@@ -38,16 +38,22 @@ The AI Elements skill is installed at `.agents/skills/ai-elements/`. Reference d
 
 ## AI SDK v6 — Critical API Notes
 
-The AI SDK skill warns: training data knowledge is outdated. Always read `node_modules/ai/docs/` after `ai` is installed. Key v6 changes that affect this project:
+Training data for the AI SDK is outdated. Always read `node_modules/ai/docs/` after `ai` is installed. Key v6 changes:
 
 | Deprecated | Current (v6) |
 |---|---|
 | `maxSteps: n` | `stopWhen: stepCountIs(n)` |
-| `parameters: z.object({...})` in `tool()` | `inputSchema: z.object({...})` |
+| `parameters: z.object({...})` in `tool()` | `inputSchema: zodSchema(z.object({...}))` |
 | `generateObject(...)` | `generateText({ output: Output.object({...}) })` |
 | `maxTokens` | `maxOutputTokens` |
 
-DevTools: `bun add @ai-sdk/devtools` + `wrapLanguageModel` middleware for local debugging of LLM calls (do not use in production).
+**Stream part field names** (not what training data says):
+- `tool-call` parts: use `.input` (not `.args`)
+- `tool-result` parts: use `.output` (not `.result`)
+- `text-delta` parts: use `.text` (not `.textDelta`)
+- `tool-approval-request` parts: use `.approvalId`, `.toolCallId`, `.toolName`, `.input`
+
+**Approval gate loop** (`src/lib/ai/agent.ts`): uses `stopWhen: stepCountIs(1)` to process one LLM step at a time, awaiting `tool-approval-request` decisions before continuing. Approved/denied decisions are injected as `{ role: "tool", content: [{ type: "tool-approval-response", approvalId, approved }] }` messages. `PendingApproval.resolve` in Zustand stores the raw Promise resolver so the UI can unblock the agent loop directly.
 
 ---
 
@@ -57,15 +63,24 @@ DevTools: `bun add @ai-sdk/devtools` + `wrapLanguageModel` middleware for local 
 
 **`@/` alias required** for all AI Elements imports (`@/components/ai-elements/...`). Must be set in both `vite.config.ts` (`resolve.alias`) and `tsconfig.json` (`paths`).
 
-**Tool component state mapping** (our `ToolCall.status` → AI Elements `state` prop):
+**`ModelSelectorTrigger` does not support `asChild`** — style it directly with `className`.
 
-| ToolCall.status | Tool/Confirmation state |
+---
+
+## Anthropic Environment Variables
+
+The following env vars are read by `src-tauri/src/config.rs` and applied in `src/lib/ai/providers.ts`. Place them in `~/.aichemist/.env` (loaded at startup via `dotenvy`).
+
+| Variable | Effect |
 |---|---|
-| `pending_approval` | `approval-requested` |
-| `approved` (running) | `input-available` |
-| `complete` | `output-available` |
-| `error` | `output-error` |
-| `rejected` | `output-denied` |
+| `ANTHROPIC_API_KEY` | Primary API key |
+| `ANTHROPIC_AUTH_TOKEN` | Fallback API key (checked when `ANTHROPIC_API_KEY` is absent) |
+| `ANTHROPIC_BASE_URL` | Custom base URL / proxy endpoint |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | Override any model whose ID contains `"sonnet"` |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | Override any model whose ID contains `"haiku"` |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | Override any model whose ID contains `"opus"` |
+
+Model overrides match by substring (e.g. `claude-sonnet-4-6` → overridden by `ANTHROPIC_DEFAULT_SONNET_MODEL`), matching Claude Code's behaviour.
 
 ---
 

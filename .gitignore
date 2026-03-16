@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Vite cache
+.vite/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+.aichemist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Playwright logs
+.playwright-mcp/
+
+# Claude local settings
+.claude/settings.local.json
