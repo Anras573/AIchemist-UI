@@ -5,11 +5,14 @@ import { Project } from "@/types";
 interface ProjectStore {
   projects: Project[];
   activeProjectId: string | null;
+  settingsOpen: boolean;
   setProjects: (projects: Project[]) => void;
   setActiveProject: (id: string | null) => void;
   addProject: (project: Project) => void;
   removeProject: (id: string) => void;
   updateProject: (project: Project) => void;
+  openSettings: () => void;
+  closeSettings: () => void;
 }
 
 export const useProjectStore = create<ProjectStore>()(
@@ -17,6 +20,7 @@ export const useProjectStore = create<ProjectStore>()(
     (set) => ({
       projects: [],
       activeProjectId: null,
+      settingsOpen: false,
 
       setProjects: (projects) => set({ projects }),
 
@@ -35,6 +39,9 @@ export const useProjectStore = create<ProjectStore>()(
         set((state) => ({
           projects: state.projects.map((p) => (p.id === project.id ? project : p)),
         })),
+
+      openSettings: () => set({ settingsOpen: true }),
+      closeSettings: () => set({ settingsOpen: false }),
     }),
     {
       name: "aichemist-project-store",

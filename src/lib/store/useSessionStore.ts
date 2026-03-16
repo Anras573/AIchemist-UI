@@ -38,6 +38,8 @@ interface SessionStore {
   updateSessionStatus: (sessionId: string, status: SessionStatus) => void;
   updateSessionTitle: (sessionId: string, title: string) => void;
   appendMessage: (sessionId: string, message: Message) => void;
+  /** Atomically appends a completed message and clears the streaming buffer. */
+  commitMessage: (sessionId: string, message: Message) => void;
   appendStreamingDelta: (sessionId: string, delta: string) => void;
   clearStreamingText: (sessionId: string) => void;
   addLiveToolCall: (sessionId: string, call: LiveToolCall) => void;
@@ -113,6 +115,22 @@ export const useSessionStore = create<SessionStore>()(
               ...state.sessions,
               [sessionId]: { ...s, messages: [...s.messages, message] },
             },
+          };
+        }),
+
+      commitMessage: (sessionId, message) =>
+        set((state) => {
+          const s = state.sessions[sessionId];
+          if (!s) return state;
+          // Guard against duplicate delivery (e.g., double IPC dispatch)
+          if (s.messages.some((m) => m.id === message.id)) return state;
+          const { [sessionId]: _cleared, ...restStreaming } = state.streamingText;
+          return {
+            sessions: {
+              ...state.sessions,
+              [sessionId]: { ...s, messages: [...s.messages, message] },
+            },
+            streamingText: restStreaming,
           };
         }),
 

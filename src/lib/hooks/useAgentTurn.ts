@@ -1,16 +1,14 @@
 import { useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { ipc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import { runAgentTurn } from "@/lib/ai/agent";
-import { buildCoreTools } from "@/lib/ai/tools";
 import type { Message } from "@/types";
-import type { PendingApproval } from "@/lib/store/useSessionStore";
 
 /**
  * Provides a stable `sendMessage` callback for the active session.
- * Orchestrates the full turn: persist user message → stream LLM response
- * → persist assistant message → update session status.
+ * Persists the user message, then dispatches to the Electron main process
+ * via `ipc.agentSend`. LLM streaming events (deltas, tool calls, status)
+ * arrive as push events handled by `useSessionEvents`.
  */
 export function useAgentTurn() {
   const {
@@ -19,13 +17,8 @@ export function useAgentTurn() {
     updateSessionStatus,
     updateSessionTitle,
     appendMessage,
-    appendStreamingDelta,
     clearStreamingText,
-    addLiveToolCall,
-    updateLiveToolResult,
     clearLiveToolCalls,
-    appendTerminalOutput,
-    addPendingApproval,
     clearPendingApprovals,
   } = useSessionStore();
 
@@ -42,7 +35,7 @@ export function useAgentTurn() {
       // 1. Persist the user message to SQLite and add it to the store
       let userMsg: Message;
       try {
-        userMsg = await invoke<Message>("save_message", {
+        userMsg = await ipc.saveMessage({
           sessionId: activeSessionId,
           role: "user",
           content: text,
@@ -56,66 +49,23 @@ export function useAgentTurn() {
       // 2. Auto-title the session from the first user message
       if (session.messages.length === 0) {
         const title = text.length > 60 ? text.slice(0, 57) + "…" : text;
-        invoke("update_session_title", { sessionId: activeSessionId, title })
+        ipc.updateSessionTitle(activeSessionId, title)
           .then(() => updateSessionTitle(activeSessionId, title))
           .catch(console.error);
       }
 
-      // 3. Run the agent turn
+      // 3. Run the agent turn via IPC — main process handles LLM dispatch
       updateSessionStatus(activeSessionId, "running");
       clearLiveToolCalls(activeSessionId);
-      const sessionIdAtStart = activeSessionId; // capture for async closure
+      const sessionIdAtStart = activeSessionId;
 
       try {
-        await runAgentTurn({
-          messages: [...session.messages, userMsg],
-          projectConfig: project.config,
-          tools: buildCoreTools(project.config),
-
-          onDelta: (delta) => appendStreamingDelta(sessionIdAtStart, delta),
-
-          onToolCall: ({ toolCallId, toolName, args }) =>
-            addLiveToolCall(sessionIdAtStart, { toolCallId, toolName, args }),
-
-          onApprovalRequest: ({ approvalId, toolCallId, toolName, args, resolve }) => {
-            // Store the approval gate; the UI will call resolveApproval() which
-            // invokes `resolve` and unblocks the agent loop's Promise.all.
-            const approval: PendingApproval = { approvalId, toolCallId, toolName, args, resolve };
-            addPendingApproval(sessionIdAtStart, approval);
-            updateSessionStatus(sessionIdAtStart, "waiting_approval");
-          },
-
-          onToolResult: ({ toolCallId, toolName, result }) => {
-            updateLiveToolResult(sessionIdAtStart, toolCallId, result);
-            // Pipe bash output into the terminal log
-            if (toolName === "execute_bash" && result && typeof result === "object") {
-              const { stdout, stderr } = result as { stdout?: string; stderr?: string };
-              if (stdout) appendTerminalOutput(sessionIdAtStart, stdout);
-              if (stderr) appendTerminalOutput(sessionIdAtStart, `\x1b[31m${stderr}\x1b[0m`);
-            }
-          },
-
-          onComplete: async (content) => {
-            clearStreamingText(sessionIdAtStart);
-            if (!content.trim()) return;
-            try {
-              const assistantMsg = await invoke<Message>("save_message", {
-                sessionId: sessionIdAtStart,
-                role: "assistant",
-                content,
-              });
-              appendMessage(sessionIdAtStart, assistantMsg);
-            } catch (err) {
-              console.error("save_message (assistant) failed:", err);
-            }
-          },
-        });
-
+        await ipc.agentSend({ sessionId: activeSessionId, prompt: text });
         clearLiveToolCalls(sessionIdAtStart);
         clearPendingApprovals(sessionIdAtStart);
-        updateSessionStatus(sessionIdAtStart, "idle");
+        // Status is updated via session:status push event from runner
       } catch (err) {
-        console.error("runAgentTurn failed:", err);
+        console.error("agentSend failed:", err);
         clearStreamingText(sessionIdAtStart);
         clearLiveToolCalls(sessionIdAtStart);
         clearPendingApprovals(sessionIdAtStart);
@@ -130,16 +80,12 @@ export function useAgentTurn() {
       updateSessionStatus,
       updateSessionTitle,
       appendMessage,
-      appendStreamingDelta,
       clearStreamingText,
-      addLiveToolCall,
-      updateLiveToolResult,
       clearLiveToolCalls,
-      appendTerminalOutput,
-      addPendingApproval,
       clearPendingApprovals,
     ]
   );
 
   return { sendMessage };
 }
+

@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { ipc } from "@/lib/ipc";
 import {
   ModelSelector,
   ModelSelectorContent,
@@ -71,10 +71,7 @@ export function ModelPickerButton({ project }: ModelPickerButtonProps) {
         model: option.model,
       };
       try {
-        await invoke("save_project_config", {
-          projectId: project.id,
-          config: newConfig,
-        });
+        await ipc.saveProjectConfig(project.id, newConfig);
         updateProject({ ...project, config: newConfig });
       } catch (err) {
         console.error("save_project_config failed:", err);

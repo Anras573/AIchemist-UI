@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { ipc } from "@/lib/ipc";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   FileTree,
@@ -38,7 +38,7 @@ function LazyFolderChildren({ path }: { path: string }) {
   const [children, setChildren] = useState<DirEntry[] | null>(null);
 
   useEffect(() => {
-    invoke<{ entries: DirEntry[] }>("list_directory", { path })
+    ipc.listDirectory(path)
       .then((r) => setChildren(r.entries))
       .catch(() => setChildren([]));
   }, [path]);
@@ -89,7 +89,7 @@ function FileTreeView({ projectPath }: FileTreeViewProps) {
   useEffect(() => {
     setEntries(null);
     setError(null);
-    invoke<{ entries: DirEntry[] }>("list_directory", { path: projectPath })
+    ipc.listDirectory(projectPath)
       .then((r) => setEntries(r.entries))
       .catch((e) => setError(String(e)));
   }, [projectPath]);

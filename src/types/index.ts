@@ -3,7 +3,7 @@
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
-export type Provider = "anthropic" | "openai" | "ollama" | string;
+export type Provider = "anthropic" | "openai" | "ollama" | "copilot" | string;
 
 // ─── Tool ────────────────────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ export interface Session {
   messages: Message[];
 }
 
-// ─── Tauri event payloads ────────────────────────────────────────────────────
+// ─── IPC event payloads ──────────────────────────────────────────────────────
 
 export interface SessionStatusEvent {
   session_id: string;

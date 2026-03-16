@@ -1,7 +1,6 @@
 import { useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { ipc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
-import { Session } from "@/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/session/StatusDot";
@@ -20,7 +19,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
 
   // Load sessions for this project on mount and when projectId changes
   useEffect(() => {
-    invoke<Session[]>("list_sessions", { projectId })
+    ipc.listSessions(projectId)
       .then((list) => {
         mergeSessions(list);
         // Restore last active session if it belongs to this project, else pick first
@@ -36,7 +35,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
 
   const handleNewSession = useCallback(async () => {
     try {
-      const session = await invoke<Session>("create_session", { projectId });
+      const session = await ipc.createSession(projectId);
       addSession(session);
       setActiveSession(session.id);
     } catch (err) {
@@ -47,7 +46,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
   const handleDeleteSession = useCallback(
     async (e: React.MouseEvent, sessionId: string) => {
       e.stopPropagation();
-      await invoke("delete_session", { sessionId }).catch(console.error);
+      await ipc.deleteSession(sessionId).catch(console.error);
       removeSession(sessionId);
     },
     [removeSession]

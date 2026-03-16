@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { onSessionEvent, IPC_CHANNELS } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import type {
   SessionStatusEvent,
@@ -10,40 +10,41 @@ import type {
 } from "@/types";
 
 /**
- * Mount once in AppShell. Subscribes to all session:* events emitted by Rust
- * and updates the Zustand session store accordingly.
+ * Mount once in AppShell. Subscribes to all session:* events emitted by the
+ * Electron main process and updates the Zustand session store accordingly.
  */
 export function useSessionEvents() {
   const {
     updateSessionStatus,
-    appendMessage,
+    commitMessage,
     appendStreamingDelta,
     clearStreamingText,
   } = useSessionStore();
 
   useEffect(() => {
-    const unlisteners = Promise.all([
-      listen<SessionStatusEvent>("session:status", ({ payload }) => {
+    const unsubs = [
+      onSessionEvent<SessionStatusEvent>(IPC_CHANNELS.SESSION_STATUS, (payload) => {
         updateSessionStatus(payload.session_id, payload.status);
+        // Safety net: clear any leftover streaming text when the turn finishes
+        if (payload.status === "idle" || payload.status === "error") {
+          clearStreamingText(payload.session_id);
+        }
       }),
 
-      listen<SessionDeltaEvent>("session:delta", ({ payload }) => {
+      onSessionEvent<SessionDeltaEvent>(IPC_CHANNELS.SESSION_DELTA, (payload) => {
         appendStreamingDelta(payload.session_id, payload.text_delta);
       }),
 
-      listen<SessionMessageEvent>("session:message", ({ payload }) => {
-        // A complete message arrived — commit it and clear the streaming buffer
-        appendMessage(payload.session_id, payload.message);
-        clearStreamingText(payload.session_id);
+      onSessionEvent<SessionMessageEvent>(IPC_CHANNELS.SESSION_MESSAGE, (payload) => {
+        // Single atomic update: append message + clear streaming buffer
+        commitMessage(payload.session_id, payload.message);
       }),
 
       // tool_call and approval_required events are handled in Phase 4+
-      listen<SessionToolCallEvent>("session:tool_call", () => {}),
-      listen<SessionApprovalRequiredEvent>("session:approval_required", () => {}),
-    ]);
+      onSessionEvent<SessionToolCallEvent>(IPC_CHANNELS.SESSION_TOOL_CALL, () => {}),
+      onSessionEvent<SessionApprovalRequiredEvent>(IPC_CHANNELS.SESSION_APPROVAL_REQUIRED, () => {}),
+    ];
 
-    return () => {
-      unlisteners.then((fns) => fns.forEach((fn) => fn()));
-    };
-  }, [updateSessionStatus, appendMessage, appendStreamingDelta, clearStreamingText]);
+    return () => unsubs.forEach((fn) => fn());
+  }, [updateSessionStatus, commitMessage, appendStreamingDelta, clearStreamingText]);
 }

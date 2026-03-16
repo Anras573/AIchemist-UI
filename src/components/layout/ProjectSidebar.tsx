@@ -1,12 +1,11 @@
 import { useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { ipc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
-import { Project } from "@/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Settings } from "lucide-react";
 
 interface ProjectSidebarProps {
   collapsed: boolean;
@@ -14,13 +13,13 @@ interface ProjectSidebarProps {
 }
 
 export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarProps) {
-  const { projects, activeProjectId, setProjects, setActiveProject, addProject, removeProject } =
+  const { projects, activeProjectId, setProjects, setActiveProject, addProject, removeProject, openSettings } =
     useProjectStore();
   const { sessions } = useSessionStore();
 
   // Load project list on mount
   useEffect(() => {
-    invoke<Project[]>("list_projects")
+    ipc.listProjects()
       .then((list) => {
         setProjects(list);
         // Restore the last active project if it still exists; otherwise fall back to first
@@ -34,22 +33,21 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
   }, []);
 
   const handleAddProject = useCallback(async () => {
-    const selected = await openDialog({ directory: true, multiple: false });
-    if (!selected) return;
-    const path = typeof selected === "string" ? selected : selected[0];
+    const path = await ipc.openFolderDialog();
+    if (!path) return;
     try {
-      const project = await invoke<Project>("add_project", { path });
+      const project = await ipc.addProject(path);
       addProject(project);
       setActiveProject(project.id);
     } catch (err) {
-      console.error("add_project failed:", err);
+      console.error("addProject failed:", err);
     }
   }, [addProject, setActiveProject]);
 
   const handleRemoveProject = useCallback(
     async (e: React.MouseEvent, id: string) => {
       e.stopPropagation();
-      await invoke("remove_project", { id }).catch(console.error);
+      await ipc.removeProject(id).catch(console.error);
       removeProject(id);
     },
     [removeProject]
@@ -144,9 +142,9 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
         })}
       </div>
 
-      {/* Add project button */}
+      {/* Bottom: Add project + Settings */}
       {!collapsed && (
-        <div className="p-2 border-t border-sidebar-border flex-shrink-0">
+        <div className="p-2 border-t border-sidebar-border flex-shrink-0 flex flex-col gap-1">
           <Button
             variant="ghost"
             size="sm"
@@ -154,6 +152,28 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
             onClick={handleAddProject}
           >
             + Add Project
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground"
+            onClick={openSettings}
+          >
+            <Settings className="h-3.5 w-3.5 mr-2" />
+            Settings
+          </Button>
+        </div>
+      )}
+      {collapsed && (
+        <div className="p-1 border-t border-sidebar-border flex-shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-sidebar-foreground/60 hover:text-sidebar-foreground mx-auto flex"
+            onClick={openSettings}
+            title="Settings"
+          >
+            <Settings className="h-4 w-4" />
           </Button>
         </div>
       )}
