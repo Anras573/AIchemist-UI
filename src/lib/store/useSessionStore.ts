@@ -68,12 +68,22 @@ export const useSessionStore = create<SessionStore>()(
       pendingApprovals: {},
       terminalOutput: {},
 
-      // Merge new sessions into the store without wiping sessions from other projects
+      // Merge new sessions into the store without wiping sessions from other projects.
+      // Preserves messages already in the store — listSessions returns messages: [],
+      // so we must not clobber messages loaded by hydrateSession or appendMessage.
       mergeSessions: (incoming) =>
         set((state) => ({
           sessions: {
             ...state.sessions,
-            ...Object.fromEntries(incoming.map((s) => [s.id, s])),
+            ...Object.fromEntries(
+              incoming.map((s) => [
+                s.id,
+                {
+                  ...s,
+                  messages: state.sessions[s.id]?.messages ?? s.messages,
+                },
+              ])
+            ),
           },
         })),
 
