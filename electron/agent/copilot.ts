@@ -418,6 +418,12 @@ export async function runCopilotAgentTurn(params: {
 
   // ── Event listeners — set up before sending ─────────────────────────────────
 
+  // Names of our custom defineTool handlers — they already send their own TOOL_CALL/RESULT events
+  const customToolNames = new Set(["execute_bash", "write_file", "delete_file", "web_fetch"]);
+
+  // Track toolCallId → toolName for built-in tools (tool.execution_complete has no toolName)
+  const toolCallIdToName = new Map<string, string>();
+
   let fullText = "";
   const done = new Promise<void>((resolve, reject) => {
     // The SDK emits "assistant.message" each time the accumulated text grows
@@ -434,11 +440,58 @@ export async function runCopilotAgentTurn(params: {
       }
     });
 
+    // Track tool execution start for built-in CLI tools (run_shell, read_file, etc.)
+    session.on("tool.execution_start", (event) => {
+      const data = event.data as {
+        toolCallId: string;
+        toolName: string;
+        arguments?: Record<string, unknown>;
+      };
+      toolCallIdToName.set(data.toolCallId, data.toolName);
+      if (!customToolNames.has(data.toolName)) {
+        webContents.send(CH.SESSION_TOOL_CALL, {
+          session_id: sessionId,
+          tool_name: data.toolName,
+          tool_call_id: data.toolCallId,
+          input: data.arguments ?? {},
+        });
+      }
+    });
+
+    // Capture results for built-in CLI tools
+    session.on("tool.execution_complete", (event) => {
+      const data = event.data as {
+        toolCallId: string;
+        success: boolean;
+        result?: {
+          content: string;
+          detailedContent?: string;
+          contents?: Array<
+            | { type: "text"; text: string }
+            | { type: "terminal"; text: string; exitCode?: number }
+          >;
+        };
+      };
+      const toolName = toolCallIdToName.get(data.toolCallId) ?? "unknown";
+      if (!customToolNames.has(toolName)) {
+        // Prefer terminal content blocks, then detailedContent, then content
+        const terminalBlock = data.result?.contents?.find((c) => c.type === "terminal");
+        const output = terminalBlock
+          ? (terminalBlock as { type: "terminal"; text: string }).text
+          : (data.result?.detailedContent ?? data.result?.content ?? "");
+        webContents.send(CH.SESSION_TOOL_RESULT, {
+          session_id: sessionId,
+          tool_name: toolName,
+          output,
+        });
+      }
+    });
+
     session.on("session.idle", () => resolve());
     session.on("session.error", (event) => {
       reject(new Error((event.data as { message: string }).message ?? "Copilot session error"));
     });
-    session.on("session.abort", () => reject(new Error("Copilot session aborted")));
+    session.on("session.shutdown", () => reject(new Error("Copilot session aborted")));
   });
 
   // ── Send & wait ─────────────────────────────────────────────────────────────

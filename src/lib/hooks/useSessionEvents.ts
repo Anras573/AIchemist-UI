@@ -102,13 +102,11 @@ export function useSessionEvents() {
       }),
 
       onSessionEvent<ToolResultEvent>(IPC_CHANNELS.SESSION_TOOL_RESULT, (payload) => {
-        console.log("[SESSION_TOOL_RESULT]", payload.tool_name, typeof payload.output, payload.output);
-        // "execute_bash" = our custom MCP tool; "Bash" = Claude Code built-in
-        if (payload.tool_name === "execute_bash" || payload.tool_name === "Bash") {
+        // "execute_bash" = our custom MCP tool; "Bash" = Claude Code built-in; "run_shell" = Copilot CLI built-in
+        const shellToolNames = new Set(["execute_bash", "Bash", "run_shell"]);
+        if (shellToolNames.has(payload.tool_name)) {
           const raw = extractOutput(payload.output);
-          console.log("[bash tool] raw:", raw);
           const formatted = formatBashOutput(raw);
-          console.log("[bash tool] formatted:", formatted);
           appendTerminalOutput(payload.session_id, formatted + "\n\n");
         }
       }),

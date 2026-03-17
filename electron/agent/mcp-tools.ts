@@ -232,7 +232,6 @@ export async function createApprovalMcpServer(
       });
 
       const result = textResult(output);
-      console.log("[mcp-tools] sending SESSION_TOOL_RESULT for execute_bash, session:", sessionId, "result:", JSON.stringify(result).slice(0, 200));
       webContents.send(CH.SESSION_TOOL_RESULT, {
         session_id: sessionId,
         tool_name: "execute_bash",
