@@ -3,7 +3,7 @@
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
-export type Provider = "anthropic" | "openai" | "ollama" | "copilot" | string;
+export type Provider = "anthropic" | "copilot" | string;
 
 // ─── Tool ────────────────────────────────────────────────────────────────────
 

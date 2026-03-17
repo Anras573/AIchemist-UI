@@ -115,7 +115,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
       setSaveStatus((s) => ({ ...s, [section]: "saving" }));
 
       const sectionKeys: Record<Section, (keyof SettingsMap)[]> = {
-        "api-keys": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "GITHUB_TOKEN"],
+        "api-keys": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN"],
         "model-overrides": [
           "ANTHROPIC_BASE_URL",
           "ANTHROPIC_DEFAULT_SONNET_MODEL",
@@ -205,13 +205,6 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                   onChange={(v) => set("ANTHROPIC_AUTH_TOKEN", v)}
                 />
                 <SecretField
-                  id="openai-key"
-                  label="OpenAI API Key"
-                  value={draft.OPENAI_API_KEY ?? ""}
-                  placeholder="sk-…"
-                  onChange={(v) => set("OPENAI_API_KEY", v)}
-                />
-                <SecretField
                   id="github-token"
                   label="GitHub Token (Copilot)"
                   value={draft.GITHUB_TOKEN ?? ""}
@@ -296,7 +289,6 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                     className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   >
                     <option value="anthropic">Anthropic (Claude)</option>
-                    <option value="openai">OpenAI</option>
                     <option value="copilot">GitHub Copilot</option>
                   </select>
                 </div>
