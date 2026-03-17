@@ -70,6 +70,8 @@ This is an **Electron** desktop application with a React + TypeScript renderer a
 5. `useSessionEvents` hook (mounted once in `AppShell`) subscribes via `onSessionEvent()` and updates the Zustand session store
 6. Approval-gated tools: main emits `SESSION_APPROVAL_REQUIRED`; UI shows approval dialog; renderer calls `ipc.approveToolCall()`
 
+**Session history hydration:** `listSessions()` returns metadata only (`messages: []`). When `activeSessionId` changes, `useSessionHydration` (mounted in `App.tsx`) calls `ipc.getSession()` to load the full message history and calls `hydrateSession()` on the store. `mergeSessions()` deliberately preserves existing messages to avoid a race where a metadata refresh wipes hydrated history.
+
 ### State management (Zustand)
 
 - `useSessionStore` — sessions, messages, streaming text, live tool calls, pending approvals, terminal output. Only `activeSessionId` is persisted (session data lives in SQLite).
@@ -93,7 +95,6 @@ Place in `~/.aichemist/.env` — loaded at startup by `electron/config.ts` via `
 | `ANTHROPIC_DEFAULT_SONNET_MODEL` | Override any model ID containing `"sonnet"` |
 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | Override any model ID containing `"haiku"` |
 | `ANTHROPIC_DEFAULT_OPUS_MODEL` | Override any model ID containing `"opus"` |
-| `OPENAI_API_KEY` | OpenAI key |
 | `GITHUB_TOKEN` | GitHub Copilot key |
 | `CLAUDE_CODE_PATH` | Explicit path to the `claude` CLI binary |
 
@@ -126,3 +127,5 @@ The AI Elements skill is installed at `.agents/skills/ai-elements/`. Reference d
 ### Styling
 
 Tailwind CSS v4 (via `@tailwindcss/vite` plugin). UI primitives are shadcn/ui components in `src/components/ui/`. Use `cn()` from `src/lib/utils.ts` for conditional class merging.
+
+**⚠️ Tailwind v4 does not scan `node_modules`:** If a third-party component (e.g. `streamdown`) renders Tailwind arbitrary-value classes from its dist bundle, those classes will never be generated. Add explicit CSS rules in `src/index.css` instead of relying on those classes being present. Example: streamdown's syntax-highlighted token spans write color values as inline CSS custom properties (`--sdm-c`, `--shiki-dark`); `index.css` has `[data-streamdown="code-block"] span { color: var(--sdm-c, inherit); }` to apply them.
