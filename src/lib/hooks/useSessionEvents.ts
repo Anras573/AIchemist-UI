@@ -40,7 +40,8 @@ function extractOutput(
   return String(output);
 }
 
-/** Parse execute_bash JSON output into human-readable terminal lines. */
+/** Parse execute_bash JSON output into human-readable terminal lines.
+ *  Falls back gracefully for plain-text output from Claude's built-in Bash tool. */
 function formatBashOutput(raw: string): string {
   try {
     const { stdout, stderr, exit_code } = JSON.parse(raw) as {
@@ -54,7 +55,8 @@ function formatBashOutput(raw: string): string {
     if (exit_code !== 0) parts.push(`[exit code: ${exit_code}]`);
     return parts.join("\n") || "(no output)";
   } catch {
-    return raw;
+    // Plain text (Claude Code built-in Bash tool returns raw output)
+    return raw.trim() || "(no output)";
   }
 }
 
@@ -92,7 +94,8 @@ export function useSessionEvents() {
 
       onSessionEvent<ToolCallEvent>(IPC_CHANNELS.SESSION_TOOL_CALL, (payload) => {
         addLiveToolCall(payload.session_id, {
-          toolCallId: `${payload.tool_name}-${Date.now()}`,
+          // Use a random suffix so multiple calls to the same tool get unique keys
+          toolCallId: `${payload.tool_name}-${Math.random().toString(36).slice(2)}`,
           toolName: payload.tool_name,
           args: payload.input ?? {},
         });
@@ -100,11 +103,12 @@ export function useSessionEvents() {
 
       onSessionEvent<ToolResultEvent>(IPC_CHANNELS.SESSION_TOOL_RESULT, (payload) => {
         console.log("[SESSION_TOOL_RESULT]", payload.tool_name, typeof payload.output, payload.output);
-        if (payload.tool_name === "execute_bash") {
+        // "execute_bash" = our custom MCP tool; "Bash" = Claude Code built-in
+        if (payload.tool_name === "execute_bash" || payload.tool_name === "Bash") {
           const raw = extractOutput(payload.output);
-          console.log("[execute_bash] raw:", raw);
+          console.log("[bash tool] raw:", raw);
           const formatted = formatBashOutput(raw);
-          console.log("[execute_bash] formatted:", formatted);
+          console.log("[bash tool] formatted:", formatted);
           appendTerminalOutput(payload.session_id, formatted + "\n\n");
         }
       }),

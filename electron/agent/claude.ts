@@ -6,7 +6,7 @@ import * as CH from "../ipc-channels";
 import { createApprovalMcpServer } from "./mcp-tools";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
 
-// ── Model resolution ───────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function resolveModel(requestedModel: string): string {
   const {
@@ -25,6 +25,21 @@ function resolveModel(requestedModel: string): string {
     return default_opus_model;
   }
   return requestedModel;
+}
+
+/** Extract plain text from a tool_result content block (string or array). */
+function extractToolResultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((c: unknown) => {
+        if (typeof c === "string") return c;
+        const block = c as { type?: string; text?: string };
+        return block.text ?? "";
+      })
+      .join("\n");
+  }
+  return String(content ?? "");
 }
 
 // ── Main export ────────────────────────────────────────────────────────────────
@@ -75,6 +90,9 @@ export async function runClaudeAgentTurn(params: {
   let resultSessionId: string | null = null;
   let fullText = "";
 
+  // Map tool_use_id → tool_name so we can label tool results
+  const toolUseIdToName = new Map<string, string>();
+
   try {
     for await (const msg of queryStream) {
       if (msg.type === "stream_event") {
@@ -98,12 +116,28 @@ export async function runClaudeAgentTurn(params: {
         // (custom MCP tools emit their own SESSION_TOOL_CALL in mcp-tools.ts)
         const content = (msg.message as { content: unknown[] }).content;
         for (const block of content) {
-          const b = block as { type: string; name?: string; input?: unknown };
+          const b = block as { type: string; id?: string; name?: string; input?: unknown };
           if (b.type === "tool_use" && b.name) {
+            if (b.id) toolUseIdToName.set(b.id, b.name);
             webContents.send(CH.SESSION_TOOL_CALL, {
               session_id: sessionId,
               tool_name: b.name,
               input: b.input ?? {},
+            });
+          }
+        }
+      } else if (msg.type === "user") {
+        // Tool results from built-in Claude Code tools (Bash, Read, etc.)
+        const content = (msg as { message?: { content?: unknown[] } }).message?.content ?? [];
+        for (const block of content) {
+          const b = block as { type: string; tool_use_id?: string; content?: unknown };
+          if (b.type === "tool_result" && b.tool_use_id) {
+            const toolName = toolUseIdToName.get(b.tool_use_id) ?? "unknown";
+            const output = extractToolResultText(b.content);
+            webContents.send(CH.SESSION_TOOL_RESULT, {
+              session_id: sessionId,
+              tool_name: toolName,
+              output,
             });
           }
         }
