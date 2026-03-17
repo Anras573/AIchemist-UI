@@ -299,6 +299,9 @@ export async function runCopilotAgentTurn(params: {
 
   const webFetchTool = defineTool<{ url: string }>("web_fetch", {
     description: "Fetch a URL via HTTP GET and return its content.",
+    // web_fetch is also a Copilot CLI built-in; override it so our version
+    // handles the call (gives us IPC visibility + approval gating).
+    overridesBuiltInTool: true,
     parameters: {
       type: "object",
       properties: {
