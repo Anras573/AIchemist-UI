@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { useEffect } from "react";
+import { X } from "lucide-react";
 import { ipc } from "@/lib/ipc";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   FileTree,
   FileTreeFolder,
@@ -169,86 +168,69 @@ function TerminalView({ sessionId }: TerminalViewProps) {
 
 // ── ContextPanel ──────────────────────────────────────────────────────────────
 
+export type ContextTab = "files" | "terminal";
+
 /**
- * Right panel: tabbed view showing the active project's file tree and
- * terminal output from bash tool calls. Auto-switches to the Terminal tab
- * when an execute_bash call arrives.
+ * Right panel content — renders whichever tool is active (files or terminal).
+ * Tab switching and collapse are controlled externally via the ToolStrip.
  */
 export function ContextPanel({
-  collapsed = false,
-  onToggleCollapse,
+  activeTab,
+  onClose,
+  onAutoSwitch,
 }: {
-  collapsed?: boolean;
-  onToggleCollapse?: () => void;
+  activeTab: ContextTab;
+  onClose: () => void;
+  onAutoSwitch?: (tab: ContextTab) => void;
 }) {
   const { activeSessionId, liveToolCalls } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
 
-  // Derive active tab from the most recent live tool call category
+  // Auto-switch to terminal when an execute_bash call arrives
   const lastToolCall = activeSessionId
     ? (liveToolCalls[activeSessionId] ?? []).at(-1)
     : undefined;
-  const autoTab =
-    lastToolCall?.toolName === "execute_bash" ? "terminal" : "files";
-
-  const [tab, setTab] = useState<"files" | "terminal">("files");
-
-  // Auto-switch when a new tool call arrives
   useEffect(() => {
-    if (lastToolCall) setTab(autoTab as "files" | "terminal");
-  }, [lastToolCall, autoTab]);
+    if (lastToolCall?.toolName === "execute_bash") {
+      onAutoSwitch?.("terminal");
+    }
+  }, [lastToolCall, onAutoSwitch]);
 
-  if (!activeProject) {
-    return (
-      <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-        No project open
-      </div>
-    );
-  }
+  const label = activeTab === "files" ? "Files" : "Terminal";
 
   return (
-    <Tabs
-      value={tab}
-      onValueChange={(v) => setTab(v as "files" | "terminal")}
-      className="flex flex-col h-full"
-    >
-      <TabsList className="shrink-0 rounded-none border-b bg-transparent justify-start px-2 h-9 gap-1">
-        <TabsTrigger value="files" className="text-xs h-7 px-3">
-          Files
-        </TabsTrigger>
-        <TabsTrigger value="terminal" className="text-xs h-7 px-3">
-          Terminal
-        </TabsTrigger>
-        {/* Collapse / expand toggle pushed to the right */}
-        <div className="ml-auto">
-          <button
-            onClick={onToggleCollapse}
-            className="flex items-center justify-center h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title={collapsed ? "Expand panel" : "Collapse panel"}
-          >
-            {collapsed ? (
-              <PanelRightOpen className="h-4 w-4" />
-            ) : (
-              <PanelRightClose className="h-4 w-4" />
-            )}
-          </button>
-        </div>
-      </TabsList>
+    <div className="flex flex-col h-full">
+      {/* Panel header */}
+      <div className="flex items-center justify-between h-9 px-3 border-b shrink-0 bg-background">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          {label}
+        </span>
+        <button
+          onClick={onClose}
+          className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          title="Close panel"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
 
-      <TabsContent value="files" className="flex-1 overflow-hidden m-0 p-0">
-        <FileTreeView projectPath={activeProject.path} />
-      </TabsContent>
-
-      <TabsContent value="terminal" className="flex-1 overflow-hidden m-0 p-0">
-        {activeSessionId ? (
+      {/* Content */}
+      <div className="flex-1 overflow-hidden">
+        {!activeProject ? (
+          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+            No project open
+          </div>
+        ) : activeTab === "files" ? (
+          <FileTreeView projectPath={activeProject.path} />
+        ) : activeSessionId ? (
           <TerminalView sessionId={activeSessionId} />
         ) : (
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
             No active session
           </div>
         )}
-      </TabsContent>
-    </Tabs>
+      </div>
+    </div>
   );
 }
