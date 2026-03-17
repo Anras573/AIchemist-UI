@@ -440,7 +440,7 @@ export async function runCopilotAgentTurn(params: {
       }
     });
 
-    // Track tool execution start for built-in CLI tools (run_shell, read_file, etc.)
+    // Track tool execution start for built-in CLI tools
     session.on("tool.execution_start", (event) => {
       const data = event.data as {
         toolCallId: string;

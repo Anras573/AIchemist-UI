@@ -102,8 +102,8 @@ export function useSessionEvents() {
       }),
 
       onSessionEvent<ToolResultEvent>(IPC_CHANNELS.SESSION_TOOL_RESULT, (payload) => {
-        // "execute_bash" = our custom MCP tool; "Bash" = Claude Code built-in; "run_shell" = Copilot CLI built-in
-        const shellToolNames = new Set(["execute_bash", "Bash", "run_shell"]);
+        // "execute_bash" = our custom MCP tool; "Bash" = Claude Code built-in; "bash" = Copilot CLI built-in
+        const shellToolNames = new Set(["execute_bash", "Bash", "bash", "run_shell"]);
         if (shellToolNames.has(payload.tool_name)) {
           const raw = extractOutput(payload.output);
           const formatted = formatBashOutput(raw);
