@@ -99,6 +99,16 @@ export function useSessionEvents() {
           toolName: payload.tool_name,
           args: payload.input ?? {},
         });
+        // Prepend the command prompt line to the terminal for shell tools
+        const shellToolNames = new Set(["execute_bash", "Bash", "bash", "run_shell"]);
+        if (shellToolNames.has(payload.tool_name)) {
+          const cmd =
+            (payload.input as Record<string, unknown> | undefined)?.command ??
+            (payload.input as Record<string, unknown> | undefined)?.cmd;
+          if (typeof cmd === "string" && cmd.trim()) {
+            appendTerminalOutput(payload.session_id, `$ ${cmd}\n`);
+          }
+        }
       }),
 
       onSessionEvent<ToolResultEvent>(IPC_CHANNELS.SESSION_TOOL_RESULT, (payload) => {
