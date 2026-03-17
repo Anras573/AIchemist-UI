@@ -13,18 +13,19 @@ import {
   ModelSelectorSeparator,
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
-import { useProjectStore } from "@/lib/store/useProjectStore";
-import type { Project, ProjectConfig } from "@/types";
+import { useSessionStore } from "@/lib/store/useSessionStore";
 import { ANTHROPIC_MODELS, type ModelOption } from "@/lib/models";
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface ModelPickerButtonProps {
-  project: Project;
+  sessionId: string;
+  provider: string | null;
+  model: string | null;
 }
 
-export function ModelPickerButton({ project }: ModelPickerButtonProps) {
-  const { updateProject } = useProjectStore();
+export function ModelPickerButton({ sessionId, provider, model }: ModelPickerButtonProps) {
+  const { updateSessionModel } = useSessionStore();
   const [open, setOpen] = useState(false);
   const [copilotModels, setCopilotModels] = useState<ModelOption[]>([]);
 
@@ -48,30 +49,22 @@ export function ModelPickerButton({ project }: ModelPickerButtonProps) {
   const allModels = [...ANTHROPIC_MODELS, ...copilotModels];
 
   const current =
-    allModels.find(
-      (m) => m.provider === project.config.provider && m.model === project.config.model
-    ) ??
-    // Fallback label for unknown model IDs
-    (project.config.model
-      ? { provider: project.config.provider, model: project.config.model, label: `${project.config.provider}/${project.config.model}`, logoProvider: project.config.provider }
+    allModels.find((m) => m.provider === provider && m.model === model) ??
+    (model
+      ? { provider: provider ?? "", model, label: `${provider}/${model}`, logoProvider: provider ?? "" }
       : null);
 
   const handleSelect = useCallback(
     async (option: ModelOption) => {
       setOpen(false);
-      const newConfig: ProjectConfig = {
-        ...project.config,
-        provider: option.provider,
-        model: option.model,
-      };
       try {
-        await ipc.saveProjectConfig(project.id, newConfig);
-        updateProject({ ...project, config: newConfig });
+        await ipc.updateSessionModel(sessionId, option.provider, option.model);
+        updateSessionModel(sessionId, option.provider, option.model);
       } catch (err) {
-        console.error("save_project_config failed:", err);
+        console.error("update_session_model failed:", err);
       }
     },
-    [project, updateProject]
+    [sessionId, updateSessionModel]
   );
 
   return (
@@ -103,9 +96,7 @@ export function ModelPickerButton({ project }: ModelPickerButtonProps) {
 
           <ModelSelectorGroup heading="Anthropic">
             {ANTHROPIC_MODELS.map((option) => {
-              const isActive =
-                option.provider === project.config.provider &&
-                option.model === project.config.model;
+              const isActive = option.provider === provider && option.model === model;
               return (
                 <ModelSelectorItem
                   key={option.model}
@@ -125,9 +116,7 @@ export function ModelPickerButton({ project }: ModelPickerButtonProps) {
               <ModelSelectorSeparator />
               <ModelSelectorGroup heading="GitHub Copilot">
                 {copilotModels.map((option) => {
-                  const isActive =
-                    option.provider === project.config.provider &&
-                    option.model === project.config.model;
+                  const isActive = option.provider === provider && option.model === model;
                   return (
                     <ModelSelectorItem
                       key={option.model}

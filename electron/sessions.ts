@@ -12,14 +12,21 @@ function nowIso(): string {
 
 /**
  * Create a new idle session for a project.
+ * Provider and model are inherited from the project config at creation time
+ * so each session remembers which model it was started with.
  */
-export function createSession(db: Database, projectId: string): Session {
+export function createSession(
+  db: Database,
+  projectId: string,
+  provider: string | null = null,
+  model: string | null = null
+): Session {
   const id = crypto.randomUUID();
   const createdAt = nowIso();
 
   db.prepare(
-    "INSERT INTO sessions (id, project_id, title, status, created_at) VALUES (?, ?, 'New session', 'idle', ?)"
-  ).run(id, projectId, createdAt);
+    "INSERT INTO sessions (id, project_id, title, status, created_at, provider, model) VALUES (?, ?, 'New session', 'idle', ?, ?, ?)"
+  ).run(id, projectId, createdAt, provider, model);
 
   return {
     id,
@@ -28,6 +35,8 @@ export function createSession(db: Database, projectId: string): Session {
     status: "idle",
     created_at: createdAt,
     messages: [],
+    provider,
+    model,
   };
 }
 
@@ -37,7 +46,7 @@ export function createSession(db: Database, projectId: string): Session {
 export function listSessions(db: Database, projectId: string): Session[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, title, status, created_at
+      `SELECT id, project_id, title, status, created_at, provider, model
        FROM sessions
        WHERE project_id = ?
        ORDER BY created_at ASC`
@@ -48,6 +57,8 @@ export function listSessions(db: Database, projectId: string): Session[] {
     title: string;
     status: string;
     created_at: string;
+    provider: string | null;
+    model: string | null;
   }[];
 
   return rows.map((row) => ({
@@ -57,6 +68,8 @@ export function listSessions(db: Database, projectId: string): Session[] {
     status: row.status as Session["status"],
     created_at: row.created_at,
     messages: [],
+    provider: row.provider,
+    model: row.model,
   }));
 }
 
@@ -66,7 +79,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
 export function getSession(db: Database, sessionId: string): Session {
   const row = db
     .prepare(
-      "SELECT id, project_id, title, status, created_at FROM sessions WHERE id = ?"
+      "SELECT id, project_id, title, status, created_at, provider, model FROM sessions WHERE id = ?"
     )
     .get(sessionId) as
     | {
@@ -75,6 +88,8 @@ export function getSession(db: Database, sessionId: string): Session {
         title: string;
         status: string;
         created_at: string;
+        provider: string | null;
+        model: string | null;
       }
     | undefined;
 
@@ -113,6 +128,8 @@ export function getSession(db: Database, sessionId: string): Session {
     status: row.status as Session["status"],
     created_at: row.created_at,
     messages,
+    provider: row.provider,
+    model: row.model,
   };
 }
 
@@ -156,4 +173,20 @@ export function updateSessionTitle(
   title: string
 ): void {
   db.prepare("UPDATE sessions SET title = ? WHERE id = ?").run(title, sessionId);
+}
+
+/**
+ * Update the provider and model for a session (changed from the model picker).
+ */
+export function updateSessionModel(
+  db: Database,
+  sessionId: string,
+  provider: string,
+  model: string
+): void {
+  db.prepare("UPDATE sessions SET provider = ?, model = ? WHERE id = ?").run(
+    provider,
+    model,
+    sessionId
+  );
 }

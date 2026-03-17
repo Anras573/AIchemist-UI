@@ -1,13 +1,10 @@
 import { useEffect, useCallback } from "react";
 import { ipc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
-import { useProjectStore } from "@/lib/store/useProjectStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/session/StatusDot";
-import {
-  ModelSelectorLogo,
-} from "@/components/ai-elements/model-selector";
+import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
 import { getModelLabel, getLogoProvider } from "@/lib/models";
 
 interface SessionTabBarProps {
@@ -17,15 +14,6 @@ interface SessionTabBarProps {
 export function SessionTabBar({ projectId }: SessionTabBarProps) {
   const { sessions, activeSessionId, mergeSessions, setActiveSession, addSession, removeSession } =
     useSessionStore();
-
-  const { projects } = useProjectStore();
-  const project = projects.find((p) => p.id === projectId);
-  const modelLabel = project?.config.model
-    ? getModelLabel(project.config.provider, project.config.model)
-    : null;
-  const logoProvider = project?.config.provider
-    ? getLogoProvider(project.config.provider)
-    : null;
 
   const projectSessions = Object.values(sessions)
     .filter((s) => s.project_id === projectId)
@@ -74,6 +62,12 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
         )}
         {projectSessions.map((session) => {
           const active = session.id === activeSessionId;
+          const sessionModelLabel = session.model
+            ? getModelLabel(session.provider ?? "", session.model)
+            : null;
+          const sessionLogoProvider = session.provider
+            ? getLogoProvider(session.provider)
+            : null;
           return (
             <div key={session.id} className="group relative flex-shrink-0">
               <button
@@ -89,10 +83,10 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
                 <StatusDot status={session.status} />
                 <span className="max-w-32 truncate">{session.title}</span>
                 {/* Model badge — shown on the active tab */}
-                {active && modelLabel && logoProvider && (
+                {active && sessionModelLabel && sessionLogoProvider && (
                   <span className="flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-normal text-muted-foreground bg-muted/60 border border-border/50">
-                    <ModelSelectorLogo provider={logoProvider} className="size-2.5 opacity-60" />
-                    {modelLabel}
+                    <ModelSelectorLogo provider={sessionLogoProvider} className="size-2.5 opacity-60" />
+                    {sessionModelLabel}
                   </span>
                 )}
                 {/* Close button — visible on hover */}

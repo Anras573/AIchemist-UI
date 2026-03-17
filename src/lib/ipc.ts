@@ -26,6 +26,8 @@ export const ipc = {
     window.electronAPI.saveMessage(args),
   updateSessionTitle: (sessionId: string, title: string) =>
     window.electronAPI.updateSessionTitle(sessionId, title),
+  updateSessionModel: (sessionId: string, provider: string, model: string) =>
+    window.electronAPI.updateSessionModel(sessionId, provider, model),
 
   // File system
   listDirectory: (path: string) => window.electronAPI.listDirectory(path),

@@ -65,9 +65,16 @@ function migrate(db: Database.Database): void {
   const columns = db
     .prepare("PRAGMA table_info(sessions)")
     .all() as { name: string }[];
-  const hasColumn = columns.some((col) => col.name === "sdk_session_id");
-  if (!hasColumn) {
+  const hasColumn = (name: string) => columns.some((col) => col.name === name);
+
+  if (!hasColumn("sdk_session_id")) {
     db.exec("ALTER TABLE sessions ADD COLUMN sdk_session_id TEXT;");
+  }
+  if (!hasColumn("provider")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN provider TEXT;");
+  }
+  if (!hasColumn("model")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN model TEXT;");
   }
 }
 

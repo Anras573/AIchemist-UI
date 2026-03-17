@@ -88,6 +88,10 @@ export interface Session {
   status: SessionStatus;
   created_at: string;
   messages: Message[];
+  /** The AI provider used for this session (e.g. "anthropic", "copilot"). Null for legacy sessions. */
+  provider: string | null;
+  /** The model ID used for this session. Null for legacy sessions — runner falls back to project config. */
+  model: string | null;
 }
 
 // ─── IPC event payloads ──────────────────────────────────────────────────────

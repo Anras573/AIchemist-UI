@@ -1,4 +1,5 @@
 import { useProjectStore } from "@/lib/store/useProjectStore";
+import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useAgentTurn } from "@/lib/hooks/useAgentTurn";
 import { SplitPane } from "@/components/layout/SplitPane";
 import { SessionTabBar } from "@/components/session/SessionTabBar";
@@ -8,7 +9,9 @@ import { ModelPickerButton } from "@/components/session/ModelPickerButton";
 
 export function WorkspaceView() {
   const { activeProjectId, projects } = useProjectStore();
+  const { sessions, activeSessionId } = useSessionStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
+  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const { sendMessage } = useAgentTurn();
 
   if (!activeProject) {
@@ -28,7 +31,13 @@ export function WorkspaceView() {
           <SessionTabBar projectId={activeProject.id} />
         </div>
         <div className="no-drag-region flex-shrink-0 pr-2 border-l ml-1 pl-2">
-          <ModelPickerButton project={activeProject} />
+          {activeSession && (
+            <ModelPickerButton
+              sessionId={activeSession.id}
+              provider={activeSession.provider}
+              model={activeSession.model}
+            />
+          )}
         </div>
       </div>
 

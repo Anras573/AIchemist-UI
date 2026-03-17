@@ -5,7 +5,7 @@ import * as CH from "./ipc-channels";
 import { loadEnv, getApiKey, getAnthropicConfig } from "./config";
 import { openDb } from "./db";
 import { addProject, listProjects, removeProject, getProjectConfig, saveProjectConfig } from "./projects";
-import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle } from "./sessions";
+import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel } from "./sessions";
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
@@ -90,9 +90,12 @@ function registerHandlers(): void {
   );
 
   // ── Sessions ─────────────────────────────────────────────────────────────────
-  ipcMain.handle(CH.CREATE_SESSION, (_event, projectId: string) =>
-    createSession(db, projectId)
-  );
+  ipcMain.handle(CH.CREATE_SESSION, (_event, projectId: string) => {
+    // Inherit the project's current provider + model so new sessions start
+    // with the right model without the user having to configure it again.
+    const project = listProjects(db).find((p) => p.id === projectId);
+    return createSession(db, projectId, project?.config.provider ?? null, project?.config.model ?? null);
+  });
   ipcMain.handle(CH.LIST_SESSIONS, (_event, projectId: string) =>
     listSessions(db, projectId)
   );
@@ -111,6 +114,11 @@ function registerHandlers(): void {
     CH.UPDATE_SESSION_TITLE,
     (_event, sessionId: string, title: string) =>
       updateSessionTitle(db, sessionId, title)
+  );
+  ipcMain.handle(
+    CH.UPDATE_SESSION_MODEL,
+    (_event, sessionId: string, provider: string, model: string) =>
+      updateSessionModel(db, sessionId, provider, model)
   );
 
   // ── File system ───────────────────────────────────────────────────────────────
@@ -152,12 +160,18 @@ function registerHandlers(): void {
     const session = getSession(db, args.sessionId);
     const project = listProjects(db).find((p) => p.id === session.project_id);
     if (!project) throw new Error(`Project not found for session ${args.sessionId}`);
+    // Session-level model overrides project default; fall back to project config for legacy sessions
+    const effectiveConfig = {
+      ...project.config,
+      provider: session.provider ?? project.config.provider,
+      model: session.model ?? project.config.model,
+    };
     await runAgentTurn({
       db,
       sessionId: args.sessionId,
       prompt: args.prompt,
       projectPath: project.path,
-      projectConfig: project.config,
+      projectConfig: effectiveConfig,
       webContents: win.webContents,
     });
   });
