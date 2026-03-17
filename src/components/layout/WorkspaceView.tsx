@@ -22,12 +22,12 @@ export function WorkspaceView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Tab bar + model picker in the same row */}
-      <div className="flex items-center border-b bg-background flex-shrink-0">
-        <div className="flex-1 overflow-hidden">
+      {/* Tab bar + model picker — drag region for macOS window dragging */}
+      <div className="drag-region flex items-center border-b bg-background flex-shrink-0">
+        <div className="no-drag-region flex-1 overflow-hidden">
           <SessionTabBar projectId={activeProject.id} />
         </div>
-        <div className="flex-shrink-0 pr-2 border-l ml-1 pl-2">
+        <div className="no-drag-region flex-shrink-0 pr-2 border-l ml-1 pl-2">
           <ModelPickerButton project={activeProject} />
         </div>
       </div>

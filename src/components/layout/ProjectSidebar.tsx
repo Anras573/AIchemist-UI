@@ -69,17 +69,18 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
         collapsed ? "w-12" : "w-60"
       )}
     >
-      {/* Header */}
-      <div className="flex items-center h-12 px-2 border-b border-sidebar-border flex-shrink-0">
+      {/* Header — drag region; traffic lights occupy ~x:[8,76] so logo starts at pl-20 */}
+      <div className="drag-region flex items-center h-12 px-2 border-b border-sidebar-border flex-shrink-0">
         {!collapsed && (
-          <span className="text-sm font-semibold text-sidebar-foreground flex-1 truncate px-1">
+          <span className="text-sm font-semibold text-sidebar-foreground flex-1 truncate pl-[72px]">
             AIchemist
           </span>
         )}
+        {collapsed && <div className="flex-1" />}
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 text-sidebar-foreground/60 hover:text-sidebar-foreground"
+          className="no-drag-region h-8 w-8 text-sidebar-foreground/60 hover:text-sidebar-foreground"
           onClick={() => onCollapsedChange(!collapsed)}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
