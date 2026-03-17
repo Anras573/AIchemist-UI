@@ -5,9 +5,21 @@ import type {
   SessionStatusEvent,
   SessionDeltaEvent,
   SessionMessageEvent,
-  SessionToolCallEvent,
   SessionApprovalRequiredEvent,
 } from "@/types";
+
+// Actual payload shapes from the main process
+interface ToolCallEvent {
+  session_id: string;
+  tool_name: string;
+  input: Record<string, unknown>;
+}
+
+interface ToolResultEvent {
+  session_id: string;
+  tool_name: string;
+  output: string;
+}
 
 /**
  * Mount once in AppShell. Subscribes to all session:* events emitted by the
@@ -19,6 +31,8 @@ export function useSessionEvents() {
     commitMessage,
     appendStreamingDelta,
     clearStreamingText,
+    addLiveToolCall,
+    appendTerminalOutput,
   } = useSessionStore();
 
   useEffect(() => {
@@ -40,11 +54,24 @@ export function useSessionEvents() {
         commitMessage(payload.session_id, payload.message);
       }),
 
-      // tool_call and approval_required events are handled in Phase 4+
-      onSessionEvent<SessionToolCallEvent>(IPC_CHANNELS.SESSION_TOOL_CALL, () => {}),
+      onSessionEvent<ToolCallEvent>(IPC_CHANNELS.SESSION_TOOL_CALL, (payload) => {
+        addLiveToolCall(payload.session_id, {
+          toolCallId: `${payload.tool_name}-${Date.now()}`,
+          toolName: payload.tool_name,
+          args: payload.input ?? {},
+        });
+      }),
+
+      onSessionEvent<ToolResultEvent>(IPC_CHANNELS.SESSION_TOOL_RESULT, (payload) => {
+        // Append bash output to the terminal view
+        if (payload.tool_name === "execute_bash") {
+          appendTerminalOutput(payload.session_id, payload.output + "\n");
+        }
+      }),
+
       onSessionEvent<SessionApprovalRequiredEvent>(IPC_CHANNELS.SESSION_APPROVAL_REQUIRED, () => {}),
     ];
 
     return () => unsubs.forEach((fn) => fn());
-  }, [updateSessionStatus, commitMessage, appendStreamingDelta, clearStreamingText]);
+  }, [updateSessionStatus, commitMessage, appendStreamingDelta, clearStreamingText, addLiveToolCall, appendTerminalOutput]);
 }
