@@ -2,35 +2,30 @@
 
 ## Project Overview
 
-AIchemist-UI is a **Tauri v2 desktop AI assistant** — a React/TypeScript frontend running in a WebView over a Rust backend. The app lets users point it at a project directory and chat with an LLM agent that can read/write files, run shell commands, and fetch URLs.
+AIchemist-UI is an **Electron desktop AI assistant** — a React/TypeScript renderer process over a Node.js main process. The app lets users point it at a project directory and chat with an LLM agent that can read/write files, run shell commands, and fetch URLs.
 
 ---
 
 ## Commands
 
 ```bash
-# Full dev environment (Vite + Rust hot-reload)
-bun run tauri dev
-
-# Frontend-only (no Rust, port 1420)
+# Start dev environment (main process + renderer, hot-reload)
 bun run dev
 
-# Type-check only
-bun run build          # tsc && vite build
-
 # Production build
-bun run tauri build
+bun run build
 
-# Rust tests only
-cargo test --manifest-path src-tauri/Cargo.toml
+# Preview production build
+bun run start
 
-# Single Rust test
-cargo test --manifest-path src-tauri/Cargo.toml <test_name>
+# Type-check both src/ and electron/
+bun run typecheck
+
+# Rebuild native modules (e.g. after Electron version bump)
+bun run rebuild
 ```
 
-> Vite is locked to port **1420** (`strictPort: true`). If that port is occupied, `tauri dev` will fail.
-
-There are no frontend tests currently. TypeScript strict mode is enabled with `noUnusedLocals` and `noUnusedParameters` — unused variables are compile errors.
+There are no automated tests currently. TypeScript strict mode is enabled with `noUnusedLocals` and `noUnusedParameters` — unused variables are compile errors.
 
 ---
 
@@ -40,33 +35,42 @@ There are no frontend tests currently. TypeScript strict mode is enabled with `n
 
 | Layer | Location | Language | Entry point |
 |---|---|---|---|
-| Frontend (WebView) | `src/` | TypeScript / React 19 | `src/main.tsx` → `src/App.tsx` |
-| Backend (native) | `src-tauri/src/` | Rust | `main.rs` → `lib.rs` |
+| Renderer (UI) | `src/` | TypeScript / React 19 | `src/main.tsx` → `src/App.tsx` |
+| Main process (backend) | `electron/` | TypeScript / Node.js | `electron/main.ts` |
 
-**Frontend → Backend:** `invoke("command_name", { args })` from `@tauri-apps/api/core`  
-**Backend → Frontend:** Tauri events via `listen("session:*")` (see `useSessionEvents.ts`)  
-**New Tauri commands:** add `#[tauri::command]` fn in the appropriate Rust module, register in `lib.rs`'s `invoke_handler!` macro  
-**New permissions:** add to `src-tauri/capabilities/default.json` (Tauri v2 is explicit opt-in)
+### IPC — Frontend ↔ Backend
 
-### Rust backend modules
+- **Renderer → Main:** `window.electronAPI.<method>(args)` — typed bridge defined in `electron/preload.ts` via `contextBridge`. Use the `ipc` wrapper in `src/lib/ipc.ts` rather than calling `window.electronAPI` directly.
+- **Main → Renderer (push events):** `webContents.send(channel, payload)` — subscribed to via `onSessionEvent()` from `src/lib/ipc.ts`.
+- **Channel constants** live in `electron/ipc-channels.ts` — always use those instead of raw strings.
+- **Adding a new IPC method:** add the channel constant to `ipc-channels.ts`, add `ipcMain.handle(CH.*, handler)` in `electron/main.ts`, expose it in `electron/preload.ts`, add the wrapper to `src/lib/ipc.ts`.
+
+### Electron main process modules (`electron/`)
 
 | Module | Role |
 |---|---|
-| `lib.rs` | App entry, shared `AppState { db: Mutex<Connection> }`, registers all commands |
-| `config.rs` | Reads env vars for API keys; mirrors Claude Code's env var names |
-| `db.rs` | Opens `~/.aichemist/aichemist.db`; forward-only `migrate()` — append only, never modify existing SQL |
-| `projects.rs` | CRUD for projects + per-project JSON config |
-| `sessions.rs` | CRUD for sessions and messages |
-| `tools.rs` | Filesystem, shell (`execute_bash`), and `web_fetch` commands |
+| `main.ts` | App entry, creates `BrowserWindow`, registers all `ipcMain` handlers |
+| `preload.ts` | `contextBridge` — exposes typed `window.electronAPI` to the renderer |
+| `ipc-channels.ts` | Shared IPC channel name constants |
+| `config.ts` | Loads `~/.aichemist/.env` via `dotenv`; resolves API keys |
+| `db.ts` | Opens `~/.aichemist/aichemist.db` via `better-sqlite3`; forward-only migrations |
+| `projects.ts` | CRUD for projects + per-project JSON config |
+| `sessions.ts` | CRUD for sessions and messages |
+| `dialog.ts` | Native folder picker via Electron's `dialog` module |
+| `settings.ts` | App-level settings persisted as JSON |
+| `agent/runner.ts` | Dispatches agent turns to the appropriate provider |
+| `agent/claude.ts` | Claude agent runner (Anthropic) |
+| `agent/copilot.ts` | Copilot agent runner (GitHub) |
+| `agent/mcp-tools.ts` | MCP tool approval gate |
 
 ### Frontend data flow
 
-1. User message → `useAgentTurn.sendMessage()` (hook)
-2. Persists user message via `invoke("save_message")` → SQLite
-3. Calls `runAgentTurn()` (`src/lib/ai/agent.ts`) — streams one LLM step at a time via `stopWhen: stepCountIs(1)`
-4. Each step: stream parts update Zustand store (`appendStreamingDelta`, `addLiveToolCall`, etc.)
-5. Approval-gated tools pause the loop via `Promise`-based `resolve` stored in `pendingApprovals` Zustand slice
-6. On turn completion, assistant message persisted via `invoke("save_message")`
+1. User message → `useAgentTurn.sendMessage()` (hook in `src/lib/hooks/`)
+2. Persists user message via `ipc.saveMessage()` → SQLite
+3. Calls `ipc.agentSend({ sessionId, prompt })` → main process runs the agent turn
+4. Main process streams events back: `SESSION_STATUS`, `SESSION_DELTA`, `SESSION_TOOL_CALL`, `SESSION_TOOL_RESULT`, `SESSION_APPROVAL_REQUIRED`, `SESSION_MESSAGE`
+5. `useSessionEvents` hook (mounted once in `AppShell`) subscribes via `onSessionEvent()` and updates Zustand
+6. Approval-gated tools: main emits `SESSION_APPROVAL_REQUIRED`; UI shows approval dialog; renderer calls `ipc.approveToolCall()`
 
 ### State management (Zustand)
 
@@ -75,11 +79,11 @@ There are no frontend tests currently. TypeScript strict mode is enabled with `n
 
 ### Database
 
-SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `messages` → `tool_calls` (cascade deletes). Config is stored as JSON in `projects.config`.
+SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `messages` → `tool_calls` (cascade deletes). Config stored as JSON in `projects.config`. Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
 
 ### API keys / config
 
-Place in `~/.aichemist/.env` — loaded at startup via `dotenvy`. Supported vars:
+Place in `~/.aichemist/.env` — loaded at startup by `electron/config.ts` via `dotenv`.
 
 | Variable | Effect |
 |---|---|
@@ -89,56 +93,28 @@ Place in `~/.aichemist/.env` — loaded at startup via `dotenvy`. Supported vars
 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | Override any model ID containing `"haiku"` |
 | `ANTHROPIC_DEFAULT_OPUS_MODEL` | Override any model ID containing `"opus"` |
 | `OPENAI_API_KEY` | OpenAI key |
+| `GITHUB_TOKEN` | GitHub Copilot key |
+| `CLAUDE_CODE_PATH` | Explicit path to the `claude` CLI binary |
 
 ---
 
 ## Key Conventions
-
-### AI SDK v6 (critical — training data is outdated)
-
-Always read `node_modules/ai/docs/` after installing `ai`. Key v6 changes:
-
-| Deprecated | Current (v6) |
-|---|---|
-| `maxSteps: n` | `stopWhen: stepCountIs(n)` |
-| `parameters: z.object({...})` in `tool()` | `inputSchema: zodSchema(z.object({...}))` |
-| `generateObject(...)` | `generateText({ output: Output.object({...}) })` |
-| `maxTokens` | `maxOutputTokens` |
-
-**Stream part field names:**
-- `tool-call` parts → `.input` (not `.args`)
-- `tool-result` parts → `.output` (not `.result`)
-- `text-delta` parts → `.text` (not `.textDelta`)
-- `tool-approval-request` parts → `.approvalId`, `.toolCallId`, `.toolName`, `.input`
 
 ### AI Elements components
 
 The AI Elements skill is installed at `.agents/skills/ai-elements/`. Reference docs for every component live at `.agents/skills/ai-elements/references/<component>.md`.
 
 - Use `@/components/ai-elements/...` (the `@/` alias is required)
-- **Do not use `useChat`** from `@ai-sdk/react` — it requires an HTTP endpoint and does not work in Tauri. All AI state is driven from Zustand + `runAgentTurn`.
+- **Do not use `useChat`** from `@ai-sdk/react` — it requires an HTTP endpoint and does not work in Electron. All AI state is driven from Zustand updated by push events from the main process.
 - **`ModelSelectorTrigger` does not support `asChild`** — style it directly with `className`
-
-### Tool definitions
-
-All AI tools are defined in `src/lib/ai/tools.ts` using:
-```ts
-tool({
-  description: "...",
-  inputSchema: zodSchema(z.object({ ... })),
-  needsApproval: needsApproval("filesystem" | "shell" | "web"),
-  execute: async (args) => invoke<ReturnType>("command_name", args),
-})
-```
-The `needsApproval` function reads the project's `approval_mode` ("all" | "none" | "custom") and per-category `approval_rules`.
-
-### Types
-
-`src/types/index.ts` mirrors Rust structs — field names use **snake_case** to match serde defaults. Do not rename them to camelCase.
 
 ### Path alias
 
-`@/` resolves to `src/` — configured in both `vite.config.ts` (`resolve.alias`) and `tsconfig.json` (`paths`). Always use `@/` for non-relative imports within `src/`.
+`@/` resolves to `src/` — configured in both `electron.vite.config.ts` (`resolve.alias`) and `tsconfig.json` (`paths`). Always use `@/` for non-relative imports within `src/`.
+
+### Types
+
+`src/types/index.ts` defines shared types mirroring the SQLite schema. Field names use **snake_case**. Do not rename them to camelCase.
 
 ### Package manager
 
