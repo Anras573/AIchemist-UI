@@ -15,21 +15,7 @@ import {
 } from "@/components/ai-elements/model-selector";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import type { Project, ProjectConfig } from "@/types";
-
-// ── Static model catalogue ────────────────────────────────────────────────────
-
-interface ModelOption {
-  provider: string;
-  model: string;
-  label: string;
-  logoProvider: string;
-}
-
-const ANTHROPIC_MODELS: ModelOption[] = [
-  { provider: "anthropic", model: "claude-opus-4-6",           label: "Claude Opus 4.6",   logoProvider: "anthropic" },
-  { provider: "anthropic", model: "claude-sonnet-4-6",         label: "Claude Sonnet 4.6", logoProvider: "anthropic" },
-  { provider: "anthropic", model: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5",  logoProvider: "anthropic" },
-];
+import { ANTHROPIC_MODELS, type ModelOption } from "@/lib/models";
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
