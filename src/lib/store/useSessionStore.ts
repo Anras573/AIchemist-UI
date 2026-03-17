@@ -33,6 +33,8 @@ interface SessionStore {
 
   mergeSessions: (sessions: Session[]) => void;
   setActiveSession: (id: string | null) => void;
+  /** Replaces a session's messages with the full history loaded from the DB. */
+  hydrateSession: (session: Session) => void;
   addSession: (session: Session) => void;
   removeSession: (id: string) => void;
   updateSessionStatus: (sessionId: string, status: SessionStatus) => void;
@@ -76,6 +78,22 @@ export const useSessionStore = create<SessionStore>()(
         })),
 
       setActiveSession: (id) => set({ activeSessionId: id }),
+
+      hydrateSession: (session) =>
+        set((state) => {
+          const existing = state.sessions[session.id];
+          // Merge: keep any runtime state (status, streaming) but replace persisted fields
+          return {
+            sessions: {
+              ...state.sessions,
+              [session.id]: {
+                ...(existing ?? session),
+                messages: session.messages,
+                title: session.title,
+              },
+            },
+          };
+        }),
 
       addSession: (session) =>
         set((state) => ({
