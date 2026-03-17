@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { ipc } from "@/lib/ipc";
 import {
   ModelSelector,
@@ -25,25 +25,10 @@ interface ModelOption {
   logoProvider: string;
 }
 
-const MODELS: ModelOption[] = [
-  // Anthropic
-  { provider: "anthropic", model: "claude-opus-4-6", label: "Claude Opus 4.6", logoProvider: "anthropic" },
-  { provider: "anthropic", model: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", logoProvider: "anthropic" },
-  { provider: "anthropic", model: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", logoProvider: "anthropic" },
-  // OpenAI
-  { provider: "openai", model: "gpt-4o", label: "GPT-4o", logoProvider: "openai" },
-  { provider: "openai", model: "gpt-4o-mini", label: "GPT-4o mini", logoProvider: "openai" },
-  { provider: "openai", model: "o3-mini", label: "o3-mini", logoProvider: "openai" },
-  // Ollama (local)
-  { provider: "ollama", model: "llama3.2", label: "Llama 3.2 (local)", logoProvider: "llama" },
-  { provider: "ollama", model: "qwen2.5-coder", label: "Qwen 2.5 Coder (local)", logoProvider: "alibaba" },
-  { provider: "ollama", model: "mistral", label: "Mistral (local)", logoProvider: "mistral" },
-];
-
-const GROUPS = [
-  { label: "Anthropic", provider: "anthropic" },
-  { label: "OpenAI", provider: "openai" },
-  { label: "Ollama (local)", provider: "ollama" },
+const ANTHROPIC_MODELS: ModelOption[] = [
+  { provider: "anthropic", model: "claude-opus-4-6",           label: "Claude Opus 4.6",   logoProvider: "anthropic" },
+  { provider: "anthropic", model: "claude-sonnet-4-6",         label: "Claude Sonnet 4.6", logoProvider: "anthropic" },
+  { provider: "anthropic", model: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5",  logoProvider: "anthropic" },
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -55,12 +40,35 @@ interface ModelPickerButtonProps {
 export function ModelPickerButton({ project }: ModelPickerButtonProps) {
   const { updateProject } = useProjectStore();
   const [open, setOpen] = useState(false);
+  const [copilotModels, setCopilotModels] = useState<ModelOption[]>([]);
 
-  const current = MODELS.find(
-    (m) =>
-      m.provider === project.config.provider &&
-      m.model === project.config.model
-  );
+  // Fetch Copilot models once when the picker is first opened
+  useEffect(() => {
+    if (!open || copilotModels.length > 0) return;
+    ipc.getCopilotModels()
+      .then((models) => {
+        setCopilotModels(
+          models.map((m) => ({
+            provider: "copilot",
+            model: m.id,
+            label: m.name,
+            logoProvider: "github-copilot",
+          }))
+        );
+      })
+      .catch(() => {/* Copilot not configured — silently hide the group */});
+  }, [open, copilotModels.length]);
+
+  const allModels = [...ANTHROPIC_MODELS, ...copilotModels];
+
+  const current =
+    allModels.find(
+      (m) => m.provider === project.config.provider && m.model === project.config.model
+    ) ??
+    // Fallback label for unknown model IDs
+    (project.config.model
+      ? { provider: project.config.provider, model: project.config.model, label: `${project.config.provider}/${project.config.model}`, logoProvider: project.config.provider }
+      : null);
 
   const handleSelect = useCallback(
     async (option: ModelOption) => {
@@ -85,16 +93,11 @@ export function ModelPickerButton({ project }: ModelPickerButtonProps) {
       <ModelSelectorTrigger className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer border-none bg-transparent">
         {current ? (
           <>
-            <ModelSelectorLogo
-              provider={current.logoProvider}
-              className="opacity-70"
-            />
+            <ModelSelectorLogo provider={current.logoProvider} className="opacity-70" />
             <span>{current.label}</span>
           </>
         ) : (
-          <span>
-            {project.config.provider}/{project.config.model}
-          </span>
+          <span>Select model</span>
         )}
         <svg
           className="size-3 opacity-50"
@@ -111,36 +114,49 @@ export function ModelPickerButton({ project }: ModelPickerButtonProps) {
         <ModelSelectorInput placeholder="Search models…" />
         <ModelSelectorList>
           <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
-          {GROUPS.map((group, idx) => {
-            const groupModels = MODELS.filter(
-              (m) => m.provider === group.provider
-            );
-            return (
-              <span key={group.provider}>
-                {idx > 0 && <ModelSelectorSeparator />}
-                <ModelSelectorGroup heading={group.label}>
-                  {groupModels.map((option) => {
-                    const isActive =
-                      option.provider === project.config.provider &&
-                      option.model === project.config.model;
-                    return (
-                      <ModelSelectorItem
-                        key={`${option.provider}/${option.model}`}
-                        value={`${option.label} ${option.provider}`}
-                        onSelect={() => handleSelect(option)}
-                      >
-                        <ModelSelectorLogo provider={option.logoProvider} />
-                        <ModelSelectorName>{option.label}</ModelSelectorName>
-                        {isActive && (
-                          <span className="text-xs text-primary">✓</span>
-                        )}
-                      </ModelSelectorItem>
-                    );
-                  })}
-                </ModelSelectorGroup>
-              </span>
-            );
-          })}
+
+          <ModelSelectorGroup heading="Anthropic">
+            {ANTHROPIC_MODELS.map((option) => {
+              const isActive =
+                option.provider === project.config.provider &&
+                option.model === project.config.model;
+              return (
+                <ModelSelectorItem
+                  key={option.model}
+                  value={`${option.label} ${option.provider}`}
+                  onSelect={() => handleSelect(option)}
+                >
+                  <ModelSelectorLogo provider={option.logoProvider} />
+                  <ModelSelectorName>{option.label}</ModelSelectorName>
+                  {isActive && <span className="text-xs text-primary">✓</span>}
+                </ModelSelectorItem>
+              );
+            })}
+          </ModelSelectorGroup>
+
+          {copilotModels.length > 0 && (
+            <>
+              <ModelSelectorSeparator />
+              <ModelSelectorGroup heading="GitHub Copilot">
+                {copilotModels.map((option) => {
+                  const isActive =
+                    option.provider === project.config.provider &&
+                    option.model === project.config.model;
+                  return (
+                    <ModelSelectorItem
+                      key={option.model}
+                      value={`${option.label} ${option.provider}`}
+                      onSelect={() => handleSelect(option)}
+                    >
+                      <ModelSelectorLogo provider={option.logoProvider} />
+                      <ModelSelectorName>{option.label}</ModelSelectorName>
+                      {isActive && <span className="text-xs text-primary">✓</span>}
+                    </ModelSelectorItem>
+                  );
+                })}
+              </ModelSelectorGroup>
+            </>
+          )}
         </ModelSelectorList>
       </ModelSelectorContent>
     </ModelSelector>

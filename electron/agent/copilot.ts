@@ -26,8 +26,7 @@ async function getClient(): Promise<CopilotClientType> {
   return client;
 }
 
-/**
- * Gracefully stop the shared Copilot CLI client.
+/** Gracefully stop the shared Copilot CLI client.
  * TODO: Call this in main.ts `app.on("before-quit")` to ensure clean shutdown
  *       of the spawned CLI process before the Electron app exits.
  */
@@ -36,6 +35,13 @@ export async function stopCopilotClient(): Promise<void> {
     await clientInstance.stop();
     clientInstance = null;
   }
+}
+
+/** Return the list of models available for the authenticated Copilot user. */
+export async function getCopilotModels(): Promise<Array<{ id: string; name: string }>> {
+  const client = await getClient();
+  const models = await client.listModels();
+  return models.map((m) => ({ id: m.id, name: m.name }));
 }
 
 // ── Approval gate ─────────────────────────────────────────────────────────────

@@ -43,6 +43,7 @@ export const ipc = {
     window.electronAPI.agentSend(args),
   approveToolCall: (sessionId: string, approvalId: string, approved: boolean) =>
     window.electronAPI.approveToolCall(sessionId, approvalId, approved),
+  getCopilotModels: () => window.electronAPI.getCopilotModels(),
 };
 
 // ── Push-event subscription helper ────────────────────────────────────────────

@@ -11,7 +11,7 @@ import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
 import { resolvePendingApproval } from "./agent/mcp-tools";
 import { runAgentTurn } from "./agent/runner";
-import { stopCopilotClient, resolveCopilotApproval } from "./agent/copilot";
+import { stopCopilotClient, resolveCopilotApproval, getCopilotModels } from "./agent/copilot";
 import type { ProjectConfig } from "../src/types/index";
 
 // ── Prevent multiple instances ───────────────────────────────────────────────
@@ -161,6 +161,7 @@ function registerHandlers(): void {
       webContents: win.webContents,
     });
   });
+  ipcMain.handle(CH.GET_COPILOT_MODELS, () => getCopilotModels());
   ipcMain.handle(
     CH.APPROVE_TOOL_CALL,
     (_event, args: { sessionId: string; approvalId: string; approved: boolean }) => {

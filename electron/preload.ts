@@ -47,6 +47,7 @@ export interface ElectronAPI {
   // ── Agent ─────────────────────────────────────────────────────────────────
   agentSend: (args: { sessionId: string; prompt: string }) => Promise<void>;
   approveToolCall: (sessionId: string, approvalId: string, approved: boolean) => Promise<void>;
+  getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
 
   // ── Push event bus ────────────────────────────────────────────────────────
   on: (channel: string, listener: (payload: unknown) => void) => void;
@@ -85,6 +86,7 @@ const api: ElectronAPI = {
   agentSend: (args) => ipcRenderer.invoke(CH.AGENT_SEND, args),
   approveToolCall: (sessionId, approvalId, approved) =>
     ipcRenderer.invoke(CH.APPROVE_TOOL_CALL, { sessionId, approvalId, approved }),
+  getCopilotModels: () => ipcRenderer.invoke(CH.GET_COPILOT_MODELS),
 
   on: (channel, listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
