@@ -60,5 +60,8 @@
     "tailwindcss": "^4.2.1",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
+  },
+  "patchedDependencies": {
+    "vscode-jsonrpc@8.2.1": "patches/vscode-jsonrpc@8.2.1.patch"
   }
 }

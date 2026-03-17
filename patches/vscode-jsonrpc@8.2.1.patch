@@ -1,0 +1,17 @@
+diff --git a/package.json b/package.json
+index d0080b2ad03f6471915c5527bfd11debbbffeefa..9572047c9af0cf3f3889f6ae0277f64fa9f8f901 100644
+--- a/package.json
++++ b/package.json
+@@ -41,5 +41,11 @@
+ 		"all": "npm run clean && npm run compile && npm run lint && npm run test",
+ 		"compile:publish": "node ../build/bin/tsc -b ./tsconfig.publish.json",
+ 		"all:publish": "git clean -xfd . && npm install && npm run compile:publish && npm run lint && npm run test"
++	},
++	"exports": {
++		".": "./lib/node/main.js",
++		"./node": "./node.js",
++		"./node.js": "./node.js",
++		"./browser": "./lib/browser/main.js"
+ 	}
+ }
+\ No newline at end of file
