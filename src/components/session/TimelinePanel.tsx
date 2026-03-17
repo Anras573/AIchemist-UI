@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
 import { Message } from "@/types";
 import { cn } from "@/lib/utils";
+import { MessageResponse } from "@/components/ai-elements/message";
 
 // ─── Individual message bubble ────────────────────────────────────────────────
 
@@ -11,13 +12,17 @@ function MessageBubble({ message }: { message: Message }) {
     <div className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[80%] rounded-lg px-4 py-2.5 text-sm whitespace-pre-wrap",
+          "max-w-[80%] rounded-lg px-4 py-2.5 text-sm",
           isUser
-            ? "bg-primary text-primary-foreground"
+            ? "bg-primary text-primary-foreground whitespace-pre-wrap"
             : "bg-muted text-foreground"
         )}
       >
-        {message.content}
+        {isUser ? (
+          message.content
+        ) : (
+          <MessageResponse className="text-sm">{message.content}</MessageResponse>
+        )}
       </div>
     </div>
   );
@@ -28,8 +33,10 @@ function MessageBubble({ message }: { message: Message }) {
 function StreamingBubble({ text }: { text: string }) {
   return (
     <div className="flex w-full justify-start">
-      <div className="max-w-[80%] rounded-lg px-4 py-2.5 text-sm bg-muted text-foreground whitespace-pre-wrap">
-        {text || (
+      <div className="max-w-[80%] rounded-lg px-4 py-2.5 text-sm bg-muted text-foreground">
+        {text ? (
+          <MessageResponse className="text-sm">{text}</MessageResponse>
+        ) : (
           <span className="flex gap-1 items-center h-4">
             <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:0ms]" />
             <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:150ms]" />
