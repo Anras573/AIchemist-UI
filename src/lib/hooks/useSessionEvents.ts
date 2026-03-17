@@ -99,9 +99,12 @@ export function useSessionEvents() {
       }),
 
       onSessionEvent<ToolResultEvent>(IPC_CHANNELS.SESSION_TOOL_RESULT, (payload) => {
+        console.log("[SESSION_TOOL_RESULT]", payload.tool_name, typeof payload.output, payload.output);
         if (payload.tool_name === "execute_bash") {
           const raw = extractOutput(payload.output);
+          console.log("[execute_bash] raw:", raw);
           const formatted = formatBashOutput(raw);
+          console.log("[execute_bash] formatted:", formatted);
           appendTerminalOutput(payload.session_id, formatted + "\n\n");
         }
       }),
