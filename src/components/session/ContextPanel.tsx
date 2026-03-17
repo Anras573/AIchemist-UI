@@ -27,6 +27,15 @@ interface DirEntry {
   size_bytes: number;
 }
 
+// ── Sorting — folders first, then files, each group alphabetical ─────────────
+
+function sortEntries(entries: DirEntry[]): DirEntry[] {
+  return [...entries].sort((a, b) => {
+    if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
+}
+
 // ── FileTreeNode — recursive, lazy-loading ────────────────────────────────────
 
 /**
@@ -51,7 +60,7 @@ function LazyFolderChildren({ path }: { path: string }) {
 
   return (
     <>
-      {children.map((child) =>
+      {sortEntries(children).map((child) =>
         child.is_dir ? (
           <FileTreeFolder key={child.path} name={child.name} path={child.path}>
             <LazyFolderChildren path={child.path} />
@@ -122,7 +131,7 @@ function FileTreeView({ projectPath }: FileTreeViewProps) {
       onSelect={setSelectedPath}
       className="border-0 rounded-none h-full overflow-y-auto"
     >
-      {entries.map((entry) => (
+      {sortEntries(entries).map((entry) => (
         <FileTreeNode key={entry.path} entry={entry} />
       ))}
     </FileTree>
