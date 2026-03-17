@@ -1,8 +1,14 @@
+diff --git a/node_modules/vscode-jsonrpc/.bun-tag-240591cffea3926e b/.bun-tag-240591cffea3926e
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/vscode-jsonrpc/.bun-tag-5b3ac0f18b072c87 b/.bun-tag-5b3ac0f18b072c87
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/package.json b/package.json
-index d0080b2ad03f6471915c5527bfd11debbbffeefa..9572047c9af0cf3f3889f6ae0277f64fa9f8f901 100644
+index d0080b2ad03f6471915c5527bfd11debbbffeefa..a989e06df058d527b007b1822cc291e7fb0c40aa 100644
 --- a/package.json
 +++ b/package.json
-@@ -41,5 +41,11 @@
+@@ -41,5 +41,12 @@
  		"all": "npm run clean && npm run compile && npm run lint && npm run test",
  		"compile:publish": "node ../build/bin/tsc -b ./tsconfig.publish.json",
  		"all:publish": "git clean -xfd . && npm install && npm run compile:publish && npm run lint && npm run test"
@@ -11,7 +17,7 @@ index d0080b2ad03f6471915c5527bfd11debbbffeefa..9572047c9af0cf3f3889f6ae0277f64f
 +		".": "./lib/node/main.js",
 +		"./node": "./node.js",
 +		"./node.js": "./node.js",
-+		"./browser": "./lib/browser/main.js"
++		"./browser": "./lib/browser/main.js",
++		"./lib/*": "./lib/*"
  	}
  }
-\ No newline at end of file
