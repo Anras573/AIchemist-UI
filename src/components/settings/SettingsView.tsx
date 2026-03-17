@@ -5,17 +5,20 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { X, Eye, EyeOff, Check, AlertCircle } from "lucide-react";
+import { useTheme } from "@/lib/hooks/useTheme";
+import type { Theme } from "@/lib/hooks/useTheme";
 
 interface SettingsViewProps {
   onClose: () => void;
 }
 
-type Section = "api-keys" | "model-overrides" | "defaults";
+type Section = "api-keys" | "model-overrides" | "defaults" | "appearance";
 
 const NAV: { id: Section; label: string }[] = [
   { id: "api-keys", label: "API Keys" },
   { id: "model-overrides", label: "Model Overrides" },
   { id: "defaults", label: "Defaults" },
+  { id: "appearance", label: "Appearance" },
 ];
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -96,7 +99,10 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     "api-keys": "idle",
     "model-overrides": "idle",
     defaults: "idle",
+    appearance: "idle",
   });
+
+  const { theme, setTheme } = useTheme();
 
   useEffect(() => {
     ipc.settingsRead().then((s) => {
@@ -123,6 +129,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
           "ANTHROPIC_DEFAULT_OPUS_MODEL",
         ],
         defaults: ["AICHEMIST_DEFAULT_PROVIDER", "AICHEMIST_DEFAULT_APPROVAL_MODE"],
+        appearance: [], // theme is auto-saved via useTheme, no batch save needed
       };
 
       const updates: Partial<SettingsMap> = {};
@@ -310,6 +317,47 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                 status={saveStatus["defaults"]}
                 onSave={() => saveSection("defaults")}
               />
+            </>
+          )}
+          {/* ── Appearance ── */}
+          {activeSection === "appearance" && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Choose how AIchemist looks. System follows your OS setting.
+              </p>
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium leading-none mb-3">Theme</legend>
+                {(
+                  [
+                    { value: "system", label: "System", description: "Matches your OS preference" },
+                    { value: "light",  label: "Light",  description: "Always use light mode" },
+                    { value: "dark",   label: "Dark",   description: "Always use dark mode" },
+                  ] as { value: Theme; label: string; description: string }[]
+                ).map(({ value, label, description }) => (
+                  <label
+                    key={value}
+                    className={cn(
+                      "flex items-center gap-3 rounded-lg border p-3.5 cursor-pointer transition-colors",
+                      theme === value
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:bg-accent/50"
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="theme"
+                      value={value}
+                      checked={theme === value}
+                      onChange={() => setTheme(value)}
+                      className="no-drag-region accent-primary"
+                    />
+                    <div>
+                      <p className="text-sm font-medium">{label}</p>
+                      <p className="text-xs text-muted-foreground">{description}</p>
+                    </div>
+                  </label>
+                ))}
+              </fieldset>
             </>
           )}
         </div>

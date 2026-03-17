@@ -12,6 +12,7 @@ export interface SettingsMap {
   GITHUB_TOKEN: string;
   AICHEMIST_DEFAULT_PROVIDER: string;
   AICHEMIST_DEFAULT_APPROVAL_MODE: string;
+  AICHEMIST_THEME: string;
 }
 
 const KNOWN_KEYS = new Set<string>([
@@ -19,6 +20,7 @@ const KNOWN_KEYS = new Set<string>([
   "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
   "GITHUB_TOKEN",
   "AICHEMIST_DEFAULT_PROVIDER", "AICHEMIST_DEFAULT_APPROVAL_MODE",
+  "AICHEMIST_THEME",
 ]);
 
 function envPath(): string {
@@ -54,6 +56,7 @@ export function readSettings(): SettingsMap {
     GITHUB_TOKEN:                    env["GITHUB_TOKEN"] ?? "",
     AICHEMIST_DEFAULT_PROVIDER:      env["AICHEMIST_DEFAULT_PROVIDER"] ?? "anthropic",
     AICHEMIST_DEFAULT_APPROVAL_MODE: env["AICHEMIST_DEFAULT_APPROVAL_MODE"] ?? "custom",
+    AICHEMIST_THEME:                 env["AICHEMIST_THEME"] ?? "system",
   };
 }
 
