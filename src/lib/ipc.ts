@@ -31,6 +31,7 @@ export const ipc = {
 
   // File system
   listDirectory: (path: string) => window.electronAPI.listDirectory(path),
+  readFile: (path: string) => window.electronAPI.readFile(path),
 
   // Dialog
   openFolderDialog: () => window.electronAPI.openFolderDialog(),

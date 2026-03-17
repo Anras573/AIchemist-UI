@@ -152,3 +152,25 @@
   color: var(--shiki-dark, var(--sdm-c, inherit));
   background-color: var(--shiki-dark-bg, var(--sdm-tbg, transparent));
 }
+/*
+ * File viewer (FileViewer.tsx) — shiki codeToHtml with defaultColor: false
+ * writes --shiki-light / --shiki-dark CSS variables onto each <span>.
+ * Apply them here since Tailwind v4 won't scan the generated HTML.
+ */
+.file-viewer pre {
+  padding: 1rem;
+  min-height: 100%;
+  background-color: var(--shiki-light-bg, hsl(var(--background)));
+}
+.dark .file-viewer pre {
+  background-color: var(--shiki-dark-bg, hsl(var(--background)));
+}
+.file-viewer span {
+  color: var(--shiki-light, inherit);
+}
+.dark .file-viewer span {
+  color: var(--shiki-dark, inherit);
+}
+.file-viewer .shiki-fallback {
+  color: hsl(var(--foreground));
+}

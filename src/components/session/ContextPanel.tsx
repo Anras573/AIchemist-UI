@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { X, ChevronLeft } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import {
   FileTree,
@@ -17,6 +17,7 @@ import {
 } from "@/components/ai-elements/terminal";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
+import { FileViewer } from "./FileViewer";
 
 // ── Rust types ────────────────────────────────────────────────────────────────
 
@@ -43,7 +44,13 @@ function sortEntries(entries: DirEntry[]): DirEntry[] {
  * Children are fetched the first time the folder is rendered
  * (i.e., when its parent was expanded).
  */
-function LazyFolderChildren({ path }: { path: string }) {
+function LazyFolderChildren({
+  path,
+  onFileOpen,
+}: {
+  path: string;
+  onFileOpen?: (path: string) => void;
+}) {
   const [children, setChildren] = useState<DirEntry[] | null>(null);
 
   useEffect(() => {
@@ -63,34 +70,48 @@ function LazyFolderChildren({ path }: { path: string }) {
       {sortEntries(children).map((child) =>
         child.is_dir ? (
           <FileTreeFolder key={child.path} name={child.name} path={child.path}>
-            <LazyFolderChildren path={child.path} />
+            <LazyFolderChildren path={child.path} onFileOpen={onFileOpen} />
           </FileTreeFolder>
         ) : (
-          <FileTreeFile key={child.path} name={child.name} path={child.path} />
+          // Wrap in a div so the click can be intercepted for the file viewer
+          <div key={child.path} onClick={() => onFileOpen?.(child.path)}>
+            <FileTreeFile name={child.name} path={child.path} />
+          </div>
         )
       )}
     </>
   );
 }
 
-function FileTreeNode({ entry }: { entry: DirEntry }) {
+function FileTreeNode({
+  entry,
+  onFileOpen,
+}: {
+  entry: DirEntry;
+  onFileOpen?: (path: string) => void;
+}) {
   if (entry.is_dir) {
     return (
       <FileTreeFolder name={entry.name} path={entry.path}>
-        <LazyFolderChildren path={entry.path} />
+        <LazyFolderChildren path={entry.path} onFileOpen={onFileOpen} />
       </FileTreeFolder>
     );
   }
-  return <FileTreeFile name={entry.name} path={entry.path} />;
+  return (
+    <div onClick={() => onFileOpen?.(entry.path)}>
+      <FileTreeFile name={entry.name} path={entry.path} />
+    </div>
+  );
 }
 
 // ── FileTreeView ──────────────────────────────────────────────────────────────
 
 interface FileTreeViewProps {
   projectPath: string;
+  onFileOpen?: (path: string) => void;
 }
 
-function FileTreeView({ projectPath }: FileTreeViewProps) {
+function FileTreeView({ projectPath, onFileOpen }: FileTreeViewProps) {
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -132,7 +153,7 @@ function FileTreeView({ projectPath }: FileTreeViewProps) {
       className="border-0 rounded-none h-full overflow-y-auto"
     >
       {sortEntries(entries).map((entry) => (
-        <FileTreeNode key={entry.path} entry={entry} />
+        <FileTreeNode key={entry.path} entry={entry} onFileOpen={onFileOpen} />
       ))}
     </FileTree>
   );
@@ -173,6 +194,7 @@ export type ContextTab = "files" | "terminal";
 /**
  * Right panel content — renders whichever tool is active (files or terminal).
  * Tab switching and collapse are controlled externally via the ToolStrip.
+ * When a file is clicked in the tree it opens an inline file viewer.
  */
 export function ContextPanel({
   activeTab,
@@ -186,6 +208,7 @@ export function ContextPanel({
   const { activeSessionId, liveToolCalls } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
+  const [viewingFile, setViewingFile] = useState<string | null>(null);
 
   // Auto-switch to terminal when an execute_bash call arrives
   const lastToolCall = activeSessionId
@@ -197,18 +220,35 @@ export function ContextPanel({
     }
   }, [lastToolCall, onAutoSwitch]);
 
-  const label = activeTab === "files" ? "Files" : "Terminal";
+  // Clear file viewer when switching away from the Files tab
+  useEffect(() => {
+    if (activeTab !== "files") setViewingFile(null);
+  }, [activeTab]);
+
+  // Header content depends on whether we're viewing a file
+  const isViewingFile = activeTab === "files" && viewingFile !== null;
+  const fileName = viewingFile?.split("/").pop() ?? "";
+  const headerLabel = isViewingFile ? fileName : activeTab === "files" ? "Files" : "Terminal";
 
   return (
     <div className="flex flex-col h-full">
       {/* Panel header */}
-      <div className="flex items-center justify-between h-9 px-3 border-b shrink-0 bg-background">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          {label}
+      <div className="flex items-center h-9 px-2 border-b shrink-0 bg-background gap-1">
+        {isViewingFile && (
+          <button
+            onClick={() => setViewingFile(null)}
+            className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+            title="Back to file tree"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex-1 truncate">
+          {headerLabel}
         </span>
         <button
           onClick={onClose}
-          className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
           title="Close panel"
         >
           <X className="h-3.5 w-3.5" />
@@ -222,7 +262,14 @@ export function ContextPanel({
             No project open
           </div>
         ) : activeTab === "files" ? (
-          <FileTreeView projectPath={activeProject.path} />
+          isViewingFile ? (
+            <FileViewer filePath={viewingFile!} />
+          ) : (
+            <FileTreeView
+              projectPath={activeProject.path}
+              onFileOpen={setViewingFile}
+            />
+          )
         ) : activeSessionId ? (
           <TerminalView sessionId={activeSessionId} />
         ) : (

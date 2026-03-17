@@ -150,6 +150,25 @@ function registerHandlers(): void {
     }
   });
 
+  ipcMain.handle(CH.READ_FILE, (_event, filePath: string) => {
+    const MAX_BYTES = 512 * 1024; // 512 KB
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.size > MAX_BYTES) {
+        return { error: `File too large (${Math.round(stat.size / 1024)} KB). Only files under 512 KB can be previewed.` };
+      }
+      const buf = fs.readFileSync(filePath);
+      // Binary detection: null byte in first 8 KB
+      const checkLen = Math.min(buf.length, 8192);
+      for (let i = 0; i < checkLen; i++) {
+        if (buf[i] === 0) return { error: "Binary file — cannot display as text." };
+      }
+      return { content: buf.toString("utf8") };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
   // ── Dialog ────────────────────────────────────────────────────────────────────
   ipcMain.handle(CH.OPEN_FOLDER_DIALOG, () => openFolderDialog());
 

@@ -32,6 +32,7 @@ export const UPDATE_SESSION_MODEL   = "sessions:update-model";
 
 // ── File system (renderer direct use — ContextPanel) ────────────────────────
 export const LIST_DIRECTORY         = "fs:list-directory";
+export const READ_FILE              = "fs:read-file";
 
 // ── Dialog ───────────────────────────────────────────────────────────────────
 export const OPEN_FOLDER_DIALOG     = "dialog:open-folder";
