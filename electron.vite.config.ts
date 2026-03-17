@@ -11,6 +11,11 @@ export default defineConfig({
       lib: {
         entry: path.resolve(__dirname, "electron/main.ts"),
       },
+      rollupOptions: {
+        // These ESM-only SDKs use import.meta.resolve() internally and must not
+        // be bundled — keep them as native dynamic imports at runtime.
+        external: ["@github/copilot-sdk", "@anthropic-ai/claude-agent-sdk"],
+      },
     },
   },
   preload: {
