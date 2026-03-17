@@ -136,3 +136,19 @@
 @utility no-drag-region {
   -webkit-app-region: no-drag;
 }
+
+/*
+ * Streamdown syntax highlighting — Tailwind v4 does not scan node_modules dist
+ * files, so the arbitrary-value classes emitted by streamdown's HighlightedCodeBlockBody
+ * (text-[var(--sdm-c,inherit)] / dark:text-[var(--shiki-dark,...)]) are never
+ * generated. Apply the token colors directly via the CSS custom properties that
+ * streamdown writes to each span's inline style attribute.
+ */
+[data-streamdown="code-block"] span {
+  color: var(--sdm-c, inherit);
+  background-color: var(--sdm-tbg, transparent);
+}
+.dark [data-streamdown="code-block"] span {
+  color: var(--shiki-dark, var(--sdm-c, inherit));
+  background-color: var(--shiki-dark-bg, var(--sdm-tbg, transparent));
+}
