@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useAgentTurn } from "@/lib/hooks/useAgentTurn";
@@ -13,6 +14,7 @@ export function WorkspaceView() {
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const { sendMessage } = useAgentTurn();
+  const [contextCollapsed, setContextCollapsed] = useState(false);
 
   if (!activeProject) {
     return (
@@ -44,7 +46,13 @@ export function WorkspaceView() {
       <div className="flex-1 overflow-hidden">
         <SplitPane
           left={<TimelinePanel onSendMessage={sendMessage} />}
-          right={<ContextPanel />}
+          right={
+            <ContextPanel
+              collapsed={contextCollapsed}
+              onToggleCollapse={() => setContextCollapsed((c) => !c)}
+            />
+          }
+          rightCollapsed={contextCollapsed}
         />
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -173,7 +174,13 @@ function TerminalView({ sessionId }: TerminalViewProps) {
  * terminal output from bash tool calls. Auto-switches to the Terminal tab
  * when an execute_bash call arrives.
  */
-export function ContextPanel() {
+export function ContextPanel({
+  collapsed = false,
+  onToggleCollapse,
+}: {
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+}) {
   const { activeSessionId, liveToolCalls } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
@@ -213,6 +220,20 @@ export function ContextPanel() {
         <TabsTrigger value="terminal" className="text-xs h-7 px-3">
           Terminal
         </TabsTrigger>
+        {/* Collapse / expand toggle pushed to the right */}
+        <div className="ml-auto">
+          <button
+            onClick={onToggleCollapse}
+            className="flex items-center justify-center h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title={collapsed ? "Expand panel" : "Collapse panel"}
+          >
+            {collapsed ? (
+              <PanelRightOpen className="h-4 w-4" />
+            ) : (
+              <PanelRightClose className="h-4 w-4" />
+            )}
+          </button>
+        </div>
       </TabsList>
 
       <TabsContent value="files" className="flex-1 overflow-hidden m-0 p-0">
