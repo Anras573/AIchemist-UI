@@ -416,34 +416,26 @@ export async function runCopilotAgentTurn(params: {
   // ── Event listeners — set up before sending ─────────────────────────────────
 
   let fullText = "";
-  const done = new Promise<void>((resolve) => {
-    session.on("assistant.message_delta", (event) => {
-      fullText += event.data.deltaContent;
-      webContents.send(CH.SESSION_DELTA, {
-        session_id: sessionId,
-        text_delta: event.data.deltaContent,
-      });
-    });
-
-    session.on("tool.execution_start", (event) => {
-      // Fires for built-in CLI tools (not for our custom defineTool handlers)
-      webContents.send(CH.SESSION_TOOL_CALL, {
-        session_id: sessionId,
-        tool_name: event.data.toolName,
-        input: event.data.arguments ?? {},
-      });
-    });
-
-    session.on("tool.execution_complete", (event) => {
-      // Fires for built-in CLI tools (not for our custom defineTool handlers)
-      webContents.send(CH.SESSION_TOOL_RESULT, {
-        session_id: sessionId,
-        tool_name: event.data.toolCallId,
-        output: event.data.success ? "completed" : "failed",
-      });
+  const done = new Promise<void>((resolve, reject) => {
+    // The SDK emits "assistant.message" each time the accumulated text grows
+    // (streaming). Track previous length to compute incremental deltas.
+    session.on("assistant.message", (event) => {
+      const newText: string = (event.data as { content: string }).content ?? "";
+      const delta = newText.slice(fullText.length);
+      fullText = newText;
+      if (delta) {
+        webContents.send(CH.SESSION_DELTA, {
+          session_id: sessionId,
+          text_delta: delta,
+        });
+      }
     });
 
     session.on("session.idle", () => resolve());
+    session.on("session.error", (event) => {
+      reject(new Error((event.data as { message: string }).message ?? "Copilot session error"));
+    });
+    session.on("session.abort", () => reject(new Error("Copilot session aborted")));
   });
 
   // ── Send & wait ─────────────────────────────────────────────────────────────
