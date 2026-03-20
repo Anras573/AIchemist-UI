@@ -2,6 +2,10 @@ import type { McpSdkServerConfigWithInstance, SDKMessage } from "@anthropic-ai/c
 import type { Database } from "better-sqlite3";
 import type { ProjectConfig } from "../../src/types/index";
 
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+
 import * as CH from "../ipc-channels";
 import { createApprovalMcpServer } from "./mcp-tools";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
@@ -44,24 +48,97 @@ function extractToolResultText(content: unknown): string {
 
 // ── Main export ────────────────────────────────────────────────────────────────
 
-/** Fetch the list of available sub-agents from the Claude SDK. */
+type AgentEntry = { name: string; description: string; model?: string };
+
+/**
+ * Parses a Claude agent markdown file's YAML frontmatter.
+ * Returns null if the file does not have a valid `name` field.
+ * Exported for testing.
+ */
+export function parseAgentFrontmatter(content: string): AgentEntry | null {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return null;
+  const fm = match[1];
+
+  const nameMatch = fm.match(/^name:\s*(.+)$/m);
+  if (!nameMatch) return null;
+  const name = nameMatch[1].trim().replace(/^['"]|['"]$/g, "");
+
+  const descMatch = fm.match(/^description:\s*(.+)$/m);
+  const description = descMatch
+    ? descMatch[1].trim().replace(/^['"]|['"]$/g, "")
+    : "";
+
+  const modelMatch = fm.match(/^model:\s*(.+)$/m);
+  const model = modelMatch
+    ? modelMatch[1].trim().replace(/^['"]|['"]$/g, "")
+    : undefined;
+
+  return { name, description, ...(model ? { model } : {}) };
+}
+
+/** Scans ~/.claude/agents/ and returns parsed agent entries. */
+function scanLocalAgents(): AgentEntry[] {
+  const agentsDir = path.join(os.homedir(), ".claude", "agents");
+  try {
+    return fs
+      .readdirSync(agentsDir, { withFileTypes: true })
+      .filter((e) => !e.isDirectory() && e.name.endsWith(".md"))
+      .flatMap((file) => {
+        try {
+          const content = fs.readFileSync(
+            path.join(agentsDir, file.name),
+            "utf8"
+          );
+          const agent = parseAgentFrontmatter(content);
+          return agent ? [agent] : [];
+        } catch {
+          return [];
+        }
+      });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Returns available Claude sub-agents by merging:
+ * 1. Built-in agents reported by the SDK via `supportedAgents()`
+ * 2. User-defined agents found in `~/.claude/agents/*.md`
+ *
+ * SDK agents take priority — if a local file shares a name with a built-in
+ * agent, the built-in entry wins and the file is skipped.
+ */
 export async function getClaudeAgents(
   projectPath: string
-): Promise<Array<{ name: string; description: string; model?: string }>> {
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
-  const claudePath = resolveClaudePath();
-  const q = query({
-    prompt: "",
-    options: {
-      cwd: projectPath,
-      ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
-    },
-  });
+): Promise<AgentEntry[]> {
+  // 1. Built-in agents from the SDK
+  let sdkAgents: AgentEntry[] = [];
   try {
-    return await q.supportedAgents();
-  } finally {
-    await q.return(undefined);
+    const { query } = await import("@anthropic-ai/claude-agent-sdk");
+    const claudePath = resolveClaudePath();
+    const q = query({
+      prompt: "",
+      options: {
+        cwd: projectPath,
+        ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
+      },
+    });
+    try {
+      sdkAgents = await q.supportedAgents();
+    } finally {
+      await q.return(undefined);
+    }
+  } catch {
+    // SDK unavailable or query failed — continue with filesystem agents only
   }
+
+  // 2. User-defined agents from ~/.claude/agents/
+  const localAgents = scanLocalAgents();
+
+  // 3. Merge, SDK agents take priority
+  const sdkNames = new Set(sdkAgents.map((a) => a.name));
+  return [...sdkAgents, ...localAgents.filter((a) => !sdkNames.has(a.name))];
 }
 
 export async function runClaudeAgentTurn(params: {
