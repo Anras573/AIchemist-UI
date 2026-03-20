@@ -300,3 +300,35 @@ describe("live tool calls", () => {
     expect(get().liveToolCalls["sess-1"]).toBeUndefined();
   });
 });
+
+// ─── sessionAgents / setSessionAgent ─────────────────────────────────────────
+
+describe("setSessionAgent", () => {
+  it("initial sessionAgents is empty", () => {
+    expect(get().sessionAgents).toEqual({});
+  });
+
+  it("sets the agent for a session", () => {
+    get().setSessionAgent("sess-1", "research");
+    expect(get().sessionAgents["sess-1"]).toBe("research");
+  });
+
+  it("overwrites the agent for the same session", () => {
+    get().setSessionAgent("sess-1", "research");
+    get().setSessionAgent("sess-1", "coder");
+    expect(get().sessionAgents["sess-1"]).toBe("coder");
+  });
+
+  it("clears the agent when null is passed", () => {
+    get().setSessionAgent("sess-1", "research");
+    get().setSessionAgent("sess-1", null);
+    expect(get().sessionAgents["sess-1"]).toBeUndefined();
+  });
+
+  it("does not affect agents for other sessions", () => {
+    get().setSessionAgent("sess-1", "research");
+    get().setSessionAgent("sess-2", "coder");
+    get().setSessionAgent("sess-1", null);
+    expect(get().sessionAgents["sess-2"]).toBe("coder");
+  });
+});

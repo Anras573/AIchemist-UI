@@ -12,6 +12,7 @@ const initialSessionState = {
   liveToolCalls: {},
   pendingApprovals: {},
   terminalOutput: {},
+  sessionAgents: {},
 };
 
 const initialProjectState = {

@@ -201,4 +201,33 @@ describe("useAgentTurn", () => {
     expect(useSessionStore.getState().streamingText["sess-1"]).toBeUndefined();
     expect(useSessionStore.getState().liveToolCalls["sess-1"]).toBeUndefined();
   });
+
+  it("passes the active agent to agentSend when one is selected", async () => {
+    setupActiveSession();
+    useSessionStore.getState().setSessionAgent("sess-1", "research");
+    vi.mocked(window.electronAPI.saveMessage).mockResolvedValue(makeMessage());
+    const { result } = renderHook(() => useAgentTurn());
+
+    await act(async () => {
+      await result.current.sendMessage("go");
+    });
+
+    expect(window.electronAPI.agentSend).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "research" })
+    );
+  });
+
+  it("passes agent as undefined when no agent is selected", async () => {
+    setupActiveSession();
+    vi.mocked(window.electronAPI.saveMessage).mockResolvedValue(makeMessage());
+    const { result } = renderHook(() => useAgentTurn());
+
+    await act(async () => {
+      await result.current.sendMessage("go");
+    });
+
+    expect(window.electronAPI.agentSend).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: undefined })
+    );
+  });
 });
