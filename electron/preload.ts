@@ -47,9 +47,11 @@ export interface ElectronAPI {
   openFolderDialog: () => Promise<string | null>;
 
   // ── Agent ─────────────────────────────────────────────────────────────────
-  agentSend: (args: { sessionId: string; prompt: string }) => Promise<void>;
+  agentSend: (args: { sessionId: string; prompt: string; agent?: string }) => Promise<void>;
   approveToolCall: (sessionId: string, approvalId: string, approved: boolean) => Promise<void>;
   getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
+  getClaudeAgents: (projectPath: string) => Promise<Array<{ name: string; description: string; model?: string }>>;
+  listSkills: (projectPath: string) => Promise<Array<{ name: string; description: string; path: string }>>;
 
   // ── Push event bus ────────────────────────────────────────────────────────
   on: (channel: string, listener: (payload: unknown) => void) => void;
@@ -91,6 +93,8 @@ const api: ElectronAPI = {
   approveToolCall: (sessionId, approvalId, approved) =>
     ipcRenderer.invoke(CH.APPROVE_TOOL_CALL, { sessionId, approvalId, approved }),
   getCopilotModels: () => ipcRenderer.invoke(CH.GET_COPILOT_MODELS),
+  getClaudeAgents: (projectPath) => ipcRenderer.invoke(CH.GET_CLAUDE_AGENTS, projectPath),
+  listSkills: (projectPath) => ipcRenderer.invoke(CH.LIST_SKILLS, projectPath),
 
   on: (channel, listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);

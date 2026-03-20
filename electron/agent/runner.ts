@@ -13,8 +13,9 @@ export async function runAgentTurn(params: {
   projectPath: string;
   projectConfig: ProjectConfig;
   webContents: Electron.WebContents;
+  agent?: string;
 }): Promise<void> {
-  const { db, sessionId, prompt, projectPath, projectConfig, webContents } = params;
+  const { db, sessionId, prompt, projectPath, projectConfig, webContents, agent } = params;
 
   webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "running" });
 
@@ -36,6 +37,7 @@ export async function runAgentTurn(params: {
           projectPath,
           projectConfig,
           webContents,
+          agent,
         });
         break;
       case "copilot":

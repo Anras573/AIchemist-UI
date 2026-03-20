@@ -18,6 +18,7 @@ import {
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { FileViewer } from "./FileViewer";
+import { AgentsPanel } from "./AgentsPanel";
 
 // ── Rust types ────────────────────────────────────────────────────────────────
 
@@ -189,7 +190,7 @@ function TerminalView({ sessionId }: TerminalViewProps) {
 
 // ── ContextPanel ──────────────────────────────────────────────────────────────
 
-export type ContextTab = "files" | "terminal";
+export type ContextTab = "files" | "terminal" | "agents";
 
 /**
  * Right panel content — renders whichever tool is active (files or terminal).
@@ -228,7 +229,7 @@ export function ContextPanel({
   // Header content depends on whether we're viewing a file
   const isViewingFile = activeTab === "files" && viewingFile !== null;
   const fileName = viewingFile?.split("/").pop() ?? "";
-  const headerLabel = isViewingFile ? fileName : activeTab === "files" ? "Files" : "Terminal";
+  const headerLabel = isViewingFile ? fileName : activeTab === "files" ? "Files" : activeTab === "terminal" ? "Terminal" : "Agents & Skills";
 
   return (
     <div className="flex flex-col h-full">
@@ -270,7 +271,9 @@ export function ContextPanel({
               onFileOpen={setViewingFile}
             />
           )
-        ) : activeSessionId ? (
+        ) : activeTab === "agents" ? (
+          <AgentsPanel />
+        ) : activeTab === "terminal" && activeSessionId ? (
           <TerminalView sessionId={activeSessionId} />
         ) : (
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm">

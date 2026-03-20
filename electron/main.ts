@@ -11,6 +11,7 @@ import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
 import { resolvePendingApproval } from "./agent/mcp-tools";
 import { runAgentTurn } from "./agent/runner";
+import { getClaudeAgents } from "./agent/claude";
 import { stopCopilotClient, resolveCopilotApproval, getCopilotModels } from "./agent/copilot";
 import type { ProjectConfig } from "../src/types/index";
 
@@ -173,7 +174,7 @@ function registerHandlers(): void {
   ipcMain.handle(CH.OPEN_FOLDER_DIALOG, () => openFolderDialog());
 
   // ── Agent ─────────────────────────────────────────────────────────────────────
-  ipcMain.handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string }) => {
+  ipcMain.handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string; agent?: string }) => {
     const win = getMainWindow();
     if (!win) throw new Error("No window available");
     const session = getSession(db, args.sessionId);
@@ -192,9 +193,43 @@ function registerHandlers(): void {
       projectPath: project.path,
       projectConfig: effectiveConfig,
       webContents: win.webContents,
+      agent: args.agent,
     });
   });
   ipcMain.handle(CH.GET_COPILOT_MODELS, () => getCopilotModels());
+  ipcMain.handle(CH.GET_CLAUDE_AGENTS, async (_event, projectPath: string) => {
+    return getClaudeAgents(projectPath);
+  });
+  ipcMain.handle(CH.LIST_SKILLS, (_event, projectPath: string) => {
+    const skillsDir = path.join(projectPath, ".agents", "skills");
+    try {
+      const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+      return entries
+        .filter((e) => e.isDirectory())
+        .map((dir) => {
+          const skillPath = path.join(skillsDir, dir.name);
+          let description = "";
+          const readmePath = path.join(skillPath, "README.md");
+          try {
+            const content = fs.readFileSync(readmePath, "utf8");
+            // First non-empty, non-heading line becomes the description
+            const lines = content.split("\n");
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed && !trimmed.startsWith("#")) {
+                description = trimmed.slice(0, 150);
+                break;
+              }
+            }
+          } catch {
+            // no README — description stays empty
+          }
+          return { name: dir.name, description, path: skillPath };
+        });
+    } catch {
+      return [];
+    }
+  });
   ipcMain.handle(
     CH.APPROVE_TOOL_CALL,
     (_event, args: { sessionId: string; approvalId: string; approved: boolean }) => {

@@ -120,3 +120,17 @@ export interface SessionApprovalRequiredEvent {
   session_id: string;
   tool_call: ToolCall;
 }
+
+// ─── Agents & Skills ──────────────────────────────────────────────────────────
+
+export interface AgentInfo {
+  name: string;
+  description: string;
+  model?: string;
+}
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  path: string;
+}

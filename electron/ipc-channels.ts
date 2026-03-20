@@ -41,6 +41,8 @@ export const OPEN_FOLDER_DIALOG     = "dialog:open-folder";
 export const AGENT_SEND             = "agent:send";
 export const APPROVE_TOOL_CALL      = "agent:approve-tool-call";
 export const GET_COPILOT_MODELS     = "agent:get-copilot-models";
+export const GET_CLAUDE_AGENTS      = "agent:get-claude-agents";
+export const LIST_SKILLS            = "agent:list-skills";
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 export const SETTINGS_READ          = "settings:read";

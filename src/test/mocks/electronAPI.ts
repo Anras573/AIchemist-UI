@@ -48,6 +48,8 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     agentSend: vi.fn().mockResolvedValue(undefined),
     approveToolCall: vi.fn().mockResolvedValue(undefined),
     getCopilotModels: vi.fn().mockResolvedValue([]),
+    getClaudeAgents: vi.fn().mockResolvedValue([]),
+    listSkills: vi.fn().mockResolvedValue([]),
 
     // Push event bus
     on: vi.fn(),

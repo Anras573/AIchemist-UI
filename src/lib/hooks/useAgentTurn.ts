@@ -14,6 +14,7 @@ export function useAgentTurn() {
   const {
     sessions,
     activeSessionId,
+    sessionAgents,
     updateSessionStatus,
     updateSessionTitle,
     appendMessage,
@@ -58,9 +59,10 @@ export function useAgentTurn() {
       updateSessionStatus(activeSessionId, "running");
       clearLiveToolCalls(activeSessionId);
       const sessionIdAtStart = activeSessionId;
+      const activeAgent = sessionAgents[activeSessionId] ?? undefined;
 
       try {
-        await ipc.agentSend({ sessionId: activeSessionId, prompt: text });
+        await ipc.agentSend({ sessionId: activeSessionId, prompt: text, agent: activeAgent });
         clearLiveToolCalls(sessionIdAtStart);
         clearPendingApprovals(sessionIdAtStart);
         // Status is updated via session:status push event from runner
@@ -77,6 +79,7 @@ export function useAgentTurn() {
       sessions,
       projects,
       activeProjectId,
+      sessionAgents,
       updateSessionStatus,
       updateSessionTitle,
       appendMessage,

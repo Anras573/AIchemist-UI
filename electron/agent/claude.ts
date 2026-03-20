@@ -44,6 +44,26 @@ function extractToolResultText(content: unknown): string {
 
 // ── Main export ────────────────────────────────────────────────────────────────
 
+/** Fetch the list of available sub-agents from the Claude SDK. */
+export async function getClaudeAgents(
+  projectPath: string
+): Promise<Array<{ name: string; description: string; model?: string }>> {
+  const { query } = await import("@anthropic-ai/claude-agent-sdk");
+  const claudePath = resolveClaudePath();
+  const q = query({
+    prompt: "",
+    options: {
+      cwd: projectPath,
+      ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
+    },
+  });
+  try {
+    return await q.supportedAgents();
+  } finally {
+    await q.return(undefined);
+  }
+}
+
 export async function runClaudeAgentTurn(params: {
   db: Database;
   sessionId: string;
@@ -52,8 +72,9 @@ export async function runClaudeAgentTurn(params: {
   projectPath: string;
   projectConfig: ProjectConfig;
   webContents: Electron.WebContents;
+  agent?: string;
 }): Promise<string> {
-  const { db, sessionId, sdkSessionId, prompt, projectPath, projectConfig, webContents } =
+  const { db, sessionId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent } =
     params;
 
   // 1. Create the in-process MCP server (approval-gated custom tools)
@@ -81,6 +102,7 @@ export async function runClaudeAgentTurn(params: {
       allowedTools: ["Read", "Glob", "LS"],
       includePartialMessages: true,
       ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
+      ...(agent ? { agent } : {}),
       systemPrompt:
         "You are a helpful AI assistant with access to the user's project files and tools. " +
         "Be concise and precise. When using tools, explain what you're doing before calling them.",

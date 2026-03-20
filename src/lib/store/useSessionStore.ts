@@ -30,6 +30,8 @@ interface SessionStore {
   liveToolCalls: Record<string, LiveToolCall[]>;
   // Approval gates waiting for user decision, keyed by session id
   pendingApprovals: Record<string, PendingApproval[]>;
+  // Active sub-agent per session (Claude only); null = default agent
+  sessionAgents: Record<string, string | null>;
 
   mergeSessions: (sessions: Session[]) => void;
   setActiveSession: (id: string | null) => void;
@@ -57,6 +59,7 @@ interface SessionStore {
   appendTerminalOutput: (sessionId: string, line: string) => void;
   clearTerminalOutput: (sessionId: string) => void;
   terminalOutput: Record<string, string>;
+  setSessionAgent: (sessionId: string, agent: string | null) => void;
 }
 
 export const useSessionStore = create<SessionStore>()(
@@ -68,6 +71,7 @@ export const useSessionStore = create<SessionStore>()(
       liveToolCalls: {},
       pendingApprovals: {},
       terminalOutput: {},
+      sessionAgents: {},
 
       // Merge new sessions into the store without wiping sessions from other projects.
       // Preserves messages already in the store — listSessions returns messages: [],
@@ -260,6 +264,13 @@ export const useSessionStore = create<SessionStore>()(
           const { [sessionId]: _cleared, ...rest } = state.terminalOutput;
           return { terminalOutput: rest };
         }),
+
+      setSessionAgent: (sessionId, agent) =>
+        set((state) => ({
+          sessionAgents: agent === null
+            ? (() => { const { [sessionId]: _, ...rest } = state.sessionAgents; return rest; })()
+            : { ...state.sessionAgents, [sessionId]: agent },
+        })),
     }),
     {
       name: "aichemist-session-store",

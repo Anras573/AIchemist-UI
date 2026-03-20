@@ -42,11 +42,13 @@ export const ipc = {
     window.electronAPI.settingsWrite(updates),
 
   // Agent
-  agentSend: (args: { sessionId: string; prompt: string }) =>
+  agentSend: (args: { sessionId: string; prompt: string; agent?: string }) =>
     window.electronAPI.agentSend(args),
   approveToolCall: (sessionId: string, approvalId: string, approved: boolean) =>
     window.electronAPI.approveToolCall(sessionId, approvalId, approved),
   getCopilotModels: () => window.electronAPI.getCopilotModels(),
+  getClaudeAgents: (projectPath: string) => window.electronAPI.getClaudeAgents(projectPath),
+  listSkills: (projectPath: string) => window.electronAPI.listSkills(projectPath),
 };
 
 // ── Push-event subscription helper ────────────────────────────────────────────
