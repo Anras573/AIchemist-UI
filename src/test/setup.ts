@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
-import { beforeEach } from "vitest";
+import { beforeEach, afterEach } from "vitest";
+import { cleanup } from "@testing-library/react";
 import { createElectronAPIMock } from "./mocks/electronAPI";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -18,6 +19,8 @@ const initialProjectState = {
   activeProjectId: null,
   settingsOpen: false,
 };
+
+afterEach(cleanup);
 
 beforeEach(() => {
   window.electronAPI = createElectronAPIMock();
