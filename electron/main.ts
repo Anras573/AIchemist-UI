@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import * as CH from "./ipc-channels";
 import { loadEnv, getApiKey, getAnthropicConfig } from "./config";
@@ -56,8 +57,43 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
-function registerHandlers(): void {
-  // ── Settings ─────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Scans a skills directory and returns an array of skill entries. */
+function scanSkillsDir(
+  dir: string
+): Array<{ name: string; description: string; path: string }> {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((d) => {
+        const skillPath = path.join(dir, d.name);
+        let description = "";
+        try {
+          const content = fs.readFileSync(
+            path.join(skillPath, "README.md"),
+            "utf8"
+          );
+          // First non-empty, non-heading line becomes the description
+          for (const line of content.split("\n")) {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.startsWith("#")) {
+              description = trimmed.slice(0, 150);
+              break;
+            }
+          }
+        } catch {
+          // no README — description stays empty
+        }
+        return { name: d.name, description, path: skillPath };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function registerHandlers(): void {  // ── Settings ─────────────────────────────────────────────────────────────────
   ipcMain.handle(CH.SETTINGS_READ, () => readSettings());
   ipcMain.handle(CH.SETTINGS_WRITE, (_event, updates: Partial<SettingsMap>) =>
     writeSettings(updates)
@@ -201,34 +237,15 @@ function registerHandlers(): void {
     return getClaudeAgents(projectPath);
   });
   ipcMain.handle(CH.LIST_SKILLS, (_event, projectPath: string) => {
-    const skillsDir = path.join(projectPath, ".agents", "skills");
-    try {
-      const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
-      return entries
-        .filter((e) => e.isDirectory())
-        .map((dir) => {
-          const skillPath = path.join(skillsDir, dir.name);
-          let description = "";
-          const readmePath = path.join(skillPath, "README.md");
-          try {
-            const content = fs.readFileSync(readmePath, "utf8");
-            // First non-empty, non-heading line becomes the description
-            const lines = content.split("\n");
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (trimmed && !trimmed.startsWith("#")) {
-                description = trimmed.slice(0, 150);
-                break;
-              }
-            }
-          } catch {
-            // no README — description stays empty
-          }
-          return { name: dir.name, description, path: skillPath };
-        });
-    } catch {
-      return [];
-    }
+    const projectSkillsDir = path.join(projectPath, ".agents", "skills");
+    const globalSkillsDir = path.join(os.homedir(), ".claude", "skills");
+
+    const projectSkills = scanSkillsDir(projectSkillsDir);
+    const globalSkills = scanSkillsDir(globalSkillsDir);
+
+    // Project-local skills take priority — skip globals with the same name
+    const projectNames = new Set(projectSkills.map((s) => s.name));
+    return [...projectSkills, ...globalSkills.filter((s) => !projectNames.has(s.name))];
   });
   ipcMain.handle(
     CH.APPROVE_TOOL_CALL,
