@@ -122,6 +122,7 @@ export async function getClaudeAgents(
       prompt: "",
       options: {
         cwd: projectPath,
+        settingSources: ["local", "user", "project"],
         ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
       },
     });
@@ -176,7 +177,7 @@ export async function runClaudeAgentTurn(params: {
       model,
       cwd: projectPath,
       mcpServers: { "aichemist-tools": mcpServer },
-      settingSources: ["user", "project"],
+      settingSources: ["local", "user", "project"],
       permissionMode: "acceptEdits",
       allowedTools: ["Read", "Glob", "LS", "Skill", "Agent"],
       includePartialMessages: true,
