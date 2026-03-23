@@ -178,7 +178,7 @@ export async function runClaudeAgentTurn(params: {
       mcpServers: { "aichemist-tools": mcpServer },
       settingSources: ["user", "project"],
       permissionMode: "acceptEdits",
-      allowedTools: ["Read", "Glob", "LS"],
+      allowedTools: ["Read", "Glob", "LS", "Skill", "Agent"],
       includePartialMessages: true,
       ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
       ...(agent ? { agent } : {}),
