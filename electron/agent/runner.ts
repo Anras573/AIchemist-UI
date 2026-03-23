@@ -3,8 +3,30 @@ import type { ProjectConfig } from "../../src/types/index";
 
 import * as CH from "../ipc-channels";
 import { saveMessage } from "../sessions";
-import { runClaudeAgentTurn } from "./claude";
-import { runCopilotAgentTurn } from "./copilot";
+import { claudeProvider } from "./claude";
+import { copilotProvider } from "./copilot";
+import type { AgentProvider, AgentProviderParams } from "./provider";
+
+// ── Provider registry ─────────────────────────────────────────────────────────
+
+const PROVIDERS: Record<string, AgentProvider> = {
+  anthropic: claudeProvider,
+  copilot: copilotProvider,
+};
+
+/** Look up a provider by name. Throws for unknown providers. */
+export function getProvider(name: string): AgentProvider {
+  const provider = PROVIDERS[name];
+  if (!provider) throw new Error(`Unsupported provider: ${name}`);
+  return provider;
+}
+
+/** Register a new provider at runtime (e.g. in tests or for extensions). */
+export function registerProvider(name: string, provider: AgentProvider): void {
+  PROVIDERS[name] = provider;
+}
+
+// ── Agent turn dispatcher ─────────────────────────────────────────────────────
 
 export async function runAgentTurn(params: {
   db: Database;
@@ -19,39 +41,19 @@ export async function runAgentTurn(params: {
 
   webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "running" });
 
-  const row = db
-    .prepare("SELECT sdk_session_id FROM sessions WHERE id = ?")
-    .get(sessionId) as { sdk_session_id: string | null } | undefined;
-  const sdkSessionId = row?.sdk_session_id ?? null;
+  const providerParams: AgentProviderParams = {
+    db,
+    sessionId,
+    prompt,
+    projectPath,
+    projectConfig,
+    webContents,
+    agent,
+  };
 
   try {
-    let fullText: string;
-
-    switch (projectConfig.provider) {
-      case "anthropic":
-        fullText = await runClaudeAgentTurn({
-          db,
-          sessionId,
-          sdkSessionId,
-          prompt,
-          projectPath,
-          projectConfig,
-          webContents,
-          agent,
-        });
-        break;
-      case "copilot":
-        fullText = await runCopilotAgentTurn({
-          sessionId,
-          prompt,
-          projectPath,
-          projectConfig,
-          webContents,
-        });
-        break;
-      default:
-        throw new Error(`Unsupported provider: ${projectConfig.provider}`);
-    }
+    const provider = getProvider(projectConfig.provider);
+    const fullText = await provider.run(providerParams);
 
     if (fullText.trim()) {
       const savedMsg = saveMessage(db, {

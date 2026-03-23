@@ -1,6 +1,6 @@
 import type { McpSdkServerConfigWithInstance, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { Database } from "better-sqlite3";
-import type { ProjectConfig } from "../../src/types/index";
+import type { AgentInfo, ProjectConfig } from "../../src/types/index";
 
 import * as fs from "fs";
 import * as os from "os";
@@ -9,6 +9,7 @@ import * as path from "path";
 import * as CH from "../ipc-channels";
 import { createApprovalMcpServer } from "./mcp-tools";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
+import type { AgentProvider, AgentProviderParams } from "./provider";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -258,3 +259,20 @@ export async function runClaudeAgentTurn(params: {
 
   return fullText;
 }
+
+// ── AgentProvider implementation ──────────────────────────────────────────────
+
+export const claudeProvider: AgentProvider = {
+  async run(params: AgentProviderParams): Promise<string> {
+    const sdkRow = params.db
+      .prepare("SELECT sdk_session_id FROM sessions WHERE id = ?")
+      .get(params.sessionId) as { sdk_session_id: string | null } | undefined;
+    const sdkSessionId = sdkRow?.sdk_session_id ?? null;
+
+    return runClaudeAgentTurn({ ...params, sdkSessionId });
+  },
+
+  async listAgents(projectPath: string): Promise<AgentInfo[]> {
+    return getClaudeAgents(projectPath);
+  },
+};

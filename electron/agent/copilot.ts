@@ -1,8 +1,3 @@
-import * as crypto from "crypto";
-import * as fs from "fs";
-import * as path from "path";
-import * as childProcess from "child_process";
-
 import type {
   CopilotClient as CopilotClientType,
   PermissionRequest,
@@ -11,6 +6,14 @@ import type {
 import type { ProjectConfig } from "../../src/types/index";
 import { getApiKey } from "../config";
 import * as CH from "../ipc-channels";
+import { requestApproval, needsApproval } from "./approval";
+import {
+  implWriteFile,
+  implDeleteFile,
+  implExecuteBash,
+  implWebFetch,
+} from "./tool-impls";
+import type { AgentProvider, AgentProviderParams } from "./provider";
 
 // ── Singleton client ──────────────────────────────────────────────────────────
 
@@ -44,61 +47,6 @@ export async function getCopilotModels(): Promise<Array<{ id: string; name: stri
   return models.map((m) => ({ id: m.id, name: m.name }));
 }
 
-// ── Approval gate ─────────────────────────────────────────────────────────────
-//
-// This module maintains its own pendingApprovals map for tools defined here.
-// TODO: The APPROVE_TOOL_CALL IPC handler in main.ts currently only calls
-//       resolvePendingApproval from mcp-tools.ts. It should also call
-//       resolveCopilotApproval (exported below) so that Copilot tool calls
-//       are properly unblocked when the user approves/denies them.
-
-const pendingApprovals = new Map<
-  string,
-  { resolve: (approved: boolean) => void; sessionId: string }
->();
-
-/** Called by the IPC handler for `agent:approve-tool-call` to unblock a waiting Copilot tool. */
-export function resolveCopilotApproval(
-  approvalId: string,
-  approved: boolean
-): void {
-  const pending = pendingApprovals.get(approvalId);
-  if (pending) {
-    pending.resolve(approved);
-    pendingApprovals.delete(approvalId);
-  }
-}
-
-async function requestApproval(
-  webContents: Electron.WebContents,
-  sessionId: string,
-  toolName: string,
-  input: unknown
-): Promise<boolean> {
-  const approvalId = crypto.randomUUID();
-  return new Promise((resolve) => {
-    pendingApprovals.set(approvalId, { resolve, sessionId });
-    webContents.send(CH.SESSION_APPROVAL_REQUIRED, {
-      session_id: sessionId,
-      approval_id: approvalId,
-      tool_name: toolName,
-      input,
-    });
-  });
-}
-
-// ── Approval policy ───────────────────────────────────────────────────────────
-
-function needsApproval(
-  config: ProjectConfig,
-  category: "filesystem" | "shell" | "web"
-): boolean {
-  if (config.approval_mode === "all") return true;
-  if (config.approval_mode === "none") return false;
-  const rule = config.approval_rules.find((r) => r.tool_category === category);
-  return rule?.policy === "always";
-}
-
 // ── Agent turn ────────────────────────────────────────────────────────────────
 
 export async function runCopilotAgentTurn(params: {
@@ -114,13 +62,36 @@ export async function runCopilotAgentTurn(params: {
 
   const client = await getClient();
 
+  // ── Shared helper ───────────────────────────────────────────────────────────
+
+  async function runTool(
+    name: string,
+    args: unknown,
+    category: "filesystem" | "web",
+    impl: () => Promise<string>
+  ): Promise<string> {
+    webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: name, input: args });
+
+    if (needsApproval(projectConfig, category)) {
+      const approved = await requestApproval(webContents, sessionId, name, args);
+      if (!approved) {
+        const msg = "Tool call denied by user.";
+        webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: name, output: msg });
+        return msg;
+      }
+    }
+
+    const output = await impl();
+    webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: name, output });
+    return output;
+  }
+
   // ── Tool definitions ────────────────────────────────────────────────────────
 
   const writeFileTool = defineTool<{ path: string; content: string }>(
     "write_file",
     {
-      description:
-        "Write content to a file, creating parent directories as needed.",
+      description: "Write content to a file, creating parent directories as needed.",
       parameters: {
         type: "object",
         properties: {
@@ -129,51 +100,7 @@ export async function runCopilotAgentTurn(params: {
         },
         required: ["path", "content"],
       },
-      handler: async (args) => {
-        webContents.send(CH.SESSION_TOOL_CALL, {
-          session_id: sessionId,
-          tool_name: "write_file",
-          input: args,
-        });
-
-        if (needsApproval(projectConfig, "filesystem")) {
-          const approved = await requestApproval(
-            webContents,
-            sessionId,
-            "write_file",
-            args
-          );
-          if (!approved) {
-            const msg = "Tool call denied by user.";
-            webContents.send(CH.SESSION_TOOL_RESULT, {
-              session_id: sessionId,
-              tool_name: "write_file",
-              output: msg,
-            });
-            return msg;
-          }
-        }
-
-        try {
-          fs.mkdirSync(path.dirname(args.path), { recursive: true });
-          fs.writeFileSync(args.path, args.content, "utf8");
-          const msg = `File written: ${args.path}`;
-          webContents.send(CH.SESSION_TOOL_RESULT, {
-            session_id: sessionId,
-            tool_name: "write_file",
-            output: msg,
-          });
-          return msg;
-        } catch (err) {
-          const msg = `Error writing file: ${err instanceof Error ? err.message : String(err)}`;
-          webContents.send(CH.SESSION_TOOL_RESULT, {
-            session_id: sessionId,
-            tool_name: "write_file",
-            output: msg,
-          });
-          return msg;
-        }
-      },
+      handler: (args) => runTool("write_file", args, "filesystem", () => implWriteFile(args)),
     }
   );
 
@@ -182,116 +109,38 @@ export async function runCopilotAgentTurn(params: {
     parameters: {
       type: "object",
       properties: {
-        path: {
-          type: "string",
-          description: "Absolute or relative path of the file to delete",
-        },
+        path: { type: "string", description: "Absolute or relative path of the file to delete" },
       },
       required: ["path"],
     },
-    handler: async (args) => {
-      webContents.send(CH.SESSION_TOOL_CALL, {
-        session_id: sessionId,
-        tool_name: "delete_file",
-        input: args,
-      });
-
-      if (needsApproval(projectConfig, "filesystem")) {
-        const approved = await requestApproval(
-          webContents,
-          sessionId,
-          "delete_file",
-          args
-        );
-        if (!approved) {
-          const msg = "Tool call denied by user.";
-          webContents.send(CH.SESSION_TOOL_RESULT, {
-            session_id: sessionId,
-            tool_name: "delete_file",
-            output: msg,
-          });
-          return msg;
-        }
-      }
-
-      try {
-        fs.unlinkSync(args.path);
-        const msg = `File deleted: ${args.path}`;
-        webContents.send(CH.SESSION_TOOL_RESULT, {
-          session_id: sessionId,
-          tool_name: "delete_file",
-          output: msg,
-        });
-        return msg;
-      } catch (err) {
-        const msg = `Error deleting file: ${err instanceof Error ? err.message : String(err)}`;
-        webContents.send(CH.SESSION_TOOL_RESULT, {
-          session_id: sessionId,
-          tool_name: "delete_file",
-          output: msg,
-        });
-        return msg;
-      }
-    },
+    handler: (args) => runTool("delete_file", args, "filesystem", () => implDeleteFile(args)),
   });
 
   const executeBashTool = defineTool<{ command: string; cwd?: string }>(
     "execute_bash",
     {
-      description:
-        "Execute a shell command and return its output. Always requires approval.",
+      description: "Execute a shell command and return its output. Always requires approval.",
       parameters: {
         type: "object",
         properties: {
           command: { type: "string", description: "Shell command to execute" },
-          cwd: {
-            type: "string",
-            description: "Working directory for the command",
-          },
+          cwd: { type: "string", description: "Working directory for the command" },
         },
         required: ["command"],
       },
       handler: async (args) => {
-        webContents.send(CH.SESSION_TOOL_CALL, {
-          session_id: sessionId,
-          tool_name: "execute_bash",
-          input: args,
-        });
+        webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: "execute_bash", input: args });
 
         // Shell is always approval-gated regardless of policy
-        const approved = await requestApproval(
-          webContents,
-          sessionId,
-          "execute_bash",
-          args
-        );
+        const approved = await requestApproval(webContents, sessionId, "execute_bash", args);
         if (!approved) {
           const msg = "Tool call denied by user.";
-          webContents.send(CH.SESSION_TOOL_RESULT, {
-            session_id: sessionId,
-            tool_name: "execute_bash",
-            output: msg,
-          });
+          webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output: msg });
           return msg;
         }
 
-        const proc = childProcess.spawnSync(args.command, {
-          shell: true,
-          cwd: args.cwd,
-          encoding: "utf8",
-        });
-
-        const output = JSON.stringify({
-          stdout: proc.stdout ?? "",
-          stderr: proc.stderr ?? "",
-          exit_code: proc.status ?? -1,
-        });
-
-        webContents.send(CH.SESSION_TOOL_RESULT, {
-          session_id: sessionId,
-          tool_name: "execute_bash",
-          output,
-        });
+        const output = await implExecuteBash(args);
+        webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output });
         return output;
       },
     }
@@ -309,56 +158,7 @@ export async function runCopilotAgentTurn(params: {
       },
       required: ["url"],
     },
-    handler: async (args) => {
-      webContents.send(CH.SESSION_TOOL_CALL, {
-        session_id: sessionId,
-        tool_name: "web_fetch",
-        input: args,
-      });
-
-      if (needsApproval(projectConfig, "web")) {
-        const approved = await requestApproval(
-          webContents,
-          sessionId,
-          "web_fetch",
-          args
-        );
-        if (!approved) {
-          const msg = "Tool call denied by user.";
-          webContents.send(CH.SESSION_TOOL_RESULT, {
-            session_id: sessionId,
-            tool_name: "web_fetch",
-            output: msg,
-          });
-          return msg;
-        }
-      }
-
-      try {
-        const response = await fetch(args.url);
-        const body = await response.text();
-        const output = JSON.stringify({
-          url: args.url,
-          status: response.status,
-          content_type: response.headers.get("content-type") ?? "",
-          body,
-        });
-        webContents.send(CH.SESSION_TOOL_RESULT, {
-          session_id: sessionId,
-          tool_name: "web_fetch",
-          output,
-        });
-        return output;
-      } catch (err) {
-        const msg = `Error fetching URL: ${err instanceof Error ? err.message : String(err)}`;
-        webContents.send(CH.SESSION_TOOL_RESULT, {
-          session_id: sessionId,
-          tool_name: "web_fetch",
-          output: msg,
-        });
-        return msg;
-      }
-    },
+    handler: (args) => runTool("web_fetch", args, "web", () => implWebFetch(args)),
   });
 
   // ── Permission handler for built-in CLI tools ───────────────────────────────
@@ -521,3 +321,17 @@ export async function runCopilotAgentTurn(params: {
 
   return fullText;
 }
+
+// ── AgentProvider implementation ──────────────────────────────────────────────
+
+export const copilotProvider: AgentProvider = {
+  run: (params: AgentProviderParams) => runCopilotAgentTurn(params),
+
+  async listModels(): Promise<Array<{ id: string; name: string }>> {
+    return getCopilotModels();
+  },
+
+  async stop(): Promise<void> {
+    return stopCopilotClient();
+  },
+};

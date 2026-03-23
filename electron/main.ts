@@ -10,10 +10,8 @@ import { createSession, listSessions, getSession, deleteSession, saveMessage, up
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
-import { resolvePendingApproval } from "./agent/mcp-tools";
-import { runAgentTurn } from "./agent/runner";
-import { getClaudeAgents } from "./agent/claude";
-import { stopCopilotClient, resolveCopilotApproval, getCopilotModels } from "./agent/copilot";
+import { resolveApproval } from "./agent/approval";
+import { runAgentTurn, getProvider } from "./agent/runner";
 import type { ProjectConfig } from "../src/types/index";
 
 // ── Prevent multiple instances ───────────────────────────────────────────────
@@ -232,9 +230,9 @@ function registerHandlers(): void {  // ── Settings ────────
       agent: args.agent,
     });
   });
-  ipcMain.handle(CH.GET_COPILOT_MODELS, () => getCopilotModels());
+  ipcMain.handle(CH.GET_COPILOT_MODELS, () => getProvider("copilot").listModels?.());
   ipcMain.handle(CH.GET_CLAUDE_AGENTS, async (_event, projectPath: string) => {
-    return getClaudeAgents(projectPath);
+    return getProvider("anthropic").listAgents?.(projectPath);
   });
   ipcMain.handle(CH.LIST_SKILLS, (_event, projectPath: string) => {
     const projectSkillsDir = path.join(projectPath, ".agents", "skills");
@@ -250,8 +248,7 @@ function registerHandlers(): void {  // ── Settings ────────
   ipcMain.handle(
     CH.APPROVE_TOOL_CALL,
     (_event, args: { sessionId: string; approvalId: string; approved: boolean }) => {
-      resolvePendingApproval(args.approvalId, args.approved);
-      resolveCopilotApproval(args.approvalId, args.approved);
+      resolveApproval(args.approvalId, args.approved);
     }
   );
 }
@@ -270,4 +267,13 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => { void stopCopilotClient(); });
+app.on("before-quit", () => {
+  // Gracefully shut down all providers that implement stop()
+  for (const name of ["copilot", "anthropic"]) {
+    try {
+      void getProvider(name).stop?.();
+    } catch {
+      // Provider may not be registered; ignore
+    }
+  }
+});
