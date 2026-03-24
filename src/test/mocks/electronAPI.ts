@@ -32,6 +32,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     saveMessage: vi.fn().mockResolvedValue(undefined),
     updateSessionTitle: vi.fn().mockResolvedValue(undefined),
     updateSessionModel: vi.fn().mockResolvedValue(undefined),
+    updateSessionAgent: vi.fn().mockResolvedValue(undefined),
 
     // File system
     listDirectory: vi.fn().mockResolvedValue({ entries: [] }),

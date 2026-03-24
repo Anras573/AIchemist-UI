@@ -28,6 +28,8 @@ export const ipc = {
     window.electronAPI.updateSessionTitle(sessionId, title),
   updateSessionModel: (sessionId: string, provider: string, model: string) =>
     window.electronAPI.updateSessionModel(sessionId, provider, model),
+  updateSessionAgent: (sessionId: string, agent: string | null) =>
+    window.electronAPI.updateSessionAgent(sessionId, agent),
 
   // File system
   listDirectory: (path: string) => window.electronAPI.listDirectory(path),

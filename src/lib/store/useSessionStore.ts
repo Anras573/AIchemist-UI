@@ -97,7 +97,10 @@ export const useSessionStore = create<SessionStore>()(
       hydrateSession: (session) =>
         set((state) => {
           const existing = state.sessions[session.id];
-          // Merge: keep any runtime state (status, streaming) but replace persisted fields
+          // Restore persisted agent selection into sessionAgents
+          const agentUpdate = session.agent != null
+            ? { sessionAgents: { ...state.sessionAgents, [session.id]: session.agent } }
+            : {};
           return {
             sessions: {
               ...state.sessions,
@@ -107,6 +110,7 @@ export const useSessionStore = create<SessionStore>()(
                 title: session.title,
               },
             },
+            ...agentUpdate,
           };
         }),
 

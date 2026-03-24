@@ -37,6 +37,7 @@ export function createSession(
     messages: [],
     provider,
     model,
+    agent: null,
   };
 }
 
@@ -46,7 +47,7 @@ export function createSession(
 export function listSessions(db: Database, projectId: string): Session[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, title, status, created_at, provider, model
+      `SELECT id, project_id, title, status, created_at, provider, model, agent
        FROM sessions
        WHERE project_id = ?
        ORDER BY created_at ASC`
@@ -59,6 +60,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
     created_at: string;
     provider: string | null;
     model: string | null;
+    agent: string | null;
   }[];
 
   return rows.map((row) => ({
@@ -70,6 +72,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
     messages: [],
     provider: row.provider,
     model: row.model,
+    agent: row.agent,
   }));
 }
 
@@ -79,7 +82,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
 export function getSession(db: Database, sessionId: string): Session {
   const row = db
     .prepare(
-      "SELECT id, project_id, title, status, created_at, provider, model FROM sessions WHERE id = ?"
+      "SELECT id, project_id, title, status, created_at, provider, model, agent FROM sessions WHERE id = ?"
     )
     .get(sessionId) as
     | {
@@ -90,6 +93,7 @@ export function getSession(db: Database, sessionId: string): Session {
         created_at: string;
         provider: string | null;
         model: string | null;
+        agent: string | null;
       }
     | undefined;
 
@@ -130,6 +134,7 @@ export function getSession(db: Database, sessionId: string): Session {
     messages,
     provider: row.provider,
     model: row.model,
+    agent: row.agent,
   };
 }
 
@@ -189,4 +194,15 @@ export function updateSessionModel(
     model,
     sessionId
   );
+}
+
+/**
+ * Update the selected sub-agent for a session (null = default agent).
+ */
+export function updateSessionAgent(
+  db: Database,
+  sessionId: string,
+  agent: string | null
+): void {
+  db.prepare("UPDATE sessions SET agent = ? WHERE id = ?").run(agent, sessionId);
 }

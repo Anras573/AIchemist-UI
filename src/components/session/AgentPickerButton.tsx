@@ -53,6 +53,7 @@ export function AgentPickerButton() {
       if (!activeSessionId) return;
       setOpen(false);
       setSessionAgent(activeSessionId, agentName);
+      ipc.updateSessionAgent(activeSessionId, agentName).catch(console.error);
     },
     [activeSessionId, setSessionAgent]
   );

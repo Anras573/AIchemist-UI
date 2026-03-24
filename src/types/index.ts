@@ -92,6 +92,8 @@ export interface Session {
   provider: string | null;
   /** The model ID used for this session. Null for legacy sessions — runner falls back to project config. */
   model: string | null;
+  /** The selected sub-agent name for this session. Null means the default agent. */
+  agent: string | null;
 }
 
 // ─── IPC event payloads ──────────────────────────────────────────────────────

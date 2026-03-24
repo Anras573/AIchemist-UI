@@ -6,7 +6,7 @@ import * as CH from "./ipc-channels";
 import { loadEnv, getApiKey, getAnthropicConfig } from "./config";
 import { openDb } from "./db";
 import { addProject, listProjects, removeProject, getProjectConfig, saveProjectConfig } from "./projects";
-import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel } from "./sessions";
+import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent } from "./sessions";
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
@@ -154,6 +154,11 @@ function registerHandlers(): void {  // ── Settings ────────
     CH.UPDATE_SESSION_MODEL,
     (_event, sessionId: string, provider: string, model: string) =>
       updateSessionModel(db, sessionId, provider, model)
+  );
+  ipcMain.handle(
+    CH.UPDATE_SESSION_AGENT,
+    (_event, sessionId: string, agent: string | null) =>
+      updateSessionAgent(db, sessionId, agent)
   );
 
   // ── File system ───────────────────────────────────────────────────────────────

@@ -34,6 +34,7 @@ export interface ElectronAPI {
   saveMessage: (args: { sessionId: string; role: string; content: string }) => Promise<import("../src/types").Message>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   updateSessionModel: (sessionId: string, provider: string, model: string) => Promise<void>;
+  updateSessionAgent: (sessionId: string, agent: string | null) => Promise<void>;
 
   // ── File system ───────────────────────────────────────────────────────────
   listDirectory: (path: string) => Promise<{ entries: Array<{ name: string; path: string; is_dir: boolean; size_bytes: number }> }>;
@@ -81,6 +82,7 @@ const api: ElectronAPI = {
   saveMessage: (args) => ipcRenderer.invoke(CH.SAVE_MESSAGE, args),
   updateSessionTitle: (sessionId, title) => ipcRenderer.invoke(CH.UPDATE_SESSION_TITLE, sessionId, title),
   updateSessionModel: (sessionId, provider, model) => ipcRenderer.invoke(CH.UPDATE_SESSION_MODEL, sessionId, provider, model),
+  updateSessionAgent: (sessionId, agent) => ipcRenderer.invoke(CH.UPDATE_SESSION_AGENT, sessionId, agent),
 
   listDirectory: (path) => ipcRenderer.invoke(CH.LIST_DIRECTORY, path),
   readFile: (path) => ipcRenderer.invoke(CH.READ_FILE, path),

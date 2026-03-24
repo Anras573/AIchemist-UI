@@ -14,6 +14,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     messages: [],
     provider: "anthropic",
     model: "claude-sonnet-4-6",
+    agent: null,
     ...overrides,
   };
 }

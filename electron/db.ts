@@ -76,6 +76,9 @@ function migrate(db: Database.Database): void {
   if (!hasColumn("model")) {
     db.exec("ALTER TABLE sessions ADD COLUMN model TEXT;");
   }
+  if (!hasColumn("agent")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN agent TEXT;");
+  }
 }
 
 /**
