@@ -48,6 +48,7 @@ export const ipc = {
     window.electronAPI.approveToolCall(sessionId, approvalId, approved),
   getCopilotModels: () => window.electronAPI.getCopilotModels(),
   getClaudeAgents: (projectPath: string) => window.electronAPI.getClaudeAgents(projectPath),
+  getCopilotAgents: (projectPath: string) => window.electronAPI.getCopilotAgents(projectPath),
   listSkills: (projectPath: string) => window.electronAPI.listSkills(projectPath),
 };
 

@@ -51,6 +51,7 @@ export interface ElectronAPI {
   approveToolCall: (sessionId: string, approvalId: string, approved: boolean) => Promise<void>;
   getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
   getClaudeAgents: (projectPath: string) => Promise<Array<{ name: string; description: string; model?: string }>>;
+  getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
   listSkills: (projectPath: string) => Promise<Array<{ name: string; description: string; path: string }>>;
 
   // ── Push event bus ────────────────────────────────────────────────────────
@@ -94,6 +95,7 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(CH.APPROVE_TOOL_CALL, { sessionId, approvalId, approved }),
   getCopilotModels: () => ipcRenderer.invoke(CH.GET_COPILOT_MODELS),
   getClaudeAgents: (projectPath) => ipcRenderer.invoke(CH.GET_CLAUDE_AGENTS, projectPath),
+  getCopilotAgents: (projectPath) => ipcRenderer.invoke(CH.GET_COPILOT_AGENTS, projectPath),
   listSkills: (projectPath) => ipcRenderer.invoke(CH.LIST_SKILLS, projectPath),
 
   on: (channel, listener) => {

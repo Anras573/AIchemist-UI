@@ -35,10 +35,14 @@ export function AgentPickerButton() {
 
   // Lazy-load agents the first time the dropdown opens
   useEffect(() => {
-    if (!open || !projectPath || provider !== "anthropic" || agents.length > 0) return;
+    if (!open || !projectPath || agents.length > 0) return;
+    if (provider !== "anthropic" && provider !== "copilot") return;
     setLoadingAgents(true);
-    ipc
-      .getClaudeAgents(projectPath)
+    const fetch =
+      provider === "anthropic"
+        ? ipc.getClaudeAgents(projectPath)
+        : ipc.getCopilotAgents(projectPath);
+    fetch
       .then(setAgents)
       .catch(() => {/* Silently hide agent list on error */})
       .finally(() => setLoadingAgents(false));
@@ -53,8 +57,8 @@ export function AgentPickerButton() {
     [activeSessionId, setSessionAgent]
   );
 
-  // Hidden for GitHub Copilot — sub-agents are Anthropic-only
-  if (provider !== "anthropic") return null;
+  // Hidden when no provider is set
+  if (!provider) return null;
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>

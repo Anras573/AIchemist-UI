@@ -234,6 +234,9 @@ function registerHandlers(): void {  // ── Settings ────────
   ipcMain.handle(CH.GET_CLAUDE_AGENTS, async (_event, projectPath: string) => {
     return getProvider("anthropic").listAgents?.(projectPath);
   });
+  ipcMain.handle(CH.GET_COPILOT_AGENTS, async (_event, projectPath: string) => {
+    return getProvider("copilot").listAgents?.(projectPath);
+  });
   ipcMain.handle(CH.LIST_SKILLS, (_event, projectPath: string) => {
     const projectSkillsDir = path.join(projectPath, ".agents", "skills");
     const globalSkillsDir = path.join(os.homedir(), ".claude", "skills");

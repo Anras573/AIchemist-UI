@@ -2,8 +2,12 @@ import type {
   CopilotClient as CopilotClientType,
   PermissionRequest,
   PermissionRequestResult,
+  CustomAgentConfig,
 } from "@github/copilot-sdk";
-import type { ProjectConfig } from "../../src/types/index";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import type { AgentInfo, ProjectConfig } from "../../src/types/index";
 import { getApiKey } from "../config";
 import * as CH from "../ipc-channels";
 import { requestApproval, needsApproval } from "./approval";
@@ -47,6 +51,96 @@ export async function getCopilotModels(): Promise<Array<{ id: string; name: stri
   return models.map((m) => ({ id: m.id, name: m.name }));
 }
 
+// ── Agent scanning ────────────────────────────────────────────────────────────
+
+type CopilotAgentEntry = { name: string; description: string; prompt: string };
+
+/** Parse a Copilot agent markdown file's YAML frontmatter + body. */
+function parseCopilotAgentFile(content: string): CopilotAgentEntry | null {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/);
+  if (!match) return null;
+
+  const fm = match[1];
+  const body = (match[2] ?? "").trim();
+
+  const nameMatch = fm.match(/^name:\s*(.+)$/m);
+  if (!nameMatch) return null;
+  const name = nameMatch[1].trim().replace(/^['"]|['"]$/g, "");
+
+  const descMatch = fm.match(/^description:\s*(.+)$/m);
+  const description = descMatch
+    ? descMatch[1].trim().replace(/^['"]|['"]$/g, "")
+    : "";
+
+  // The body becomes the agent's system prompt — must be non-empty
+  if (!body) return null;
+
+  return { name, description, prompt: body };
+}
+
+/** Scan a directory for `*.md` agent files and return parsed entries. */
+function scanAgentDir(dir: string): CopilotAgentEntry[] {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => !e.isDirectory() && e.name.endsWith(".md"))
+      .flatMap((file) => {
+        try {
+          const content = fs.readFileSync(path.join(dir, file.name), "utf8");
+          const entry = parseCopilotAgentFile(content);
+          return entry ? [entry] : [];
+        } catch {
+          return [];
+        }
+      });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Returns available Copilot sub-agents by merging:
+ * 1. Project-local agents: `{projectPath}/.agents/copilot-agents/*.md`
+ * 2. Global agents: `~/.github-copilot/agents/*.md`
+ *
+ * Project-local agents take priority over globals with the same name.
+ */
+export function listCopilotAgents(projectPath: string): AgentInfo[] {
+  const projectDir = path.join(projectPath, ".agents", "copilot-agents");
+  const globalDir = path.join(os.homedir(), ".github-copilot", "agents");
+
+  const projectEntries = scanAgentDir(projectDir);
+  const globalEntries = scanAgentDir(globalDir);
+
+  const projectNames = new Set(projectEntries.map((a) => a.name));
+  const merged = [
+    ...projectEntries,
+    ...globalEntries.filter((a) => !projectNames.has(a.name)),
+  ];
+
+  return merged.map(({ name, description }) => ({ name, description }));
+}
+
+/** Convert scanned agent entries to CustomAgentConfig objects for the SDK. */
+function toCustomAgentConfigs(projectPath: string): CustomAgentConfig[] {
+  const projectDir = path.join(projectPath, ".agents", "copilot-agents");
+  const globalDir = path.join(os.homedir(), ".github-copilot", "agents");
+
+  const projectEntries = scanAgentDir(projectDir);
+  const globalEntries = scanAgentDir(globalDir);
+
+  const projectNames = new Set(projectEntries.map((a) => a.name));
+  return [
+    ...projectEntries,
+    ...globalEntries.filter((a) => !projectNames.has(a.name)),
+  ].map(({ name, description, prompt }) => ({
+    name,
+    displayName: name,
+    description,
+    prompt,
+  }));
+}
+
 // ── Agent turn ────────────────────────────────────────────────────────────────
 
 export async function runCopilotAgentTurn(params: {
@@ -55,8 +149,9 @@ export async function runCopilotAgentTurn(params: {
   projectPath: string;
   projectConfig: ProjectConfig;
   webContents: Electron.WebContents;
+  agent?: string;
 }): Promise<string> {
-  const { sessionId, prompt, projectPath, projectConfig, webContents } = params;
+  const { sessionId, prompt, projectPath, projectConfig, webContents, agent } = params;
 
   const { defineTool } = await import("@github/copilot-sdk");
 
@@ -208,13 +303,25 @@ export async function runCopilotAgentTurn(params: {
 
   // ── Create session ──────────────────────────────────────────────────────────
 
+  const customAgents = toCustomAgentConfigs(projectPath);
+
   const session = await client.createSession({
     model: projectConfig.model,
     streaming: true,
     workingDirectory: projectPath,
     tools: [writeFileTool, deleteFileTool, executeBashTool, webFetchTool],
     onPermissionRequest,
+    ...(customAgents.length > 0 ? { customAgents } : {}),
   });
+
+  // Select the requested agent before sending the prompt
+  if (agent) {
+    try {
+      await session.rpc.agent.select({ name: agent });
+    } catch {
+      // Agent not found or selection failed — proceed with default
+    }
+  }
 
   // ── Event listeners — set up before sending ─────────────────────────────────
 
@@ -329,6 +436,10 @@ export const copilotProvider: AgentProvider = {
 
   async listModels(): Promise<Array<{ id: string; name: string }>> {
     return getCopilotModels();
+  },
+
+  async listAgents(projectPath: string): Promise<AgentInfo[]> {
+    return listCopilotAgents(projectPath);
   },
 
   async stop(): Promise<void> {
