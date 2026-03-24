@@ -3,6 +3,7 @@ import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useS
 import { Message } from "@/types";
 import { cn } from "@/lib/utils";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { AgentPickerButton } from "./AgentPickerButton";
 
 // ─── Individual message bubble ────────────────────────────────────────────────
 
@@ -268,9 +269,12 @@ function InputBar({ disabled, placeholder = "Send a message…", onSend }: Input
           "min-h-[38px] max-h-40 overflow-y-auto"
         )}
       />
-      <p className="mt-1.5 text-xs text-muted-foreground/60">
-        Enter to send · Shift+Enter for new line
-      </p>
+      <div className="mt-1.5 flex items-center gap-2">
+        <AgentPickerButton />
+        <p className="text-xs text-muted-foreground/60 ml-auto">
+          Enter to send · Shift+Enter for new line
+        </p>
+      </div>
     </div>
   );
 }
