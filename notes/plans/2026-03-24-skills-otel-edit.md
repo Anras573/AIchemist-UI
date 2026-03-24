@@ -150,3 +150,39 @@ Application-managed files only:
 | 1 | Skills injection | Medium | Infrastructure already in place; high UX value |
 | 2 | Tracing panel | Medium | Standalone new capability; no dependencies |
 | 3 | Edit agents/skills | Medium | Nice-to-have; can be done incrementally |
+
+---
+
+## Backlog — identified gaps not yet planned
+
+These don't have implementation steps yet but should be tracked.
+
+### Background session notifications
+When a session finishes running while the user is viewing a different session or project,
+there is currently no OS notification or in-app badge. The original design doc (2026-03-12)
+listed this as deferred. The `session.status` field is already in the store — the missing
+piece is a `Notification` call from the main process when status transitions to `done` or
+`error` for a non-active session.
+
+### Command palette expansion
+`CommandPalette.tsx` (Cmd+K) currently only navigates between projects and sessions.
+The original design intended slash commands: start new session, switch agent, open settings,
+toggle approval mode, etc. The `cmdk` primitive is already installed.
+
+### MCP server configuration UI
+`electron/agent/mcp-tools.ts` creates an in-process approval-gated MCP server, but users
+have no way to add or remove external MCP servers from within the app. The `ProjectConfig`
+type likely has a field for this — no UI exists yet.
+
+### Onboarding / first-run experience
+New users must manually create `~/.aichemist/.env` and populate API keys before anything
+works. There is no guided setup, no empty-state screen that explains what to do, and no
+in-app key validation. `SettingsView.tsx` exists but is not surfaced on first launch.
+
+### Export conversations
+No way to save a session as markdown, JSON, or any other format. Useful for sharing or
+archiving agent runs.
+
+### Testing — Phase 4 (IPC / main process)
+`notes/plans/2026-03-20-testing-plan.md` Phase 4 (IPC and main-process integration tests)
+is marked as "Future" and has not been revisited.

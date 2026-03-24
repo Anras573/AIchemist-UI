@@ -1,7 +1,11 @@
 # AIchemist UI — Agent UI Design
 
 **Date:** 2026-03-12
-**Status:** Approved
+**Status:** ~~Approved~~ **Superseded**
+
+> **Note (2026-03-24):** This document was written for a Tauri + Rust implementation that was
+> never built. The app was shipped on **Electron + Node.js** instead. Refer to `CLAUDE.md` for
+> the current architecture and `notes/plans/2026-03-24-skills-otel-edit.md` for active planning.
 
 ---
 

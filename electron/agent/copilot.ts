@@ -33,10 +33,7 @@ async function getClient(): Promise<CopilotClientType> {
   return client;
 }
 
-/** Gracefully stop the shared Copilot CLI client.
- * TODO: Call this in main.ts `app.on("before-quit")` to ensure clean shutdown
- *       of the spawned CLI process before the Electron app exits.
- */
+/** Gracefully stop the shared Copilot CLI client. */
 export async function stopCopilotClient(): Promise<void> {
   if (clientInstance) {
     await clientInstance.stop();

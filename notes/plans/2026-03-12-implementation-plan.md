@@ -1,6 +1,12 @@
 # AIchemist UI — Implementation Plan
 
 **Date:** 2026-03-12
+**Status:** **Superseded**
+
+> **Note (2026-03-24):** This plan was written for a Tauri + Rust implementation that was
+> never built. The app was shipped on **Electron + Node.js** instead. Refer to `CLAUDE.md` for
+> the current architecture and `notes/plans/2026-03-24-skills-otel-edit.md` for active planning.
+
 **Design doc:** `docs/plans/2026-03-12-agent-ui-design.md`
 **MVP definition:** Streaming LLM responses + core filesystem/shell tools + approval gates
 
