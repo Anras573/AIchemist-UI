@@ -53,12 +53,12 @@ This is an **Electron** desktop application with a React + TypeScript renderer a
 | `config.ts` | Loads `~/.aichemist/.env` via `dotenv`; resolves API keys |
 | `db.ts` | Opens `~/.aichemist/aichemist.db` via `better-sqlite3`; forward-only migrations |
 | `projects.ts` | CRUD for projects + per-project JSON config |
-| `sessions.ts` | CRUD for sessions and messages |
+| `sessions.ts` | CRUD for sessions and messages; includes `updateSessionAgent()` |
 | `dialog.ts` | Native folder picker via Electron's `dialog` module |
 | `settings.ts` | App-level settings persisted as JSON |
 | `agent/runner.ts` | Dispatches agent turns to the appropriate provider |
-| `agent/claude.ts` | Claude agent runner (Anthropic) |
-| `agent/copilot.ts` | Copilot agent runner (GitHub) |
+| `agent/claude.ts` | Claude agent runner (Anthropic); discovers agents via SDK `supportedAgents()` |
+| `agent/copilot.ts` | Copilot agent runner (GitHub); discovers agents by scanning `.md` files on disk |
 | `agent/mcp-tools.ts` | MCP tool approval gate |
 
 ### Frontend data flow
@@ -74,12 +74,47 @@ This is an **Electron** desktop application with a React + TypeScript renderer a
 
 ### State management (Zustand)
 
-- `useSessionStore` — sessions, messages, streaming text, live tool calls, pending approvals, terminal output. Only `activeSessionId` is persisted (session data lives in SQLite).
+- `useSessionStore` — sessions, messages, streaming text, live tool calls, pending approvals, terminal output, and `sessionAgents` (maps `sessionId → agentName | null`). Only `activeSessionId` is persisted (session data lives in SQLite). `sessionAgents` is restored from `session.agent` via `hydrateSession()` on navigation.
 - `useProjectStore` — projects list, active project. Only `activeProjectId` is persisted.
 
 ### Database
 
-SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `messages` → `tool_calls` (cascade deletes). Config stored as JSON in `projects.config`. Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
+SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `messages` → `tool_calls` (cascade deletes). Config stored as JSON in `projects.config`. The `sessions` table has an `agent TEXT` column storing the selected agent name (nullable). Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
+
+---
+
+## Agent Selection
+
+The app has a VS Code-style **agent picker** in the input bar (`src/components/session/AgentPickerButton.tsx`). It replaces the old Agents tab (which is now the **Skills** tab, showing only skills/tools from `.agents/skills/`).
+
+### How it works
+
+1. User clicks the agent picker button next to the message input.
+2. The dropdown loads available agents (lazy, cached after first fetch) via `ipc.getClaudeAgents()` or `ipc.getCopilotAgents()` depending on the active provider.
+3. Selecting an agent calls `ipc.updateSessionAgent(sessionId, agentName)` — persisted to `sessions.agent` in SQLite.
+4. On the next `agentSend`, the runner picks up the agent and activates it:
+   - **Claude:** `options.agent = agentName` passed to Claude Code SDK
+   - **Copilot:** `session.rpc.agent.select({ name })` called before `send()`
+5. Selected agent name is shown on the session tab as a `Bot` icon badge (visible on all tabs, not just the active one).
+
+### Agent file format
+
+Both Claude and Copilot agents use the same frontmatter format:
+
+```markdown
+---
+name: my-agent
+description: What this agent does
+---
+System prompt / instructions here.
+```
+
+### Agent discovery locations
+
+| Provider | Locations scanned |
+|---|---|
+| Claude | `~/.claude/agents/*.md` + SDK `supportedAgents()` |
+| Copilot | `.agents/copilot-agents/*.md` (project) and `~/.github-copilot/agents/*.md` (global) |
 
 ---
 
@@ -109,6 +144,12 @@ The AI Elements skill is installed at `.agents/skills/ai-elements/`. Reference d
 **Critical — no `useChat`:** AI Elements examples use `useChat` from `@ai-sdk/react`, which requires an HTTP endpoint and **does not work in Electron**. This project drives AI Elements components from Zustand state updated by push events from the main process. Do not use `useChat`.
 
 **`@/` alias required** for all AI Elements imports (`@/components/ai-elements/...`). Configured in both `vite.config.ts` (`resolve.alias`) and `tsconfig.json` (`paths`).
+
+### UI component gotchas
+
+**`DropdownMenu` uses Base UI, not Radix UI.** `src/components/ui/dropdown-menu.tsx` wraps `@base-ui/react/menu`. Base UI's `Menu.Item` fires `onClick`, **not** `onSelect`. Always use `onClick` on `DropdownMenuItem` — `onSelect` silently does nothing.
+
+**`DropdownMenuTrigger` does not support `asChild`** — style it directly with `className`.
 
 **`ModelSelectorTrigger` does not support `asChild`** — style it directly with `className`.
 
