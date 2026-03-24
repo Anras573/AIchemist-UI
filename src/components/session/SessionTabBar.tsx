@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from "react";
+import { Bot } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { cn } from "@/lib/utils";
@@ -12,7 +13,7 @@ interface SessionTabBarProps {
 }
 
 export function SessionTabBar({ projectId }: SessionTabBarProps) {
-  const { sessions, activeSessionId, mergeSessions, setActiveSession, addSession, removeSession } =
+  const { sessions, activeSessionId, sessionAgents, mergeSessions, setActiveSession, addSession, removeSession } =
     useSessionStore();
 
   const projectSessions = Object.values(sessions)
@@ -68,6 +69,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
           const sessionLogoProvider = session.provider
             ? getLogoProvider(session.provider)
             : null;
+          const sessionAgent = sessionAgents[session.id] ?? null;
           return (
             <div key={session.id} className="group relative flex-shrink-0">
               <button
@@ -87,6 +89,18 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
                   <span className="flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-normal text-muted-foreground bg-muted/60 border border-border/50">
                     <ModelSelectorLogo provider={sessionLogoProvider} className="size-2.5 opacity-60" />
                     {sessionModelLabel}
+                  </span>
+                )}
+                {/* Agent badge — shown on all tabs where an agent is selected */}
+                {sessionAgent && (
+                  <span className={cn(
+                    "flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-normal",
+                    active
+                      ? "text-primary bg-primary/10 border border-primary/30"
+                      : "text-muted-foreground bg-muted/60 border border-border/50"
+                  )}>
+                    <Bot className="size-2.5 shrink-0" />
+                    <span className="max-w-[80px] truncate">{sessionAgent}</span>
                   </span>
                 )}
                 {/* Close button — visible on hover */}
