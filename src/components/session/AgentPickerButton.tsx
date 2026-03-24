@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Bot, Check, ChevronsUpDown } from "lucide-react";
+import { Bot, Check, ChevronsUpDown, Loader2 } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -27,6 +27,7 @@ export function AgentPickerButton() {
 
   const [open, setOpen] = useState(false);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [loadingAgents, setLoadingAgents] = useState(false);
 
   const selectedAgent = activeSessionId
     ? (sessionAgents[activeSessionId] ?? null)
@@ -35,10 +36,12 @@ export function AgentPickerButton() {
   // Lazy-load agents the first time the dropdown opens
   useEffect(() => {
     if (!open || !projectPath || provider !== "anthropic" || agents.length > 0) return;
+    setLoadingAgents(true);
     ipc
       .getClaudeAgents(projectPath)
       .then(setAgents)
-      .catch(() => {/* Silently hide agent list on error */});
+      .catch(() => {/* Silently hide agent list on error */})
+      .finally(() => setLoadingAgents(false));
   }, [open, projectPath, provider, agents.length]);
 
   const handleSelect = useCallback(
@@ -90,26 +93,33 @@ export function AgentPickerButton() {
           )}
         </DropdownMenuItem>
 
-        {agents.map((agent) => (
-          <DropdownMenuItem
-            key={agent.name}
-            className="flex items-center gap-2 text-xs cursor-pointer"
-            onClick={() => handleSelect(agent.name)}
-          >
-            <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="truncate">{agent.name}</div>
-              {agent.model && (
-                <div className="text-[9px] text-muted-foreground truncate">
-                  {agent.model}
-                </div>
+        {loadingAgents ? (
+          <div className="flex items-center gap-2 px-1.5 py-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+            Loading agents…
+          </div>
+        ) : (
+          agents.map((agent) => (
+            <DropdownMenuItem
+              key={agent.name}
+              className="flex items-center gap-2 text-xs cursor-pointer"
+              onClick={() => handleSelect(agent.name)}
+            >
+              <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="truncate">{agent.name}</div>
+                {agent.model && (
+                  <div className="text-[9px] text-muted-foreground truncate">
+                    {agent.model}
+                  </div>
+                )}
+              </div>
+              {selectedAgent === agent.name && (
+                <Check className="h-3 w-3 text-primary shrink-0" />
               )}
-            </div>
-            {selectedAgent === agent.name && (
-              <Check className="h-3 w-3 text-primary shrink-0" />
-            )}
-          </DropdownMenuItem>
-        ))}
+            </DropdownMenuItem>
+          ))
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
