@@ -6,7 +6,7 @@ import * as CH from "./ipc-channels";
 import { loadEnv, getApiKey, getAnthropicConfig } from "./config";
 import { openDb } from "./db";
 import { addProject, listProjects, removeProject, getProjectConfig, saveProjectConfig } from "./projects";
-import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent } from "./sessions";
+import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent, updateSessionSkills } from "./sessions";
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
@@ -160,6 +160,11 @@ function registerHandlers(): void {  // ── Settings ────────
     (_event, sessionId: string, agent: string | null) =>
       updateSessionAgent(db, sessionId, agent)
   );
+  ipcMain.handle(
+    CH.UPDATE_SESSION_SKILLS,
+    (_event, sessionId: string, skills: string[]) =>
+      updateSessionSkills(db, sessionId, skills)
+  );
 
   // ── File system ───────────────────────────────────────────────────────────────
   ipcMain.handle(CH.LIST_DIRECTORY, (_event, dirPath: string) => {
@@ -219,7 +224,6 @@ function registerHandlers(): void {  // ── Settings ────────
     const session = getSession(db, args.sessionId);
     const project = listProjects(db).find((p) => p.id === session.project_id);
     if (!project) throw new Error(`Project not found for session ${args.sessionId}`);
-    // Session-level model overrides project default; fall back to project config for legacy sessions
     const effectiveConfig = {
       ...project.config,
       provider: session.provider ?? project.config.provider,
@@ -233,6 +237,7 @@ function registerHandlers(): void {  // ── Settings ────────
       projectConfig: effectiveConfig,
       webContents: win.webContents,
       agent: args.agent,
+      skills: session.skills ?? undefined,
     });
   });
   ipcMain.handle(CH.GET_COPILOT_MODELS, () => getProvider("copilot").listModels?.());

@@ -35,6 +35,7 @@ export interface ElectronAPI {
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   updateSessionModel: (sessionId: string, provider: string, model: string) => Promise<void>;
   updateSessionAgent: (sessionId: string, agent: string | null) => Promise<void>;
+  updateSessionSkills: (sessionId: string, skills: string[]) => Promise<void>;
 
   // ── File system ───────────────────────────────────────────────────────────
   listDirectory: (path: string) => Promise<{ entries: Array<{ name: string; path: string; is_dir: boolean; size_bytes: number }> }>;
@@ -83,6 +84,7 @@ const api: ElectronAPI = {
   updateSessionTitle: (sessionId, title) => ipcRenderer.invoke(CH.UPDATE_SESSION_TITLE, sessionId, title),
   updateSessionModel: (sessionId, provider, model) => ipcRenderer.invoke(CH.UPDATE_SESSION_MODEL, sessionId, provider, model),
   updateSessionAgent: (sessionId, agent) => ipcRenderer.invoke(CH.UPDATE_SESSION_AGENT, sessionId, agent),
+  updateSessionSkills: (sessionId, skills) => ipcRenderer.invoke(CH.UPDATE_SESSION_SKILLS, sessionId, skills),
 
   listDirectory: (path) => ipcRenderer.invoke(CH.LIST_DIRECTORY, path),
   readFile: (path) => ipcRenderer.invoke(CH.READ_FILE, path),

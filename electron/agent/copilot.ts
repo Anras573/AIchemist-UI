@@ -11,6 +11,7 @@ import type { AgentInfo, ProjectConfig } from "../../src/types/index";
 import { getApiKey } from "../config";
 import * as CH from "../ipc-channels";
 import { requestApproval, needsApproval } from "./approval";
+import { buildSkillsContext } from "./skills";
 import {
   implWriteFile,
   implDeleteFile,
@@ -147,8 +148,9 @@ export async function runCopilotAgentTurn(params: {
   projectConfig: ProjectConfig;
   webContents: Electron.WebContents;
   agent?: string;
+  skills?: string[];
 }): Promise<string> {
-  const { sessionId, prompt, projectPath, projectConfig, webContents, agent } = params;
+  const { sessionId, prompt, projectPath, projectConfig, webContents, agent, skills } = params;
 
   const { defineTool } = await import("@github/copilot-sdk");
 
@@ -300,7 +302,17 @@ export async function runCopilotAgentTurn(params: {
 
   // ── Create session ──────────────────────────────────────────────────────────
 
-  const customAgents = toCustomAgentConfigs(projectPath);
+  const skillsContext = buildSkillsContext(skills ?? [], projectPath);
+  // Inject active skill content into each custom agent's prompt. If skills are
+  // active but no custom agents exist, create a synthetic one to carry the context.
+  let customAgents = toCustomAgentConfigs(projectPath);
+  if (skillsContext) {
+    if (customAgents.length > 0) {
+      customAgents = customAgents.map((a) => ({ ...a, prompt: a.prompt + skillsContext }));
+    } else {
+      customAgents = [{ name: "_skills", description: "Active skills context", prompt: skillsContext }];
+    }
+  }
 
   const session = await client.createSession({
     model: projectConfig.model,

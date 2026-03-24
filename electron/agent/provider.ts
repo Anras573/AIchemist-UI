@@ -12,6 +12,8 @@ export interface AgentProviderParams {
   webContents: Electron.WebContents;
   /** Optional sub-agent name (provider-specific). */
   agent?: string;
+  /** Active skill names to inject into the system prompt. */
+  skills?: string[];
 }
 
 /**

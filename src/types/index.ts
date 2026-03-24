@@ -94,6 +94,8 @@ export interface Session {
   model: string | null;
   /** The selected sub-agent name for this session. Null means the default agent. */
   agent: string | null;
+  /** The active skills for this session (array of skill names). Null means no skills toggled. */
+  skills: string[] | null;
 }
 
 // ─── IPC event payloads ──────────────────────────────────────────────────────

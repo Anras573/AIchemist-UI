@@ -32,6 +32,8 @@ interface SessionStore {
   pendingApprovals: Record<string, PendingApproval[]>;
   // Active sub-agent per session (Claude only); null = default agent
   sessionAgents: Record<string, string | null>;
+  // Active skills per session; empty array = no skills toggled
+  sessionSkills: Record<string, string[]>;
 
   mergeSessions: (sessions: Session[]) => void;
   setActiveSession: (id: string | null) => void;
@@ -60,6 +62,7 @@ interface SessionStore {
   clearTerminalOutput: (sessionId: string) => void;
   terminalOutput: Record<string, string>;
   setSessionAgent: (sessionId: string, agent: string | null) => void;
+  setSessionSkills: (sessionId: string, skills: string[]) => void;
 }
 
 export const useSessionStore = create<SessionStore>()(
@@ -72,6 +75,7 @@ export const useSessionStore = create<SessionStore>()(
       pendingApprovals: {},
       terminalOutput: {},
       sessionAgents: {},
+      sessionSkills: {},
 
       // Merge new sessions into the store without wiping sessions from other projects.
       // Preserves messages already in the store — listSessions returns messages: [],
@@ -97,9 +101,11 @@ export const useSessionStore = create<SessionStore>()(
       hydrateSession: (session) =>
         set((state) => {
           const existing = state.sessions[session.id];
-          // Restore persisted agent selection into sessionAgents
           const agentUpdate = session.agent != null
             ? { sessionAgents: { ...state.sessionAgents, [session.id]: session.agent } }
+            : {};
+          const skillsUpdate = session.skills != null && session.skills.length > 0
+            ? { sessionSkills: { ...state.sessionSkills, [session.id]: session.skills } }
             : {};
           return {
             sessions: {
@@ -111,6 +117,7 @@ export const useSessionStore = create<SessionStore>()(
               },
             },
             ...agentUpdate,
+            ...skillsUpdate,
           };
         }),
 
@@ -274,6 +281,11 @@ export const useSessionStore = create<SessionStore>()(
           sessionAgents: agent === null
             ? (() => { const { [sessionId]: _, ...rest } = state.sessionAgents; return rest; })()
             : { ...state.sessionAgents, [sessionId]: agent },
+        })),
+
+      setSessionSkills: (sessionId, skills) =>
+        set((state) => ({
+          sessionSkills: { ...state.sessionSkills, [sessionId]: skills },
         })),
     }),
     {

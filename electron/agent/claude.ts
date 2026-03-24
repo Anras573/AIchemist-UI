@@ -8,6 +8,7 @@ import * as path from "path";
 
 import * as CH from "../ipc-channels";
 import { createApprovalMcpServer } from "./mcp-tools";
+import { buildSkillsContext } from "./skills";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 
@@ -152,8 +153,9 @@ export async function runClaudeAgentTurn(params: {
   projectConfig: ProjectConfig;
   webContents: Electron.WebContents;
   agent?: string;
+  skills?: string[];
 }): Promise<string> {
-  const { db, sessionId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent } =
+  const { db, sessionId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent, skills } =
     params;
 
   // 1. Create the in-process MCP server (approval-gated custom tools)
@@ -185,7 +187,8 @@ export async function runClaudeAgentTurn(params: {
       ...(agent ? { agent } : {}),
       systemPrompt:
         "You are a helpful AI assistant with access to the user's project files and tools. " +
-        "Be concise and precise. When using tools, explain what you're doing before calling them.",
+        "Be concise and precise. When using tools, explain what you're doing before calling them." +
+        buildSkillsContext(skills ?? [], projectPath),
     },
   });
 

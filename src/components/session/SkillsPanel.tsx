@@ -1,21 +1,43 @@
-import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Check, Loader2 } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
+import { useSessionStore } from "@/lib/store/useSessionStore";
+import { cn } from "@/lib/utils";
 import type { SkillInfo } from "@/types";
 
 // ── SkillCard ─────────────────────────────────────────────────────────────────
 
-function SkillCard({ skill }: { skill: SkillInfo }) {
+function SkillCard({
+  skill,
+  active,
+  onToggle,
+}: {
+  skill: SkillInfo;
+  active: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <div className="rounded-md border border-border bg-background px-3 py-2">
-      <div className="text-xs font-semibold">{skill.name}</div>
+    <button
+      onClick={onToggle}
+      className={cn(
+        "w-full text-left rounded-md border px-3 py-2 transition-colors",
+        "hover:bg-accent hover:text-accent-foreground",
+        active
+          ? "border-primary/40 bg-primary/5"
+          : "border-border bg-background"
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold truncate">{skill.name}</span>
+        {active && <Check className="size-3 shrink-0 text-primary" />}
+      </div>
       {skill.description && (
         <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
           {skill.description}
         </p>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -25,6 +47,9 @@ export function SkillsPanel() {
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const projectPath = activeProject?.path ?? "";
+
+  const { activeSessionId, sessionSkills, setSessionSkills } = useSessionStore();
+  const activeSkills = activeSessionId ? (sessionSkills[activeSessionId] ?? []) : [];
 
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
 
@@ -36,6 +61,18 @@ export function SkillsPanel() {
       .then(setSkills)
       .catch(() => setSkills([]));
   }, [projectPath]);
+
+  const handleToggle = useCallback(
+    (skillName: string) => {
+      if (!activeSessionId) return;
+      const next = activeSkills.includes(skillName)
+        ? activeSkills.filter((s) => s !== skillName)
+        : [...activeSkills, skillName];
+      setSessionSkills(activeSessionId, next);
+      ipc.updateSessionSkills(activeSessionId, next).catch(console.error);
+    },
+    [activeSessionId, activeSkills, setSessionSkills]
+  );
 
   return (
     <div className="flex flex-col h-full overflow-y-auto">
@@ -51,7 +88,14 @@ export function SkillsPanel() {
             <code className="font-mono">.agents/skills/</code>.
           </div>
         ) : (
-          skills.map((skill) => <SkillCard key={skill.name} skill={skill} />)
+          skills.map((skill) => (
+            <SkillCard
+              key={skill.name}
+              skill={skill}
+              active={activeSkills.includes(skill.name)}
+              onToggle={() => handleToggle(skill.name)}
+            />
+          ))
         )}
       </div>
     </div>

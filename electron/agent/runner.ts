@@ -36,8 +36,9 @@ export async function runAgentTurn(params: {
   projectConfig: ProjectConfig;
   webContents: Electron.WebContents;
   agent?: string;
+  skills?: string[];
 }): Promise<void> {
-  const { db, sessionId, prompt, projectPath, projectConfig, webContents, agent } = params;
+  const { db, sessionId, prompt, projectPath, projectConfig, webContents, agent, skills } = params;
 
   webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "running" });
 
@@ -49,6 +50,7 @@ export async function runAgentTurn(params: {
     projectConfig,
     webContents,
     agent,
+    skills,
   };
 
   try {

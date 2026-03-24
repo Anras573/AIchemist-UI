@@ -38,6 +38,7 @@ export function createSession(
     provider,
     model,
     agent: null,
+    skills: null,
   };
 }
 
@@ -47,7 +48,7 @@ export function createSession(
 export function listSessions(db: Database, projectId: string): Session[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, title, status, created_at, provider, model, agent
+      `SELECT id, project_id, title, status, created_at, provider, model, agent, skills
        FROM sessions
        WHERE project_id = ?
        ORDER BY created_at ASC`
@@ -61,6 +62,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
     provider: string | null;
     model: string | null;
     agent: string | null;
+    skills: string | null;
   }[];
 
   return rows.map((row) => ({
@@ -73,6 +75,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
     provider: row.provider,
     model: row.model,
     agent: row.agent,
+    skills: row.skills ? (JSON.parse(row.skills) as string[]) : null,
   }));
 }
 
@@ -82,7 +85,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
 export function getSession(db: Database, sessionId: string): Session {
   const row = db
     .prepare(
-      "SELECT id, project_id, title, status, created_at, provider, model, agent FROM sessions WHERE id = ?"
+      "SELECT id, project_id, title, status, created_at, provider, model, agent, skills FROM sessions WHERE id = ?"
     )
     .get(sessionId) as
     | {
@@ -94,6 +97,7 @@ export function getSession(db: Database, sessionId: string): Session {
         provider: string | null;
         model: string | null;
         agent: string | null;
+        skills: string | null;
       }
     | undefined;
 
@@ -135,6 +139,7 @@ export function getSession(db: Database, sessionId: string): Session {
     provider: row.provider,
     model: row.model,
     agent: row.agent,
+    skills: row.skills ? (JSON.parse(row.skills) as string[]) : null,
   };
 }
 
@@ -205,4 +210,16 @@ export function updateSessionAgent(
   agent: string | null
 ): void {
   db.prepare("UPDATE sessions SET agent = ? WHERE id = ?").run(agent, sessionId);
+}
+
+/**
+ * Update the active skills for a session (empty array = no skills active).
+ */
+export function updateSessionSkills(
+  db: Database,
+  sessionId: string,
+  skills: string[]
+): void {
+  const value = skills.length > 0 ? JSON.stringify(skills) : null;
+  db.prepare("UPDATE sessions SET skills = ? WHERE id = ?").run(value, sessionId);
 }
