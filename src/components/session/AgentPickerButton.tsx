@@ -81,7 +81,7 @@ export function AgentPickerButton() {
         {/* Default (no agent) */}
         <DropdownMenuItem
           className="flex items-center gap-2 text-xs cursor-pointer"
-          onSelect={() => handleSelect(null)}
+          onClick={() => handleSelect(null)}
         >
           <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <span className="flex-1">Default</span>
@@ -94,7 +94,7 @@ export function AgentPickerButton() {
           <DropdownMenuItem
             key={agent.name}
             className="flex items-center gap-2 text-xs cursor-pointer"
-            onSelect={() => handleSelect(agent.name)}
+            onClick={() => handleSelect(agent.name)}
           >
             <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <div className="flex-1 min-w-0">
