@@ -58,9 +58,10 @@ export function AgentPickerButton() {
       <DropdownMenuTrigger
         className={cn(
           "flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-colors",
-          "border border-border/60 bg-background/50",
-          "text-muted-foreground hover:text-foreground hover:bg-muted",
-          "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          selectedAgent !== null
+            ? "border border-primary/50 bg-primary/10 text-primary hover:bg-primary/15 font-medium"
+            : "border border-border/60 bg-background/50 text-muted-foreground hover:text-foreground hover:bg-muted"
         )}
         title="Select agent"
       >
