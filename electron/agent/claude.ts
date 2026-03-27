@@ -181,6 +181,7 @@ export async function runClaudeAgentTurn(params: {
   const claudePath = resolveClaudePath();
 
   // 5. Stream the query generator
+  const skillsContext = buildSkillsContext(skills ?? [], projectPath);
   const queryStream: AsyncGenerator<SDKMessage, void> = query({
     prompt,
     options: {
@@ -193,11 +194,17 @@ export async function runClaudeAgentTurn(params: {
       allowedTools: ["Read", "Glob", "LS", "Skill", "Agent"],
       includePartialMessages: true,
       ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
-      ...(agent ? { agent } : {}),
-      systemPrompt:
-        "You are a helpful AI assistant with access to the user's project files and tools. " +
-        "Be concise and precise. When using tools, explain what you're doing before calling them." +
-        buildSkillsContext(skills ?? [], projectPath),
+      ...(agent
+        // When an agent is selected, let its own system prompt take effect.
+        // Injecting a systemPrompt here would override the agent's instructions.
+        // Active skills are appended to the user prompt instead.
+        ? { agent }
+        : {
+            systemPrompt:
+              "You are a helpful AI assistant with access to the user's project files and tools. " +
+              "Be concise and precise. When using tools, explain what you're doing before calling them." +
+              skillsContext,
+          }),
     },
   });
 
