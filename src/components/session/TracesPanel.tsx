@@ -74,6 +74,26 @@ function TurnCard({ turn, tools }: { turn: TraceSpan; tools: TraceSpan[] }) {
 
 // ── ToolRow ───────────────────────────────────────────────────────────────────
 
+const BASH_TOOLS = new Set(["execute_bash", "Bash", "bash", "run_shell"]);
+const FILE_TOOLS = new Set(["write_file", "delete_file", "Read", "Write", "Edit", "MultiEdit", "Glob", "LS", "read_file"]);
+
+function getToolSummary(name: string, meta: Record<string, unknown> | undefined): string | null {
+  const input = meta?.input as Record<string, unknown> | undefined;
+  if (!input) return null;
+  if (BASH_TOOLS.has(name)) {
+    const cmd = (input.command ?? input.cmd) as string | undefined;
+    return cmd ? `$ ${cmd}` : null;
+  }
+  if (FILE_TOOLS.has(name)) {
+    const p = (input.path ?? input.file_path) as string | undefined;
+    return p ?? null;
+  }
+  if (name === "web_fetch") {
+    return (input.url as string | undefined) ?? null;
+  }
+  return null;
+}
+
 function ToolRow({
   tool,
   turnStartMs,
@@ -101,6 +121,15 @@ function ToolRow({
           {formatDuration(tool.durationMs)}
         </span>
       </div>
+      {/* Command / path / URL summary */}
+      {(() => {
+        const summary = getToolSummary(tool.name, tool.meta);
+        return summary ? (
+          <p className="font-mono text-[10px] text-foreground/70 truncate pl-5" title={summary}>
+            {summary}
+          </p>
+        ) : null;
+      })()}
       {/* Relative timing bar */}
       {turnDuration !== undefined && (
         <div className="relative h-1 rounded-full bg-muted overflow-hidden">

@@ -184,6 +184,7 @@ export async function runCopilotAgentTurn(params: {
       name,
       parentId: turnSpanId,
       startMs: Date.now(),
+      meta: { input: args as Record<string, unknown> },
     });
     webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: name, input: args });
 
@@ -400,6 +401,7 @@ export async function runCopilotAgentTurn(params: {
           name: data.toolName,
           parentId: turnSpanId,
           startMs: Date.now(),
+          meta: { input: data.arguments ?? {} },
         });
         toolCallIdToName.set(`span:${data.toolCallId}`, spanId);
         webContents.send(CH.SESSION_TOOL_CALL, {

@@ -311,6 +311,7 @@ export async function runClaudeAgentTurn(params: {
                 name: b.name,
                 parentId: turnSpanId,
                 startMs: Date.now(),
+                meta: { input: b.input ?? {} },
               });
               toolUseIdToSpanId.set(b.id, toolSpanId);
             }
