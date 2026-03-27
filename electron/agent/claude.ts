@@ -109,7 +109,7 @@ function scanLocalAgents(): AgentEntry[] {
  * it is unrelated to ~/.claude/agents/*.md files. We must inject the body of
  * the agent file as `systemPrompt` ourselves.
  */
-function readAgentFileSystemPrompt(
+export function readAgentFileSystemPrompt(
   agentName: string
 ): { body: string; model?: string } | null {
   const filePath = path.join(os.homedir(), ".claude", "agents", `${agentName}.md`);
