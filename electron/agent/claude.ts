@@ -102,6 +102,35 @@ function scanLocalAgents(): AgentEntry[] {
 }
 
 /**
+ * Reads a Claude agent file and returns its system prompt body and optional
+ * model override. Returns null if the file does not exist or cannot be parsed.
+ *
+ * The SDK's `agent` option in `query()` does NOT load a named agent persona —
+ * it is unrelated to ~/.claude/agents/*.md files. We must inject the body of
+ * the agent file as `systemPrompt` ourselves.
+ */
+function readAgentFileSystemPrompt(
+  agentName: string
+): { body: string; model?: string } | null {
+  const filePath = path.join(os.homedir(), ".claude", "agents", `${agentName}.md`);
+  try {
+    const content = fs.readFileSync(filePath, "utf8");
+    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/);
+    if (!match) return { body: content.trim() };
+
+    const fm = match[1];
+    const body = (match[2] ?? "").trim();
+    const modelMatch = fm.match(/^model:\s*(.+)$/m);
+    const agentModel = modelMatch
+      ? modelMatch[1].trim().replace(/^['"]|['"]$/g, "")
+      : undefined;
+    return { body, model: agentModel };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Returns available Claude sub-agents by merging:
  * 1. Built-in agents reported by the SDK via `supportedAgents()`
  * 2. User-defined agents found in `~/.claude/agents/*.md`
@@ -171,8 +200,8 @@ export async function runClaudeAgentTurn(params: {
   const mcpServer: McpSdkServerConfigWithInstance =
     await createApprovalMcpServer(webContents, sessionId, projectConfig);
 
-  // 2. Resolve model ID with env-var overrides
-  const model = resolveModel(projectConfig.model);
+  // 2. Resolve model — agent file can override the project model
+  let effectiveModel = resolveModel(projectConfig.model);
 
   // 3. Dynamic import — SDK is ESM-only, bundle is CJS
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
@@ -180,31 +209,52 @@ export async function runClaudeAgentTurn(params: {
   // 4. Resolve claude CLI path (Electron doesn't inherit shell PATH on macOS)
   const claudePath = resolveClaudePath();
 
-  // 5. Stream the query generator
+  // 5. Determine system prompt:
+  //    - Named agent selected → read its .md file body as system prompt.
+  //      The SDK's `agent` option does NOT load user-defined agent files;
+  //      we must inject the file body as systemPrompt ourselves.
+  //    - No agent → use the default assistant prompt.
+  //    In both cases, active skills context is appended.
   const skillsContext = buildSkillsContext(skills ?? [], projectPath);
+  let systemPrompt: string;
+  let sdkAgent: string | undefined;
+
+  if (agent) {
+    const agentFile = readAgentFileSystemPrompt(agent);
+    if (agentFile) {
+      // File-based agent: use its body as the system prompt
+      systemPrompt = agentFile.body + skillsContext;
+      if (agentFile.model) effectiveModel = resolveModel(agentFile.model);
+    } else {
+      // SDK built-in agent (no local file): delegate to the SDK
+      sdkAgent = agent;
+      systemPrompt =
+        "You are a helpful AI assistant with access to the user's project files and tools. " +
+        "Be concise and precise. When using tools, explain what you're doing before calling them." +
+        skillsContext;
+    }
+  } else {
+    systemPrompt =
+      "You are a helpful AI assistant with access to the user's project files and tools. " +
+      "Be concise and precise. When using tools, explain what you're doing before calling them." +
+      skillsContext;
+  }
+
+  // 6. Stream the query generator
   const queryStream: AsyncGenerator<SDKMessage, void> = query({
     prompt,
     options: {
       resume: sdkSessionId ?? undefined,
-      model,
+      model: effectiveModel,
       cwd: projectPath,
       mcpServers: { "aichemist-tools": mcpServer },
       settingSources: ["local", "user", "project"],
       permissionMode: "acceptEdits",
       allowedTools: ["Read", "Glob", "LS", "Skill", "Agent"],
       includePartialMessages: true,
+      systemPrompt,
       ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
-      ...(agent
-        // When an agent is selected, let its own system prompt take effect.
-        // Injecting a systemPrompt here would override the agent's instructions.
-        // Active skills are appended to the user prompt instead.
-        ? { agent }
-        : {
-            systemPrompt:
-              "You are a helpful AI assistant with access to the user's project files and tools. " +
-              "Be concise and precise. When using tools, explain what you're doing before calling them." +
-              skillsContext,
-          }),
+      ...(sdkAgent ? { agent: sdkAgent } : {}),
     },
   });
 
