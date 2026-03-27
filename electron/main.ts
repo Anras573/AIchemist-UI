@@ -12,6 +12,7 @@ import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
 import { resolveApproval } from "./agent/approval";
 import { runAgentTurn, getProvider } from "./agent/runner";
+import { getSpans } from "./tracer";
 import type { ProjectConfig } from "../src/types/index";
 
 // ── Prevent multiple instances ───────────────────────────────────────────────
@@ -96,6 +97,9 @@ function registerHandlers(): void {  // ── Settings ────────
   ipcMain.handle(CH.SETTINGS_WRITE, (_event, updates: Partial<SettingsMap>) =>
     writeSettings(updates)
   );
+
+  // ── Traces ───────────────────────────────────────────────────────────────────
+  ipcMain.handle(CH.GET_TRACES, (_event, sessionId?: string) => getSpans(sessionId));
 
   // ── Config ──────────────────────────────────────────────────────────────────
   ipcMain.handle(CH.GET_API_KEY, (_event, provider: string) =>

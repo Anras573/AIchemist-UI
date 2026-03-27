@@ -7,6 +7,7 @@ import * as os from "os";
 import * as path from "path";
 
 import * as CH from "../ipc-channels";
+import * as tracer from "../tracer";
 import { createApprovalMcpServer } from "./mcp-tools";
 import { buildSkillsContext } from "./skills";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
@@ -261,8 +262,20 @@ export async function runClaudeAgentTurn(params: {
   let resultSessionId: string | null = null;
   let fullText = "";
 
-  // Map tool_use_id → tool_name so we can label tool results
+  // Map tool_use_id → tool_name/spanId so we can label results and end spans
   const toolUseIdToName = new Map<string, string>();
+  const toolUseIdToSpanId = new Map<string, string>();
+
+  // ── Tracing: start turn span and relay updates to the renderer ───────────────
+  const turnStartMs = Date.now();
+  const turnSpanId = tracer.startSpan({
+    sessionId,
+    type: "turn",
+    name: agent ? `Agent: ${agent}` : "Agent Turn",
+    startMs: turnStartMs,
+  });
+  let firstTokenMs: number | null = null;
+  const unsubTracer = tracer.onSpanUpdate((span) => webContents.send(CH.SESSION_TRACE, span));
 
   try {
     for await (const msg of queryStream) {
@@ -274,6 +287,7 @@ export async function runClaudeAgentTurn(params: {
           if (delta?.["type"] === "text_delta") {
             const text = delta["text"];
             if (typeof text === "string" && text.length > 0) {
+              if (!firstTokenMs) firstTokenMs = Date.now();
               fullText += text;
               webContents.send(CH.SESSION_DELTA, {
                 session_id: sessionId,
@@ -289,7 +303,17 @@ export async function runClaudeAgentTurn(params: {
         for (const block of content) {
           const b = block as { type: string; id?: string; name?: string; input?: unknown };
           if (b.type === "tool_use" && b.name) {
-            if (b.id) toolUseIdToName.set(b.id, b.name);
+            if (b.id) {
+              toolUseIdToName.set(b.id, b.name);
+              const toolSpanId = tracer.startSpan({
+                sessionId,
+                type: "tool",
+                name: b.name,
+                parentId: turnSpanId,
+                startMs: Date.now(),
+              });
+              toolUseIdToSpanId.set(b.id, toolSpanId);
+            }
             webContents.send(CH.SESSION_TOOL_CALL, {
               session_id: sessionId,
               tool_name: b.name,
@@ -304,6 +328,8 @@ export async function runClaudeAgentTurn(params: {
           const b = block as { type: string; tool_use_id?: string; content?: unknown };
           if (b.type === "tool_result" && b.tool_use_id) {
             const toolName = toolUseIdToName.get(b.tool_use_id) ?? "unknown";
+            const spanId = toolUseIdToSpanId.get(b.tool_use_id);
+            if (spanId) tracer.endSpan(spanId, "success");
             const output = extractToolResultText(b.content);
             webContents.send(CH.SESSION_TOOL_RESULT, {
               session_id: sessionId,
@@ -316,8 +342,14 @@ export async function runClaudeAgentTurn(params: {
         resultSessionId = msg.session_id;
       }
     }
+    tracer.endSpan(turnSpanId, "success", {
+      firstTokenLatencyMs: firstTokenMs ? firstTokenMs - turnStartMs : undefined,
+    });
   } catch (err) {
+    tracer.endSpan(turnSpanId, "error", { errorMessage: String(err) });
     throw err;
+  } finally {
+    unsubTracer();
   }
 
   // 5. Persist sdk_session_id if it changed or was assigned for the first time

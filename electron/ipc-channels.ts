@@ -64,3 +64,7 @@ export const SESSION_TOOL_CALL        = "session:tool_call";
 export const SESSION_TOOL_RESULT      = "session:tool_result";
 export const SESSION_APPROVAL_REQUIRED = "session:approval_required";
 export const SESSION_MESSAGE          = "session:message";
+export const SESSION_TRACE            = "session:trace";
+
+// ── Traces ────────────────────────────────────────────────────────────────────
+export const GET_TRACES             = "traces:get";

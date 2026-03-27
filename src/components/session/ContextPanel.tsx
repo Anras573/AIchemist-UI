@@ -19,6 +19,7 @@ import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { FileViewer } from "./FileViewer";
 import { SkillsPanel } from "./SkillsPanel";
+import { TracesPanel } from "./TracesPanel";
 
 // ── Rust types ────────────────────────────────────────────────────────────────
 
@@ -190,7 +191,7 @@ function TerminalView({ sessionId }: TerminalViewProps) {
 
 // ── ContextPanel ──────────────────────────────────────────────────────────────
 
-export type ContextTab = "files" | "terminal" | "skills";
+export type ContextTab = "files" | "terminal" | "skills" | "traces";
 
 /**
  * Right panel content — renders whichever tool is active (files or terminal).
@@ -229,7 +230,7 @@ export function ContextPanel({
   // Header content depends on whether we're viewing a file
   const isViewingFile = activeTab === "files" && viewingFile !== null;
   const fileName = viewingFile?.split("/").pop() ?? "";
-  const headerLabel = isViewingFile ? fileName : activeTab === "files" ? "Files" : activeTab === "terminal" ? "Terminal" : "Skills";
+  const headerLabel = isViewingFile ? fileName : activeTab === "files" ? "Files" : activeTab === "terminal" ? "Terminal" : activeTab === "traces" ? "Traces" : "Skills";
 
   return (
     <div className="flex flex-col h-full">
@@ -273,6 +274,8 @@ export function ContextPanel({
           )
         ) : activeTab === "skills" ? (
           <SkillsPanel />
+        ) : activeTab === "traces" ? (
+          <TracesPanel />
         ) : activeTab === "terminal" && activeSessionId ? (
           <TerminalView sessionId={activeSessionId} />
         ) : (

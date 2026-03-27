@@ -73,6 +73,7 @@ export function useSessionEvents() {
     addLiveToolCall,
     appendTerminalOutput,
     addPendingApproval,
+    addOrUpdateTraceSpan,
   } = useSessionStore();
 
   useEffect(() => {
@@ -135,6 +136,11 @@ export function useSessionEvents() {
           });
         }
       ),
+
+      onSessionEvent<import("@/types").TraceSpan>(
+        IPC_CHANNELS.SESSION_TRACE,
+        (span) => addOrUpdateTraceSpan(span)
+      ),
     ];
 
     return () => unsubs.forEach((fn) => fn());
@@ -146,5 +152,6 @@ export function useSessionEvents() {
     addLiveToolCall,
     appendTerminalOutput,
     addPendingApproval,
+    addOrUpdateTraceSpan,
   ]);
 }

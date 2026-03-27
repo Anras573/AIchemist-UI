@@ -142,3 +142,19 @@ export interface SkillInfo {
   description: string;
   path: string;
 }
+
+// ─── Tracing ──────────────────────────────────────────────────────────────────
+
+export interface TraceSpan {
+  id: string;
+  /** Set for tool spans — points to the parent turn span id. */
+  parentId?: string;
+  sessionId: string;
+  type: "turn" | "tool";
+  name: string;
+  startMs: number;
+  endMs?: number;
+  durationMs?: number;
+  status: "running" | "success" | "error";
+  meta?: Record<string, unknown>;
+}

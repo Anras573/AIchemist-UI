@@ -64,6 +64,9 @@ export interface ElectronAPI {
   deleteSkillDir: (skillPath: string) => Promise<void>;
   createSkill: (args: { name: string; projectPath: string; scope: "global" | "project"; content: string }) => Promise<{ skillPath: string }>;
 
+  // ── Traces ────────────────────────────────────────────────────────────────
+  getTraces: (sessionId?: string) => Promise<import("../src/types").TraceSpan[]>;
+
   // ── Push event bus ────────────────────────────────────────────────────────
   on: (channel: string, listener: (payload: unknown) => void) => void;
   off: (channel: string, listener: (payload: unknown) => void) => void;
@@ -116,6 +119,7 @@ const api: ElectronAPI = {
   writeSkillFile: (args) => ipcRenderer.invoke(CH.WRITE_SKILL_FILE, args),
   deleteSkillDir: (skillPath) => ipcRenderer.invoke(CH.DELETE_SKILL_DIR, skillPath),
   createSkill: (args) => ipcRenderer.invoke(CH.CREATE_SKILL, args),
+  getTraces: (sessionId) => ipcRenderer.invoke(CH.GET_TRACES, sessionId),
 
   on: (channel, listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);

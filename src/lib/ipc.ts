@@ -68,6 +68,9 @@ export const ipc = {
     window.electronAPI.deleteSkillDir(skillPath),
   createSkill: (args: { name: string; projectPath: string; scope: "global" | "project"; content: string }) =>
     window.electronAPI.createSkill(args),
+
+  // Traces
+  getTraces: (sessionId?: string) => window.electronAPI.getTraces(sessionId),
 };
 
 // ── Push-event subscription helper ────────────────────────────────────────────
@@ -92,4 +95,5 @@ export const IPC_CHANNELS = {
   SESSION_TOOL_RESULT: "session:tool_result",
   SESSION_APPROVAL_REQUIRED: "session:approval_required",
   SESSION_MESSAGE: "session:message",
+  SESSION_TRACE: "session:trace",
 } as const;

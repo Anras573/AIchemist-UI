@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { Session, SessionStatus, Message } from "@/types";
+import { Session, SessionStatus, Message, TraceSpan } from "@/types";
 
 export interface LiveToolCall {
   toolCallId: string;
@@ -34,6 +34,8 @@ interface SessionStore {
   sessionAgents: Record<string, string | null>;
   // Active skills per session; empty array = no skills toggled
   sessionSkills: Record<string, string[]>;
+  // Trace spans per session; accumulates live during a turn
+  sessionTraces: Record<string, TraceSpan[]>;
 
   mergeSessions: (sessions: Session[]) => void;
   setActiveSession: (id: string | null) => void;
@@ -63,6 +65,7 @@ interface SessionStore {
   terminalOutput: Record<string, string>;
   setSessionAgent: (sessionId: string, agent: string | null) => void;
   setSessionSkills: (sessionId: string, skills: string[]) => void;
+  addOrUpdateTraceSpan: (span: TraceSpan) => void;
 }
 
 export const useSessionStore = create<SessionStore>()(
@@ -76,6 +79,7 @@ export const useSessionStore = create<SessionStore>()(
       terminalOutput: {},
       sessionAgents: {},
       sessionSkills: {},
+      sessionTraces: {},
 
       // Merge new sessions into the store without wiping sessions from other projects.
       // Preserves messages already in the store — listSessions returns messages: [],
@@ -129,8 +133,10 @@ export const useSessionStore = create<SessionStore>()(
       removeSession: (id) =>
         set((state) => {
           const { [id]: _removed, ...rest } = state.sessions;
+          const { [id]: _t, ...tracesRest } = state.sessionTraces;
           return {
             sessions: rest,
+            sessionTraces: tracesRest,
             activeSessionId:
               state.activeSessionId === id ? null : state.activeSessionId,
           };
@@ -287,6 +293,17 @@ export const useSessionStore = create<SessionStore>()(
         set((state) => ({
           sessionSkills: { ...state.sessionSkills, [sessionId]: skills },
         })),
+
+      addOrUpdateTraceSpan: (span) =>
+        set((state) => {
+          const existing = state.sessionTraces[span.sessionId] ?? [];
+          const idx = existing.findIndex((s) => s.id === span.id);
+          const updated =
+            idx >= 0
+              ? [...existing.slice(0, idx), span, ...existing.slice(idx + 1)]
+              : [...existing, span];
+          return { sessionTraces: { ...state.sessionTraces, [span.sessionId]: updated } };
+        }),
     }),
     {
       name: "aichemist-session-store",
