@@ -47,6 +47,14 @@ export const GET_CLAUDE_AGENTS      = "agent:get-claude-agents";
 export const GET_COPILOT_AGENTS     = "agent:get-copilot-agents";
 export const LIST_SKILLS            = "agent:list-skills";
 
+// ── Agent / Skill file management ────────────────────────────────────────────
+export const WRITE_AGENT_FILE   = "agents:write-file";
+export const DELETE_AGENT_FILE  = "agents:delete-file";
+export const CREATE_AGENT       = "agents:create";
+export const WRITE_SKILL_FILE   = "agents:write-skill";
+export const DELETE_SKILL_DIR   = "agents:delete-skill";
+export const CREATE_SKILL       = "agents:create-skill";
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 export const SETTINGS_READ          = "settings:read";
 export const SETTINGS_WRITE         = "settings:write";

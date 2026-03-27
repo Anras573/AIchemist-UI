@@ -56,6 +56,14 @@ export interface ElectronAPI {
   getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
   listSkills: (projectPath: string) => Promise<Array<{ name: string; description: string; path: string }>>;
 
+  // ── Agent / Skill file management ─────────────────────────────────────────
+  writeAgentFile: (args: { filePath: string; content: string }) => Promise<void>;
+  deleteAgentFile: (filePath: string) => Promise<void>;
+  createAgent: (args: { provider: string; name: string; projectPath: string; scope: "global" | "project"; content: string }) => Promise<{ filePath: string }>;
+  writeSkillFile: (args: { skillPath: string; content: string }) => Promise<void>;
+  deleteSkillDir: (skillPath: string) => Promise<void>;
+  createSkill: (args: { name: string; projectPath: string; scope: "global" | "project"; content: string }) => Promise<{ skillPath: string }>;
+
   // ── Push event bus ────────────────────────────────────────────────────────
   on: (channel: string, listener: (payload: unknown) => void) => void;
   off: (channel: string, listener: (payload: unknown) => void) => void;
@@ -101,6 +109,13 @@ const api: ElectronAPI = {
   getClaudeAgents: (projectPath) => ipcRenderer.invoke(CH.GET_CLAUDE_AGENTS, projectPath),
   getCopilotAgents: (projectPath) => ipcRenderer.invoke(CH.GET_COPILOT_AGENTS, projectPath),
   listSkills: (projectPath) => ipcRenderer.invoke(CH.LIST_SKILLS, projectPath),
+
+  writeAgentFile: (args) => ipcRenderer.invoke(CH.WRITE_AGENT_FILE, args),
+  deleteAgentFile: (filePath) => ipcRenderer.invoke(CH.DELETE_AGENT_FILE, filePath),
+  createAgent: (args) => ipcRenderer.invoke(CH.CREATE_AGENT, args),
+  writeSkillFile: (args) => ipcRenderer.invoke(CH.WRITE_SKILL_FILE, args),
+  deleteSkillDir: (skillPath) => ipcRenderer.invoke(CH.DELETE_SKILL_DIR, skillPath),
+  createSkill: (args) => ipcRenderer.invoke(CH.CREATE_SKILL, args),
 
   on: (channel, listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);

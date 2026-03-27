@@ -54,6 +54,14 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     getCopilotAgents: vi.fn().mockResolvedValue([]),
     listSkills: vi.fn().mockResolvedValue([]),
 
+    // Agent / Skill file management
+    writeAgentFile: vi.fn().mockResolvedValue(undefined),
+    deleteAgentFile: vi.fn().mockResolvedValue(undefined),
+    createAgent: vi.fn().mockResolvedValue({ filePath: "" }),
+    writeSkillFile: vi.fn().mockResolvedValue(undefined),
+    deleteSkillDir: vi.fn().mockResolvedValue(undefined),
+    createSkill: vi.fn().mockResolvedValue({ skillPath: "" }),
+
     // Push event bus
     on: vi.fn(),
     off: vi.fn(),

@@ -50,7 +50,7 @@ function extractToolResultText(content: unknown): string {
 
 // ── Main export ────────────────────────────────────────────────────────────────
 
-type AgentEntry = { name: string; description: string; model?: string };
+type AgentEntry = { name: string; description: string; model?: string; path?: string; editable?: boolean };
 
 /**
  * Parses a Claude agent markdown file's YAML frontmatter.
@@ -88,12 +88,10 @@ function scanLocalAgents(): AgentEntry[] {
       .filter((e) => !e.isDirectory() && e.name.endsWith(".md"))
       .flatMap((file) => {
         try {
-          const content = fs.readFileSync(
-            path.join(agentsDir, file.name),
-            "utf8"
-          );
+          const filePath = path.join(agentsDir, file.name);
+          const content = fs.readFileSync(filePath, "utf8");
           const agent = parseAgentFrontmatter(content);
-          return agent ? [agent] : [];
+          return agent ? [{ ...agent, path: filePath, editable: true }] : [];
         } catch {
           return [];
         }
@@ -128,7 +126,7 @@ export async function getClaudeAgents(
       },
     });
     try {
-      sdkAgents = await q.supportedAgents();
+      sdkAgents = (await q.supportedAgents()).map((a) => ({ ...a, editable: false }));
     } finally {
       await q.return(undefined);
     }

@@ -131,6 +131,10 @@ export interface AgentInfo {
   name: string;
   description: string;
   model?: string;
+  /** Absolute path to the agent's .md file. Undefined for SDK built-in agents. */
+  path?: string;
+  /** Whether the agent file can be edited or deleted. False for SDK built-ins. */
+  editable?: boolean;
 }
 
 export interface SkillInfo {

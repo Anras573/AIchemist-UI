@@ -51,10 +51,11 @@ export async function getCopilotModels(): Promise<Array<{ id: string; name: stri
 
 // ── Agent scanning ────────────────────────────────────────────────────────────
 
-type CopilotAgentEntry = { name: string; description: string; prompt: string };
+type CopilotAgentEntry = { name: string; description: string; prompt: string; filePath: string };
+type CopilotAgentParsed = Omit<CopilotAgentEntry, "filePath">;
 
 /** Parse a Copilot agent markdown file's YAML frontmatter + body. */
-function parseCopilotAgentFile(content: string): CopilotAgentEntry | null {
+function parseCopilotAgentFile(content: string): CopilotAgentParsed | null {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/);
   if (!match) return null;
 
@@ -84,9 +85,10 @@ function scanAgentDir(dir: string): CopilotAgentEntry[] {
       .filter((e) => !e.isDirectory() && e.name.endsWith(".md"))
       .flatMap((file) => {
         try {
-          const content = fs.readFileSync(path.join(dir, file.name), "utf8");
+          const filePath = path.join(dir, file.name);
+          const content = fs.readFileSync(filePath, "utf8");
           const entry = parseCopilotAgentFile(content);
-          return entry ? [entry] : [];
+          return entry ? [{ ...entry, filePath }] : [];
         } catch {
           return [];
         }
@@ -116,7 +118,7 @@ export function listCopilotAgents(projectPath: string): AgentInfo[] {
     ...globalEntries.filter((a) => !projectNames.has(a.name)),
   ];
 
-  return merged.map(({ name, description }) => ({ name, description }));
+  return merged.map(({ name, description, filePath }) => ({ name, description, path: filePath, editable: true }));
 }
 
 /** Convert scanned agent entries to CustomAgentConfig objects for the SDK. */

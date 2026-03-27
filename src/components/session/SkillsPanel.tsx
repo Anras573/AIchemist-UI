@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Pencil, Plus } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { SkillEditorModal } from "@/components/session/SkillEditorModal";
 import type { SkillInfo } from "@/types";
 
 // ── SkillCard ─────────────────────────────────────────────────────────────────
@@ -12,32 +14,46 @@ function SkillCard({
   skill,
   active,
   onToggle,
+  onEdit,
 }: {
   skill: SkillInfo;
   active: boolean;
   onToggle: () => void;
+  onEdit: () => void;
 }) {
   return (
-    <button
-      onClick={onToggle}
+    <div
       className={cn(
-        "w-full text-left rounded-md border px-3 py-2 transition-colors",
-        "hover:bg-accent hover:text-accent-foreground",
+        "w-full text-left rounded-md border px-3 py-2 transition-colors group relative",
         active
           ? "border-primary/40 bg-primary/5"
           : "border-border bg-background"
       )}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold truncate">{skill.name}</span>
-        {active && <Check className="size-3 shrink-0 text-primary" />}
-      </div>
-      {skill.description && (
-        <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
-          {skill.description}
-        </p>
-      )}
-    </button>
+      <button
+        onClick={onToggle}
+        className="w-full text-left hover:bg-transparent"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold truncate">{skill.name}</span>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(); }}
+              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
+              title="Edit skill"
+            >
+              <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+            </button>
+            {active && <Check className="size-3 text-primary" />}
+          </div>
+        </div>
+        {skill.description && (
+          <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
+            {skill.description}
+          </p>
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -53,7 +69,11 @@ export function SkillsPanel() {
 
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
 
-  useEffect(() => {
+  // Modal state — undefined means closed, null means "new", SkillInfo means "edit"
+  const [editingSkill, setEditingSkill] = useState<SkillInfo | null | undefined>(undefined);
+  const modalOpen = editingSkill !== undefined;
+
+  const loadSkills = useCallback(() => {
     if (!projectPath) return;
     setSkills(null);
     ipc
@@ -61,6 +81,10 @@ export function SkillsPanel() {
       .then(setSkills)
       .catch(() => setSkills([]));
   }, [projectPath]);
+
+  useEffect(() => {
+    loadSkills();
+  }, [loadSkills]);
 
   const handleToggle = useCallback(
     (skillName: string) => {
@@ -74,30 +98,60 @@ export function SkillsPanel() {
     [activeSessionId, activeSkills, setSessionSkills]
   );
 
+  const handleModalClose = useCallback(() => setEditingSkill(undefined), []);
+
+  const handleModalSaved = useCallback(() => {
+    loadSkills();
+  }, [loadSkills]);
+
   return (
-    <div className="flex flex-col h-full overflow-y-auto">
-      <div className="p-2 flex flex-col gap-1.5">
-        {skills === null ? (
-          <div className="flex items-center gap-2 px-2 py-3 text-[10px] text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Loading skills…
-          </div>
-        ) : skills.length === 0 ? (
-          <div className="px-2 py-3 text-[10px] text-muted-foreground">
-            No skills installed in{" "}
-            <code className="font-mono">.agents/skills/</code>.
-          </div>
-        ) : (
-          skills.map((skill) => (
-            <SkillCard
-              key={skill.name}
-              skill={skill}
-              active={activeSkills.includes(skill.name)}
-              onToggle={() => handleToggle(skill.name)}
-            />
-          ))
-        )}
+    <>
+      <div className="flex flex-col h-full overflow-y-auto">
+        <div className="p-2 flex flex-col gap-1.5">
+          {skills === null ? (
+            <div className="flex items-center gap-2 px-2 py-3 text-[10px] text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading skills…
+            </div>
+          ) : skills.length === 0 ? (
+            <div className="px-2 py-3 text-[10px] text-muted-foreground">
+              No skills installed in{" "}
+              <code className="font-mono">.agents/skills/</code>.
+            </div>
+          ) : (
+            skills.map((skill) => (
+              <SkillCard
+                key={skill.name}
+                skill={skill}
+                active={activeSkills.includes(skill.name)}
+                onToggle={() => handleToggle(skill.name)}
+                onEdit={() => setEditingSkill(skill)}
+              />
+            ))
+          )}
+        </div>
+        <div className="px-2 pb-2 mt-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full gap-1.5 text-xs"
+            onClick={() => setEditingSkill(null)}
+          >
+            <Plus className="h-3 w-3" />
+            New Skill
+          </Button>
+        </div>
       </div>
-    </div>
+
+      {modalOpen && (
+        <SkillEditorModal
+          skill={editingSkill ?? null}
+          projectPath={projectPath}
+          open={modalOpen}
+          onClose={handleModalClose}
+          onSaved={handleModalSaved}
+        />
+      )}
+    </>
   );
 }

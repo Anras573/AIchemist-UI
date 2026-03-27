@@ -54,6 +54,20 @@ export const ipc = {
   getClaudeAgents: (projectPath: string) => window.electronAPI.getClaudeAgents(projectPath),
   getCopilotAgents: (projectPath: string) => window.electronAPI.getCopilotAgents(projectPath),
   listSkills: (projectPath: string) => window.electronAPI.listSkills(projectPath),
+
+  // Agent / Skill file management
+  writeAgentFile: (args: { filePath: string; content: string }) =>
+    window.electronAPI.writeAgentFile(args),
+  deleteAgentFile: (filePath: string) =>
+    window.electronAPI.deleteAgentFile(filePath),
+  createAgent: (args: { provider: string; name: string; projectPath: string; scope: "global" | "project"; content: string }) =>
+    window.electronAPI.createAgent(args),
+  writeSkillFile: (args: { skillPath: string; content: string }) =>
+    window.electronAPI.writeSkillFile(args),
+  deleteSkillDir: (skillPath: string) =>
+    window.electronAPI.deleteSkillDir(skillPath),
+  createSkill: (args: { name: string; projectPath: string; scope: "global" | "project"; content: string }) =>
+    window.electronAPI.createSkill(args),
 };
 
 // ── Push-event subscription helper ────────────────────────────────────────────
