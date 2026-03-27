@@ -236,7 +236,7 @@ function registerHandlers(): void {  // ── Settings ────────
       projectPath: project.path,
       projectConfig: effectiveConfig,
       webContents: win.webContents,
-      agent: args.agent,
+      agent: args.agent ?? session.agent ?? undefined,
       skills: session.skills ?? undefined,
     });
   });

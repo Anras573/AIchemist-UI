@@ -106,8 +106,9 @@ function scanLocalAgents(): AgentEntry[] {
  * 1. Built-in agents reported by the SDK via `supportedAgents()`
  * 2. User-defined agents found in `~/.claude/agents/*.md`
  *
- * SDK agents take priority — if a local file shares a name with a built-in
- * agent, the built-in entry wins and the file is skipped.
+ * SDK agents take priority for display metadata (description, model), but
+ * if a local file exists for an SDK agent, it is marked editable so users
+ * can edit or delete it. SDK-only agents (no local file) are read-only.
  */
 export async function getClaudeAgents(
   projectPath: string
@@ -136,10 +137,20 @@ export async function getClaudeAgents(
 
   // 2. User-defined agents from ~/.claude/agents/
   const localAgents = scanLocalAgents();
+  const localFileMap = new Map(localAgents.map((a) => [a.name, a]));
 
-  // 3. Merge, SDK agents take priority
+  // 3. Merge: SDK metadata takes priority, but local files determine editability.
+  //    If the SDK reports an agent that also has a local file, mark it editable.
   const sdkNames = new Set(sdkAgents.map((a) => a.name));
-  return [...sdkAgents, ...localAgents.filter((a) => !sdkNames.has(a.name))];
+  const mergedSdkAgents = sdkAgents.map((a) => {
+    const local = localFileMap.get(a.name);
+    return local ? { ...a, path: local.path, editable: true } : a;
+  });
+
+  return [
+    ...mergedSdkAgents,
+    ...localAgents.filter((a) => !sdkNames.has(a.name)),
+  ];
 }
 
 export async function runClaudeAgentTurn(params: {
