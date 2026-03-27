@@ -91,6 +91,10 @@ function getToolSummary(name: string, meta: Record<string, unknown> | undefined)
   if (name === "web_fetch") {
     return (input.url as string | undefined) ?? null;
   }
+  if (name === "Skill" || name === "Agent") {
+    const skillName = (input.name ?? input.skill) as string | undefined;
+    return skillName ? `${name.toLowerCase()}: ${skillName}` : null;
+  }
   return null;
 }
 
