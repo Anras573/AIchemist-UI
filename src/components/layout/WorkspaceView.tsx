@@ -7,13 +7,11 @@ import { SessionTabBar } from "@/components/session/SessionTabBar";
 import { TimelinePanel } from "@/components/session/TimelinePanel";
 import { ContextPanel, type ContextTab } from "@/components/session/ContextPanel";
 import { ToolStrip } from "@/components/session/ToolStrip";
-import { ModelPickerButton } from "@/components/session/ModelPickerButton";
 
 export function WorkspaceView() {
   const { activeProjectId, projects } = useProjectStore();
-  const { sessions, activeSessionId, tabSwitchRequest, clearTabSwitchRequest } = useSessionStore();
+  const { sessions: _sessions, activeSessionId: _activeSessionId, tabSwitchRequest, clearTabSwitchRequest } = useSessionStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
-  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const { sendMessage } = useAgentTurn();
 
   // null = panel closed; a tab value = panel open on that tab
@@ -46,19 +44,10 @@ export function WorkspaceView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Tab bar + model picker */}
+      {/* Tab bar */}
       <div className="drag-region flex items-center border-b bg-background flex-shrink-0">
         <div className="no-drag-region flex-1 overflow-hidden">
           <SessionTabBar projectId={activeProject.id} />
-        </div>
-        <div className="no-drag-region flex-shrink-0 pr-2 border-l ml-1 pl-2">
-          {activeSession && (
-            <ModelPickerButton
-              sessionId={activeSession.id}
-              provider={activeSession.provider}
-              model={activeSession.model}
-            />
-          )}
         </div>
       </div>
 

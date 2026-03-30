@@ -4,6 +4,7 @@ import { Message } from "@/types";
 import { cn } from "@/lib/utils";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { AgentPickerButton } from "./AgentPickerButton";
+import { ModelPickerButton } from "./ModelPickerButton";
 
 // ─── Individual message bubble ────────────────────────────────────────────────
 
@@ -243,6 +244,9 @@ interface InputBarProps {
 }
 
 function InputBar({ disabled, placeholder = "Send a message…", onSend }: InputBarProps) {
+  const { sessions, activeSessionId } = useSessionStore();
+  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -270,6 +274,13 @@ function InputBar({ disabled, placeholder = "Send a message…", onSend }: Input
         )}
       />
       <div className="mt-1.5 flex items-center gap-2">
+        {activeSession && (
+          <ModelPickerButton
+            sessionId={activeSession.id}
+            provider={activeSession.provider}
+            model={activeSession.model}
+          />
+        )}
         <AgentPickerButton />
         <p className="text-xs text-muted-foreground/60 ml-auto">
           Enter to send · Shift+Enter for new line
