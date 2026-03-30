@@ -197,3 +197,23 @@ The AI Elements skill is installed at `.agents/skills/ai-elements/`. Reference d
 Tailwind CSS v4 (via `@tailwindcss/vite` plugin). UI primitives are shadcn/ui components in `src/components/ui/`. Use `cn()` from `src/lib/utils.ts` for conditional class merging.
 
 **⚠️ Tailwind v4 does not scan `node_modules`:** If a third-party component (e.g. `streamdown`) renders Tailwind arbitrary-value classes from its dist bundle, those classes will never be generated. Add explicit CSS rules in `src/index.css` instead of relying on those classes being present. Example: streamdown's syntax-highlighted token spans write color values as inline CSS custom properties (`--sdm-c`, `--shiki-dark`); `index.css` has `[data-streamdown="code-block"] span { color: var(--sdm-c, inherit); }` to apply them.
+
+---
+
+## Known SDK Footguns
+
+### Claude Code SDK — `allowedTools` vs `tools`
+
+These two `Options` fields look similar but do completely different things:
+
+| Field | Effect |
+|---|---|
+| `allowedTools: string[]` | **Auto-approves** the listed tools without an interactive permission prompt. Does **not** restrict availability. |
+| `tools: string[]` | **Restricts** available built-in tools to exactly that list — and also blocks MCP tools from our custom server. |
+
+**Never change `allowedTools` to `tools`** in `electron/agent/claude.ts`. Doing so silently prevents all MCP tool calls (write_file, execute_bash, web_fetch, delete_file), leaving the agent unable to do anything useful without showing any error to the user.
+
+The correct pattern:
+- Use `allowedTools` to suppress permission prompts for safe native tools (Read, Glob, LS, …).
+- Leave `tools` unset so our MCP server tools remain accessible.
+- Track file changes from native `Write`/`Edit` tool calls via the `pendingFileChanges` intercept in `claude.ts`, not by restricting native tools.

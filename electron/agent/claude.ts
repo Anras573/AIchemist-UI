@@ -252,6 +252,12 @@ export async function runClaudeAgentTurn(params: {
       mcpServers: { "aichemist-tools": mcpServer },
       settingSources: ["local", "user", "project"],
       permissionMode: "acceptEdits",
+      // ⚠️  SDK naming trap:
+      //   allowedTools = "auto-approve these without a permission prompt" (does NOT restrict availability)
+      //   tools        = "restrict to ONLY these built-in tools" (also blocks our MCP tools — don't use)
+      // We use allowedTools to suppress interactive prompts for safe native tools (Read, Glob, etc.)
+      // while letting the model still access all MCP tools from our custom server.
+      // File changes from native Write/Edit are tracked via the tool_use intercept below.
       allowedTools: ["Read", "Glob", "LS", "Skill", "Agent"],
       includePartialMessages: true,
       systemPrompt,
