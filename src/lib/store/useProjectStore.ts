@@ -6,6 +6,7 @@ interface ProjectStore {
   projects: Project[];
   activeProjectId: string | null;
   settingsOpen: boolean;
+  projectSettingsOpen: boolean;
   setProjects: (projects: Project[]) => void;
   setActiveProject: (id: string | null) => void;
   addProject: (project: Project) => void;
@@ -13,6 +14,8 @@ interface ProjectStore {
   updateProject: (project: Project) => void;
   openSettings: () => void;
   closeSettings: () => void;
+  openProjectSettings: () => void;
+  closeProjectSettings: () => void;
 }
 
 export const useProjectStore = create<ProjectStore>()(
@@ -21,6 +24,7 @@ export const useProjectStore = create<ProjectStore>()(
       projects: [],
       activeProjectId: null,
       settingsOpen: false,
+      projectSettingsOpen: false,
 
       setProjects: (projects) => set({ projects }),
 
@@ -42,6 +46,8 @@ export const useProjectStore = create<ProjectStore>()(
 
       openSettings: () => set({ settingsOpen: true }),
       closeSettings: () => set({ settingsOpen: false }),
+      openProjectSettings: () => set({ projectSettingsOpen: true }),
+      closeProjectSettings: () => set({ projectSettingsOpen: false }),
     }),
     {
       name: "aichemist-project-store",

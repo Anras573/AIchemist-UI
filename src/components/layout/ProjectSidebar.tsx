@@ -5,7 +5,7 @@ import { useSessionStore } from "@/lib/store/useSessionStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Settings } from "lucide-react";
+import { Settings, Settings2 } from "lucide-react";
 
 interface ProjectSidebarProps {
   collapsed: boolean;
@@ -13,7 +13,7 @@ interface ProjectSidebarProps {
 }
 
 export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarProps) {
-  const { projects, activeProjectId, setProjects, setActiveProject, addProject, removeProject, openSettings } =
+  const { projects, activeProjectId, setProjects, setActiveProject, addProject, removeProject, openSettings, openProjectSettings } =
     useProjectStore();
   const { sessions } = useSessionStore();
 
@@ -136,6 +136,16 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
                   title="Remove project"
                 >
                   ✕
+                </button>
+              )}
+              {/* Project settings gear — visible on hover for active project */}
+              {!collapsed && active && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); openProjectSettings(); }}
+                  className="absolute right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity p-0.5"
+                  title="Project settings"
+                >
+                  <Settings2 className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>

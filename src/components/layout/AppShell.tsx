@@ -3,13 +3,14 @@ import { ProjectSidebar } from "@/components/layout/ProjectSidebar";
 import { WorkspaceView } from "@/components/layout/WorkspaceView";
 import { CommandPalette } from "@/components/layout/CommandPalette";
 import { SettingsView } from "@/components/settings/SettingsView";
+import { ProjectSettingsSheet } from "@/components/settings/ProjectSettingsSheet";
 import { useSessionEvents } from "@/lib/hooks/useSessionEvents";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 
 export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const { settingsOpen, openSettings, closeSettings } = useProjectStore();
+  const { settingsOpen, openSettings, closeSettings, projectSettingsOpen, closeProjectSettings, activeProjectId } = useProjectStore();
 
   // Subscribe to all session:* events for the lifetime of the app
   useSessionEvents();
@@ -40,6 +41,13 @@ export function AppShell() {
       <main className="flex flex-1 overflow-hidden">
         {settingsOpen ? <SettingsView onClose={closeSettings} /> : <WorkspaceView />}
       </main>
+
+      {projectSettingsOpen && activeProjectId && (
+        <ProjectSettingsSheet
+          projectId={activeProjectId}
+          onClose={closeProjectSettings}
+        />
+      )}
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </div>
