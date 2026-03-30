@@ -162,6 +162,22 @@ export interface SessionFileChangeEvent {
   file_change: FileChange;
 }
 
+export interface CompactionEvent {
+  id: string;
+  session_id: string;
+  /** 'auto' = SDK triggered; 'manual' = user triggered */
+  trigger: "auto" | "manual";
+  /** Token count before compaction */
+  pre_tokens: number;
+  /** ISO timestamp when the compaction boundary was received */
+  timestamp: string;
+}
+
+export interface SessionCompactionEvent {
+  session_id: string;
+  compaction: CompactionEvent;
+}
+
 
 export interface TraceSpan {
   id: string;

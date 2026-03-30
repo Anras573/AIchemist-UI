@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { Session, SessionStatus, Message, TraceSpan, FileChange } from "@/types";
+import { Session, SessionStatus, Message, TraceSpan, FileChange, CompactionEvent } from "@/types";
 
 export interface LiveToolCall {
   toolCallId: string;
@@ -38,6 +38,9 @@ interface SessionStore {
   sessionTraces: Record<string, TraceSpan[]>;
   // File changes written during a session (from SESSION_FILE_CHANGE events)
   sessionFileChanges: Record<string, FileChange[]>;
+  // Compaction events received during a session (from SESSION_COMPACTION events)
+  sessionCompactions: Record<string, CompactionEvent[]>;
+  addCompactionEvent: (sessionId: string, event: CompactionEvent) => void;
 
   mergeSessions: (sessions: Session[]) => void;
   setActiveSession: (id: string | null) => void;
@@ -88,6 +91,7 @@ export const useSessionStore = create<SessionStore>()(
       sessionSkills: {},
       sessionTraces: {},
       sessionFileChanges: {},
+      sessionCompactions: {},
       tabSwitchRequest: null,
 
       // Merge new sessions into the store without wiping sessions from other projects.
@@ -319,6 +323,14 @@ export const useSessionStore = create<SessionStore>()(
           sessionFileChanges: {
             ...state.sessionFileChanges,
             [sessionId]: [...(state.sessionFileChanges[sessionId] ?? []), change],
+          },
+        })),
+
+      addCompactionEvent: (sessionId, event) =>
+        set((state) => ({
+          sessionCompactions: {
+            ...state.sessionCompactions,
+            [sessionId]: [...(state.sessionCompactions[sessionId] ?? []), event],
           },
         })),
 

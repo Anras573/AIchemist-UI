@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
-import { Message } from "@/types";
+import { Message, CompactionEvent } from "@/types";
 import { cn } from "@/lib/utils";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { AgentPickerButton } from "./AgentPickerButton";
@@ -158,7 +158,25 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
   );
 }
 
-// ─── Main panel ───────────────────────────────────────────────────────────────
+// ─── Compaction marker ────────────────────────────────────────────────────────
+
+function CompactionMarker({ event }: { event: CompactionEvent }) {
+  const tokens = event.pre_tokens > 0
+    ? `${Math.round(event.pre_tokens / 1000)}k tokens summarised`
+    : "context summarised";
+  return (
+    <div className="flex items-center gap-2 py-1 select-none" aria-label="Conversation compacted">
+      <div className="flex-1 h-px bg-border" />
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap px-1">
+        <span>🗜</span>
+        <span>Conversation compacted · {tokens}</span>
+      </span>
+      <div className="flex-1 h-px bg-border" />
+    </div>
+  );
+}
+
+
 
 interface TimelinePanelProps {
   /** Called by Phase 4 when the user submits a message. */
@@ -168,11 +186,12 @@ interface TimelinePanelProps {
 }
 
 export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProps) {
-  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, resolveApproval } = useSessionStore();
+  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, resolveApproval, sessionCompactions } = useSessionStore();
   const session = activeSessionId ? sessions[activeSessionId] : null;
   const streaming = activeSessionId ? (streamingText[activeSessionId] ?? "") : "";
   const toolCalls = activeSessionId ? (liveToolCalls[activeSessionId] ?? []) : [];
   const approvals = activeSessionId ? (pendingApprovals[activeSessionId] ?? []) : [];
+  const compactions = activeSessionId ? (sessionCompactions[activeSessionId] ?? []) : [];
   const isRunning = session?.status === "running" || session?.status === "waiting_approval";
 
   function handleApprovalDecision(approvalId: string, approved: boolean) {
@@ -209,18 +228,36 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
 
   const messages = session.messages ?? [];
 
+  // Build a merged, time-sorted list of messages and compaction markers
+  type TimelineItem =
+    | { kind: "message"; data: Message }
+    | { kind: "compaction"; data: CompactionEvent };
+
+  const timelineItems: TimelineItem[] = [
+    ...messages.map((m): TimelineItem => ({ kind: "message", data: m })),
+    ...compactions.map((c): TimelineItem => ({ kind: "compaction", data: c })),
+  ].sort((a, b) => {
+    const ta = a.kind === "message" ? a.data.created_at : a.data.timestamp;
+    const tb = b.kind === "message" ? b.data.created_at : b.data.timestamp;
+    return ta.localeCompare(tb);
+  });
+
   return (
     <div className="flex flex-col h-full">
       {/* Message list */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length === 0 && !streaming && (
+        {timelineItems.length === 0 && !streaming && (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
             Send a message to start the conversation
           </div>
         )}
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
-        ))}
+        {timelineItems.map((item) =>
+          item.kind === "message" ? (
+            <MessageBubble key={item.data.id} message={item.data} />
+          ) : (
+            <CompactionMarker key={item.data.id} event={item.data} />
+          )
+        )}
         {toolCalls.map((call) => (
           <ToolCallBlock key={call.toolCallId} call={call} />
         ))}

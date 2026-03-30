@@ -411,6 +411,21 @@ export async function runClaudeAgentTurn(params: {
         }
       } else if (msg.type === "result") {
         resultSessionId = msg.session_id;
+      } else if (msg.type === "system") {
+        const sysMsg = msg as { type: "system"; subtype: string; [key: string]: unknown };
+        if (sysMsg.subtype === "compact_boundary") {
+          const meta = sysMsg["compact_metadata"] as { trigger: "auto" | "manual"; pre_tokens: number } | undefined;
+          webContents.send(CH.SESSION_COMPACTION, {
+            session_id: sessionId,
+            compaction: {
+              id: (sysMsg["uuid"] as string | undefined) ?? `${sessionId}-${Date.now()}`,
+              session_id: sessionId,
+              trigger: meta?.trigger ?? "auto",
+              pre_tokens: meta?.pre_tokens ?? 0,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        }
       }
     }
     tracer.endSpan(turnSpanId, "success", {

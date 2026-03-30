@@ -75,6 +75,7 @@ export function useSessionEvents() {
     addPendingApproval,
     addOrUpdateTraceSpan,
     addFileChange,
+    addCompactionEvent,
     requestTabSwitch,
   } = useSessionStore();
 
@@ -151,6 +152,13 @@ export function useSessionEvents() {
           requestTabSwitch("changes");
         }
       ),
+
+      onSessionEvent<import("@/types").SessionCompactionEvent>(
+        IPC_CHANNELS.SESSION_COMPACTION,
+        (payload) => {
+          addCompactionEvent(payload.session_id, payload.compaction);
+        }
+      ),
     ];
 
     return () => unsubs.forEach((fn) => fn());
@@ -164,6 +172,7 @@ export function useSessionEvents() {
     addPendingApproval,
     addOrUpdateTraceSpan,
     addFileChange,
+    addCompactionEvent,
     requestTabSwitch,
   ]);
 }

@@ -100,4 +100,5 @@ export const IPC_CHANNELS = {
   SESSION_MESSAGE: "session:message",
   SESSION_TRACE: "session:trace",
   SESSION_FILE_CHANGE: "session:file_change",
+  SESSION_COMPACTION: "session:compaction",
 } as const;

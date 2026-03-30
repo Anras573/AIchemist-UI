@@ -71,4 +71,5 @@ export const GET_TRACES             = "traces:get";
 
 // ── Changes (session file writes + git diff) ──────────────────────────────────
 export const SESSION_FILE_CHANGE    = "session:file_change";
+export const SESSION_COMPACTION     = "session:compaction";
 export const GET_GIT_DIFF           = "fs:git-diff";
