@@ -1,5 +1,10 @@
 import { useState, useEffect } from "react";
 import { Loader2, Trash2 } from "lucide-react";
+import { cjk } from "@streamdown/cjk";
+import { code } from "@streamdown/code";
+import { math } from "@streamdown/math";
+import { mermaid } from "@streamdown/mermaid";
+import { Streamdown } from "streamdown";
 import { ipc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -14,8 +19,18 @@ import type { SkillInfo } from "@/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const streamdownPlugins = { cjk, code, math, mermaid };
+
 function defaultSkillContent(name: string) {
   return `---\nname: ${name}\ndescription: Brief description of what this skill does.\n---\n\nDescribe the capability or instructions this skill provides to the agent.\n`;
+}
+
+/** Strip YAML frontmatter (--- ... ---) from markdown content. */
+function stripFrontmatter(content: string): string {
+  if (!content.startsWith("---")) return content;
+  const end = content.indexOf("\n---", 3);
+  if (end === -1) return content;
+  return content.slice(end + 4).trimStart();
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -29,6 +44,8 @@ interface SkillEditorModalProps {
   onClose: () => void;
   /** Called after a successful save or delete so the caller can refresh the list. */
   onSaved: () => void;
+  /** When true, shows content read-only without save/delete controls. */
+  readOnly?: boolean;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -39,6 +56,7 @@ export function SkillEditorModal({
   open,
   onClose,
   onSaved,
+  readOnly = false,
 }: SkillEditorModalProps) {
   const isNew = skill === null;
 
@@ -134,12 +152,12 @@ export function SkillEditorModal({
     }
   };
 
-  const title = isNew ? "New Skill" : `Edit Skill — ${skill!.name}`;
+  const title = isNew ? "New Skill" : readOnly ? `Skill — ${skill!.name}` : `Edit Skill — ${skill!.name}`;
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent
-        className="max-w-2xl w-full"
+        className="sm:max-w-4xl w-full overflow-hidden"
         showCloseButton={!saving && !deleting}
       >
         <DialogHeader>
@@ -186,20 +204,32 @@ export function SkillEditorModal({
           )}
 
           <div>
-            <label className="text-[11px] text-muted-foreground mb-1 block">
-              SKILL.md content{" "}
-              <span className="text-muted-foreground/60">(frontmatter + instructions)</span>
-            </label>
+            {!readOnly && (
+              <label className="text-[11px] text-muted-foreground mb-1 block">
+                SKILL.md content{" "}
+                <span className="text-muted-foreground/60">(frontmatter + instructions)</span>
+              </label>
+            )}
             {loading ? (
               <div className="flex items-center gap-2 py-8 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Loading…
               </div>
+            ) : readOnly ? (
+              <div className="overflow-auto max-h-[60vh] rounded-md border bg-muted/10 px-4 py-3">
+                <Streamdown
+                  plugins={streamdownPlugins}
+                  className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:overflow-x-auto [&_table]:overflow-x-auto [&_table]:block"
+                >
+                  {stripFrontmatter(content)}
+                </Streamdown>
+              </div>
             ) : (
               <textarea
                 className={cn(
-                  "w-full h-64 rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs leading-relaxed resize-y",
-                  "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  "w-full h-64 rounded-md border px-3 py-2 font-mono text-xs leading-relaxed resize-y",
+                  "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  "bg-muted/30"
                 )}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
@@ -214,7 +244,7 @@ export function SkillEditorModal({
         </div>
 
         <DialogFooter>
-          {!isNew && (
+          {!readOnly && !isNew && (
             <Button
               variant="destructive"
               size="sm"
@@ -231,16 +261,18 @@ export function SkillEditorModal({
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={onClose} disabled={saving || deleting}>
-            Cancel
+            {readOnly ? "Close" : "Cancel"}
           </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={saving || loading || deleting}
-          >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {isNew ? "Create" : "Save"}
-          </Button>
+          {!readOnly && (
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={saving || loading || deleting}
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              {isNew ? "Create" : "Save"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

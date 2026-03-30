@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Check, Loader2, Pencil, Plus } from "lucide-react";
+import { Check, Eye, Loader2, Pencil, Plus } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -14,11 +14,13 @@ function SkillCard({
   skill,
   active,
   onToggle,
+  onView,
   onEdit,
 }: {
   skill: SkillInfo;
   active: boolean;
   onToggle: () => void;
+  onView: () => void;
   onEdit: () => void;
 }) {
   return (
@@ -37,6 +39,13 @@ function SkillCard({
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-semibold truncate">{skill.name}</span>
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={(e) => { e.stopPropagation(); onView(); }}
+              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
+              title="View skill"
+            >
+              <Eye className="h-2.5 w-2.5 text-muted-foreground" />
+            </button>
             <button
               onClick={(e) => { e.stopPropagation(); onEdit(); }}
               className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
@@ -69,9 +78,11 @@ export function SkillsPanel() {
 
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
 
-  // Modal state — undefined means closed, null means "new", SkillInfo means "edit"
+  // Modal state — undefined means closed, null means "new", SkillInfo means "edit/view"
   const [editingSkill, setEditingSkill] = useState<SkillInfo | null | undefined>(undefined);
+  const [viewingSkill, setViewingSkill] = useState<SkillInfo | undefined>(undefined);
   const modalOpen = editingSkill !== undefined;
+  const viewModalOpen = viewingSkill !== undefined;
 
   const loadSkills = useCallback(() => {
     if (!projectPath) return;
@@ -99,6 +110,7 @@ export function SkillsPanel() {
   );
 
   const handleModalClose = useCallback(() => setEditingSkill(undefined), []);
+  const handleViewModalClose = useCallback(() => setViewingSkill(undefined), []);
 
   const handleModalSaved = useCallback(() => {
     loadSkills();
@@ -125,6 +137,7 @@ export function SkillsPanel() {
                 skill={skill}
                 active={activeSkills.includes(skill.name)}
                 onToggle={() => handleToggle(skill.name)}
+                onView={() => setViewingSkill(skill)}
                 onEdit={() => setEditingSkill(skill)}
               />
             ))
@@ -150,6 +163,17 @@ export function SkillsPanel() {
           open={modalOpen}
           onClose={handleModalClose}
           onSaved={handleModalSaved}
+        />
+      )}
+
+      {viewModalOpen && viewingSkill && (
+        <SkillEditorModal
+          skill={viewingSkill}
+          projectPath={projectPath}
+          open={viewModalOpen}
+          onClose={handleViewModalClose}
+          onSaved={handleViewModalClose}
+          readOnly
         />
       )}
     </>
