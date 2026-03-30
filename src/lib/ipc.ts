@@ -48,8 +48,8 @@ export const ipc = {
   // Agent
   agentSend: (args: { sessionId: string; prompt: string; agent?: string }) =>
     window.electronAPI.agentSend(args),
-  approveToolCall: (sessionId: string, approvalId: string, approved: boolean) =>
-    window.electronAPI.approveToolCall(sessionId, approvalId, approved),
+  approveToolCall: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) =>
+    window.electronAPI.approveToolCall(sessionId, approvalId, approved, options),
   getCopilotModels: () => window.electronAPI.getCopilotModels(),
   getClaudeAgents: (projectPath: string) => window.electronAPI.getClaudeAgents(projectPath),
   getCopilotAgents: (projectPath: string) => window.electronAPI.getCopilotAgents(projectPath),

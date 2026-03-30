@@ -21,6 +21,7 @@ function defaultProjectConfig(): ProjectConfig {
       { tool_category: "web", policy: "never" },
     ],
     custom_tools: [],
+    allowed_tools: [],
   };
 }
 

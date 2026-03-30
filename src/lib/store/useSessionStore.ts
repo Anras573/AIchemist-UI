@@ -17,7 +17,7 @@ export interface PendingApproval {
   toolName: string;
   args: Record<string, unknown>;
   /** Call with true to allow, false to deny. Resolves the Promise in the agent loop. */
-  resolve: (approved: boolean) => void;
+  resolve: (approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) => void;
 }
 
 interface SessionStore {
@@ -62,7 +62,7 @@ interface SessionStore {
   clearLiveToolCalls: (sessionId: string) => void;
   // Approval gate actions
   addPendingApproval: (sessionId: string, approval: PendingApproval) => void;
-  resolveApproval: (sessionId: string, approvalId: string, approved: boolean) => void;
+  resolveApproval: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) => void;
   clearPendingApprovals: (sessionId: string) => void;
   // Terminal log — accumulates execute_bash output across a session's lifetime
   appendTerminalOutput: (sessionId: string, line: string) => void;
@@ -260,11 +260,11 @@ export const useSessionStore = create<SessionStore>()(
           },
         })),
 
-      resolveApproval: (sessionId, approvalId, approved) =>
+      resolveApproval: (sessionId, approvalId, approved, options) =>
         set((state) => {
           const approvals = state.pendingApprovals[sessionId] ?? [];
           const target = approvals.find((a) => a.approvalId === approvalId);
-          if (target) target.resolve(approved);
+          if (target) target.resolve(approved, options);
           return {
             pendingApprovals: {
               ...state.pendingApprovals,

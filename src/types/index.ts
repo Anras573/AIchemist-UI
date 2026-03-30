@@ -43,6 +43,17 @@ export interface ApprovalRule {
   policy: ApprovalPolicy;
 }
 
+/** A tool (or specific command) that is always allowed without prompting. */
+export interface AllowedTool {
+  tool_name: string;
+  /**
+   * For execute_bash: prefix-matched against the command string.
+   * e.g. "mkdir" allows "mkdir -p foo/bar".
+   * Omit to allow all invocations of tool_name.
+   */
+  command_pattern?: string;
+}
+
 // ─── Project ─────────────────────────────────────────────────────────────────
 
 export interface ProjectConfig {
@@ -51,6 +62,7 @@ export interface ProjectConfig {
   approval_mode: "all" | "none" | "custom";
   approval_rules: ApprovalRule[];
   custom_tools: ToolDefinition[];
+  allowed_tools: AllowedTool[];
 }
 
 export interface Project {

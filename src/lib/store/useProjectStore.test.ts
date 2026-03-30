@@ -16,6 +16,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
       approval_mode: "custom",
       approval_rules: [],
       custom_tools: [],
+        allowed_tools: [],
     },
     ...overrides,
   };

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
+import { useProjectStore } from "@/lib/store/useProjectStore";
 import { Message, CompactionEvent } from "@/types";
 import { cn } from "@/lib/utils";
 import { MessageResponse } from "@/components/ai-elements/message";
@@ -107,10 +108,15 @@ function ToolCallBlock({ call }: { call: LiveToolCall }) {
 
 interface ApprovalGateProps {
   approval: PendingApproval;
-  onDecide: (approvalId: string, approved: boolean) => void;
+  onDecide: (approvalId: string, approved: boolean, scope: "once" | "session" | "project") => void;
 }
 
 function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
+  const allowBtn = cn(
+    "rounded px-3 py-1 text-xs font-sans font-medium transition-colors",
+    "bg-green-500/15 text-green-700 dark:text-green-400 hover:bg-green-500/30",
+    "border border-green-500/30"
+  );
   return (
     <div className="flex w-full justify-start">
       <div className="max-w-[85%] rounded-lg border border-amber-400/50 bg-background text-xs font-mono overflow-hidden shadow-sm">
@@ -130,22 +136,21 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
           </pre>
         </div>
 
-        {/* Allow / Deny buttons */}
-        <div className="flex gap-2 px-3 py-2 bg-muted/30">
-          <button
-            onClick={() => onDecide(approval.approvalId, true)}
-            className={cn(
-              "flex-1 rounded px-3 py-1 text-xs font-sans font-medium transition-colors",
-              "bg-green-500/15 text-green-700 dark:text-green-400 hover:bg-green-500/30",
-              "border border-green-500/30"
-            )}
-          >
-            Allow
+        {/* Allow (×3) / Deny */}
+        <div className="flex gap-2 px-3 py-2 bg-muted/30 flex-wrap">
+          <button className={allowBtn} onClick={() => onDecide(approval.approvalId, true, "once")}>
+            Allow once
+          </button>
+          <button className={allowBtn} onClick={() => onDecide(approval.approvalId, true, "session")}>
+            Allow for session
+          </button>
+          <button className={allowBtn} onClick={() => onDecide(approval.approvalId, true, "project")}>
+            Allow for project
           </button>
           <button
-            onClick={() => onDecide(approval.approvalId, false)}
+            onClick={() => onDecide(approval.approvalId, false, "once")}
             className={cn(
-              "flex-1 rounded px-3 py-1 text-xs font-sans font-medium transition-colors",
+              "rounded px-3 py-1 text-xs font-sans font-medium transition-colors",
               "bg-destructive/10 text-destructive hover:bg-destructive/20",
               "border border-destructive/30"
             )}
@@ -187,6 +192,7 @@ interface TimelinePanelProps {
 
 export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProps) {
   const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, resolveApproval, sessionCompactions } = useSessionStore();
+  const { activeProjectId } = useProjectStore();
   const session = activeSessionId ? sessions[activeSessionId] : null;
   const streaming = activeSessionId ? (streamingText[activeSessionId] ?? "") : "";
   const toolCalls = activeSessionId ? (liveToolCalls[activeSessionId] ?? []) : [];
@@ -194,10 +200,12 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
   const compactions = activeSessionId ? (sessionCompactions[activeSessionId] ?? []) : [];
   const isRunning = session?.status === "running" || session?.status === "waiting_approval";
 
-  function handleApprovalDecision(approvalId: string, approved: boolean) {
+  function handleApprovalDecision(approvalId: string, approved: boolean, scope: "once" | "session" | "project") {
     if (!activeSessionId) return;
-    resolveApproval(activeSessionId, approvalId, approved);
-    // If all approvals resolved, status reverts to running inside the agent loop
+    resolveApproval(activeSessionId, approvalId, approved, {
+      scope,
+      projectId: activeProjectId ?? undefined,
+    });
   }
 
   // Auto-scroll to bottom when messages or streaming text changes

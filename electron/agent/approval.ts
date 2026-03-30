@@ -9,7 +9,7 @@ import * as CH from "../ipc-channels";
 
 const pendingApprovals = new Map<
   string,
-  { resolve: (approved: boolean) => void; sessionId: string }
+  { resolve: (approved: boolean) => void; sessionId: string; toolName: string; args: unknown }
 >();
 
 /**
@@ -24,6 +24,14 @@ export function resolveApproval(approvalId: string, approved: boolean): void {
   }
 }
 
+/** Returns the stored tool name + args for a pending approval (used for allowlist recording). */
+export function getPendingApprovalData(
+  approvalId: string
+): { sessionId: string; toolName: string; args: unknown } | null {
+  const p = pendingApprovals.get(approvalId);
+  return p ? { sessionId: p.sessionId, toolName: p.toolName, args: p.args } : null;
+}
+
 /**
  * Emits SESSION_APPROVAL_REQUIRED and suspends until the user approves/denies.
  */
@@ -35,13 +43,57 @@ export function requestApproval(
 ): Promise<boolean> {
   const approvalId = crypto.randomUUID();
   return new Promise((resolve) => {
-    pendingApprovals.set(approvalId, { resolve, sessionId });
+    pendingApprovals.set(approvalId, { resolve, sessionId, toolName, args: input });
     webContents.send(CH.SESSION_APPROVAL_REQUIRED, {
       session_id: sessionId,
       approval_id: approvalId,
       tool_name: toolName,
       input,
     });
+  });
+}
+
+// ── Allowlists ────────────────────────────────────────────────────────────────
+
+/** Session-scoped allowlist: maps sessionId → Set of tool fingerprints. */
+const sessionAllowlist = new Map<string, Set<string>>();
+
+/**
+ * Computes a fingerprint for a tool call used for allowlist matching.
+ * For execute_bash: "execute_bash:<first-word-of-command>"
+ * For all other tools: "<tool_name>"
+ */
+export function computeFingerprint(toolName: string, args: unknown): string {
+  if (toolName === "execute_bash") {
+    const cmd = ((args as Record<string, unknown>).command as string | undefined) ?? "";
+    const firstWord = cmd.trim().split(/\s+/)[0] ?? "";
+    return `execute_bash:${firstWord}`;
+  }
+  return toolName;
+}
+
+/** Adds a tool call to the session-scoped allowlist so it won't prompt again this session. */
+export function addToSessionAllowlist(sessionId: string, toolName: string, args: unknown): void {
+  const fp = computeFingerprint(toolName, args);
+  if (!sessionAllowlist.has(sessionId)) sessionAllowlist.set(sessionId, new Set());
+  sessionAllowlist.get(sessionId)!.add(fp);
+}
+
+/** Returns true if this tool call is already approved for the current session. */
+export function isSessionAllowed(sessionId: string, toolName: string, args: unknown): boolean {
+  return sessionAllowlist.get(sessionId)?.has(computeFingerprint(toolName, args)) ?? false;
+}
+
+/** Returns true if this tool call matches an entry in the project's allowed_tools list. */
+export function isProjectAllowed(config: ProjectConfig, toolName: string, args: unknown): boolean {
+  return (config.allowed_tools ?? []).some((rule) => {
+    if (rule.tool_name !== toolName) return false;
+    if (!rule.command_pattern) return true;
+    if (toolName === "execute_bash") {
+      const cmd = ((args as Record<string, unknown>).command as string | undefined) ?? "";
+      return cmd.trim().startsWith(rule.command_pattern);
+    }
+    return true;
   });
 }
 
@@ -63,4 +115,20 @@ export function needsApproval(
   if (config.approval_mode === "none") return false;
   const rule = config.approval_rules.find((r) => r.tool_category === category);
   return rule?.policy === "always";
+}
+
+/**
+ * Full approval check: session allowlist → project allowlist → category rules.
+ * Returns true if the tool call should be prompted for approval.
+ */
+export function requiresApproval(
+  sessionId: string,
+  config: ProjectConfig,
+  category: ToolCategory,
+  toolName: string,
+  args: unknown
+): boolean {
+  if (isSessionAllowed(sessionId, toolName, args)) return false;
+  if (isProjectAllowed(config, toolName, args)) return false;
+  return needsApproval(config, category);
 }

@@ -11,7 +11,7 @@ import type { AgentInfo, ProjectConfig } from "../../src/types/index";
 import { getApiKey } from "../config";
 import * as CH from "../ipc-channels";
 import * as tracer from "../tracer";
-import { requestApproval, needsApproval } from "./approval";
+import { requestApproval, needsApproval, requiresApproval } from "./approval";
 import { buildSkillsContext } from "./skills";
 import {
   implWriteFileWithChange,
@@ -195,7 +195,7 @@ export async function runCopilotAgentTurn(params: {
     });
     webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: name, input: args });
 
-    if (needsApproval(projectConfig, category)) {
+    if (requiresApproval(sessionId, projectConfig, category, name, args)) {
       const approved = await requestApproval(webContents, sessionId, name, args);
       if (!approved) {
         const msg = "Tool call denied by user.";

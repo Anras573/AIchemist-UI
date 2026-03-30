@@ -15,6 +15,7 @@ function makeConfig(
     approval_mode,
     approval_rules,
     custom_tools: [],
+    allowed_tools: [],
   };
 }
 

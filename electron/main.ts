@@ -11,7 +11,7 @@ import { createSession, listSessions, getSession, deleteSession, saveMessage, up
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
-import { resolveApproval } from "./agent/approval";
+import { resolveApproval, getPendingApprovalData, addToSessionAllowlist, computeFingerprint } from "./agent/approval";
 import { runAgentTurn, getProvider } from "./agent/runner";
 import { getSpans } from "./tracer";
 import type { ProjectConfig } from "../src/types/index";
@@ -305,7 +305,35 @@ function registerHandlers(): void {  // ── Settings ────────
   });
   ipcMain.handle(
     CH.APPROVE_TOOL_CALL,
-    (_event, args: { sessionId: string; approvalId: string; approved: boolean }) => {
+    (_event, args: {
+      sessionId: string;
+      approvalId: string;
+      approved: boolean;
+      scope?: "once" | "session" | "project";
+      projectId?: string;
+    }) => {
+      if (args.approved && args.scope && args.scope !== "once") {
+        const data = getPendingApprovalData(args.approvalId);
+        if (data) {
+          if (args.scope === "session") {
+            addToSessionAllowlist(data.sessionId, data.toolName, data.args);
+          } else if (args.scope === "project" && args.projectId) {
+            const config = getProjectConfig(db, args.projectId);
+            const fp = computeFingerprint(data.toolName, data.args);
+            const pattern = data.toolName === "execute_bash"
+              ? fp.replace("execute_bash:", "") || undefined
+              : undefined;
+            const existing = config.allowed_tools ?? [];
+            const alreadyExists = existing.some(
+              (t) => t.tool_name === data.toolName && t.command_pattern === pattern
+            );
+            if (!alreadyExists) {
+              config.allowed_tools = [...existing, { tool_name: data.toolName, command_pattern: pattern }];
+              saveProjectConfig(db, args.projectId, config);
+            }
+          }
+        }
+      }
       resolveApproval(args.approvalId, args.approved);
     }
   );

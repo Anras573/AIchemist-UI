@@ -50,7 +50,7 @@ export interface ElectronAPI {
 
   // ── Agent ─────────────────────────────────────────────────────────────────
   agentSend: (args: { sessionId: string; prompt: string; agent?: string }) => Promise<void>;
-  approveToolCall: (sessionId: string, approvalId: string, approved: boolean) => Promise<void>;
+  approveToolCall: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) => Promise<void>;
   getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
   getClaudeAgents: (projectPath: string) => Promise<Array<{ name: string; description: string; model?: string }>>;
   getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
@@ -109,8 +109,8 @@ const api: ElectronAPI = {
   openFolderDialog: () => ipcRenderer.invoke(CH.OPEN_FOLDER_DIALOG),
 
   agentSend: (args) => ipcRenderer.invoke(CH.AGENT_SEND, args),
-  approveToolCall: (sessionId, approvalId, approved) =>
-    ipcRenderer.invoke(CH.APPROVE_TOOL_CALL, { sessionId, approvalId, approved }),
+  approveToolCall: (sessionId, approvalId, approved, options) =>
+    ipcRenderer.invoke(CH.APPROVE_TOOL_CALL, { sessionId, approvalId, approved, ...options }),
   getCopilotModels: () => ipcRenderer.invoke(CH.GET_COPILOT_MODELS),
   getClaudeAgents: (projectPath) => ipcRenderer.invoke(CH.GET_CLAUDE_AGENTS, projectPath),
   getCopilotAgents: (projectPath) => ipcRenderer.invoke(CH.GET_COPILOT_AGENTS, projectPath),

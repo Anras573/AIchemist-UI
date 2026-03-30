@@ -134,8 +134,8 @@ export function useSessionEvents() {
             toolName: payload.tool_name,
             args: payload.input ?? {},
             // Calling resolve unblocks the agent in the main process
-            resolve: (approved) =>
-              ipc.approveToolCall(payload.session_id, payload.approval_id, approved),
+            resolve: (approved, options) =>
+              ipc.approveToolCall(payload.session_id, payload.approval_id, approved, options),
           });
         }
       ),
