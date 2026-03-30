@@ -103,19 +103,42 @@ function registerHandlers(): void {  // ── Settings ────────
   ipcMain.handle(CH.GET_TRACES, (_event, sessionId?: string) => getSpans(sessionId));
 
   ipcMain.handle(CH.GET_GIT_DIFF, (_event, projectPath: string) => {
+    // Add common git locations to PATH — Electron on macOS doesn't inherit the shell PATH.
+    const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
+    const env = { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` };
+
+    const run = (cmd: string) =>
+      childProcess.execSync(cmd, { cwd: projectPath, encoding: "utf8", timeout: 10_000, env });
+
     try {
-      return childProcess.execSync("git diff", {
-        cwd: projectPath,
-        encoding: "utf8",
-        timeout: 10_000,
-      });
+      // `git diff HEAD --no-color` shows all tracked-file changes (staged + unstaged) vs last commit.
+      // Fall back to `git diff --no-color --cached` when there is no HEAD yet (brand-new repo).
+      let diff = "";
+      try {
+        diff = run("git diff HEAD --no-color");
+      } catch (headErr) {
+        const e = headErr as { stderr?: string };
+        const isNoHead = e.stderr?.includes("ambiguous argument") || e.stderr?.includes("unknown revision");
+        if (isNoHead) {
+          diff = run("git diff --no-color --cached");
+        } else {
+          throw headErr;
+        }
+      }
+
+      // Also append a list of untracked files — `git diff HEAD` never shows them.
+      const untracked = run("git ls-files --others --exclude-standard").trim();
+      if (untracked) {
+        const header = "=== Untracked files ===\n";
+        diff = diff ? `${diff}\n${header}${untracked}` : `${header}${untracked}`;
+      }
+
+      return diff;
     } catch (err) {
-      // execSync throws when exit code != 0 OR when git isn't found.
-      // A non-zero exit code still populates stdout on the error object.
       const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
-      if (e.code === "ENOENT") return { error: "git not found" };
-      if (e.stdout) return e.stdout; // partial diff
-      return { error: e.stderr ?? String(err) };
+      if (e.code === "ENOENT") return { error: "git not found — ensure git is installed" };
+      if (e.stdout) return e.stdout;
+      return { error: e.stderr?.trim() ?? String(err) };
     }
   });
 
