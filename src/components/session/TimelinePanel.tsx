@@ -163,9 +163,11 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
 interface TimelinePanelProps {
   /** Called by Phase 4 when the user submits a message. */
   onSendMessage?: (text: string) => void;
+  /** Called when the user clicks "Create new session" from the empty state. */
+  onNewSession?: () => void;
 }
 
-export function TimelinePanel({ onSendMessage }: TimelinePanelProps) {
+export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProps) {
   const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, resolveApproval } = useSessionStore();
   const session = activeSessionId ? sessions[activeSessionId] : null;
   const streaming = activeSessionId ? (streamingText[activeSessionId] ?? "") : "";
@@ -189,8 +191,16 @@ export function TimelinePanel({ onSendMessage }: TimelinePanelProps) {
   if (!session) {
     return (
       <div className="flex flex-col h-full">
-        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-          Select a session or press <kbd className="mx-1.5 px-1.5 py-0.5 rounded border bg-muted text-xs font-mono">+</kbd> to start a new one
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+          <p className="text-sm">No sessions yet for this project.</p>
+          {onNewSession && (
+            <button
+              onClick={onNewSession}
+              className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+            >
+              Create a new session
+            </button>
+          )}
         </div>
         <InputBar disabled onSend={onSendMessage} />
       </div>

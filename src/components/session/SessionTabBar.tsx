@@ -22,6 +22,9 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
 
   // Load sessions for this project on mount and when projectId changes
   useEffect(() => {
+    // Immediately clear the active session so no stale session from another
+    // project is shown while the new project's sessions are loading.
+    setActiveSession(null);
     ipc.listSessions(projectId)
       .then((list) => {
         mergeSessions(list);
