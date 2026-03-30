@@ -75,10 +75,85 @@ function CollapsibleChange({ change }: { change: FileChange }) {
   );
 }
 
+// ── parseGitDiff ──────────────────────────────────────────────────────────────
+
+interface GitFileEntry {
+  relativePath: string;
+  diff: string;
+  isUntracked: boolean;
+}
+
+function parseGitDiff(raw: string): GitFileEntry[] {
+  const results: GitFileEntry[] = [];
+
+  // Split off the untracked files footer added by our backend
+  const UNTRACKED_HEADER = "=== Untracked files ===\n";
+  const markerIdx = raw.indexOf(UNTRACKED_HEADER);
+  const mainDiff = markerIdx >= 0 ? raw.slice(0, markerIdx) : raw;
+  const untrackedSection = markerIdx >= 0 ? raw.slice(markerIdx + UNTRACKED_HEADER.length) : "";
+
+  // Split tracked file chunks on "diff --git" boundaries
+  const chunks = mainDiff.split(/(?=^diff --git )/m).filter(Boolean);
+  for (const chunk of chunks) {
+    const match = chunk.match(/^diff --git a\/.+? b\/(.+)/m);
+    if (match) results.push({ relativePath: match[1].trim(), diff: chunk, isUntracked: false });
+  }
+
+  // Append untracked files (no diff content available)
+  for (const line of untrackedSection.split("\n")) {
+    if (line.trim()) results.push({ relativePath: line.trim(), diff: "", isUntracked: true });
+  }
+
+  return results;
+}
+
+// ── GitFileDiff ───────────────────────────────────────────────────────────────
+
+function GitFileDiff({ entry }: { entry: GitFileEntry }) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <div className="border rounded-md overflow-hidden">
+      <button
+        className="w-full flex items-center gap-2 px-3 py-1.5 bg-muted/40 hover:bg-muted/70 transition-colors text-left text-xs font-mono"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {open ? (
+          <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <span className="truncate flex-1 text-foreground">{entry.relativePath}</span>
+        <span
+          className={cn(
+            "text-[10px] px-1.5 py-0.5 rounded font-sans font-medium shrink-0",
+            entry.isUntracked
+              ? "bg-yellow-900/50 text-yellow-300"
+              : "bg-blue-900/50 text-blue-300"
+          )}
+        >
+          {entry.isUntracked ? "untracked" : "modified"}
+        </span>
+      </button>
+      {open && (
+        <div className="border-t overflow-x-auto">
+          {entry.isUntracked ? (
+            <p className="text-xs text-muted-foreground italic px-3 py-2">
+              New untracked file — not yet staged or committed.
+            </p>
+          ) : (
+            <DiffView diff={entry.diff} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── GitDiffSection ─────────────────────────────────────────────────────────────
 
 function GitDiffSection({ projectPath }: { projectPath: string }) {
-  const [diff, setDiff] = useState<string | null>(null);
+  const [entries, setEntries] = useState<GitFileEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -88,7 +163,7 @@ function GitDiffSection({ projectPath }: { projectPath: string }) {
     try {
       const result = await ipc.getGitDiff(projectPath);
       if (typeof result === "string") {
-        setDiff(result || "(no changes)");
+        setEntries(parseGitDiff(result));
       } else {
         setError(result.error);
       }
@@ -115,16 +190,22 @@ function GitDiffSection({ projectPath }: { projectPath: string }) {
         </button>
       </div>
 
-      {diff === null && !error && (
+      {entries === null && !error && (
         <p className="text-xs text-muted-foreground italic">Click Refresh to load git diff.</p>
       )}
       {error && (
         <p className="text-xs text-red-400 bg-red-950/30 rounded px-2 py-1">{error}</p>
       )}
-      {diff !== null && !error && (
-        <div className="border rounded-md overflow-hidden overflow-x-auto">
-          <DiffView diff={diff} />
-        </div>
+      {entries !== null && !error && (
+        entries.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">No uncommitted changes.</p>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {entries.map((entry, i) => (
+              <GitFileDiff key={i} entry={entry} />
+            ))}
+          </div>
+        )
       )}
     </div>
   );
