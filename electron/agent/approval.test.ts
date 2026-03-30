@@ -1,13 +1,24 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { needsApproval, requestApproval, resolveApproval } from "./approval";
+import {
+  needsApproval,
+  requestApproval,
+  resolveApproval,
+  computeFingerprint,
+  addToSessionAllowlist,
+  isSessionAllowed,
+  isProjectAllowed,
+  requiresApproval,
+  getPendingApprovalData,
+} from "./approval";
 import type { ProjectConfig } from "../../src/types/index";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeConfig(
   approval_mode: ProjectConfig["approval_mode"],
-  approval_rules: ProjectConfig["approval_rules"] = []
+  approval_rules: ProjectConfig["approval_rules"] = [],
+  allowed_tools: ProjectConfig["allowed_tools"] = []
 ): ProjectConfig {
   return {
     provider: "anthropic",
@@ -15,7 +26,7 @@ function makeConfig(
     approval_mode,
     approval_rules,
     custom_tools: [],
-    allowed_tools: [],
+    allowed_tools,
   };
 }
 
@@ -171,5 +182,183 @@ describe("requestApproval / resolveApproval", () => {
 
     // Second call with same ID should be a no-op (entry was already deleted)
     expect(() => resolveApproval(approvalId, false)).not.toThrow();
+  });
+});
+
+// ── computeFingerprint ────────────────────────────────────────────────────────
+
+describe("computeFingerprint", () => {
+  it("returns tool name for non-bash tools", () => {
+    expect(computeFingerprint("write_file", { path: "/tmp/a.txt" })).toBe("write_file");
+    expect(computeFingerprint("web_fetch", { url: "https://example.com" })).toBe("web_fetch");
+    expect(computeFingerprint("delete_file", {})).toBe("delete_file");
+  });
+
+  it("returns execute_bash:<first-word> for bash commands", () => {
+    expect(computeFingerprint("execute_bash", { command: "mkdir -p /tmp/foo" })).toBe("execute_bash:mkdir");
+    expect(computeFingerprint("execute_bash", { command: "git status" })).toBe("execute_bash:git");
+    expect(computeFingerprint("execute_bash", { command: "npm install" })).toBe("execute_bash:npm");
+  });
+
+  it("strips leading whitespace before extracting the first word", () => {
+    expect(computeFingerprint("execute_bash", { command: "  ls -la" })).toBe("execute_bash:ls");
+  });
+
+  it("returns execute_bash: for an empty command", () => {
+    expect(computeFingerprint("execute_bash", { command: "" })).toBe("execute_bash:");
+    expect(computeFingerprint("execute_bash", {})).toBe("execute_bash:");
+  });
+});
+
+// ── session allowlist ─────────────────────────────────────────────────────────
+
+describe("session allowlist", () => {
+  // The module-level map persists between tests; use unique session IDs to isolate.
+  let sid: string;
+  beforeEach(() => { sid = `sess-${Math.random()}`; });
+
+  it("returns false when nothing has been added", () => {
+    expect(isSessionAllowed(sid, "write_file", {})).toBe(false);
+  });
+
+  it("returns true after the exact tool is added", () => {
+    addToSessionAllowlist(sid, "write_file", { path: "/tmp/a.txt" });
+    expect(isSessionAllowed(sid, "write_file", { path: "/other/path.txt" })).toBe(true);
+  });
+
+  it("matches execute_bash by first word, ignoring remaining args", () => {
+    addToSessionAllowlist(sid, "execute_bash", { command: "mkdir -p /first" });
+    expect(isSessionAllowed(sid, "execute_bash", { command: "mkdir /second" })).toBe(true);
+    expect(isSessionAllowed(sid, "execute_bash", { command: "rm -rf /" })).toBe(false);
+  });
+
+  it("is scoped to its session ID — does not bleed into other sessions", () => {
+    const other = `sess-other-${Math.random()}`;
+    addToSessionAllowlist(sid, "write_file", {});
+    expect(isSessionAllowed(other, "write_file", {})).toBe(false);
+  });
+
+  it("can hold multiple tools for the same session", () => {
+    addToSessionAllowlist(sid, "write_file", {});
+    addToSessionAllowlist(sid, "web_fetch", {});
+    expect(isSessionAllowed(sid, "write_file", {})).toBe(true);
+    expect(isSessionAllowed(sid, "web_fetch", {})).toBe(true);
+    expect(isSessionAllowed(sid, "delete_file", {})).toBe(false);
+  });
+});
+
+// ── isProjectAllowed ──────────────────────────────────────────────────────────
+
+describe("isProjectAllowed", () => {
+  function cfg(allowed_tools: ProjectConfig["allowed_tools"]): ProjectConfig {
+    return makeConfig("custom", [], allowed_tools);
+  }
+
+  it("returns false when allowed_tools is empty", () => {
+    expect(isProjectAllowed(cfg([]), "write_file", {})).toBe(false);
+  });
+
+  it("returns true for an exact tool_name match with no pattern", () => {
+    expect(isProjectAllowed(cfg([{ tool_name: "write_file" }]), "write_file", {})).toBe(true);
+  });
+
+  it("returns false when tool_name does not match", () => {
+    expect(isProjectAllowed(cfg([{ tool_name: "web_fetch" }]), "write_file", {})).toBe(false);
+  });
+
+  it("matches execute_bash when command starts with the pattern", () => {
+    const config = cfg([{ tool_name: "execute_bash", command_pattern: "mkdir" }]);
+    expect(isProjectAllowed(config, "execute_bash", { command: "mkdir -p /tmp/foo" })).toBe(true);
+    expect(isProjectAllowed(config, "execute_bash", { command: "mkdir /bar" })).toBe(true);
+  });
+
+  it("does not match execute_bash when command does not start with the pattern", () => {
+    const config = cfg([{ tool_name: "execute_bash", command_pattern: "mkdir" }]);
+    expect(isProjectAllowed(config, "execute_bash", { command: "rm -rf /" })).toBe(false);
+    expect(isProjectAllowed(config, "execute_bash", { command: "git commit" })).toBe(false);
+  });
+
+  it("treats undefined command_pattern as allow-all for that tool", () => {
+    const config = cfg([{ tool_name: "execute_bash" }]);
+    expect(isProjectAllowed(config, "execute_bash", { command: "rm -rf /" })).toBe(true);
+  });
+
+  it("gracefully handles missing allowed_tools field (legacy configs)", () => {
+    const config = makeConfig("custom") as ProjectConfig;
+    // @ts-expect-error intentionally testing missing field
+    delete config.allowed_tools;
+    expect(isProjectAllowed(config, "write_file", {})).toBe(false);
+  });
+});
+
+// ── requiresApproval ─────────────────────────────────────────────────────────
+
+describe("requiresApproval", () => {
+  let sid: string;
+  beforeEach(() => { sid = `sess-req-${Math.random()}`; });
+
+  it("returns true when nothing is allowlisted and category requires approval", () => {
+    const config = makeConfig("all");
+    expect(requiresApproval(sid, config, "filesystem", "write_file", {})).toBe(true);
+  });
+
+  it("returns false when tool is in the session allowlist", () => {
+    const config = makeConfig("all"); // would normally require approval
+    addToSessionAllowlist(sid, "write_file", {});
+    expect(requiresApproval(sid, config, "filesystem", "write_file", {})).toBe(false);
+  });
+
+  it("returns false when tool matches project allowed_tools", () => {
+    const config = makeConfig("all", [], [{ tool_name: "write_file" }]);
+    expect(requiresApproval(sid, config, "filesystem", "write_file", {})).toBe(false);
+  });
+
+  it("session allowlist takes priority over category rules", () => {
+    const config = makeConfig("custom", [{ tool_category: "shell", policy: "always" }]);
+    addToSessionAllowlist(sid, "execute_bash", { command: "git status" });
+    expect(requiresApproval(sid, config, "shell", "execute_bash", { command: "git status" })).toBe(false);
+  });
+
+  it("falls through to needsApproval when neither allowlist matches", () => {
+    const config = makeConfig("none");
+    expect(requiresApproval(sid, config, "filesystem", "write_file", {})).toBe(false);
+
+    const configAll = makeConfig("all");
+    expect(requiresApproval(sid, configAll, "filesystem", "write_file", {})).toBe(true);
+  });
+});
+
+// ── getPendingApprovalData ────────────────────────────────────────────────────
+
+describe("getPendingApprovalData", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns null for an unknown approvalId", () => {
+    expect(getPendingApprovalData("unknown-id")).toBeNull();
+  });
+
+  it("returns the stored toolName and args for a pending approval", () => {
+    const wc = makeWebContents();
+    const args = { command: "ls -la" };
+    requestApproval(wc, "sess-1", "execute_bash", args);
+
+    const approvalId = vi.mocked(wc.send).mock.calls[0][1].approval_id;
+    const data = getPendingApprovalData(approvalId);
+
+    expect(data).not.toBeNull();
+    expect(data!.sessionId).toBe("sess-1");
+    expect(data!.toolName).toBe("execute_bash");
+    expect(data!.args).toEqual(args);
+  });
+
+  it("returns null after the approval has been resolved (consumed)", async () => {
+    const wc = makeWebContents();
+    const promise = requestApproval(wc, "sess-1", "write_file", {});
+    const approvalId = vi.mocked(wc.send).mock.calls[0][1].approval_id;
+
+    resolveApproval(approvalId, true);
+    await promise;
+
+    expect(getPendingApprovalData(approvalId)).toBeNull();
   });
 });
