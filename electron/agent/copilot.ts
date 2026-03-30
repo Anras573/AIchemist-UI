@@ -452,6 +452,26 @@ export async function runCopilotAgentTurn(params: {
       }
     });
 
+    // Compaction events — emitted by the SDK when context window is managed
+    session.on("session.compaction_complete", (event) => {
+      const data = event.data as {
+        success: boolean;
+        preCompactionTokens?: number;
+        tokensRemoved?: number;
+      };
+      if (data.success) {
+        webContents.send(CH.SESSION_COMPACTION, {
+          session_id: sessionId,
+          compaction: {
+            id: `compaction-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            trigger: "auto" as const,
+            pre_tokens: data.preCompactionTokens ?? 0,
+          },
+        });
+      }
+    });
+
     session.on("session.idle", () => resolve());
     session.on("session.error", (event) => {
       reject(new Error((event.data as { message: string }).message ?? "Copilot session error"));
