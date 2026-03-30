@@ -6,6 +6,29 @@ import { ipc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import type { FileChange } from "@/types";
 
+// ── countDiffStats ────────────────────────────────────────────────────────────
+
+function countDiffStats(diff: string): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) added++;
+    else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+  }
+  return { added, removed };
+}
+
+function DiffStats({ diff }: { diff: string }) {
+  const { added, removed } = countDiffStats(diff);
+  if (added === 0 && removed === 0) return null;
+  return (
+    <span className="flex items-center gap-1 shrink-0 font-sans font-medium text-[11px]">
+      {added > 0 && <span className="text-green-400">+{added}</span>}
+      {removed > 0 && <span className="text-red-400">-{removed}</span>}
+    </span>
+  );
+}
+
 // ── DiffView ─────────────────────────────────────────────────────────────────
 
 function DiffView({ diff }: { diff: string }) {
@@ -55,6 +78,7 @@ function CollapsibleChange({ change }: { change: FileChange }) {
           <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
         )}
         <span className="truncate flex-1 text-foreground">{change.relativePath}</span>
+        <DiffStats diff={change.diff} />
         <span
           className={cn(
             "text-[10px] px-1.5 py-0.5 rounded font-sans font-medium shrink-0",
@@ -124,6 +148,7 @@ function GitFileDiff({ entry }: { entry: GitFileEntry }) {
           <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
         )}
         <span className="truncate flex-1 text-foreground">{entry.relativePath}</span>
+        {!entry.isUntracked && <DiffStats diff={entry.diff} />}
         <span
           className={cn(
             "text-[10px] px-1.5 py-0.5 rounded font-sans font-medium shrink-0",
