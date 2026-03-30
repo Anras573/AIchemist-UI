@@ -1,5 +1,10 @@
 import { useState, useEffect } from "react";
 import { Loader2, Trash2 } from "lucide-react";
+import { cjk } from "@streamdown/cjk";
+import { code } from "@streamdown/code";
+import { math } from "@streamdown/math";
+import { mermaid } from "@streamdown/mermaid";
+import { Streamdown } from "streamdown";
 import { ipc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -14,8 +19,18 @@ import type { AgentInfo } from "@/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const streamdownPlugins = { cjk, code, math, mermaid };
+
 function defaultAgentContent(name: string, description = "") {
   return `---\nname: ${name}\ndescription: ${description}\n---\n\nWrite your agent system prompt here.\n`;
+}
+
+/** Strip YAML frontmatter (--- ... ---) from markdown content. */
+function stripFrontmatter(content: string): string {
+  if (!content.startsWith("---")) return content;
+  const end = content.indexOf("\n---", 3);
+  if (end === -1) return content;
+  return content.slice(end + 4).trimStart();
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -31,6 +46,8 @@ interface AgentEditorModalProps {
   onClose: () => void;
   /** Called after a successful save or delete so the caller can refresh the list. */
   onSaved: () => void;
+  /** When true, shows content read-only without save/delete controls. */
+  readOnly?: boolean;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -42,6 +59,7 @@ export function AgentEditorModal({
   open,
   onClose,
   onSaved,
+  readOnly = false,
 }: AgentEditorModalProps) {
   const isNew = agent === null;
 
@@ -144,12 +162,12 @@ export function AgentEditorModal({
     }
   };
 
-  const title = isNew ? "New Agent" : `Edit Agent — ${agent!.name}`;
+  const title = isNew ? "New Agent" : readOnly ? `Agent — ${agent!.name}` : `Edit Agent — ${agent!.name}`;
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent
-        className="max-w-2xl w-full"
+        className="sm:max-w-4xl w-full overflow-hidden"
         showCloseButton={!saving && !deleting}
       >
         <DialogHeader>
@@ -192,14 +210,25 @@ export function AgentEditorModal({
           )}
 
           <div>
-            <label className="text-[11px] text-muted-foreground mb-1 block">
-              File content{" "}
-              <span className="text-muted-foreground/60">(frontmatter + system prompt)</span>
-            </label>
+            {!readOnly && (
+              <label className="text-[11px] text-muted-foreground mb-1 block">
+                File content{" "}
+                <span className="text-muted-foreground/60">(frontmatter + system prompt)</span>
+              </label>
+            )}
             {loading ? (
               <div className="flex items-center gap-2 py-8 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Loading…
+              </div>
+            ) : readOnly ? (
+              <div className="overflow-auto max-h-[60vh] rounded-md border bg-muted/10 px-4 py-3">
+                <Streamdown
+                  plugins={streamdownPlugins}
+                  className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:overflow-x-auto [&_table]:overflow-x-auto [&_table]:block"
+                >
+                  {stripFrontmatter(content)}
+                </Streamdown>
               </div>
             ) : (
               <textarea
@@ -220,7 +249,7 @@ export function AgentEditorModal({
         </div>
 
         <DialogFooter>
-          {!isNew && agent!.editable !== false && agent!.path && (
+          {!readOnly && !isNew && agent!.editable !== false && agent!.path && (
             <Button
               variant="destructive"
               size="sm"
@@ -237,16 +266,18 @@ export function AgentEditorModal({
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={onClose} disabled={saving || deleting}>
-            Cancel
+            {readOnly ? "Close" : "Cancel"}
           </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={saving || loading || deleting}
-          >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {isNew ? "Create" : "Save"}
-          </Button>
+          {!readOnly && (
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={saving || loading || deleting}
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              {isNew ? "Create" : "Save"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

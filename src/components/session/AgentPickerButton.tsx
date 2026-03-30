@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Bot, Check, ChevronsUpDown, Loader2, Pencil, Plus } from "lucide-react";
+import { Bot, Check, ChevronsUpDown, Eye, Loader2, Pencil, Plus } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -33,6 +33,7 @@ export function AgentPickerButton() {
 
   // Editor modal state
   const [editingAgent, setEditingAgent] = useState<AgentInfo | null | undefined>(undefined);
+  const [viewingAgent, setViewingAgent] = useState<AgentInfo | undefined>(undefined);
   const modalOpen = editingAgent !== undefined;
 
   const selectedAgent = activeSessionId
@@ -74,6 +75,12 @@ export function AgentPickerButton() {
     e.stopPropagation();
     setOpen(false);
     setEditingAgent(agent);
+  }, []);
+
+  const handleView = useCallback((agent: AgentInfo, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOpen(false);
+    setViewingAgent(agent);
   }, []);
 
   const handleNew = useCallback(() => {
@@ -154,6 +161,13 @@ export function AgentPickerButton() {
                 {selectedAgent === agent.name && (
                   <Check className="h-3 w-3 text-primary shrink-0" />
                 )}
+                <button
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
+                  title="View agent"
+                  onClick={(e) => handleView(agent, e)}
+                >
+                  <Eye className="h-2.5 w-2.5 text-muted-foreground" />
+                </button>
                 {agent.editable !== false && agent.path && (
                   <button
                     className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
@@ -192,6 +206,18 @@ export function AgentPickerButton() {
           open={modalOpen}
           onClose={handleModalClose}
           onSaved={handleModalSaved}
+        />
+      )}
+
+      {viewingAgent && (
+        <AgentEditorModal
+          agent={viewingAgent}
+          provider={provider}
+          projectPath={projectPath}
+          open={true}
+          onClose={() => setViewingAgent(undefined)}
+          onSaved={() => setViewingAgent(undefined)}
+          readOnly
         />
       )}
     </>

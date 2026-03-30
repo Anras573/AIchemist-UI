@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Bot, Blocks, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { Bot, Blocks, CheckCircle2, AlertCircle, Eye, Loader2 } from "lucide-react";
 import { ipc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { cn } from "@/lib/utils";
+import { AgentEditorModal } from "@/components/session/AgentEditorModal";
 import type { AgentInfo, SkillInfo } from "@/types";
 
 // ── AgentCard ─────────────────────────────────────────────────────────────────
@@ -12,42 +13,57 @@ function AgentCard({
   agent,
   isSelected,
   onSelect,
+  onView,
 }: {
   agent: AgentInfo;
   isSelected: boolean;
   onSelect: () => void;
+  onView: () => void;
 }) {
   return (
-    <button
-      onClick={onSelect}
+    <div
       className={cn(
-        "w-full text-left rounded-md border px-3 py-2 transition-colors",
+        "w-full text-left rounded-md border px-3 py-2 transition-colors group relative",
         isSelected
           ? "border-primary/50 bg-primary/5 text-foreground"
-          : "border-border bg-background hover:bg-muted/50 text-foreground"
+          : "border-border bg-background text-foreground"
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-semibold truncate">{agent.name}</span>
-            {agent.model && (
-              <span className="shrink-0 rounded px-1 py-0 text-[9px] font-medium bg-muted text-muted-foreground leading-4">
-                {agent.model}
-              </span>
+      <button
+        onClick={onSelect}
+        className="w-full text-left hover:bg-transparent"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold truncate">{agent.name}</span>
+              {agent.model && (
+                <span className="shrink-0 rounded px-1 py-0 text-[9px] font-medium bg-muted text-muted-foreground leading-4">
+                  {agent.model}
+                </span>
+              )}
+            </div>
+            {agent.description && (
+              <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
+                {agent.description}
+              </p>
             )}
           </div>
-          {agent.description && (
-            <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
-              {agent.description}
-            </p>
-          )}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={(e) => { e.stopPropagation(); onView(); }}
+              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
+              title="View agent"
+            >
+              <Eye className="h-2.5 w-2.5 text-muted-foreground" />
+            </button>
+            {isSelected && (
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
+            )}
+          </div>
         </div>
-        {isSelected && (
-          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
-        )}
-      </div>
-    </button>
+      </button>
+    </div>
   );
 }
 
@@ -98,6 +114,7 @@ export function AgentsPanel() {
   const [agents, setAgents] = useState<AgentInfo[] | null>(null);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
+  const [viewingAgent, setViewingAgent] = useState<AgentInfo | undefined>(undefined);
 
   const selectedAgent = activeSessionId ? (sessionAgents[activeSessionId] ?? null) : null;
 
@@ -128,7 +145,8 @@ export function AgentsPanel() {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto">
+    <>
+      <div className="flex flex-col h-full overflow-y-auto">
       {/* ── Sub-agents section ─────────────────────────────────────── */}
       <SectionHeader icon={Bot} label="Sub-agents" />
 
@@ -159,6 +177,7 @@ export function AgentsPanel() {
               agent={agent}
               isSelected={selectedAgent === agent.name}
               onSelect={() => toggleAgent(agent.name)}
+              onView={() => setViewingAgent(agent)}
             />
           ))
         )}
@@ -182,5 +201,18 @@ export function AgentsPanel() {
         )}
       </div>
     </div>
+
+    {viewingAgent && (
+      <AgentEditorModal
+        agent={viewingAgent}
+        provider={provider ?? ""}
+        projectPath={projectPath}
+        open={true}
+        onClose={() => setViewingAgent(undefined)}
+        onSaved={() => setViewingAgent(undefined)}
+        readOnly
+      />
+    )}
+    </>
   );
 }
