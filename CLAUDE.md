@@ -116,6 +116,33 @@ System prompt / instructions here.
 | Claude | `~/.claude/agents/*.md` + SDK `supportedAgents()` |
 | Copilot | `.agents/copilot-agents/*.md` (project) and `~/.github-copilot/agents/*.md` (global) |
 
+### Viewing and editing agents
+
+Both `AgentsPanel` and `AgentPickerButton` show per-agent action icons on hover:
+
+- **Eye icon** — opens `AgentEditorModal` with `readOnly=true`: renders the agent's markdown body via `Streamdown` (frontmatter stripped), no Save/Delete, "Close" instead of "Cancel". Available for all agents including SDK built-ins (which show name + description since they have no file path).
+- **Pencil icon** — opens `AgentEditorModal` in edit mode. Only shown for agents where `agent.editable !== false && agent.path`.
+
+---
+
+## Skills Panel
+
+`src/components/session/SkillsPanel.tsx` lists skills discovered from `.agents/skills/` (project) and `~/.claude/skills/` (global). Each card supports three interactions:
+
+- **Click card body** — toggles the skill on/off for the active session (persisted via `ipc.updateSessionSkills`).
+- **Eye icon** (hover) — opens `SkillEditorModal` with `readOnly=true` to view the skill's rendered markdown.
+- **Pencil icon** (hover) — opens `SkillEditorModal` in edit mode to modify `SKILL.md`.
+
+A **New Skill** button at the bottom opens `SkillEditorModal` with `skill=null` (create mode).
+
+### SkillEditorModal / AgentEditorModal — readOnly prop
+
+Both modals accept `readOnly?: boolean`. When `true`:
+- The file is still loaded via `ipc.readFile` (or `ipc.readFile` with `skill.path/SKILL.md`)
+- Content is rendered as markdown via `Streamdown` (frontmatter stripped with `stripFrontmatter()`)
+- Save and Delete buttons are hidden; "Cancel" becomes "Close"
+- Title changes from "Edit X — name" to "X — name"
+
 ---
 
 ## API Keys / Config

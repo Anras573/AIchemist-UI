@@ -99,6 +99,31 @@ Place in `~/.aichemist/.env` — loaded at startup by `electron/config.ts` via `
 
 ---
 
+## Agent Selection & Skills Panel
+
+### Agent picker (`AgentPickerButton`)
+
+VS Code-style dropdown in the input bar. Loads agents lazily via `ipc.getClaudeAgents()` / `ipc.getCopilotAgents()`. Each item has two hover icons:
+- **Eye** — opens `AgentEditorModal` with `readOnly=true` (viewer)
+- **Pencil** — opens `AgentEditorModal` in edit mode (only for `agent.editable !== false && agent.path`)
+
+### Skills panel (`SkillsPanel`)
+
+Lists skills from `.agents/skills/` and `~/.claude/skills/`. Each card:
+- **Click** — toggles the skill on/off for the session
+- **Eye icon** (hover) — opens `SkillEditorModal` with `readOnly=true`
+- **Pencil icon** (hover) — opens `SkillEditorModal` in edit mode
+
+### readOnly viewer pattern
+
+Both `SkillEditorModal` and `AgentEditorModal` accept `readOnly?: boolean`. When `true`:
+- Frontmatter stripped via `stripFrontmatter()`, body rendered with `Streamdown`
+- Title: "X — name" (not "Edit X — name")
+- "Cancel" → "Close"; Save and Delete hidden
+- For SDK built-in agents (no `path`): renders name + description; skips `ipc.readFile`
+
+---
+
 ## Key Conventions
 
 ### AI Elements components
