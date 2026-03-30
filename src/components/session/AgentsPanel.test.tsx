@@ -197,4 +197,30 @@ describe("AgentsPanel", () => {
       expect(screen.getByText(/no skills installed/i)).toBeInTheDocument();
     });
   });
+
+  it("each agent card has a View agent button", async () => {
+    setupStores();
+    vi.mocked(window.electronAPI.getClaudeAgents).mockResolvedValue(AGENTS);
+    vi.mocked(window.electronAPI.listSkills).mockResolvedValue([]);
+
+    renderWithProviders(<AgentsPanel />);
+
+    await waitFor(() => screen.getByText("research"));
+    const viewButtons = screen.getAllByTitle("View agent");
+    expect(viewButtons).toHaveLength(AGENTS.length);
+  });
+
+  it("clicking the View agent button opens the viewer modal", async () => {
+    setupStores();
+    vi.mocked(window.electronAPI.getClaudeAgents).mockResolvedValue(AGENTS);
+    vi.mocked(window.electronAPI.listSkills).mockResolvedValue([]);
+
+    renderWithProviders(<AgentsPanel />);
+
+    await waitFor(() => screen.getByText("research"));
+    const [researchViewButton] = screen.getAllByTitle("View agent");
+    await userEvent.click(researchViewButton);
+
+    expect(screen.getByText("Agent — research")).toBeInTheDocument();
+  });
 });

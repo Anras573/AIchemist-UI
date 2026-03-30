@@ -220,3 +220,62 @@ describe("SkillEditorModal — edit existing skill", () => {
     expect(screen.queryByPlaceholderText("my-skill")).not.toBeInTheDocument();
   });
 });
+
+// ─── Read-only view ───────────────────────────────────────────────────────────
+
+describe("SkillEditorModal — read-only view", () => {
+  it("shows 'Skill — ai-elements' title (not 'Edit Skill')", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ skill: EDITABLE_SKILL, readOnly: true });
+    await waitFor(() => {
+      expect(screen.getByText("Skill — ai-elements")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/edit skill/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a 'Close' button", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ skill: EDITABLE_SKILL, readOnly: true });
+    await waitFor(() => screen.getByText("Skill — ai-elements"));
+    expect(screen.getAllByRole("button", { name: /^close$/i }).length).toBeGreaterThan(0);
+  });
+
+  it("does NOT show a 'Save' button", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ skill: EDITABLE_SKILL, readOnly: true });
+    await waitFor(() => screen.getByText("Skill — ai-elements"));
+    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
+  });
+
+  it("does NOT show a 'Delete' button", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ skill: EDITABLE_SKILL, readOnly: true });
+    await waitFor(() => screen.getByText("Skill — ai-elements"));
+    expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+  });
+
+  it("does NOT render a textarea", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ skill: EDITABLE_SKILL, readOnly: true });
+    await waitFor(() => screen.getByText("Skill — ai-elements"));
+    expect(document.querySelector("textarea")).toBeNull();
+  });
+
+  it("calls ipc.readFile with `${skill.path}/SKILL.md` to load content", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ skill: EDITABLE_SKILL, readOnly: true });
+    await waitFor(() => {
+      expect(window.electronAPI.readFile).toHaveBeenCalledWith(
+        `${EDITABLE_SKILL.path}/SKILL.md`
+      );
+    });
+  });
+
+  it("displays the file path", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ skill: EDITABLE_SKILL, readOnly: true });
+    await waitFor(() => {
+      expect(screen.getByText(new RegExp(EDITABLE_SKILL.path))).toBeInTheDocument();
+    });
+  });
+});

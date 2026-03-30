@@ -222,3 +222,81 @@ describe("AgentEditorModal — built-in agent (no path)", () => {
     expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
   });
 });
+
+// ─── Read-only view (with path) ───────────────────────────────────────────────
+
+describe("AgentEditorModal — read-only view (with path)", () => {
+  it("shows 'Agent — haiku-agent' title", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ agent: EDITABLE_AGENT, readOnly: true });
+    await waitFor(() => {
+      expect(screen.getByText("Agent — haiku-agent")).toBeInTheDocument();
+    });
+  });
+
+  it("shows 'Close' button", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ agent: EDITABLE_AGENT, readOnly: true });
+    await waitFor(() => screen.getByText("Agent — haiku-agent"));
+    expect(screen.getAllByRole("button", { name: /^close$/i }).length).toBeGreaterThan(0);
+  });
+
+  it("does NOT show a 'Save' button", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ agent: EDITABLE_AGENT, readOnly: true });
+    await waitFor(() => screen.getByText("Agent — haiku-agent"));
+    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
+  });
+
+  it("does NOT show a 'Delete' button", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ agent: EDITABLE_AGENT, readOnly: true });
+    await waitFor(() => screen.getByText("Agent — haiku-agent"));
+    expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+  });
+
+  it("does NOT render a textarea", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ agent: EDITABLE_AGENT, readOnly: true });
+    await waitFor(() => screen.getByText("Agent — haiku-agent"));
+    expect(document.querySelector("textarea")).toBeNull();
+  });
+
+  it("loads file content via ipc.readFile", async () => {
+    vi.mocked(window.electronAPI.readFile).mockResolvedValue({ content: "body" });
+    renderModal({ agent: EDITABLE_AGENT, readOnly: true });
+    await waitFor(() => {
+      expect(window.electronAPI.readFile).toHaveBeenCalledWith(EDITABLE_AGENT.path);
+    });
+  });
+});
+
+// ─── Read-only view (built-in, no path) ──────────────────────────────────────
+
+describe("AgentEditorModal — read-only view (built-in, no path)", () => {
+  it("shows 'Agent — sdk-builtin' title", () => {
+    renderModal({ agent: BUILTIN_AGENT, readOnly: true });
+    expect(screen.getByText("Agent — sdk-builtin")).toBeInTheDocument();
+  });
+
+  it("does NOT call ipc.readFile (no path to read)", () => {
+    renderModal({ agent: BUILTIN_AGENT, readOnly: true });
+    expect(window.electronAPI.readFile).not.toHaveBeenCalled();
+  });
+
+  it("does NOT show 'cannot be edited' text", () => {
+    renderModal({ agent: BUILTIN_AGENT, readOnly: true });
+    expect(screen.queryByText(/cannot be edited/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the agent name in the content area", () => {
+    renderModal({ agent: BUILTIN_AGENT, readOnly: true });
+    expect(document.body.textContent).toContain("sdk-builtin");
+  });
+
+  it("shows 'Close' button and no 'Save' button", () => {
+    renderModal({ agent: BUILTIN_AGENT, readOnly: true });
+    expect(screen.getAllByRole("button", { name: /^close$/i }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
+  });
+});
