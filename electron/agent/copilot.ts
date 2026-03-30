@@ -25,6 +25,12 @@ import type { AgentProvider, AgentProviderParams } from "./provider";
 
 let clientInstance: CopilotClientType | null = null;
 
+/**
+ * Maps AIchemist session ID → Copilot SDK session ID so we can resume the
+ * same SDK session across multiple agent turns, preserving conversation history.
+ */
+const copilotSessionIds = new Map<string, string>();
+
 async function getClient(): Promise<CopilotClientType> {
   if (clientInstance) return clientInstance;
   const { CopilotClient } = await import("@github/copilot-sdk");
@@ -40,6 +46,7 @@ export async function stopCopilotClient(): Promise<void> {
   if (clientInstance) {
     await clientInstance.stop();
     clientInstance = null;
+    copilotSessionIds.clear();
   }
 }
 
@@ -337,7 +344,7 @@ export async function runCopilotAgentTurn(params: {
       : { kind: "denied-interactively-by-user" };
   };
 
-  // ── Create session ──────────────────────────────────────────────────────────
+  // ── Create or resume session ────────────────────────────────────────────────
 
   const skillsContext = buildSkillsContext(skills ?? [], projectPath);
   // Inject active skill content into each custom agent's prompt. If skills are
@@ -351,14 +358,33 @@ export async function runCopilotAgentTurn(params: {
     }
   }
 
-  const session = await client.createSession({
+  const sessionConfig = {
     model: projectConfig.model,
     streaming: true,
     workingDirectory: projectPath,
     tools: [writeFileTool, deleteFileTool, executeBashTool, webFetchTool],
     onPermissionRequest,
     ...(customAgents.length > 0 ? { customAgents } : {}),
-  });
+  };
+
+  // Resume the existing Copilot SDK session for this AIchemist session (if any)
+  // so conversation history is preserved across turns. Fall back to creating a
+  // new session if no prior session exists or resuming fails.
+  let session: Awaited<ReturnType<typeof client.createSession>>;
+  const existingCopilotSessionId = copilotSessionIds.get(sessionId);
+  if (existingCopilotSessionId) {
+    try {
+      session = await client.resumeSession(existingCopilotSessionId, sessionConfig);
+    } catch {
+      // Session state was lost (e.g. CLI restart) — create fresh
+      copilotSessionIds.delete(sessionId);
+      session = await client.createSession(sessionConfig);
+      copilotSessionIds.set(sessionId, session.sessionId);
+    }
+  } else {
+    session = await client.createSession(sessionConfig);
+    copilotSessionIds.set(sessionId, session.sessionId);
+  }
 
   // Select the requested agent before sending the prompt
   if (agent) {
