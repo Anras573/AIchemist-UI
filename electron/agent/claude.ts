@@ -251,7 +251,7 @@ export async function runClaudeAgentTurn(params: {
       mcpServers: { "aichemist-tools": mcpServer },
       settingSources: ["local", "user", "project"],
       permissionMode: "acceptEdits",
-      allowedTools: ["Read", "Glob", "LS", "Skill", "Agent"],
+      tools: ["Read", "Glob", "LS", "Skill", "Agent"],
       includePartialMessages: true,
       systemPrompt,
       ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
@@ -297,29 +297,38 @@ export async function runClaudeAgentTurn(params: {
           }
         }
       } else if (msg.type === "assistant") {
-        // Completed assistant turn — emit tool_use blocks for native SDK tools
-        // (custom MCP tools emit their own SESSION_TOOL_CALL in mcp-tools.ts)
+        // Completed assistant turn — emit tool_use blocks for native SDK tools.
+        // MCP tools (mcp__aichemist-tools__*) handle their own SESSION_TOOL_CALL
+        // in mcp-tools.ts, so we skip the push event here to avoid duplicates.
         const content = (msg.message as { content: unknown[] }).content;
         for (const block of content) {
           const b = block as { type: string; id?: string; name?: string; input?: unknown };
           if (b.type === "tool_use" && b.name) {
+            const isMcp = b.name.startsWith("mcp__");
+            // Strip "mcp__aichemist-tools__" prefix for display / tracing
+            const displayName = isMcp
+              ? b.name.replace(/^mcp__[^_]+__/, "")
+              : b.name;
             if (b.id) {
-              toolUseIdToName.set(b.id, b.name);
+              toolUseIdToName.set(b.id, displayName);
               const toolSpanId = tracer.startSpan({
                 sessionId,
                 type: "tool",
-                name: b.name,
+                name: displayName,
                 parentId: turnSpanId,
                 startMs: Date.now(),
                 meta: { input: b.input ?? {} },
               });
               toolUseIdToSpanId.set(b.id, toolSpanId);
             }
-            webContents.send(CH.SESSION_TOOL_CALL, {
-              session_id: sessionId,
-              tool_name: b.name,
-              input: b.input ?? {},
-            });
+            // MCP tools emit SESSION_TOOL_CALL themselves; skip for native tools only
+            if (!isMcp) {
+              webContents.send(CH.SESSION_TOOL_CALL, {
+                session_id: sessionId,
+                tool_name: displayName,
+                input: b.input ?? {},
+              });
+            }
           }
         }
       } else if (msg.type === "user") {
