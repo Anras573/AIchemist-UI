@@ -5,6 +5,7 @@ import type { AgentInfo, ProjectConfig } from "../../src/types/index";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { createPatch } from "diff";
 
 import * as CH from "../ipc-channels";
 import * as tracer from "../tracer";
@@ -251,7 +252,7 @@ export async function runClaudeAgentTurn(params: {
       mcpServers: { "aichemist-tools": mcpServer },
       settingSources: ["local", "user", "project"],
       permissionMode: "acceptEdits",
-      tools: ["Read", "Glob", "LS", "Skill", "Agent"],
+      allowedTools: ["Read", "Glob", "LS", "Skill", "Agent"],
       includePartialMessages: true,
       systemPrompt,
       ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
@@ -265,6 +266,8 @@ export async function runClaudeAgentTurn(params: {
   // Map tool_use_id → tool_name/spanId so we can label results and end spans
   const toolUseIdToName = new Map<string, string>();
   const toolUseIdToSpanId = new Map<string, string>();
+  // Map tool_use_id → { filePath, beforeContent } for native Write/Edit tracking
+  const pendingFileChanges = new Map<string, { filePath: string; before: string }>();
 
   // ── Tracing: start turn span and relay updates to the renderer ───────────────
   const turnStartMs = Date.now();
@@ -320,6 +323,18 @@ export async function runClaudeAgentTurn(params: {
                 meta: { input: b.input ?? {} },
               });
               toolUseIdToSpanId.set(b.id, toolSpanId);
+
+              // Capture before-content for native file write/edit tools
+              const FILE_WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEditCell"]);
+              if (!isMcp && FILE_WRITE_TOOLS.has(b.name) && b.id) {
+                const inp = b.input as Record<string, unknown> | undefined;
+                const filePath = (inp?.["file_path"] ?? inp?.["notebook_path"]) as string | undefined;
+                if (filePath) {
+                  let before = "";
+                  try { before = fs.readFileSync(filePath, "utf8"); } catch { /* new file */ }
+                  pendingFileChanges.set(b.id, { filePath, before });
+                }
+              }
             }
             // MCP tools emit SESSION_TOOL_CALL themselves; skip for native tools only
             if (!isMcp) {
@@ -346,6 +361,24 @@ export async function runClaudeAgentTurn(params: {
               tool_name: toolName,
               output,
             });
+
+            // Emit file change event for native write/edit tools
+            const pending = pendingFileChanges.get(b.tool_use_id);
+            if (pending) {
+              pendingFileChanges.delete(b.tool_use_id);
+              // Only emit if the write succeeded (output doesn't start with error indicators)
+              const lowerOutput = output.toLowerCase();
+              if (!lowerOutput.startsWith("error") && !lowerOutput.includes("permission denied")) {
+                let after = "";
+                try { after = fs.readFileSync(pending.filePath, "utf8"); } catch { /* deleted */ }
+                const relPath = path.relative(projectPath, pending.filePath) || path.basename(pending.filePath);
+                const diff = createPatch(relPath, pending.before, after, "", "");
+                webContents.send(CH.SESSION_FILE_CHANGE, {
+                  session_id: sessionId,
+                  file_change: { path: pending.filePath, relativePath: relPath, diff, operation: "write" as const },
+                });
+              }
+            }
           }
         }
       } else if (msg.type === "result") {
