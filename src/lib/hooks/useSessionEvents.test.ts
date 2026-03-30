@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useSessionEvents } from "@/lib/hooks/useSessionEvents";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -305,5 +305,66 @@ describe("useSessionEvents", () => {
         true
       );
     });
+  });
+});
+
+// ─── SESSION_FILE_CHANGE ──────────────────────────────────────────────────────
+
+describe("SESSION_FILE_CHANGE", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ sessionFileChanges: {}, tabSwitchRequest: null });
+  });
+  it("registers a listener for SESSION_FILE_CHANGE", () => {
+    renderHook(() => useSessionEvents());
+    const channels = vi.mocked(window.electronAPI.on).mock.calls.map(([ch]) => ch);
+    expect(channels).toContain(IPC_CHANNELS.SESSION_FILE_CHANGE);
+  });
+
+  it("calls addFileChange with the correct sessionId and change", () => {
+    renderHook(() => useSessionEvents());
+
+    const change = {
+      path: "/proj/src/app.ts",
+      relativePath: "src/app.ts",
+      diff: "--- src/app.ts\n+++ src/app.ts\n@@ -1 +1 @@\n-old\n+new",
+      operation: "write" as const,
+    };
+
+    getCb(IPC_CHANNELS.SESSION_FILE_CHANGE)({
+      session_id: "sess-1",
+      file_change: change,
+    });
+
+    const changes = useSessionStore.getState().sessionFileChanges["sess-1"];
+    expect(changes).toHaveLength(1);
+    expect(changes[0].relativePath).toBe("src/app.ts");
+    expect(changes[0].operation).toBe("write");
+  });
+
+  it("sets tabSwitchRequest to 'changes' when a file change arrives", () => {
+    renderHook(() => useSessionEvents());
+
+    getCb(IPC_CHANNELS.SESSION_FILE_CHANGE)({
+      session_id: "sess-1",
+      file_change: { path: "/x", relativePath: "x", diff: "", operation: "write" as const },
+    });
+
+    expect(useSessionStore.getState().tabSwitchRequest).toBe("changes");
+  });
+
+  it("accumulates multiple file changes for the same session", () => {
+    renderHook(() => useSessionEvents());
+
+    const fire = (rel: string) =>
+      getCb(IPC_CHANNELS.SESSION_FILE_CHANGE)({
+        session_id: "sess-1",
+        file_change: { path: `/${rel}`, relativePath: rel, diff: "", operation: "write" as const },
+      });
+
+    fire("a.ts");
+    fire("b.ts");
+    fire("c.ts");
+
+    expect(useSessionStore.getState().sessionFileChanges["sess-1"]).toHaveLength(3);
   });
 });

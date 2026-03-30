@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import type { Session, Message } from "@/types";
 
@@ -332,5 +332,67 @@ describe("setSessionAgent", () => {
     get().setSessionAgent("sess-2", "coder");
     get().setSessionAgent("sess-1", null);
     expect(get().sessionAgents["sess-2"]).toBe("coder");
+  });
+});
+
+// ─── addFileChange ────────────────────────────────────────────────────────────
+
+describe("addFileChange", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ sessionFileChanges: {} });
+  });
+
+  it("appends a file change to the session", () => {
+    const change = {
+      path: "/proj/foo.ts",
+      relativePath: "foo.ts",
+      diff: "--- foo.ts\n+++ foo.ts\n@@ -1 +1 @@\n-old\n+new",
+      operation: "write" as const,
+    };
+    get().addFileChange("sess-1", change);
+    expect(get().sessionFileChanges["sess-1"]).toHaveLength(1);
+    expect(get().sessionFileChanges["sess-1"][0].relativePath).toBe("foo.ts");
+  });
+
+  it("accumulates multiple changes for the same session", () => {
+    get().addFileChange("sess-1", { path: "/a", relativePath: "a", diff: "", operation: "write" });
+    get().addFileChange("sess-1", { path: "/b", relativePath: "b", diff: "", operation: "delete" });
+    expect(get().sessionFileChanges["sess-1"]).toHaveLength(2);
+  });
+
+  it("keeps changes for different sessions independent", () => {
+    get().addFileChange("sess-1", { path: "/a", relativePath: "a", diff: "", operation: "write" });
+    get().addFileChange("sess-2", { path: "/b", relativePath: "b", diff: "", operation: "write" });
+    expect(get().sessionFileChanges["sess-1"]).toHaveLength(1);
+    expect(get().sessionFileChanges["sess-2"]).toHaveLength(1);
+  });
+
+  it("starts with an empty array when first change arrives", () => {
+    expect(get().sessionFileChanges["brand-new-session"]).toBeUndefined();
+    get().addFileChange("brand-new-session", { path: "/x", relativePath: "x", diff: "", operation: "write" });
+    expect(get().sessionFileChanges["brand-new-session"]).toHaveLength(1);
+  });
+});
+
+// ─── tabSwitchRequest ─────────────────────────────────────────────────────────
+
+describe("tabSwitchRequest", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ tabSwitchRequest: null });
+  });
+
+  it("is null initially", () => {
+    expect(get().tabSwitchRequest).toBeNull();
+  });
+
+  it("requestTabSwitch sets the value", () => {
+    get().requestTabSwitch("changes");
+    expect(get().tabSwitchRequest).toBe("changes");
+  });
+
+  it("clearTabSwitchRequest resets it to null", () => {
+    get().requestTabSwitch("changes");
+    get().clearTabSwitchRequest();
+    expect(get().tabSwitchRequest).toBeNull();
   });
 });
