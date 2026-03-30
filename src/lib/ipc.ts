@@ -71,6 +71,9 @@ export const ipc = {
 
   // Traces
   getTraces: (sessionId?: string) => window.electronAPI.getTraces(sessionId),
+
+  // Changes
+  getGitDiff: (projectPath: string) => window.electronAPI.getGitDiff(projectPath),
 };
 
 // ── Push-event subscription helper ────────────────────────────────────────────
@@ -96,4 +99,5 @@ export const IPC_CHANNELS = {
   SESSION_APPROVAL_REQUIRED: "session:approval_required",
   SESSION_MESSAGE: "session:message",
   SESSION_TRACE: "session:trace",
+  SESSION_FILE_CHANGE: "session:file_change",
 } as const;

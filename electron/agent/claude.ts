@@ -199,7 +199,7 @@ export async function runClaudeAgentTurn(params: {
 
   // 1. Create the in-process MCP server (approval-gated custom tools)
   const mcpServer: McpSdkServerConfigWithInstance =
-    await createApprovalMcpServer(webContents, sessionId, projectConfig);
+    await createApprovalMcpServer(webContents, sessionId, projectConfig, projectPath);
 
   // 2. Resolve model — agent file can override the project model
   let effectiveModel = resolveModel(projectConfig.model);

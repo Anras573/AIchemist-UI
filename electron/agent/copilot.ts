@@ -14,8 +14,8 @@ import * as tracer from "../tracer";
 import { requestApproval, needsApproval } from "./approval";
 import { buildSkillsContext } from "./skills";
 import {
-  implWriteFile,
-  implDeleteFile,
+  implWriteFileWithChange,
+  implDeleteFileWithChange,
   implExecuteBash,
   implWebFetch,
 } from "./tool-impls";
@@ -223,7 +223,11 @@ export async function runCopilotAgentTurn(params: {
         },
         required: ["path", "content"],
       },
-      handler: (args) => runTool("write_file", args, "filesystem", () => implWriteFile(args)),
+      handler: (args) => runTool("write_file", args, "filesystem", async () => {
+      const { result, change } = await implWriteFileWithChange(args, projectPath);
+      if (change) webContents.send(CH.SESSION_FILE_CHANGE, { session_id: sessionId, file_change: change });
+      return result;
+    }),
     }
   );
 
@@ -236,7 +240,11 @@ export async function runCopilotAgentTurn(params: {
       },
       required: ["path"],
     },
-    handler: (args) => runTool("delete_file", args, "filesystem", () => implDeleteFile(args)),
+    handler: (args) => runTool("delete_file", args, "filesystem", async () => {
+      const { result, change } = await implDeleteFileWithChange(args, projectPath);
+      if (change) webContents.send(CH.SESSION_FILE_CHANGE, { session_id: sessionId, file_change: change });
+      return result;
+    }),
   });
 
   const executeBashTool = defineTool<{ command: string; cwd?: string }>(

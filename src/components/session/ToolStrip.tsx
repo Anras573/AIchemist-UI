@@ -1,4 +1,4 @@
-import { Files, Terminal, Blocks, Activity } from "lucide-react";
+import { Files, Terminal, Blocks, Activity, GitCommitHorizontal } from "lucide-react";
 import type { ContextTab } from "./ContextPanel";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,7 @@ const TOOLS: ToolStripItem[] = [
   { id: "terminal", icon: Terminal, label: "Terminal" },
   { id: "skills", icon: Blocks, label: "Skills" },
   { id: "traces", icon: Activity, label: "Traces" },
+  { id: "changes", icon: GitCommitHorizontal, label: "Changes" },
 ];
 
 interface ToolStripProps {

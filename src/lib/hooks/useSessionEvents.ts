@@ -74,6 +74,8 @@ export function useSessionEvents() {
     appendTerminalOutput,
     addPendingApproval,
     addOrUpdateTraceSpan,
+    addFileChange,
+    requestTabSwitch,
   } = useSessionStore();
 
   useEffect(() => {
@@ -141,6 +143,14 @@ export function useSessionEvents() {
         IPC_CHANNELS.SESSION_TRACE,
         (span) => addOrUpdateTraceSpan(span)
       ),
+
+      onSessionEvent<import("@/types").SessionFileChangeEvent>(
+        IPC_CHANNELS.SESSION_FILE_CHANGE,
+        (payload) => {
+          addFileChange(payload.session_id, payload.file_change);
+          requestTabSwitch("changes");
+        }
+      ),
     ];
 
     return () => unsubs.forEach((fn) => fn());
@@ -153,5 +163,7 @@ export function useSessionEvents() {
     appendTerminalOutput,
     addPendingApproval,
     addOrUpdateTraceSpan,
+    addFileChange,
+    requestTabSwitch,
   ]);
 }

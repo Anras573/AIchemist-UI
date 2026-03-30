@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useAgentTurn } from "@/lib/hooks/useAgentTurn";
@@ -11,7 +11,7 @@ import { ModelPickerButton } from "@/components/session/ModelPickerButton";
 
 export function WorkspaceView() {
   const { activeProjectId, projects } = useProjectStore();
-  const { sessions, activeSessionId } = useSessionStore();
+  const { sessions, activeSessionId, tabSwitchRequest, clearTabSwitchRequest } = useSessionStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const { sendMessage } = useAgentTurn();
@@ -26,6 +26,14 @@ export function WorkspaceView() {
   const handleAutoSwitch = useCallback((tab: ContextTab) => {
     setActiveTab(tab);
   }, []);
+
+  // Consume store-level tab switch requests (e.g. from file change events)
+  useEffect(() => {
+    if (tabSwitchRequest) {
+      setActiveTab(tabSwitchRequest as ContextTab);
+      clearTabSwitchRequest();
+    }
+  }, [tabSwitchRequest, clearTabSwitchRequest]);
 
   if (!activeProject) {
     return (

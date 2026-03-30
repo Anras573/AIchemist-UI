@@ -1,6 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as childProcess from "child_process";
+import { createPatch } from "diff";
+import type { FileChange } from "../../src/types/index";
 
 // ── SDK-agnostic tool implementations ────────────────────────────────────────
 //
@@ -62,4 +64,62 @@ export async function implWebFetch(args: { url: string }): Promise<string> {
   } catch (err) {
     return `Error fetching URL: ${err instanceof Error ? err.message : String(err)}`;
   }
+}
+
+// ── File-change capture helpers ───────────────────────────────────────────────
+
+/**
+ * Wraps implWriteFile: reads before-content, calls the impl, then returns
+ * both the result string and a FileChange (or null on write error).
+ */
+export async function implWriteFileWithChange(
+  args: { path: string; content: string },
+  projectPath: string
+): Promise<{ result: string; change: FileChange | null }> {
+  let before: string | null = null;
+  try {
+    before = fs.readFileSync(args.path, "utf8");
+  } catch {
+    // File doesn't exist yet — before stays null
+  }
+
+  const result = await implWriteFile(args);
+
+  if (result.startsWith("Error")) return { result, change: null };
+
+  const relPath = path.relative(projectPath, args.path) || path.basename(args.path);
+  const diff = createPatch(relPath, before ?? "", args.content, "", "");
+
+  return {
+    result,
+    change: { path: args.path, relativePath: relPath, diff, operation: "write" },
+  };
+}
+
+/**
+ * Wraps implDeleteFile: reads before-content, calls the impl, then returns
+ * both the result string and a FileChange (or null on delete error).
+ */
+export async function implDeleteFileWithChange(
+  args: { path: string },
+  projectPath: string
+): Promise<{ result: string; change: FileChange | null }> {
+  let before: string | null = null;
+  try {
+    before = fs.readFileSync(args.path, "utf8");
+  } catch {
+    before = null;
+  }
+
+  const result = await implDeleteFile(args);
+
+  if (result.startsWith("Error")) return { result, change: null };
+
+  const relPath = path.relative(projectPath, args.path) || path.basename(args.path);
+  const diff = createPatch(relPath, before ?? "", "", "", "");
+
+  return {
+    result,
+    change: { path: args.path, relativePath: relPath, diff, operation: "delete" },
+  };
 }

@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import * as childProcess from "child_process";
 import * as CH from "./ipc-channels";
 import { loadEnv, getApiKey, getAnthropicConfig } from "./config";
 import { openDb } from "./db";
@@ -100,6 +101,23 @@ function registerHandlers(): void {  // ── Settings ────────
 
   // ── Traces ───────────────────────────────────────────────────────────────────
   ipcMain.handle(CH.GET_TRACES, (_event, sessionId?: string) => getSpans(sessionId));
+
+  ipcMain.handle(CH.GET_GIT_DIFF, (_event, projectPath: string) => {
+    try {
+      return childProcess.execSync("git diff", {
+        cwd: projectPath,
+        encoding: "utf8",
+        timeout: 10_000,
+      });
+    } catch (err) {
+      // execSync throws when exit code != 0 OR when git isn't found.
+      // A non-zero exit code still populates stdout on the error object.
+      const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+      if (e.code === "ENOENT") return { error: "git not found" };
+      if (e.stdout) return e.stdout; // partial diff
+      return { error: e.stderr ?? String(err) };
+    }
+  });
 
   // ── Config ──────────────────────────────────────────────────────────────────
   ipcMain.handle(CH.GET_API_KEY, (_event, provider: string) =>

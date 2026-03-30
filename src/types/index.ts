@@ -143,7 +143,23 @@ export interface SkillInfo {
   path: string;
 }
 
-// ─── Tracing ──────────────────────────────────────────────────────────────────
+// ─── File changes ─────────────────────────────────────────────────────────────
+
+export interface FileChange {
+  /** Absolute path to the file. */
+  path: string;
+  /** Path relative to the project root, for display. */
+  relativePath: string;
+  /** Pre-computed unified diff string (computed in main process). */
+  diff: string;
+  operation: "write" | "delete";
+}
+
+export interface SessionFileChangeEvent {
+  session_id: string;
+  file_change: FileChange;
+}
+
 
 export interface TraceSpan {
   id: string;

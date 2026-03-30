@@ -5,8 +5,8 @@ import { z } from "zod";
 import * as CH from "../ipc-channels";
 import { requestApproval, needsApproval } from "./approval";
 import {
-  implWriteFile,
-  implDeleteFile,
+  implWriteFileWithChange,
+  implDeleteFileWithChange,
   implExecuteBash,
   implWebFetch,
 } from "./tool-impls";
@@ -28,7 +28,8 @@ function textResult(text: string) {
 export async function createApprovalMcpServer(
   webContents: Electron.WebContents,
   sessionId: string,
-  config: ProjectConfig
+  config: ProjectConfig,
+  projectPath: string
 ): Promise<McpSdkServerConfigWithInstance> {
   const { createSdkMcpServer, tool } = await import(
     "@anthropic-ai/claude-agent-sdk"
@@ -66,7 +67,11 @@ export async function createApprovalMcpServer(
     "write_file",
     "Write content to a file, creating parent directories as needed.",
     { path: z.string().describe("Absolute or relative file path"), content: z.string().describe("Content to write") },
-    (args) => runTool("write_file", args, "filesystem", () => implWriteFile(args))
+    (args) => runTool("write_file", args, "filesystem", async () => {
+      const { result, change } = await implWriteFileWithChange(args, projectPath);
+      if (change) webContents.send(CH.SESSION_FILE_CHANGE, { session_id: sessionId, file_change: change });
+      return result;
+    })
   );
 
   // ── delete_file ─────────────────────────────────────────────────────────────
@@ -74,7 +79,11 @@ export async function createApprovalMcpServer(
     "delete_file",
     "Delete a file from the filesystem.",
     { path: z.string().describe("Absolute or relative path of the file to delete") },
-    (args) => runTool("delete_file", args, "filesystem", () => implDeleteFile(args))
+    (args) => runTool("delete_file", args, "filesystem", async () => {
+      const { result, change } = await implDeleteFileWithChange(args, projectPath);
+      if (change) webContents.send(CH.SESSION_FILE_CHANGE, { session_id: sessionId, file_change: change });
+      return result;
+    })
   );
 
   // ── execute_bash ────────────────────────────────────────────────────────────

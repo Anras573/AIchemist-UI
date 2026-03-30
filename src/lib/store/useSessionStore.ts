@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { Session, SessionStatus, Message, TraceSpan } from "@/types";
+import { Session, SessionStatus, Message, TraceSpan, FileChange } from "@/types";
 
 export interface LiveToolCall {
   toolCallId: string;
@@ -36,6 +36,8 @@ interface SessionStore {
   sessionSkills: Record<string, string[]>;
   // Trace spans per session; accumulates live during a turn
   sessionTraces: Record<string, TraceSpan[]>;
+  // File changes written during a session (from SESSION_FILE_CHANGE events)
+  sessionFileChanges: Record<string, FileChange[]>;
 
   mergeSessions: (sessions: Session[]) => void;
   setActiveSession: (id: string | null) => void;
@@ -66,6 +68,11 @@ interface SessionStore {
   setSessionAgent: (sessionId: string, agent: string | null) => void;
   setSessionSkills: (sessionId: string, skills: string[]) => void;
   addOrUpdateTraceSpan: (span: TraceSpan) => void;
+  addFileChange: (sessionId: string, change: FileChange) => void;
+  // Signals WorkspaceView to switch the context panel to a given tab
+  tabSwitchRequest: string | null;
+  requestTabSwitch: (tab: string) => void;
+  clearTabSwitchRequest: () => void;
 }
 
 export const useSessionStore = create<SessionStore>()(
@@ -80,6 +87,8 @@ export const useSessionStore = create<SessionStore>()(
       sessionAgents: {},
       sessionSkills: {},
       sessionTraces: {},
+      sessionFileChanges: {},
+      tabSwitchRequest: null,
 
       // Merge new sessions into the store without wiping sessions from other projects.
       // Preserves messages already in the store — listSessions returns messages: [],
@@ -304,6 +313,17 @@ export const useSessionStore = create<SessionStore>()(
               : [...existing, span];
           return { sessionTraces: { ...state.sessionTraces, [span.sessionId]: updated } };
         }),
+
+      addFileChange: (sessionId, change) =>
+        set((state) => ({
+          sessionFileChanges: {
+            ...state.sessionFileChanges,
+            [sessionId]: [...(state.sessionFileChanges[sessionId] ?? []), change],
+          },
+        })),
+
+      requestTabSwitch: (tab) => set({ tabSwitchRequest: tab }),
+      clearTabSwitchRequest: () => set({ tabSwitchRequest: null }),
     }),
     {
       name: "aichemist-session-store",
