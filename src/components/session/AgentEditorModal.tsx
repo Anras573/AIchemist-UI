@@ -86,7 +86,15 @@ export function AgentEditorModal({
     }
 
     if (!agent.path) {
-      setContent("# This is a built-in agent and cannot be edited.");
+      if (readOnly) {
+        const lines = [`# ${agent!.name}`];
+        if (agent!.description) lines.push(`\n${agent!.description}`);
+        if (agent!.model) lines.push(`\n**Model:** \`${agent!.model}\``);
+        lines.push("\n---\n\n*This is a built-in agent — no file is available to view.*");
+        setContent(lines.join("\n"));
+      } else {
+        setContent("# This is a built-in agent and cannot be edited.");
+      }
       return;
     }
 
@@ -103,7 +111,7 @@ export function AgentEditorModal({
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [open, agent, isNew]);
+  }, [open, agent, isNew, readOnly]);
 
   const handleSave = async () => {
     setError(null);
