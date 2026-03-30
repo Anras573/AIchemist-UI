@@ -302,7 +302,8 @@ describe("useSessionEvents", () => {
       expect(window.electronAPI.approveToolCall).toHaveBeenCalledWith(
         "sess-1",
         "appr-1",
-        true
+        true,
+        undefined
       );
     });
   });

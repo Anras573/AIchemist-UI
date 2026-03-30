@@ -221,7 +221,7 @@ describe("resolveApproval", () => {
 
     get().resolveApproval("sess-1", "a1", true);
 
-    expect(resolve).toHaveBeenCalledWith(true);
+    expect(resolve).toHaveBeenCalledWith(true, undefined);
     expect(get().pendingApprovals["sess-1"]).toHaveLength(0);
   });
 
@@ -237,7 +237,7 @@ describe("resolveApproval", () => {
 
     get().resolveApproval("sess-1", "a1", false);
 
-    expect(resolve).toHaveBeenCalledWith(false);
+    expect(resolve).toHaveBeenCalledWith(false, undefined);
   });
 
   it("only removes the matched approval, leaving others intact", () => {
