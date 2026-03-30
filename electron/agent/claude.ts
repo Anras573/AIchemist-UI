@@ -16,6 +16,15 @@ import type { AgentProvider, AgentProviderParams } from "./provider";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+/** Returns true if a Buffer contains null bytes in its first 8 KB (binary heuristic). */
+function isBinaryBuffer(buf: Buffer): boolean {
+  const len = Math.min(buf.length, 8192);
+  for (let i = 0; i < len; i++) {
+    if (buf[i] === 0) return true;
+  }
+  return false;
+}
+
 function resolveModel(requestedModel: string): string {
   const {
     default_sonnet_model,
@@ -273,7 +282,7 @@ export async function runClaudeAgentTurn(params: {
   const toolUseIdToName = new Map<string, string>();
   const toolUseIdToSpanId = new Map<string, string>();
   // Map tool_use_id → { filePath, beforeContent } for native Write/Edit tracking
-  const pendingFileChanges = new Map<string, { filePath: string; before: string }>();
+  const pendingFileChanges = new Map<string, { filePath: string; before: Buffer | null }>();
 
   // ── Tracing: start turn span and relay updates to the renderer ───────────────
   const turnStartMs = Date.now();
@@ -336,8 +345,8 @@ export async function runClaudeAgentTurn(params: {
                 const inp = b.input as Record<string, unknown> | undefined;
                 const filePath = (inp?.["file_path"] ?? inp?.["notebook_path"]) as string | undefined;
                 if (filePath) {
-                  let before = "";
-                  try { before = fs.readFileSync(filePath, "utf8"); } catch { /* new file */ }
+                  let before: Buffer | null = null;
+                  try { before = fs.readFileSync(filePath); } catch { /* new file */ }
                   pendingFileChanges.set(b.id, { filePath, before });
                 }
               }
@@ -375,14 +384,27 @@ export async function runClaudeAgentTurn(params: {
               // Only emit if the write succeeded (output doesn't start with error indicators)
               const lowerOutput = output.toLowerCase();
               if (!lowerOutput.startsWith("error") && !lowerOutput.includes("permission denied")) {
-                let after = "";
-                try { after = fs.readFileSync(pending.filePath, "utf8"); } catch { /* deleted */ }
                 const relPath = path.relative(projectPath, pending.filePath) || path.basename(pending.filePath);
-                const diff = createPatch(relPath, pending.before, after, "", "");
-                webContents.send(CH.SESSION_FILE_CHANGE, {
-                  session_id: sessionId,
-                  file_change: { path: pending.filePath, relativePath: relPath, diff, operation: "write" as const },
-                });
+                let afterBuf: Buffer | null = null;
+                try { afterBuf = fs.readFileSync(pending.filePath); } catch { /* deleted */ }
+
+                const isBinary = (pending.before !== null && isBinaryBuffer(pending.before))
+                  || (afterBuf !== null && isBinaryBuffer(afterBuf));
+
+                if (isBinary) {
+                  webContents.send(CH.SESSION_FILE_CHANGE, {
+                    session_id: sessionId,
+                    file_change: { path: pending.filePath, relativePath: relPath, diff: "", operation: "write" as const, isBinary: true },
+                  });
+                } else {
+                  const before = pending.before ? pending.before.toString("utf8") : "";
+                  const after = afterBuf ? afterBuf.toString("utf8") : "";
+                  const diff = createPatch(relPath, before, after, "", "");
+                  webContents.send(CH.SESSION_FILE_CHANGE, {
+                    session_id: sessionId,
+                    file_change: { path: pending.filePath, relativePath: relPath, diff, operation: "write" as const },
+                  });
+                }
               }
             }
           }

@@ -68,6 +68,15 @@ export async function implWebFetch(args: { url: string }): Promise<string> {
 
 // ── File-change capture helpers ───────────────────────────────────────────────
 
+/** Returns true if a Buffer contains null bytes in its first 8 KB (binary heuristic). */
+function isBinaryBuffer(buf: Buffer): boolean {
+  const len = Math.min(buf.length, 8192);
+  for (let i = 0; i < len; i++) {
+    if (buf[i] === 0) return true;
+  }
+  return false;
+}
+
 /**
  * Wraps implWriteFile: reads before-content, calls the impl, then returns
  * both the result string and a FileChange (or null on write error).
@@ -76,11 +85,11 @@ export async function implWriteFileWithChange(
   args: { path: string; content: string },
   projectPath: string
 ): Promise<{ result: string; change: FileChange | null }> {
-  let before: string | null = null;
+  let beforeBuf: Buffer | null = null;
   try {
-    before = fs.readFileSync(args.path, "utf8");
+    beforeBuf = fs.readFileSync(args.path);
   } catch {
-    // File doesn't exist yet — before stays null
+    // File doesn't exist yet — beforeBuf stays null
   }
 
   const result = await implWriteFile(args);
@@ -88,7 +97,22 @@ export async function implWriteFileWithChange(
   if (result.startsWith("Error")) return { result, change: null };
 
   const relPath = path.relative(projectPath, args.path) || path.basename(args.path);
-  const diff = createPatch(relPath, before ?? "", args.content, "", "");
+
+  // Detect binary from before or after content
+  let afterBuf: Buffer | null = null;
+  try {
+    afterBuf = fs.readFileSync(args.path);
+  } catch { /* ignore */ }
+
+  if ((beforeBuf && isBinaryBuffer(beforeBuf)) || (afterBuf && isBinaryBuffer(afterBuf))) {
+    return {
+      result,
+      change: { path: args.path, relativePath: relPath, diff: "", operation: "write", isBinary: true },
+    };
+  }
+
+  const before = beforeBuf ? beforeBuf.toString("utf8") : "";
+  const diff = createPatch(relPath, before, args.content, "", "");
 
   return {
     result,
@@ -104,11 +128,11 @@ export async function implDeleteFileWithChange(
   args: { path: string },
   projectPath: string
 ): Promise<{ result: string; change: FileChange | null }> {
-  let before: string | null = null;
+  let beforeBuf: Buffer | null = null;
   try {
-    before = fs.readFileSync(args.path, "utf8");
+    beforeBuf = fs.readFileSync(args.path);
   } catch {
-    before = null;
+    beforeBuf = null;
   }
 
   const result = await implDeleteFile(args);
@@ -116,7 +140,16 @@ export async function implDeleteFileWithChange(
   if (result.startsWith("Error")) return { result, change: null };
 
   const relPath = path.relative(projectPath, args.path) || path.basename(args.path);
-  const diff = createPatch(relPath, before ?? "", "", "", "");
+
+  if (beforeBuf && isBinaryBuffer(beforeBuf)) {
+    return {
+      result,
+      change: { path: args.path, relativePath: relPath, diff: "", operation: "delete", isBinary: true },
+    };
+  }
+
+  const before = beforeBuf ? beforeBuf.toString("utf8") : "";
+  const diff = createPatch(relPath, before, "", "", "");
 
   return {
     result,

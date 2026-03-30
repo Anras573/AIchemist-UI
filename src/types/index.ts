@@ -150,9 +150,11 @@ export interface FileChange {
   path: string;
   /** Path relative to the project root, for display. */
   relativePath: string;
-  /** Pre-computed unified diff string (computed in main process). */
+  /** Pre-computed unified diff string (computed in main process). Empty when isBinary is true. */
   diff: string;
   operation: "write" | "delete";
+  /** True when the file is binary — no diff is available. */
+  isBinary?: boolean;
 }
 
 export interface SessionFileChangeEvent {

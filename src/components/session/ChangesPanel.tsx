@@ -78,7 +78,7 @@ function CollapsibleChange({ change }: { change: FileChange }) {
           <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
         )}
         <span className="truncate flex-1 text-foreground">{change.relativePath}</span>
-        <DiffStats diff={change.diff} />
+        {!change.isBinary && <DiffStats diff={change.diff} />}
         <span
           className={cn(
             "text-[10px] px-1.5 py-0.5 rounded font-sans font-medium shrink-0",
@@ -92,7 +92,13 @@ function CollapsibleChange({ change }: { change: FileChange }) {
       </button>
       {open && (
         <div className="border-t overflow-x-auto">
-          <DiffView diff={change.diff} />
+          {change.isBinary ? (
+            <p className="text-xs text-muted-foreground italic px-3 py-2">
+              Binary file — diff not available.
+            </p>
+          ) : (
+            <DiffView diff={change.diff} />
+          )}
         </div>
       )}
     </div>
