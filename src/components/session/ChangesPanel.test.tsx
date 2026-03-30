@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import { ChangesPanel } from "./ChangesPanel";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -52,6 +52,8 @@ describe("DiffView line colouring", () => {
     useSessionStore.getState().addFileChange("sess-1", makeFileChange());
 
     const { container } = renderWithProviders(<ChangesPanel />);
+    // Items are collapsed by default — click the first file header to expand it
+    fireEvent.click(container.querySelector("button")!);
     const lines = container.querySelectorAll("pre > div");
     const addedLine = Array.from(lines).find((el) =>
       el.textContent?.startsWith("+new line")
@@ -65,6 +67,7 @@ describe("DiffView line colouring", () => {
     useSessionStore.getState().addFileChange("sess-1", makeFileChange());
 
     const { container } = renderWithProviders(<ChangesPanel />);
+    fireEvent.click(container.querySelector("button")!);
     const lines = container.querySelectorAll("pre > div");
     const removedLine = Array.from(lines).find((el) =>
       el.textContent?.startsWith("-old line")
@@ -78,6 +81,7 @@ describe("DiffView line colouring", () => {
     useSessionStore.getState().addFileChange("sess-1", makeFileChange());
 
     const { container } = renderWithProviders(<ChangesPanel />);
+    fireEvent.click(container.querySelector("button")!);
     const lines = container.querySelectorAll("pre > div");
     const hunkLine = Array.from(lines).find((el) =>
       el.textContent?.startsWith("@@")
@@ -91,6 +95,7 @@ describe("DiffView line colouring", () => {
     useSessionStore.getState().addFileChange("sess-1", makeFileChange());
 
     const { container } = renderWithProviders(<ChangesPanel />);
+    fireEvent.click(container.querySelector("button")!);
     const lines = container.querySelectorAll("pre > div");
     const contextLine = Array.from(lines).find(
       (el) => el.textContent === " unchanged"

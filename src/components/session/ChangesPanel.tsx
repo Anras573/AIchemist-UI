@@ -64,7 +64,7 @@ function DiffView({ diff }: { diff: string }) {
 // ── CollapsibleChange ─────────────────────────────────────────────────────────
 
 function CollapsibleChange({ change }: { change: FileChange }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
 
   return (
     <div className="border rounded-md overflow-hidden">
@@ -133,14 +133,29 @@ function parseGitDiff(raw: string): GitFileEntry[] {
 
 // ── GitFileDiff ───────────────────────────────────────────────────────────────
 
-function GitFileDiff({ entry }: { entry: GitFileEntry }) {
-  const [open, setOpen] = useState(true);
+function GitFileDiff({ entry, projectPath }: { entry: GitFileEntry; projectPath: string }) {
+  const [open, setOpen] = useState(false);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  const handleToggle = useCallback(async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && entry.isUntracked && fileContent === null && fileError === null) {
+      const result = await ipc.readFile(`${projectPath}/${entry.relativePath}`);
+      if ("content" in result) {
+        setFileContent(result.content);
+      } else {
+        setFileError(result.error);
+      }
+    }
+  }, [open, entry, projectPath, fileContent, fileError]);
 
   return (
     <div className="border rounded-md overflow-hidden">
       <button
         className="w-full flex items-center gap-2 px-3 py-1.5 bg-muted/40 hover:bg-muted/70 transition-colors text-left text-xs font-mono"
-        onClick={() => setOpen((o) => !o)}
+        onClick={handleToggle}
       >
         {open ? (
           <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
@@ -149,6 +164,9 @@ function GitFileDiff({ entry }: { entry: GitFileEntry }) {
         )}
         <span className="truncate flex-1 text-foreground">{entry.relativePath}</span>
         {!entry.isUntracked && <DiffStats diff={entry.diff} />}
+        {entry.isUntracked && fileContent !== null && (
+          <DiffStats diff={fileContent.split("\n").map((l) => `+${l}`).join("\n")} />
+        )}
         <span
           className={cn(
             "text-[10px] px-1.5 py-0.5 rounded font-sans font-medium shrink-0",
@@ -157,15 +175,24 @@ function GitFileDiff({ entry }: { entry: GitFileEntry }) {
               : "bg-blue-900/50 text-blue-300"
           )}
         >
-          {entry.isUntracked ? "untracked" : "modified"}
+          {entry.isUntracked ? "new file" : "modified"}
         </span>
       </button>
       {open && (
         <div className="border-t overflow-x-auto">
           {entry.isUntracked ? (
-            <p className="text-xs text-muted-foreground italic px-3 py-2">
-              New untracked file — not yet staged or committed.
-            </p>
+            fileError ? (
+              <p className="text-xs text-red-400 px-3 py-2">{fileError}</p>
+            ) : fileContent === null ? (
+              <p className="text-xs text-muted-foreground italic px-3 py-2">Loading…</p>
+            ) : (
+              <DiffView
+                diff={fileContent
+                  .split("\n")
+                  .map((l) => `+${l}`)
+                  .join("\n")}
+              />
+            )
           ) : (
             <DiffView diff={entry.diff} />
           )}
@@ -227,7 +254,7 @@ function GitDiffSection({ projectPath }: { projectPath: string }) {
         ) : (
           <div className="flex flex-col gap-1.5">
             {entries.map((entry, i) => (
-              <GitFileDiff key={i} entry={entry} />
+              <GitFileDiff key={i} entry={entry} projectPath={projectPath} />
             ))}
           </div>
         )
