@@ -256,7 +256,7 @@ export function ProjectSettingsSheet({ projectId, onClose }: ProjectSettingsShee
       <div
         role="dialog"
         aria-label="Project settings"
-        className="fixed right-0 top-0 z-50 flex h-full w-[420px] flex-col bg-background border-l shadow-xl"
+        className="fixed right-0 top-[38px] z-50 flex h-[calc(100vh-38px)] w-[420px] flex-col bg-background border-l shadow-xl"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-3.5">
