@@ -13,6 +13,7 @@ import * as CH from "../ipc-channels";
 import * as tracer from "../tracer";
 import { requestApproval, needsApproval, requiresApproval } from "./approval";
 import { buildSkillsContext } from "./skills";
+import { readAgentFileSystemPrompt } from "./claude";
 import {
   implWriteFileWithChange,
   implDeleteFileWithChange,
@@ -364,19 +365,22 @@ export async function runCopilotAgentTurn(params: {
   const skillsContext = buildSkillsContext(skills ?? [], projectPath);
 
   // When a specific agent is selected, inject its system prompt via `systemMessage`
-  // (the same pattern Claude uses with `systemPrompt`). `customAgents` are sub-agent
-  // delegation configs — they are NOT a replacement for the session system prompt, so
-  // selecting an agent via `session.rpc.agent.select()` only routes sub-tasks; it does
-  // not change the primary instructions the model operates under.
-  //
-  // When no agent is selected, fall back to registering all available agents as
-  // custom sub-agents so Copilot can automatically delegate based on inference.
+  // using replace mode so the agent's instructions ARE the primary context.
+  // Lookup order: Copilot agent files → Claude agent files (cross-provider, e.g.
+  // agents selected via Command Palette which merges both providers).
   let systemMessageContent: string | null = null;
   let customAgents: CustomAgentConfig[] = [];
 
   if (agent) {
-    const agentBody = findCopilotAgentBody(agent, projectPath);
-    systemMessageContent = (agentBody ?? "") + skillsContext;
+    const agentBody =
+      findCopilotAgentBody(agent, projectPath) ??
+      readAgentFileSystemPrompt(agent)?.body ??
+      null;
+    if (agentBody) {
+      systemMessageContent = agentBody + skillsContext;
+    } else {
+      console.warn(`[copilot] Agent "${agent}" not found — running without custom system prompt`);
+    }
   } else {
     customAgents = toCustomAgentConfigs(projectPath);
     if (skillsContext) {
@@ -394,9 +398,22 @@ export async function runCopilotAgentTurn(params: {
     workingDirectory: projectPath,
     tools: [writeFileTool, deleteFileTool, executeBashTool, webFetchTool],
     onPermissionRequest,
-    ...(systemMessageContent ? { systemMessage: { mode: "append" as const, content: systemMessageContent } } : {}),
+    // Use replace mode so the agent's instructions become the full system prompt.
+    // Append mode adds after the SDK foundation but may not carry enough weight
+    // to override the default Copilot persona.
+    ...(systemMessageContent ? { systemMessage: { mode: "replace" as const, content: systemMessageContent } } : {}),
     ...(customAgents.length > 0 ? { customAgents } : {}),
   };
+
+  // If the agent changed since the last turn, the old Copilot SDK session was
+  // created with a different (or no) system message. Resuming it would ignore
+  // the new systemMessage, so force a fresh session instead.
+  const lastAgentKey = `agent:${sessionId}`;
+  const lastAgent = copilotSessionIds.get(lastAgentKey) ?? null;
+  if (agent !== lastAgent && copilotSessionIds.has(sessionId)) {
+    copilotSessionIds.delete(sessionId);
+  }
+  copilotSessionIds.set(lastAgentKey, agent ?? "");
 
   // Resume the existing Copilot SDK session for this AIchemist session (if any)
   // so conversation history is preserved across turns. Fall back to creating a
