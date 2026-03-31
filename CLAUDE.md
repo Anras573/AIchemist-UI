@@ -118,8 +118,8 @@ The app has a VS Code-style **agent picker** in the input bar (`src/components/s
 2. The dropdown loads available agents (lazy, cached after first fetch) via `ipc.getClaudeAgents()` or `ipc.getCopilotAgents()` depending on the active provider.
 3. Selecting an agent calls `ipc.updateSessionAgent(sessionId, agentName)` — persisted to `sessions.agent` in SQLite.
 4. On the next `agentSend`, the runner picks up the agent and activates it:
-   - **Claude:** `options.agent = agentName` passed to Claude Code SDK
-   - **Copilot:** `session.rpc.agent.select({ name })` called before `send()`
+   - **Claude:** `options.agent = agentName` passed to Claude Code SDK (for SDK built-ins) or the agent file body injected as `systemPrompt`
+   - **Copilot:** agent file body injected as `systemMessage: { mode: "replace" }` in the session config. If the agent changed since the last turn, the old SDK session is discarded so the new system message takes effect from turn 1. Lookup order: Copilot agent files → Claude agent files (cross-provider fallback for agents selected via Command Palette).
 5. Selected agent name is shown on the session tab as a `Bot` icon badge (visible on all tabs, not just the active one).
 
 ### Agent file format
@@ -242,3 +242,23 @@ The correct pattern:
 - Use `allowedTools` to suppress permission prompts for safe native tools (Read, Glob, LS, …).
 - Leave `tools` unset so our MCP server tools remain accessible.
 - Track file changes from native `Write`/`Edit` tool calls via the `pendingFileChanges` intercept in `claude.ts`, not by restricting native tools.
+
+### Claude Code SDK — Streaming vs Extended Thinking
+
+The Claude Agent SDK has a **known limitation**: enabling extended thinking (`thinking: { type: "enabled" }` or `maxThinkingTokens`) **disables all `StreamEvent` messages**. This means text streaming (real-time deltas) stops working entirely when thinking is enabled.
+
+**Do NOT add a `thinking` option** to the `query()` call in `electron/agent/claude.ts`. It will silently break streaming text, making the UI appear frozen until the full response is ready.
+
+The `Reasoning` component is wired up for **Copilot only**, which properly supports `assistant.reasoning_delta` streaming without any trade-offs.
+
+### Claude Code SDK — `PreToolUse` hook for approval gating
+
+Claude prefers its **native tools** (`Write`, `Edit`, `Bash`, `WebFetch`) over our custom MCP tools. These native tools bypass the MCP approval gate in `mcp-tools.ts`. The `PreToolUse` hook in `query()` options intercepts ALL native tool calls before execution — we check `requiresApproval()` and pause with `requestApproval()` when needed.
+
+MCP tools (`mcp__aichemist-tools__*`) are explicitly skipped in the hook (they handle approval themselves). Read-only tools (`Read`, `Glob`, `LS`) always return `approve` immediately.
+
+### Copilot SDK — `customAgents` vs `systemMessage`
+
+`customAgents` in Copilot sessions are **sub-agent delegation configs** — the parent Copilot agent decides when to delegate to them based on inference. They are NOT a replacement for the session system prompt.
+
+To make a user-selected agent's instructions the primary context, use `systemMessage: { mode: "replace", content: agentBody }` in the `createSession`/`resumeSession` config. When the agent changes between turns, the cached Copilot SDK session must be discarded (delete from `copilotSessionIds`) so the next turn creates a fresh session with the new system message — `resumeSession` does not update the system message of an existing session.

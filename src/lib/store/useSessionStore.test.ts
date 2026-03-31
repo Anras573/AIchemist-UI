@@ -429,3 +429,70 @@ describe("tabSwitchRequest", () => {
     expect(get().tabSwitchRequest).toBeNull();
   });
 });
+
+// ─── appendThinking / doneThinking / clearThinking ───────────────────────────
+
+describe("appendThinking", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ sessionThinking: {}, sessionIsThinking: {} });
+  });
+
+  it("accumulates thinking deltas for a session", () => {
+    get().appendThinking("sess-1", "Hello ");
+    get().appendThinking("sess-1", "world");
+    expect(get().sessionThinking["sess-1"]).toBe("Hello world");
+  });
+
+  it("sets sessionIsThinking to true while streaming", () => {
+    get().appendThinking("sess-1", "some thought");
+    expect(get().sessionIsThinking["sess-1"]).toBe(true);
+  });
+
+  it("keeps thinking for different sessions independent", () => {
+    get().appendThinking("sess-1", "a");
+    get().appendThinking("sess-2", "b");
+    expect(get().sessionThinking["sess-1"]).toBe("a");
+    expect(get().sessionThinking["sess-2"]).toBe("b");
+  });
+});
+
+describe("doneThinking", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ sessionThinking: { "sess-1": "some thought" }, sessionIsThinking: { "sess-1": true } });
+  });
+
+  it("sets sessionIsThinking to false", () => {
+    get().doneThinking("sess-1");
+    expect(get().sessionIsThinking["sess-1"]).toBe(false);
+  });
+
+  it("preserves the accumulated thinking text", () => {
+    get().doneThinking("sess-1");
+    expect(get().sessionThinking["sess-1"]).toBe("some thought");
+  });
+});
+
+describe("clearThinking", () => {
+  beforeEach(() => {
+    useSessionStore.setState({
+      sessionThinking: { "sess-1": "text", "sess-2": "other" },
+      sessionIsThinking: { "sess-1": true, "sess-2": false },
+    });
+  });
+
+  it("removes thinking text for the session", () => {
+    get().clearThinking("sess-1");
+    expect(get().sessionThinking["sess-1"]).toBeUndefined();
+  });
+
+  it("removes isThinking flag for the session", () => {
+    get().clearThinking("sess-1");
+    expect(get().sessionIsThinking["sess-1"]).toBeUndefined();
+  });
+
+  it("does not affect other sessions", () => {
+    get().clearThinking("sess-1");
+    expect(get().sessionThinking["sess-2"]).toBe("other");
+    expect(get().sessionIsThinking["sess-2"]).toBe(false);
+  });
+});
