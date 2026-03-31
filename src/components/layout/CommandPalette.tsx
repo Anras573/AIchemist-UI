@@ -35,7 +35,7 @@ interface CommandPaletteProps {
 type Page = "root" | "agent";
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
-  const { projects, setActiveProject, activeProjectId, openSettings } = useProjectStore();
+  const { projects, setActiveProject, activeProjectId, openSettings, openProjectSettings } = useProjectStore();
   const {
     sessions,
     setActiveSession,
@@ -121,6 +121,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   async function handleToggleApprovalMode() {
     if (!activeProjectId) return;
+    // Custom approval rules can't be meaningfully toggled — send to project settings
+    if (approvalMode === "custom") {
+      openProjectSettings();
+      close();
+      return;
+    }
     try {
       const config = await ipc.getProjectConfig(activeProjectId);
       const newMode = config.approval_mode === "none" ? "all" : "none";
@@ -231,11 +237,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
                   {activeProjectId && (
                     <CommandItem
-                      value="toggle approval mode tools require all none"
+                      value="toggle approval mode tools require all none custom"
                       onSelect={handleToggleApprovalMode}
                     >
                       <Shield className="mr-2 h-4 w-4" />
-                      <span className="flex-1">Toggle Approval Mode</span>
+                      <span className="flex-1">
+                        {approvalMode === "custom"
+                          ? "Approval Mode: Custom — edit in Project Settings"
+                          : approvalMode === "none"
+                          ? "Approval Mode: Enable"
+                          : "Approval Mode: Disable"}
+                      </span>
                       {approvalMode !== null && (
                         <span className={`ml-2 text-xs font-medium ${approvalMode === "none" ? "text-muted-foreground" : "text-green-500"}`}>
                           {approvalMode === "none" ? "off" : approvalMode === "all" ? "on" : "custom"}
