@@ -3,6 +3,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as childProcess from "child_process";
+import * as pty from "node-pty";
+import type { IPty } from "node-pty";
 import * as CH from "./ipc-channels";
 import { loadEnv, getApiKey, getAnthropicConfig } from "./config";
 import { openDb } from "./db";
@@ -28,6 +30,9 @@ const db = openDb();
 // In production, load the built index.html from dist/renderer.
 
 let mainWin: BrowserWindow | null = null;
+
+// Active PTY processes keyed by a UUID assigned at creation time.
+const terminals = new Map<string, IPty>();
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWin;
@@ -93,7 +98,52 @@ function scanSkillsDir(
   }
 }
 
-function registerHandlers(): void {  // ── Settings ─────────────────────────────────────────────────────────────────
+function registerHandlers(): void {  // ── Terminal ──────────────────────────────────────────────────────────────────
+  ipcMain.handle(CH.TERMINAL_CREATE, (_event, projectPath: string) => {
+    const id = crypto.randomUUID();
+    const shell = process.env.SHELL ?? "/bin/bash";
+    const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
+    const env = { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` } as Record<string, string>;
+
+    const term = pty.spawn(shell, [], {
+      name: "xterm-256color",
+      cols: 80,
+      rows: 24,
+      cwd: projectPath,
+      env,
+    });
+
+    terminals.set(id, term);
+
+    term.onData((data) => {
+      getMainWindow()?.webContents.send(CH.TERMINAL_OUTPUT, { id, data });
+    });
+
+    term.onExit(() => {
+      terminals.delete(id);
+      getMainWindow()?.webContents.send(CH.TERMINAL_OUTPUT, { id, data: "\r\n[Process exited]\r\n" });
+    });
+
+    return id;
+  });
+
+  ipcMain.handle(CH.TERMINAL_INPUT, (_event, id: string, data: string) => {
+    terminals.get(id)?.write(data);
+  });
+
+  ipcMain.handle(CH.TERMINAL_RESIZE, (_event, id: string, cols: number, rows: number) => {
+    terminals.get(id)?.resize(cols, rows);
+  });
+
+  ipcMain.handle(CH.TERMINAL_CLOSE, (_event, id: string) => {
+    const term = terminals.get(id);
+    if (term) {
+      try { term.kill(); } catch { /* already exited */ }
+      terminals.delete(id);
+    }
+  });
+
+  // ── Settings ─────────────────────────────────────────────────────────────────
   ipcMain.handle(CH.SETTINGS_READ, () => readSettings());
   ipcMain.handle(CH.SETTINGS_WRITE, (_event, updates: Partial<SettingsMap>) =>
     writeSettings(updates)
@@ -433,6 +483,12 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  // Kill all active terminal PTY processes.
+  for (const term of terminals.values()) {
+    try { term.kill(); } catch { /* already exited */ }
+  }
+  terminals.clear();
+
   // Gracefully shut down all providers that implement stop()
   for (const name of ["copilot", "anthropic"]) {
     try {

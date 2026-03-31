@@ -74,3 +74,10 @@ export const SESSION_FILE_CHANGE    = "session:file_change";
 export const SESSION_COMPACTION     = "session:compaction";
 export const GET_GIT_DIFF           = "fs:git-diff";
 export const GET_GIT_BRANCH         = "fs:git-branch";
+
+// ── Terminal (interactive PTY) ────────────────────────────────────────────────
+export const TERMINAL_CREATE        = "terminal:create";
+export const TERMINAL_INPUT         = "terminal:input";
+export const TERMINAL_RESIZE        = "terminal:resize";
+export const TERMINAL_CLOSE         = "terminal:close";
+export const TERMINAL_OUTPUT        = "terminal:output"; // push: main → renderer

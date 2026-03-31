@@ -75,6 +75,12 @@ export const ipc = {
   // Changes
   getGitDiff: (projectPath: string) => window.electronAPI.getGitDiff(projectPath),
   getGitBranch: (projectPath: string) => window.electronAPI.getGitBranch(projectPath),
+
+  // Terminal
+  terminalCreate: (projectPath: string) => window.electronAPI.terminalCreate(projectPath),
+  terminalInput: (id: string, data: string) => window.electronAPI.terminalInput(id, data),
+  terminalResize: (id: string, cols: number, rows: number) => window.electronAPI.terminalResize(id, cols, rows),
+  terminalClose: (id: string) => window.electronAPI.terminalClose(id),
 };
 
 // ── Push-event subscription helper ────────────────────────────────────────────
@@ -102,4 +108,5 @@ export const IPC_CHANNELS = {
   SESSION_TRACE: "session:trace",
   SESSION_FILE_CHANGE: "session:file_change",
   SESSION_COMPACTION: "session:compaction",
+  TERMINAL_OUTPUT: "terminal:output",
 } as const;

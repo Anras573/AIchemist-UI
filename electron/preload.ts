@@ -71,6 +71,12 @@ export interface ElectronAPI {
   getGitDiff: (projectPath: string) => Promise<string | { error: string }>;
   getGitBranch: (projectPath: string) => Promise<string | null>;
 
+  // ── Terminal ──────────────────────────────────────────────────────────────
+  terminalCreate: (projectPath: string) => Promise<string>;
+  terminalInput: (id: string, data: string) => Promise<void>;
+  terminalResize: (id: string, cols: number, rows: number) => Promise<void>;
+  terminalClose: (id: string) => Promise<void>;
+
   // ── Push event bus ────────────────────────────────────────────────────────
   on: (channel: string, listener: (payload: unknown) => void) => void;
   off: (channel: string, listener: (payload: unknown) => void) => void;
@@ -126,6 +132,11 @@ const api: ElectronAPI = {
   getTraces: (sessionId) => ipcRenderer.invoke(CH.GET_TRACES, sessionId),
   getGitDiff: (projectPath) => ipcRenderer.invoke(CH.GET_GIT_DIFF, projectPath),
   getGitBranch: (projectPath) => ipcRenderer.invoke(CH.GET_GIT_BRANCH, projectPath),
+
+  terminalCreate: (projectPath) => ipcRenderer.invoke(CH.TERMINAL_CREATE, projectPath),
+  terminalInput: (id, data) => ipcRenderer.invoke(CH.TERMINAL_INPUT, id, data),
+  terminalResize: (id, cols, rows) => ipcRenderer.invoke(CH.TERMINAL_RESIZE, id, cols, rows),
+  terminalClose: (id) => ipcRenderer.invoke(CH.TERMINAL_CLOSE, id),
 
   on: (channel, listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);

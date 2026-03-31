@@ -64,6 +64,10 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     getTraces: vi.fn().mockResolvedValue([]),
     getGitDiff: vi.fn().mockResolvedValue(""),
     getGitBranch: vi.fn().mockResolvedValue(null),
+    terminalCreate: vi.fn().mockResolvedValue("mock-terminal-id"),
+    terminalInput: vi.fn().mockResolvedValue(undefined),
+    terminalResize: vi.fn().mockResolvedValue(undefined),
+    terminalClose: vi.fn().mockResolvedValue(undefined),
 
     // Push event bus
     on: vi.fn(),

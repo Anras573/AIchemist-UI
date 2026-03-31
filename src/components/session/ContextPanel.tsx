@@ -6,21 +6,13 @@ import {
   FileTreeFolder,
   FileTreeFile,
 } from "@/components/ai-elements/file-tree";
-import {
-  Terminal,
-  TerminalHeader,
-  TerminalTitle,
-  TerminalActions,
-  TerminalCopyButton,
-  TerminalClearButton,
-  TerminalContent,
-} from "@/components/ai-elements/terminal";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { FileViewer } from "./FileViewer";
 import { SkillsPanel } from "./SkillsPanel";
 import { TracesPanel } from "./TracesPanel";
 import { ChangesPanel } from "./ChangesPanel";
+import { InteractiveTerminal } from "./InteractiveTerminal";
 
 // ── Rust types ────────────────────────────────────────────────────────────────
 
@@ -162,34 +154,6 @@ function FileTreeView({ projectPath, onFileOpen }: FileTreeViewProps) {
   );
 }
 
-// ── TerminalView ──────────────────────────────────────────────────────────────
-
-interface TerminalViewProps {
-  sessionId: string;
-}
-
-function TerminalView({ sessionId }: TerminalViewProps) {
-  const { terminalOutput, clearTerminalOutput } = useSessionStore();
-  const output = terminalOutput[sessionId] ?? "";
-
-  return (
-    <Terminal
-      output={output}
-      onClear={() => clearTerminalOutput(sessionId)}
-      className="border-0 rounded-none h-full"
-    >
-      <TerminalHeader>
-        <TerminalTitle />
-        <TerminalActions>
-          <TerminalCopyButton />
-          <TerminalClearButton />
-        </TerminalActions>
-      </TerminalHeader>
-      <TerminalContent className="max-h-full flex-1" />
-    </Terminal>
-  );
-}
-
 // ── ContextPanel ──────────────────────────────────────────────────────────────
 
 export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes";
@@ -208,7 +172,7 @@ export function ContextPanel({
   onClose: () => void;
   onAutoSwitch?: (tab: ContextTab) => void;
 }) {
-  const { activeSessionId, liveToolCalls } = useSessionStore();
+  const { liveToolCalls, activeSessionId } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const [viewingFile, setViewingFile] = useState<string | null>(null);
@@ -279,8 +243,14 @@ export function ContextPanel({
           <TracesPanel />
         ) : activeTab === "changes" ? (
           <ChangesPanel />
-        ) : activeTab === "terminal" && activeSessionId ? (
-          <TerminalView sessionId={activeSessionId} />
+        ) : activeTab === "terminal" ? (
+          activeProject ? (
+            <InteractiveTerminal projectPath={activeProject.path} />
+          ) : (
+            <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+              No project open
+            </div>
+          )
         ) : (
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
             No active session
