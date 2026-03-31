@@ -4,6 +4,16 @@ import { useProjectStore } from "@/lib/store/useProjectStore";
 import { Message, CompactionEvent } from "@/types";
 import { cn } from "@/lib/utils";
 import { MessageResponse } from "@/components/ai-elements/message";
+import {
+  Confirmation,
+  ConfirmationTitle,
+  ConfirmationRequest,
+  ConfirmationAccepted,
+  ConfirmationRejected,
+  ConfirmationActions,
+  ConfirmationAction,
+} from "@/components/ai-elements/confirmation";
+import { CheckIcon, XIcon } from "lucide-react";
 import { AgentPickerButton } from "./AgentPickerButton";
 import { ModelPickerButton } from "./ModelPickerButton";
 import { ipc } from "@/lib/ipc";
@@ -107,58 +117,108 @@ function ToolCallBlock({ call }: { call: LiveToolCall }) {
 
 // ─── Approval gate ────────────────────────────────────────────────────────────
 
+type ApprovalScope = "once" | "session" | "project";
+type ApprovalDecision = "pending" | "approved" | "denied";
+
 interface ApprovalGateProps {
   approval: PendingApproval;
-  onDecide: (approvalId: string, approved: boolean, scope: "once" | "session" | "project") => void;
+  onDecide: (approvalId: string, approved: boolean, scope: ApprovalScope) => void;
+}
+
+/** Formats a single arg value for display — strings truncated, objects as compact JSON. */
+function formatArgValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") {
+    return value.length > 200 ? `${value.slice(0, 200)}…` : value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
 }
 
 function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
-  const allowBtn = cn(
-    "rounded px-3 py-1 text-xs font-sans font-medium transition-colors",
-    "bg-green-500/15 text-green-700 dark:text-green-400 hover:bg-green-500/30",
-    "border border-green-500/30"
-  );
+  const [decision, setDecision] = useState<ApprovalDecision>("pending");
+  const [scope, setScope] = useState<ApprovalScope>("once");
+
+  function decide(approved: boolean, chosenScope: ApprovalScope) {
+    setDecision(approved ? "approved" : "denied");
+    setScope(chosenScope);
+    onDecide(approval.approvalId, approved, chosenScope);
+  }
+
+  const confirmApproval =
+    decision === "pending"
+      ? { id: approval.approvalId }
+      : { id: approval.approvalId, approved: decision === "approved" };
+
+  const confirmState =
+    decision === "pending" ? "approval-requested" : "approval-responded";
+
+  const argEntries = Object.entries(approval.args ?? {});
+  const scopeLabel: Record<ApprovalScope, string> = {
+    once: "once",
+    session: "for this session",
+    project: "for this project",
+  };
+
   return (
     <div className="flex w-full justify-start">
-      <div className="max-w-[85%] rounded-lg border border-amber-400/50 bg-background text-xs font-mono overflow-hidden shadow-sm">
-        {/* Header */}
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-400/10 border-b border-amber-400/30">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
-          <span className="text-amber-600 dark:text-amber-400 font-sans text-[11px] font-medium">
-            approval required
-          </span>
-          <span className="font-semibold text-foreground">{approval.toolName}</span>
-        </div>
+      <div className="max-w-[85%] min-w-[280px]">
+        <Confirmation
+          approval={confirmApproval}
+          state={confirmState}
+          className="text-sm"
+        >
+          <ConfirmationTitle className="font-semibold">
+            {approval.toolName}
+          </ConfirmationTitle>
 
-        {/* Tool arguments */}
-        <div className="px-3 py-2 text-muted-foreground border-b border-amber-400/20">
-          <pre className="whitespace-pre-wrap break-all">
-            {JSON.stringify(approval.args, null, 2)}
-          </pre>
-        </div>
-
-        {/* Allow (×3) / Deny */}
-        <div className="flex gap-2 px-3 py-2 bg-muted/30 flex-wrap">
-          <button className={allowBtn} onClick={() => onDecide(approval.approvalId, true, "once")}>
-            Allow once
-          </button>
-          <button className={allowBtn} onClick={() => onDecide(approval.approvalId, true, "session")}>
-            Allow for session
-          </button>
-          <button className={allowBtn} onClick={() => onDecide(approval.approvalId, true, "project")}>
-            Allow for project
-          </button>
-          <button
-            onClick={() => onDecide(approval.approvalId, false, "once")}
-            className={cn(
-              "rounded px-3 py-1 text-xs font-sans font-medium transition-colors",
-              "bg-destructive/10 text-destructive hover:bg-destructive/20",
-              "border border-destructive/30"
+          {/* Args — only shown while pending */}
+          <ConfirmationRequest>
+            {argEntries.length > 0 && (
+              <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs font-mono">
+                {argEntries.map(([key, val]) => (
+                  <div key={key} className="contents">
+                    <dt className="text-muted-foreground truncate">{key}</dt>
+                    <dd className="text-foreground break-all">{formatArgValue(val)}</dd>
+                  </div>
+                ))}
+              </dl>
             )}
-          >
-            Deny
-          </button>
-        </div>
+          </ConfirmationRequest>
+
+          <ConfirmationAccepted>
+            <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+              <CheckIcon className="size-3.5" />
+              Allowed {scopeLabel[scope]}
+            </span>
+          </ConfirmationAccepted>
+
+          <ConfirmationRejected>
+            <span className="flex items-center gap-1.5 text-xs text-destructive">
+              <XIcon className="size-3.5" />
+              Denied
+            </span>
+          </ConfirmationRejected>
+
+          <ConfirmationActions className="flex-wrap justify-start">
+            <ConfirmationAction variant="outline" size="sm" onClick={() => decide(true, "once")}>
+              Allow once
+            </ConfirmationAction>
+            <ConfirmationAction variant="outline" size="sm" onClick={() => decide(true, "session")}>
+              Allow for session
+            </ConfirmationAction>
+            <ConfirmationAction variant="outline" size="sm" onClick={() => decide(true, "project")}>
+              Allow for project
+            </ConfirmationAction>
+            <ConfirmationAction
+              variant="destructive"
+              size="sm"
+              onClick={() => decide(false, "once")}
+            >
+              Deny
+            </ConfirmationAction>
+          </ConfirmationActions>
+        </Confirmation>
       </div>
     </div>
   );
@@ -192,7 +252,7 @@ interface TimelinePanelProps {
 }
 
 export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProps) {
-  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, resolveApproval, sessionCompactions } = useSessionStore();
+  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, removeApproval, sessionCompactions } = useSessionStore();
   const { activeProjectId } = useProjectStore();
   const session = activeSessionId ? sessions[activeSessionId] : null;
   const streaming = activeSessionId ? (streamingText[activeSessionId] ?? "") : "";
@@ -203,10 +263,13 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
 
   function handleApprovalDecision(approvalId: string, approved: boolean, scope: "once" | "session" | "project") {
     if (!activeSessionId) return;
-    resolveApproval(activeSessionId, approvalId, approved, {
-      scope,
-      projectId: activeProjectId ?? undefined,
-    });
+    const approval = approvals.find((a) => a.approvalId === approvalId);
+    if (!approval) return;
+    // Unblock the agent immediately
+    approval.resolve(approved, { scope, projectId: activeProjectId ?? undefined });
+    // Remove the card after a brief feedback window
+    const sid = activeSessionId;
+    setTimeout(() => removeApproval(sid, approvalId), 1500);
   }
 
   // Auto-scroll to bottom when messages or streaming text changes

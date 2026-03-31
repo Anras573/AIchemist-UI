@@ -265,7 +265,40 @@ describe("resolveApproval", () => {
   });
 });
 
-// ─── live tool calls ──────────────────────────────────────────────────────────
+// ─── removeApproval ───────────────────────────────────────────────────────────
+
+describe("removeApproval", () => {
+  it("removes the approval without calling resolve", () => {
+    const resolve = vi.fn();
+    get().addPendingApproval("sess-1", {
+      approvalId: "a1",
+      toolCallId: "tc1",
+      toolName: "execute_bash",
+      args: {},
+      resolve,
+    });
+
+    get().removeApproval("sess-1", "a1");
+
+    expect(resolve).not.toHaveBeenCalled();
+    expect(get().pendingApprovals["sess-1"]).toHaveLength(0);
+  });
+
+  it("only removes the matched approval, leaving others intact", () => {
+    const r1 = vi.fn();
+    const r2 = vi.fn();
+    get().addPendingApproval("sess-1", { approvalId: "a1", toolCallId: "tc1", toolName: "tool_a", args: {}, resolve: r1 });
+    get().addPendingApproval("sess-1", { approvalId: "a2", toolCallId: "tc2", toolName: "tool_b", args: {}, resolve: r2 });
+
+    get().removeApproval("sess-1", "a1");
+
+    expect(get().pendingApprovals["sess-1"]).toHaveLength(1);
+    expect(get().pendingApprovals["sess-1"][0].approvalId).toBe("a2");
+    expect(r1).not.toHaveBeenCalled();
+  });
+});
+
+
 
 describe("live tool calls", () => {
   it("adds and updates tool results", () => {

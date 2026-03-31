@@ -63,6 +63,7 @@ interface SessionStore {
   // Approval gate actions
   addPendingApproval: (sessionId: string, approval: PendingApproval) => void;
   resolveApproval: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) => void;
+  removeApproval: (sessionId: string, approvalId: string) => void;
   clearPendingApprovals: (sessionId: string) => void;
   // Terminal log — accumulates execute_bash output across a session's lifetime
   appendTerminalOutput: (sessionId: string, line: string) => void;
@@ -272,6 +273,16 @@ export const useSessionStore = create<SessionStore>()(
             },
           };
         }),
+
+      removeApproval: (sessionId, approvalId) =>
+        set((state) => ({
+          pendingApprovals: {
+            ...state.pendingApprovals,
+            [sessionId]: (state.pendingApprovals[sessionId] ?? []).filter(
+              (a) => a.approvalId !== approvalId
+            ),
+          },
+        })),
 
       clearPendingApprovals: (sessionId) =>
         set((state) => {
