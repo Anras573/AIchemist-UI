@@ -50,6 +50,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [search, setSearch] = useState("");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
+  const [approvalMode, setApprovalMode] = useState<"all" | "none" | "custom" | null>(null);
 
   // Register Cmd+K globally
   useEffect(() => {
@@ -70,6 +71,15 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setSearch("");
     }
   }, [open]);
+
+  // Load current approval mode whenever the palette opens with an active project
+  useEffect(() => {
+    if (open && activeProjectId) {
+      ipc.getProjectConfig(activeProjectId)
+        .then((config) => setApprovalMode(config.approval_mode))
+        .catch(() => {});
+    }
+  }, [open, activeProjectId]);
 
   function close() {
     onOpenChange(false);
@@ -115,6 +125,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       const config = await ipc.getProjectConfig(activeProjectId);
       const newMode = config.approval_mode === "none" ? "all" : "none";
       await ipc.saveProjectConfig(activeProjectId, { ...config, approval_mode: newMode });
+      setApprovalMode(newMode);
     } catch (err) {
       console.error("Failed to toggle approval mode", err);
     }
@@ -224,7 +235,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       onSelect={handleToggleApprovalMode}
                     >
                       <Shield className="mr-2 h-4 w-4" />
-                      Toggle Approval Mode
+                      <span className="flex-1">Toggle Approval Mode</span>
+                      {approvalMode !== null && (
+                        <span className={`ml-2 text-xs font-medium ${approvalMode === "none" ? "text-muted-foreground" : "text-green-500"}`}>
+                          {approvalMode === "none" ? "off" : approvalMode === "all" ? "on" : "custom"}
+                        </span>
+                      )}
                     </CommandItem>
                   )}
 
