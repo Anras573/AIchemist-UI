@@ -16,15 +16,6 @@ import { requestApproval, requiresApproval } from "./approval";
 import type { ToolCategory } from "./approval";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 
-// ── Thinking-capable model prefixes ───────────────────────────────────────────
-
-const THINKING_CAPABLE_MODELS = new Set([
-  "claude-3-7",
-  "claude-opus-4",
-  "claude-sonnet-4",
-  "claude-haiku-4",
-]);
-
 // ── Native tool category map ───────────────────────────────────────────────────
 
 /** Maps a Claude Code native tool name to its approval category.
@@ -274,8 +265,6 @@ export async function runClaudeAgentTurn(params: {
   }
 
   // 6. Stream the query generator
-  const isThinkingCapable = [...THINKING_CAPABLE_MODELS].some((m) => effectiveModel.includes(m));
-
   const queryStream: AsyncGenerator<SDKMessage, void> = query({
     prompt,
     options: {
@@ -296,7 +285,6 @@ export async function runClaudeAgentTurn(params: {
       systemPrompt,
       ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
       ...(sdkAgent ? { agent: sdkAgent } : {}),
-      ...(isThinkingCapable ? { thinking: { type: "enabled" as const, budgetTokens: 8000 } } : {}),
       // ── Pre-tool hook: approval gate for native Claude Code tools ──────────
       // MCP tools (write_file, delete_file, execute_bash, web_fetch) handle
       // approval inside mcp-tools.ts. This hook covers native SDK tools that
@@ -330,7 +318,6 @@ export async function runClaudeAgentTurn(params: {
 
   let resultSessionId: string | null = null;
   let fullText = "";
-  let inThinkingBlock = false;
 
   // Map tool_use_id → tool_name/spanId so we can label results and end spans
   const toolUseIdToName = new Map<string, string>();
@@ -354,12 +341,7 @@ export async function runClaudeAgentTurn(params: {
       if (msg.type === "stream_event") {
         // Extract streaming text deltas from the raw Anthropic stream event
         const event = msg.event as Record<string, unknown>;
-        if (event["type"] === "content_block_start") {
-          const contentBlock = event["content_block"] as Record<string, unknown> | undefined;
-          if (contentBlock?.["type"] === "thinking") {
-            inThinkingBlock = true;
-          }
-        } else if (event["type"] === "content_block_delta") {
+        if (event["type"] === "content_block_delta") {
           const delta = event["delta"] as Record<string, unknown> | undefined;
           if (delta?.["type"] === "text_delta") {
             const text = delta["text"];
@@ -371,21 +353,6 @@ export async function runClaudeAgentTurn(params: {
                 text_delta: text,
               });
             }
-          } else if (delta?.["type"] === "thinking_delta") {
-            const thinkingText = delta["thinking"];
-            if (typeof thinkingText === "string" && thinkingText.length > 0) {
-              webContents.send(CH.SESSION_THINKING_DELTA, {
-                session_id: sessionId,
-                text_delta: thinkingText,
-              });
-            }
-          }
-        } else if (event["type"] === "content_block_stop") {
-          if (inThinkingBlock) {
-            inThinkingBlock = false;
-            webContents.send(CH.SESSION_THINKING_DONE, {
-              session_id: sessionId,
-            });
           }
         }
       } else if (msg.type === "assistant") {
