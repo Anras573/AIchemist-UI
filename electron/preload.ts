@@ -69,6 +69,7 @@ export interface ElectronAPI {
 
   // ── Changes ───────────────────────────────────────────────────────────────
   getGitDiff: (projectPath: string) => Promise<string | { error: string }>;
+  getGitBranch: (projectPath: string) => Promise<string | null>;
 
   // ── Push event bus ────────────────────────────────────────────────────────
   on: (channel: string, listener: (payload: unknown) => void) => void;
@@ -124,6 +125,7 @@ const api: ElectronAPI = {
   createSkill: (args) => ipcRenderer.invoke(CH.CREATE_SKILL, args),
   getTraces: (sessionId) => ipcRenderer.invoke(CH.GET_TRACES, sessionId),
   getGitDiff: (projectPath) => ipcRenderer.invoke(CH.GET_GIT_DIFF, projectPath),
+  getGitBranch: (projectPath) => ipcRenderer.invoke(CH.GET_GIT_BRANCH, projectPath),
 
   on: (channel, listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);

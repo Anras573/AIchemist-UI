@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { Message, CompactionEvent } from "@/types";
@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { AgentPickerButton } from "./AgentPickerButton";
 import { ModelPickerButton } from "./ModelPickerButton";
+import { ipc } from "@/lib/ipc";
 
 // ─── Individual message bubble ────────────────────────────────────────────────
 
@@ -300,7 +301,16 @@ interface InputBarProps {
 
 function InputBar({ disabled, placeholder = "Send a message…", onSend }: InputBarProps) {
   const { sessions, activeSessionId } = useSessionStore();
+  const { projects, activeProjectId } = useProjectStore();
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+  const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
+
+  const [gitBranch, setGitBranch] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!activeProject?.path) { setGitBranch(null); return; }
+    ipc.getGitBranch(activeProject.path).then(setGitBranch).catch(() => setGitBranch(null));
+  }, [activeProject?.path]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -337,6 +347,14 @@ function InputBar({ disabled, placeholder = "Send a message…", onSend }: Input
           />
         )}
         <AgentPickerButton />
+        {gitBranch && (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground/60">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M11.75 2.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm.75 2.25a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM4.25 13.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM5 15.75a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM4.25 2.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM5 4.75a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM5.75 8A3.25 3.25 0 0 0 9 11.25v.5a2.25 2.25 0 1 0 1.5 0v-.5a4.75 4.75 0 0 1-4.75-4.75v-.5a2.25 2.25 0 1 0-1.5 0v.5A3.25 3.25 0 0 0 5.75 8Z"/>
+            </svg>
+            {gitBranch}
+          </span>
+        )}
         <p className="text-xs text-muted-foreground/60 ml-auto">
           Enter to send · Shift+Enter for new line
         </p>

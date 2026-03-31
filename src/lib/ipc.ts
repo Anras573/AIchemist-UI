@@ -74,6 +74,7 @@ export const ipc = {
 
   // Changes
   getGitDiff: (projectPath: string) => window.electronAPI.getGitDiff(projectPath),
+  getGitBranch: (projectPath: string) => window.electronAPI.getGitBranch(projectPath),
 };
 
 // ── Push-event subscription helper ────────────────────────────────────────────

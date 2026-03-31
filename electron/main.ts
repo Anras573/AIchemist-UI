@@ -102,6 +102,18 @@ function registerHandlers(): void {  // ── Settings ────────
   // ── Traces ───────────────────────────────────────────────────────────────────
   ipcMain.handle(CH.GET_TRACES, (_event, sessionId?: string) => getSpans(sessionId));
 
+  ipcMain.handle(CH.GET_GIT_BRANCH, (_event, projectPath: string) => {
+    const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
+    const env = { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` };
+    try {
+      return childProcess
+        .execSync("git branch --show-current", { cwd: projectPath, encoding: "utf8", timeout: 5_000, env })
+        .trim() || null;
+    } catch {
+      return null;
+    }
+  });
+
   ipcMain.handle(CH.GET_GIT_DIFF, (_event, projectPath: string) => {
     // Add common git locations to PATH — Electron on macOS doesn't inherit the shell PATH.
     const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");

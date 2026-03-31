@@ -73,3 +73,4 @@ export const GET_TRACES             = "traces:get";
 export const SESSION_FILE_CHANGE    = "session:file_change";
 export const SESSION_COMPACTION     = "session:compaction";
 export const GET_GIT_DIFF           = "fs:git-diff";
+export const GET_GIT_BRANCH         = "fs:git-branch";

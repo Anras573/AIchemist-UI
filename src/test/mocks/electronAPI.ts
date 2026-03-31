@@ -63,6 +63,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     createSkill: vi.fn().mockResolvedValue({ skillPath: "" }),
     getTraces: vi.fn().mockResolvedValue([]),
     getGitDiff: vi.fn().mockResolvedValue(""),
+    getGitBranch: vi.fn().mockResolvedValue(null),
 
     // Push event bus
     on: vi.fn(),
