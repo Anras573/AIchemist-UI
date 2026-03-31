@@ -7,6 +7,7 @@ export function TitleBar() {
     <div
       className="flex h-[38px] w-full flex-shrink-0 items-center justify-center border-b bg-sidebar text-sidebar-foreground"
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      data-drag-region="true"
     >
       {/* Left spacer matches native traffic-light button area */}
       <div className="w-[70px] flex-shrink-0" />

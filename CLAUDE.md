@@ -21,7 +21,7 @@ bun run typecheck
 bun run rebuild
 ```
 
-There are no automated tests currently. TypeScript strict mode is enabled with `noUnusedLocals` and `noUnusedParameters` — unused variables are compile errors. Package manager is **bun** (see `bun.lock`). Use `bun` instead of `npm`/`yarn`.
+There are automated tests — run `bun run test`. TypeScript strict mode is enabled with `noUnusedLocals` and `noUnusedParameters` — unused variables are compile errors. Package manager is **bun** (see `bun.lock`). Use `bun` instead of `npm`/`yarn`.
 
 ---
 
@@ -60,6 +60,31 @@ This is an **Electron** desktop application with a React + TypeScript renderer a
 | `agent/claude.ts` | Claude agent runner (Anthropic); discovers agents via SDK `supportedAgents()` |
 | `agent/copilot.ts` | Copilot agent runner (GitHub); discovers agents by scanning `.md` files on disk |
 | `agent/mcp-tools.ts` | MCP tool approval gate |
+
+### Layout
+
+`AppShell` uses a **vertical flex layout** (`flex-col`):
+1. `TitleBar` — full-width macOS-style title bar (38px, draggable via `WebkitAppRegion: drag`, `data-drag-region="true"`). Left/right 70px spacers keep the centred app name clear of the native traffic-light buttons (`titleBarStyle: "hiddenInset"`).
+2. A horizontal `flex-row` below containing `ProjectSidebar` + `main` area.
+
+### Interactive terminal
+
+`src/components/session/InteractiveTerminal.tsx` renders a real interactive shell using **xterm.js** (`@xterm/xterm` + `@xterm/addon-fit`) in the renderer and **node-pty** in the main process.
+
+| IPC channel | Direction | Purpose |
+|---|---|---|
+| `TERMINAL_CREATE` | renderer → main | Spawn a PTY (respects `$SHELL`, cwd = project path). Returns a UUID. |
+| `TERMINAL_INPUT` | renderer → main | Forward keystrokes to the PTY. |
+| `TERMINAL_RESIZE` | renderer → main | Sync cols/rows after container resize. |
+| `TERMINAL_CLOSE` | renderer → main | Kill the PTY. |
+| `TERMINAL_OUTPUT` | main → renderer (push) | Stream PTY output to xterm. |
+
+`node-pty` is a native module — it must be rebuilt after an Electron version bump. The `rebuild` script covers both it and `better-sqlite3`:
+```bash
+bun run rebuild   # electron-rebuild -f -w better-sqlite3 -w node-pty
+```
+
+**Testing xterm.js components:** jsdom has no canvas, so mock `@xterm/xterm` and `@xterm/addon-fit` using `vi.fn().mockImplementation(function() { ... })` (arrow functions are not constructors). Also stub `global.ResizeObserver` the same way.
 
 ### Frontend data flow
 
