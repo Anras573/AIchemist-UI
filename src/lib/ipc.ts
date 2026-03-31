@@ -109,4 +109,20 @@ export const IPC_CHANNELS = {
   SESSION_FILE_CHANGE: "session:file_change",
   SESSION_COMPACTION: "session:compaction",
   TERMINAL_OUTPUT: "terminal:output",
+  SESSION_THINKING_DELTA: "session:thinking-delta",
+  SESSION_THINKING_DONE: "session:thinking-done",
 } as const;
+
+// ── Thinking / reasoning subscription helpers ─────────────────────────────────
+
+export function onThinkingDelta(
+  cb: (payload: { session_id: string; text_delta: string }) => void
+): () => void {
+  return window.electronAPI.onThinkingDelta(cb);
+}
+
+export function onThinkingDone(
+  cb: (payload: { session_id: string }) => void
+): () => void {
+  return window.electronAPI.onThinkingDone(cb);
+}

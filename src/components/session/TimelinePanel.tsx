@@ -13,6 +13,11 @@ import {
   ConfirmationActions,
   ConfirmationAction,
 } from "@/components/ai-elements/confirmation";
+import {
+  Reasoning,
+  ReasoningTrigger,
+  ReasoningContent,
+} from "@/components/ai-elements/reasoning";
 import { CheckIcon, XIcon } from "lucide-react";
 import { AgentPickerButton } from "./AgentPickerButton";
 import { ModelPickerButton } from "./ModelPickerButton";
@@ -253,13 +258,15 @@ interface TimelinePanelProps {
 }
 
 export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProps) {
-  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, removeApproval, sessionCompactions } = useSessionStore();
+  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, removeApproval, sessionCompactions, sessionThinking, sessionIsThinking } = useSessionStore();
   const { activeProjectId } = useProjectStore();
   const session = activeSessionId ? sessions[activeSessionId] : null;
   const streaming = activeSessionId ? (streamingText[activeSessionId] ?? "") : "";
   const toolCalls = activeSessionId ? (liveToolCalls[activeSessionId] ?? []) : [];
   const approvals = activeSessionId ? (pendingApprovals[activeSessionId] ?? []) : [];
   const compactions = activeSessionId ? (sessionCompactions[activeSessionId] ?? []) : [];
+  const thinkingText = activeSessionId ? (sessionThinking[activeSessionId] ?? "") : "";
+  const isThinking = activeSessionId ? (sessionIsThinking[activeSessionId] ?? false) : false;
   const isRunning = session?.status === "running" || session?.status === "waiting_approval";
 
   function handleApprovalDecision(approvalId: string, approved: boolean, scope: "once" | "session" | "project") {
@@ -277,7 +284,7 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
   const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [session?.messages.length, streaming, toolCalls.length, approvals.length]);
+  }, [session?.messages.length, streaming, toolCalls.length, approvals.length, thinkingText]);
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (!session) {
@@ -341,6 +348,16 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
             onDecide={handleApprovalDecision}
           />
         ))}
+        {thinkingText && (
+          <div className="flex w-full justify-start">
+            <div className="max-w-[85%]">
+              <Reasoning isStreaming={isThinking}>
+                <ReasoningTrigger />
+                <ReasoningContent>{thinkingText}</ReasoningContent>
+              </Reasoning>
+            </div>
+          </div>
+        )}
         {streaming && <StreamingBubble text={streaming} />}
         <div ref={bottomRef} />
       </div>

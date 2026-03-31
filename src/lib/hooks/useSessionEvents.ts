@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { onSessionEvent, IPC_CHANNELS, ipc } from "@/lib/ipc";
+import { onSessionEvent, IPC_CHANNELS, ipc, onThinkingDelta, onThinkingDone } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import type {
   SessionStatusEvent,
@@ -77,12 +77,18 @@ export function useSessionEvents() {
     addFileChange,
     addCompactionEvent,
     requestTabSwitch,
+    appendThinking,
+    doneThinking,
+    clearThinking,
   } = useSessionStore();
 
   useEffect(() => {
     const unsubs = [
       onSessionEvent<SessionStatusEvent>(IPC_CHANNELS.SESSION_STATUS, (payload) => {
         updateSessionStatus(payload.session_id, payload.status);
+        if (payload.status === "running") {
+          clearThinking(payload.session_id);
+        }
         if (payload.status === "idle" || payload.status === "error") {
           clearStreamingText(payload.session_id);
         }
@@ -159,6 +165,14 @@ export function useSessionEvents() {
           addCompactionEvent(payload.session_id, payload.compaction);
         }
       ),
+
+      onThinkingDelta((payload) => {
+        appendThinking(payload.session_id, payload.text_delta);
+      }),
+
+      onThinkingDone((payload) => {
+        doneThinking(payload.session_id);
+      }),
     ];
 
     return () => unsubs.forEach((fn) => fn());
@@ -174,5 +188,8 @@ export function useSessionEvents() {
     addFileChange,
     addCompactionEvent,
     requestTabSwitch,
+    appendThinking,
+    doneThinking,
+    clearThinking,
   ]);
 }

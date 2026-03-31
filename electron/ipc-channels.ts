@@ -81,3 +81,7 @@ export const TERMINAL_INPUT         = "terminal:input";
 export const TERMINAL_RESIZE        = "terminal:resize";
 export const TERMINAL_CLOSE         = "terminal:close";
 export const TERMINAL_OUTPUT        = "terminal:output"; // push: main → renderer
+
+// ── Thinking / reasoning (push: main → renderer) ─────────────────────────────
+export const SESSION_THINKING_DELTA = "session:thinking-delta";
+export const SESSION_THINKING_DONE  = "session:thinking-done";

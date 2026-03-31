@@ -72,5 +72,9 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     // Push event bus
     on: vi.fn(),
     off: vi.fn(),
+
+    // Thinking / reasoning
+    onThinkingDelta: vi.fn().mockReturnValue(() => undefined),
+    onThinkingDone: vi.fn().mockReturnValue(() => undefined),
   };
 }

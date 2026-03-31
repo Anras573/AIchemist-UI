@@ -80,6 +80,10 @@ export interface ElectronAPI {
   // ── Push event bus ────────────────────────────────────────────────────────
   on: (channel: string, listener: (payload: unknown) => void) => void;
   off: (channel: string, listener: (payload: unknown) => void) => void;
+
+  // ── Thinking / reasoning push subscriptions ───────────────────────────────
+  onThinkingDelta: (cb: (payload: { session_id: string; text_delta: string }) => void) => () => void;
+  onThinkingDone: (cb: (payload: { session_id: string }) => void) => () => void;
 }
 
 // Tracks the IpcRenderer-compatible wrapped function for each original listener
@@ -149,6 +153,19 @@ const api: ElectronAPI = {
       ipcRenderer.removeListener(channel, wrapped);
       wrappedListeners.delete(listener);
     }
+  },
+
+  onThinkingDelta: (cb) => {
+    const wrapped = (_e: Electron.IpcRendererEvent, p: unknown) =>
+      cb(p as { session_id: string; text_delta: string });
+    ipcRenderer.on(CH.SESSION_THINKING_DELTA, wrapped);
+    return () => ipcRenderer.removeListener(CH.SESSION_THINKING_DELTA, wrapped);
+  },
+  onThinkingDone: (cb) => {
+    const wrapped = (_e: Electron.IpcRendererEvent, p: unknown) =>
+      cb(p as { session_id: string });
+    ipcRenderer.on(CH.SESSION_THINKING_DONE, wrapped);
+    return () => ipcRenderer.removeListener(CH.SESSION_THINKING_DONE, wrapped);
   },
 };
 

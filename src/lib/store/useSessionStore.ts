@@ -41,6 +41,10 @@ interface SessionStore {
   // Compaction events received during a session (from SESSION_COMPACTION events)
   sessionCompactions: Record<string, CompactionEvent[]>;
   addCompactionEvent: (sessionId: string, event: CompactionEvent) => void;
+  // Accumulated extended thinking text per session (NOT persisted)
+  sessionThinking: Record<string, string>;
+  // Whether a thinking block is actively streaming per session (NOT persisted)
+  sessionIsThinking: Record<string, boolean>;
 
   mergeSessions: (sessions: Session[]) => void;
   setActiveSession: (id: string | null) => void;
@@ -77,6 +81,10 @@ interface SessionStore {
   tabSwitchRequest: string | null;
   requestTabSwitch: (tab: string) => void;
   clearTabSwitchRequest: () => void;
+  // Thinking / reasoning actions
+  appendThinking: (sessionId: string, delta: string) => void;
+  doneThinking: (sessionId: string) => void;
+  clearThinking: (sessionId: string) => void;
 }
 
 export const useSessionStore = create<SessionStore>()(
@@ -93,6 +101,8 @@ export const useSessionStore = create<SessionStore>()(
       sessionTraces: {},
       sessionFileChanges: {},
       sessionCompactions: {},
+      sessionThinking: {},
+      sessionIsThinking: {},
       tabSwitchRequest: null,
 
       // Merge new sessions into the store without wiping sessions from other projects.
@@ -347,6 +357,36 @@ export const useSessionStore = create<SessionStore>()(
 
       requestTabSwitch: (tab) => set({ tabSwitchRequest: tab }),
       clearTabSwitchRequest: () => set({ tabSwitchRequest: null }),
+
+      appendThinking: (sessionId, delta) =>
+        set((state) => ({
+          sessionThinking: {
+            ...state.sessionThinking,
+            [sessionId]: (state.sessionThinking[sessionId] ?? "") + delta,
+          },
+          sessionIsThinking: {
+            ...state.sessionIsThinking,
+            [sessionId]: true,
+          },
+        })),
+
+      doneThinking: (sessionId) =>
+        set((state) => ({
+          sessionIsThinking: {
+            ...state.sessionIsThinking,
+            [sessionId]: false,
+          },
+        })),
+
+      clearThinking: (sessionId) =>
+        set((state) => {
+          const { [sessionId]: _t, ...thinkingRest } = state.sessionThinking;
+          const { [sessionId]: _i, ...isThinkingRest } = state.sessionIsThinking;
+          return {
+            sessionThinking: thinkingRest,
+            sessionIsThinking: isThinkingRest,
+          };
+        }),
     }),
     {
       name: "aichemist-session-store",
