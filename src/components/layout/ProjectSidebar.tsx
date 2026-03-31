@@ -73,7 +73,7 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
       <div className="drag-region flex items-center h-12 px-2 border-b border-sidebar-border flex-shrink-0">
         {!collapsed && (
           <span className="text-sm font-semibold text-sidebar-foreground flex-1 truncate pl-[72px]">
-            AIchemist
+            Projects
           </span>
         )}
         {collapsed && <div className="flex-1" />}
