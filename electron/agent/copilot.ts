@@ -498,6 +498,19 @@ export async function runCopilotAgentTurn(params: {
       }
     });
 
+    // Reasoning / extended thinking events
+    session.on("assistant.reasoning_delta", (event) => {
+      const data = event.data as { reasoningId: string; deltaContent: string };
+      webContents.send(CH.SESSION_THINKING_DELTA, {
+        session_id: sessionId,
+        text_delta: data.deltaContent,
+      });
+    });
+
+    session.on("assistant.reasoning", () => {
+      webContents.send(CH.SESSION_THINKING_DONE, { session_id: sessionId });
+    });
+
     session.on("session.idle", () => resolve());
     session.on("session.error", (event) => {
       reject(new Error((event.data as { message: string }).message ?? "Copilot session error"));
