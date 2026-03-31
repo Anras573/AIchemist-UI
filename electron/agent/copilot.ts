@@ -149,6 +149,21 @@ function toCustomAgentConfigs(projectPath: string): CustomAgentConfig[] {
   }));
 }
 
+/**
+ * Find a Copilot agent by name and return its prompt body.
+ * Searches project-local agents first, then global agents.
+ */
+function findCopilotAgentBody(agentName: string, projectPath: string): string | null {
+  const projectDir = path.join(projectPath, ".agents", "copilot-agents");
+  const globalDir = path.join(os.homedir(), ".github-copilot", "agents");
+  for (const dir of [projectDir, globalDir]) {
+    for (const entry of scanAgentDir(dir)) {
+      if (entry.name === agentName) return entry.prompt;
+    }
+  }
+  return null;
+}
+
 // ── Agent turn ────────────────────────────────────────────────────────────────
 
 export async function runCopilotAgentTurn(params: {
@@ -347,14 +362,29 @@ export async function runCopilotAgentTurn(params: {
   // ── Create or resume session ────────────────────────────────────────────────
 
   const skillsContext = buildSkillsContext(skills ?? [], projectPath);
-  // Inject active skill content into each custom agent's prompt. If skills are
-  // active but no custom agents exist, create a synthetic one to carry the context.
-  let customAgents = toCustomAgentConfigs(projectPath);
-  if (skillsContext) {
-    if (customAgents.length > 0) {
-      customAgents = customAgents.map((a) => ({ ...a, prompt: a.prompt + skillsContext }));
-    } else {
-      customAgents = [{ name: "_skills", description: "Active skills context", prompt: skillsContext }];
+
+  // When a specific agent is selected, inject its system prompt via `systemMessage`
+  // (the same pattern Claude uses with `systemPrompt`). `customAgents` are sub-agent
+  // delegation configs — they are NOT a replacement for the session system prompt, so
+  // selecting an agent via `session.rpc.agent.select()` only routes sub-tasks; it does
+  // not change the primary instructions the model operates under.
+  //
+  // When no agent is selected, fall back to registering all available agents as
+  // custom sub-agents so Copilot can automatically delegate based on inference.
+  let systemMessageContent: string | null = null;
+  let customAgents: CustomAgentConfig[] = [];
+
+  if (agent) {
+    const agentBody = findCopilotAgentBody(agent, projectPath);
+    systemMessageContent = (agentBody ?? "") + skillsContext;
+  } else {
+    customAgents = toCustomAgentConfigs(projectPath);
+    if (skillsContext) {
+      if (customAgents.length > 0) {
+        customAgents = customAgents.map((a) => ({ ...a, prompt: a.prompt + skillsContext }));
+      } else {
+        customAgents = [{ name: "_skills", description: "Active skills context", prompt: skillsContext }];
+      }
     }
   }
 
@@ -364,6 +394,7 @@ export async function runCopilotAgentTurn(params: {
     workingDirectory: projectPath,
     tools: [writeFileTool, deleteFileTool, executeBashTool, webFetchTool],
     onPermissionRequest,
+    ...(systemMessageContent ? { systemMessage: { mode: "append" as const, content: systemMessageContent } } : {}),
     ...(customAgents.length > 0 ? { customAgents } : {}),
   };
 
@@ -384,15 +415,6 @@ export async function runCopilotAgentTurn(params: {
   } else {
     session = await client.createSession(sessionConfig);
     copilotSessionIds.set(sessionId, session.sessionId);
-  }
-
-  // Select the requested agent before sending the prompt
-  if (agent) {
-    try {
-      await session.rpc.agent.select({ name: agent });
-    } catch {
-      // Agent not found or selection failed — proceed with default
-    }
   }
 
   // ── Event listeners — set up before sending ─────────────────────────────────
