@@ -369,3 +369,62 @@ describe("SESSION_FILE_CHANGE", () => {
     expect(useSessionStore.getState().sessionFileChanges["sess-1"]).toHaveLength(3);
   });
 });
+
+// ─── SESSION_THINKING_DELTA ───────────────────────────────────────────────────
+
+describe("SESSION_THINKING_DELTA", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ sessionThinking: {}, sessionIsThinking: {} });
+  });
+
+  it("appends thinking deltas to the store", () => {
+    renderHook(() => useSessionEvents());
+
+    const cb = vi.mocked(window.electronAPI.onThinkingDelta).mock.calls[0][0];
+    cb({ session_id: "sess-1", text_delta: "Hello " });
+    cb({ session_id: "sess-1", text_delta: "world" });
+
+    expect(useSessionStore.getState().sessionThinking["sess-1"]).toBe("Hello world");
+    expect(useSessionStore.getState().sessionIsThinking["sess-1"]).toBe(true);
+  });
+});
+
+// ─── SESSION_THINKING_DONE ────────────────────────────────────────────────────
+
+describe("SESSION_THINKING_DONE", () => {
+  beforeEach(() => {
+    useSessionStore.setState({
+      sessionThinking: { "sess-1": "some thought" },
+      sessionIsThinking: { "sess-1": true },
+    });
+  });
+
+  it("sets sessionIsThinking to false but keeps the text", () => {
+    renderHook(() => useSessionEvents());
+
+    const cb = vi.mocked(window.electronAPI.onThinkingDone).mock.calls[0][0];
+    cb({ session_id: "sess-1" });
+
+    expect(useSessionStore.getState().sessionIsThinking["sess-1"]).toBe(false);
+    expect(useSessionStore.getState().sessionThinking["sess-1"]).toBe("some thought");
+  });
+});
+
+// ─── clearThinking on new turn ────────────────────────────────────────────────
+
+describe("clearThinking on SESSION_STATUS running", () => {
+  beforeEach(() => {
+    useSessionStore.setState({
+      sessionThinking: { "sess-1": "previous thought" },
+      sessionIsThinking: { "sess-1": false },
+    });
+  });
+
+  it("clears thinking text when a new turn starts", () => {
+    renderHook(() => useSessionEvents());
+    getCb(IPC_CHANNELS.SESSION_STATUS)({ session_id: "sess-1", status: "running" });
+
+    expect(useSessionStore.getState().sessionThinking["sess-1"]).toBeUndefined();
+    expect(useSessionStore.getState().sessionIsThinking["sess-1"]).toBeUndefined();
+  });
+});
