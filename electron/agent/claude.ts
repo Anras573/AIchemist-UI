@@ -12,7 +12,20 @@ import * as tracer from "../tracer";
 import { createApprovalMcpServer } from "./mcp-tools";
 import { buildSkillsContext } from "./skills";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
+import { requestApproval, requiresApproval } from "./approval";
+import type { ToolCategory } from "./approval";
 import type { AgentProvider, AgentProviderParams } from "./provider";
+
+// ── Native tool category map ───────────────────────────────────────────────────
+
+/** Maps a Claude Code native tool name to its approval category.
+ *  Returns null for read-only or unknown tools that never require approval. */
+function getNativeToolCategory(toolName: string): ToolCategory | null {
+  if (["Write", "Edit", "MultiEdit", "NotebookEditCell"].includes(toolName)) return "filesystem";
+  if (["Bash"].includes(toolName)) return "shell";
+  if (["WebFetch", "WebSearch"].includes(toolName)) return "web";
+  return null;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -272,6 +285,34 @@ export async function runClaudeAgentTurn(params: {
       systemPrompt,
       ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
       ...(sdkAgent ? { agent: sdkAgent } : {}),
+      // ── Pre-tool hook: approval gate for native Claude Code tools ──────────
+      // MCP tools (write_file, delete_file, execute_bash, web_fetch) handle
+      // approval inside mcp-tools.ts. This hook covers native SDK tools that
+      // bypass the MCP server (Write, Edit, Bash, WebFetch, etc.).
+      hooks: {
+        PreToolUse: [
+          {
+            hooks: [
+              async (input: unknown) => {
+                const { tool_name, tool_input } = input as { tool_name: string; tool_input: unknown };
+                // MCP tools use their own approval gate — skip
+                if (tool_name.startsWith("mcp__")) {
+                  return { decision: "approve" as const };
+                }
+                const category = getNativeToolCategory(tool_name);
+                if (!category) return { decision: "approve" as const };
+                if (!requiresApproval(sessionId, projectConfig, category, tool_name, tool_input)) {
+                  return { decision: "approve" as const };
+                }
+                const approved = await requestApproval(webContents, sessionId, tool_name, tool_input);
+                return approved
+                  ? { decision: "approve" as const }
+                  : { decision: "block" as const, reason: "Denied by user." };
+              },
+            ],
+          },
+        ],
+      },
     },
   });
 
