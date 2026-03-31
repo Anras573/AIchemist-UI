@@ -166,9 +166,10 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
         <Confirmation
           approval={confirmApproval}
           state={confirmState}
-          className="text-sm"
+          className="text-sm border-amber-400/50 bg-amber-400/10 dark:bg-amber-400/5"
         >
-          <ConfirmationTitle className="font-semibold">
+          <ConfirmationTitle className="flex items-center gap-2 font-semibold text-foreground">
+            <span className="inline-block size-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse" />
             {approval.toolName}
           </ConfirmationTitle>
 
