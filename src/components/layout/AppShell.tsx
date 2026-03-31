@@ -6,6 +6,7 @@ import { SettingsView } from "@/components/settings/SettingsView";
 import { ProjectSettingsSheet } from "@/components/settings/ProjectSettingsSheet";
 import { useSessionEvents } from "@/lib/hooks/useSessionEvents";
 import { useProjectStore } from "@/lib/store/useProjectStore";
+import { TitleBar } from "@/components/layout/TitleBar";
 
 export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -32,15 +33,19 @@ export function AppShell() {
   }, [handleKeyDown]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-      <ProjectSidebar
-        collapsed={sidebarCollapsed}
-        onCollapsedChange={setSidebarCollapsed}
-      />
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
+      <TitleBar />
 
-      <main className="flex flex-1 overflow-hidden">
-        {settingsOpen ? <SettingsView onClose={closeSettings} /> : <WorkspaceView />}
-      </main>
+      <div className="flex flex-1 overflow-hidden">
+        <ProjectSidebar
+          collapsed={sidebarCollapsed}
+          onCollapsedChange={setSidebarCollapsed}
+        />
+
+        <main className="flex flex-1 overflow-hidden">
+          {settingsOpen ? <SettingsView onClose={closeSettings} /> : <WorkspaceView />}
+        </main>
+      </div>
 
       {projectSettingsOpen && activeProjectId && (
         <ProjectSettingsSheet
