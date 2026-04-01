@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { onSessionEvent, IPC_CHANNELS, ipc, onThinkingDelta, onThinkingDone } from "@/lib/ipc";
-import { useSessionStore } from "@/lib/store/useSessionStore";
+import { useSessionStore, type PendingQuestion } from "@/lib/store/useSessionStore";
 import type {
   SessionStatusEvent,
   SessionDeltaEvent,
@@ -29,7 +29,13 @@ interface ApprovalRequiredEvent {
   input: Record<string, unknown>;
 }
 
-/** Extract a plain string from either mcp-tools or copilot output shapes. */
+interface QuestionRequiredEvent {
+  session_id: string;
+  question_id: string;
+  question: string;
+  options?: string[];
+  placeholder?: string;
+}
 function extractOutput(
   output: ToolResultEvent["output"]
 ): string {
@@ -80,6 +86,8 @@ export function useSessionEvents() {
     appendThinking,
     doneThinking,
     clearThinking,
+    addPendingQuestion,
+    clearPendingQuestions,
   } = useSessionStore();
 
   useEffect(() => {
@@ -88,6 +96,7 @@ export function useSessionEvents() {
         updateSessionStatus(payload.session_id, payload.status);
         if (payload.status === "running") {
           clearThinking(payload.session_id);
+          clearPendingQuestions(payload.session_id);
         }
         if (payload.status === "idle" || payload.status === "error") {
           clearStreamingText(payload.session_id);
@@ -173,6 +182,21 @@ export function useSessionEvents() {
       onThinkingDone((payload) => {
         doneThinking(payload.session_id);
       }),
+
+      onSessionEvent<QuestionRequiredEvent>(
+        IPC_CHANNELS.SESSION_QUESTION_REQUIRED,
+        (payload) => {
+          const q: PendingQuestion = {
+            questionId: payload.question_id,
+            question: payload.question,
+            options: payload.options,
+            placeholder: payload.placeholder,
+            resolve: (answer) =>
+              ipc.answerQuestion(payload.question_id, answer),
+          };
+          addPendingQuestion(payload.session_id, q);
+        }
+      ),
     ];
 
     return () => unsubs.forEach((fn) => fn());
@@ -191,5 +215,7 @@ export function useSessionEvents() {
     appendThinking,
     doneThinking,
     clearThinking,
+    addPendingQuestion,
+    clearPendingQuestions,
   ]);
 }

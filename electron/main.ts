@@ -14,6 +14,7 @@ import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
 import { resolveApproval, getPendingApprovalData, addToSessionAllowlist, computeFingerprint } from "./agent/approval";
+import { resolveQuestion } from "./agent/question";
 import { runAgentTurn, getProvider } from "./agent/runner";
 import { getSpans } from "./tracer";
 import type { ProjectConfig } from "../src/types/index";
@@ -397,6 +398,13 @@ function registerHandlers(): void {  // ── Terminal ────────
         }
       }
       resolveApproval(args.approvalId, args.approved);
+    }
+  );
+
+  ipcMain.handle(
+    CH.ANSWER_QUESTION,
+    (_event, args: { questionId: string; answer: string }) => {
+      resolveQuestion(args.questionId, args.answer);
     }
   );
 

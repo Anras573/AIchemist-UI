@@ -50,6 +50,8 @@ export const ipc = {
     window.electronAPI.agentSend(args),
   approveToolCall: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) =>
     window.electronAPI.approveToolCall(sessionId, approvalId, approved, options),
+  answerQuestion: (questionId: string, answer: string) =>
+    window.electronAPI.answerQuestion(questionId, answer),
   getCopilotModels: () => window.electronAPI.getCopilotModels(),
   getClaudeAgents: (projectPath: string) => window.electronAPI.getClaudeAgents(projectPath),
   getCopilotAgents: (projectPath: string) => window.electronAPI.getCopilotAgents(projectPath),
@@ -111,6 +113,7 @@ export const IPC_CHANNELS = {
   TERMINAL_OUTPUT: "terminal:output",
   SESSION_THINKING_DELTA: "session:thinking-delta",
   SESSION_THINKING_DONE: "session:thinking-done",
+  SESSION_QUESTION_REQUIRED: "session:question_required",
 } as const;
 
 // ── Thinking / reasoning subscription helpers ─────────────────────────────────

@@ -85,3 +85,7 @@ export const TERMINAL_OUTPUT        = "terminal:output"; // push: main → rende
 // ── Thinking / reasoning (push: main → renderer) ─────────────────────────────
 export const SESSION_THINKING_DELTA = "session:thinking-delta";
 export const SESSION_THINKING_DONE  = "session:thinking-done";
+
+// ── Interactive questions (push: main → renderer + renderer → main) ───────────
+export const SESSION_QUESTION_REQUIRED = "session:question_required";
+export const ANSWER_QUESTION           = "agent:answer-question";

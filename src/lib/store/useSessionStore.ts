@@ -20,6 +20,14 @@ export interface PendingApproval {
   resolve: (approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) => void;
 }
 
+export interface PendingQuestion {
+  questionId: string;
+  question: string;
+  options?: string[];
+  placeholder?: string;
+  resolve: (answer: string) => void;
+}
+
 interface SessionStore {
   // All loaded sessions keyed by session id (can span multiple projects)
   sessions: Record<string, Session>;
@@ -30,6 +38,8 @@ interface SessionStore {
   liveToolCalls: Record<string, LiveToolCall[]>;
   // Approval gates waiting for user decision, keyed by session id
   pendingApprovals: Record<string, PendingApproval[]>;
+  // Interactive questions waiting for user answer, keyed by session id
+  pendingQuestions: Record<string, PendingQuestion[]>;
   // Active sub-agent per session (Claude only); null = default agent
   sessionAgents: Record<string, string | null>;
   // Active skills per session; empty array = no skills toggled
@@ -85,6 +95,10 @@ interface SessionStore {
   appendThinking: (sessionId: string, delta: string) => void;
   doneThinking: (sessionId: string) => void;
   clearThinking: (sessionId: string) => void;
+  // Question gate actions
+  addPendingQuestion: (sessionId: string, question: PendingQuestion) => void;
+  removePendingQuestion: (sessionId: string, questionId: string) => void;
+  clearPendingQuestions: (sessionId: string) => void;
 }
 
 export const useSessionStore = create<SessionStore>()(
@@ -95,6 +109,7 @@ export const useSessionStore = create<SessionStore>()(
       streamingText: {},
       liveToolCalls: {},
       pendingApprovals: {},
+      pendingQuestions: {},
       terminalOutput: {},
       sessionAgents: {},
       sessionSkills: {},
@@ -386,6 +401,31 @@ export const useSessionStore = create<SessionStore>()(
             sessionThinking: thinkingRest,
             sessionIsThinking: isThinkingRest,
           };
+        }),
+
+      addPendingQuestion: (sessionId, question) =>
+        set((state) => ({
+          pendingQuestions: {
+            ...state.pendingQuestions,
+            [sessionId]: [...(state.pendingQuestions[sessionId] ?? []), question],
+          },
+        })),
+
+      removePendingQuestion: (sessionId, questionId) =>
+        set((state) => ({
+          pendingQuestions: {
+            ...state.pendingQuestions,
+            [sessionId]: (state.pendingQuestions[sessionId] ?? []).filter(
+              (q) => q.questionId !== questionId
+            ),
+          },
+        })),
+
+      clearPendingQuestions: (sessionId) =>
+        set((state) => {
+          (state.pendingQuestions[sessionId] ?? []).forEach((q) => q.resolve(""));
+          const { [sessionId]: _cleared, ...rest } = state.pendingQuestions;
+          return { pendingQuestions: rest };
         }),
     }),
     {

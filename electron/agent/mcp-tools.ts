@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import * as CH from "../ipc-channels";
 import { requestApproval, needsApproval } from "./approval";
+import { requestQuestion } from "./question";
 import {
   implWriteFileWithChange,
   implDeleteFileWithChange,
@@ -119,9 +120,30 @@ export async function createApprovalMcpServer(
     (args) => runTool("web_fetch", args, "web", () => implWebFetch(args))
   );
 
+  // ── ask_user ────────────────────────────────────────────────────────────────
+  const askUserTool = tool(
+    "ask_user",
+    "Ask the user a question and wait for their answer before proceeding. Use when you need clarification, missing information, or a decision from the user.",
+    {
+      question: z.string().describe("The question to ask the user"),
+      options: z.array(z.string()).optional().describe("Optional list of pre-defined choices the user can click"),
+      placeholder: z.string().optional().describe("Placeholder text for the free-form input field"),
+    },
+    async (args) => {
+      const answer = await requestQuestion(
+        webContents,
+        sessionId,
+        args.question,
+        args.options,
+        args.placeholder
+      );
+      return textResult(answer || "(no answer provided)");
+    }
+  );
+
   return createSdkMcpServer({
     name: "aichemist-tools",
     version: "1.0.0",
-    tools: [writeFileTool, deleteFileTool, executeBashTool, webFetchTool],
+    tools: [writeFileTool, deleteFileTool, executeBashTool, webFetchTool, askUserTool],
   });
 }

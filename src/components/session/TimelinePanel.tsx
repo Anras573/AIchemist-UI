@@ -27,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AgentPickerButton } from "./AgentPickerButton";
 import { ModelPickerButton } from "./ModelPickerButton";
+import { QuestionCard } from "./QuestionCard";
 import { ipc } from "@/lib/ipc";
 
 // ─── Individual message bubble ────────────────────────────────────────────────
@@ -197,12 +198,13 @@ interface TimelinePanelProps {
 }
 
 export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProps) {
-  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, removeApproval, sessionCompactions, sessionThinking, sessionIsThinking } = useSessionStore();
+  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking } = useSessionStore();
   const { activeProjectId } = useProjectStore();
   const session = activeSessionId ? sessions[activeSessionId] : null;
   const streaming = activeSessionId ? (streamingText[activeSessionId] ?? "") : "";
   const toolCalls = activeSessionId ? (liveToolCalls[activeSessionId] ?? []) : [];
   const approvals = activeSessionId ? (pendingApprovals[activeSessionId] ?? []) : [];
+  const questions = activeSessionId ? (pendingQuestions[activeSessionId] ?? []) : [];
   const compactions = activeSessionId ? (sessionCompactions[activeSessionId] ?? []) : [];
   const thinkingText = activeSessionId ? (sessionThinking[activeSessionId] ?? "") : "";
   const isThinking = activeSessionId ? (sessionIsThinking[activeSessionId] ?? false) : false;
@@ -284,6 +286,17 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
               key={approval.approvalId}
               approval={approval}
               onDecide={handleApprovalDecision}
+            />
+          ))}
+          {questions.map((q) => (
+            <QuestionCard
+              key={q.questionId}
+              question={q}
+              onAnswer={(questionId, answer) => {
+                if (!activeSessionId) return;
+                q.resolve(answer);
+                removePendingQuestion(activeSessionId, questionId);
+              }}
             />
           ))}
           {thinkingText && (
