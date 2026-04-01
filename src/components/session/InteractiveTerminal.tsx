@@ -11,6 +11,12 @@ import {
   TerminalClearButton,
 } from "@/components/ai-elements/terminal";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { CheckIcon, CopyIcon } from "lucide-react";
 
 interface TerminalOutputPayload {
@@ -33,17 +39,17 @@ export function InteractiveTerminal({ projectPath }: InteractiveTerminalProps) {
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef<string | null>(null);
-  // Accumulate raw output for the copy button (no re-renders on every keystroke).
-  const outputRef = useRef<string>("");
+  // Accumulate PTY output since the last Enter — used by the copy button.
+  const lastCommandOutputRef = useRef<string>("");
   const [copied, setCopied] = useState(false);
 
   const handleClear = () => {
     xtermRef.current?.clear();
-    outputRef.current = "";
+    lastCommandOutputRef.current = "";
   };
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(outputRef.current);
+    await navigator.clipboard.writeText(lastCommandOutputRef.current);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -103,8 +109,11 @@ export function InteractiveTerminal({ projectPath }: InteractiveTerminalProps) {
 
       terminalIdRef.current = id;
 
-      // Forward user keystrokes to the PTY.
-      xterm.onData((data) => ipc.terminalInput(id, data));
+      // Forward user keystrokes to the PTY; reset the copy buffer on Enter.
+      xterm.onData((data) => {
+        if (data === "\r") lastCommandOutputRef.current = "";
+        ipc.terminalInput(id, data);
+      });
     });
 
     // ── Subscribe to PTY output ──────────────────────────────────────────────
@@ -112,7 +121,7 @@ export function InteractiveTerminal({ projectPath }: InteractiveTerminalProps) {
       const { id, data } = payload as TerminalOutputPayload;
       if (id === terminalIdRef.current) {
         xterm.write(data);
-        outputRef.current += data;
+        lastCommandOutputRef.current += data;
       }
     };
 
@@ -148,15 +157,27 @@ export function InteractiveTerminal({ projectPath }: InteractiveTerminalProps) {
       <TerminalHeader>
         <TerminalTitle />
         <TerminalActions>
-          <Button
-            className="size-7 shrink-0 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-            onClick={handleCopy}
-            size="icon"
-            variant="ghost"
-          >
-            {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-          </Button>
-          <TerminalClearButton />
+          <TooltipProvider delay={300}>
+            <Tooltip>
+              <TooltipTrigger>
+                <Button
+                  className="size-7 shrink-0 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                  onClick={handleCopy}
+                  size="icon"
+                  variant="ghost"
+                >
+                  {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Copy output since last command</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger>
+                <TerminalClearButton />
+              </TooltipTrigger>
+              <TooltipContent>Clear terminal</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </TerminalActions>
       </TerminalHeader>
       <div ref={containerRef} className="flex-1 overflow-hidden p-1" />
