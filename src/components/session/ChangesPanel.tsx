@@ -5,6 +5,7 @@ import { useProjectStore } from "@/lib/store/useProjectStore";
 import { ipc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import type { FileChange } from "@/types";
+import { CodeBlock } from "@/components/ai-elements/code-block";
 
 // ── countDiffStats ────────────────────────────────────────────────────────────
 
@@ -26,38 +27,6 @@ function DiffStats({ diff }: { diff: string }) {
       {added > 0 && <span className="text-green-400">+{added}</span>}
       {removed > 0 && <span className="text-red-400">-{removed}</span>}
     </span>
-  );
-}
-
-// ── DiffView ─────────────────────────────────────────────────────────────────
-
-function DiffView({ diff }: { diff: string }) {
-  const lines = diff.split("\n");
-
-  return (
-    <pre className="text-xs font-mono leading-5 overflow-x-auto p-2">
-      {lines.map((line, i) => {
-        const isAdd = line.startsWith("+") && !line.startsWith("+++");
-        const isDel = line.startsWith("-") && !line.startsWith("---");
-        const isHunk = line.startsWith("@@");
-        const isHeader = line.startsWith("---") || line.startsWith("+++");
-
-        return (
-          <div
-            key={i}
-            className={cn(
-              "whitespace-pre",
-              isAdd && "bg-green-950/50 text-green-400",
-              isDel && "bg-red-950/50 text-red-400",
-              isHunk && "text-blue-400",
-              isHeader && "text-muted-foreground"
-            )}
-          >
-            {line || " "}
-          </div>
-        );
-      })}
-    </pre>
   );
 }
 
@@ -91,13 +60,13 @@ function CollapsibleChange({ change }: { change: FileChange }) {
         </span>
       </button>
       {open && (
-        <div className="border-t overflow-x-auto">
+        <div className="border-t">
           {change.isBinary ? (
             <p className="text-xs text-muted-foreground italic px-3 py-2">
               Binary file — diff not available.
             </p>
           ) : (
-            <DiffView diff={change.diff} />
+            <CodeBlock code={change.diff} language="diff" />
           )}
         </div>
       )}
@@ -185,22 +154,20 @@ function GitFileDiff({ entry, projectPath }: { entry: GitFileEntry; projectPath:
         </span>
       </button>
       {open && (
-        <div className="border-t overflow-x-auto">
+        <div className="border-t">
           {entry.isUntracked ? (
             fileError ? (
               <p className="text-xs text-red-400 px-3 py-2">{fileError}</p>
             ) : fileContent === null ? (
               <p className="text-xs text-muted-foreground italic px-3 py-2">Loading…</p>
             ) : (
-              <DiffView
-                diff={fileContent
-                  .split("\n")
-                  .map((l) => `+${l}`)
-                  .join("\n")}
+              <CodeBlock
+                code={fileContent.split("\n").map((l) => `+${l}`).join("\n")}
+                language="diff"
               />
             )
           ) : (
-            <DiffView diff={entry.diff} />
+            <CodeBlock code={entry.diff} language="diff" />
           )}
         </div>
       )}
