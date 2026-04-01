@@ -59,7 +59,9 @@ This is an **Electron** desktop application with a React + TypeScript renderer a
 | `agent/runner.ts` | Dispatches agent turns to the appropriate provider |
 | `agent/claude.ts` | Claude agent runner (Anthropic); discovers agents via SDK `supportedAgents()` |
 | `agent/copilot.ts` | Copilot agent runner (GitHub); discovers agents by scanning `.md` files on disk |
-| `agent/mcp-tools.ts` | MCP tool approval gate |
+| `agent/mcp-tools.ts` | MCP tool approval gate + `ask_user` tool (Claude) |
+| `agent/approval.ts` | Approval promise map — `requestApproval` / `resolveApproval` |
+| `agent/question.ts` | Question promise map — `requestQuestion` / `resolveQuestion` |
 
 ### Layout
 
@@ -91,15 +93,16 @@ bun run rebuild   # electron-rebuild -f -w better-sqlite3 -w node-pty
 1. User message → `useAgentTurn.sendMessage()` (hook in `src/lib/hooks/`)
 2. Persists user message via `ipc.saveMessage()` → SQLite
 3. Calls `ipc.agentSend({ sessionId, prompt })` → main process runs the agent turn
-4. Main process streams events back: `SESSION_STATUS`, `SESSION_DELTA`, `SESSION_TOOL_CALL`, `SESSION_TOOL_RESULT`, `SESSION_APPROVAL_REQUIRED`, `SESSION_MESSAGE`
+4. Main process streams events back: `SESSION_STATUS`, `SESSION_DELTA`, `SESSION_TOOL_CALL`, `SESSION_TOOL_RESULT`, `SESSION_APPROVAL_REQUIRED`, `SESSION_QUESTION_REQUIRED`, `SESSION_MESSAGE`
 5. `useSessionEvents` hook (mounted once in `AppShell`) subscribes via `onSessionEvent()` and updates the Zustand session store
 6. Approval-gated tools: main emits `SESSION_APPROVAL_REQUIRED`; UI shows approval dialog; renderer calls `ipc.approveToolCall()`
+7. Interactive questions: main emits `SESSION_QUESTION_REQUIRED`; UI shows `QuestionCard`; renderer calls `ipc.answerQuestion()`
 
 **Session history hydration:** `listSessions()` returns metadata only (`messages: []`). When `activeSessionId` changes, `useSessionHydration` (mounted in `App.tsx`) calls `ipc.getSession()` to load the full message history and calls `hydrateSession()` on the store. `mergeSessions()` deliberately preserves existing messages to avoid a race where a metadata refresh wipes hydrated history.
 
 ### State management (Zustand)
 
-- `useSessionStore` — sessions, messages, streaming text, live tool calls, pending approvals, terminal output, and `sessionAgents` (maps `sessionId → agentName | null`). Only `activeSessionId` is persisted (session data lives in SQLite). `sessionAgents` is restored from `session.agent` via `hydrateSession()` on navigation.
+- `useSessionStore` — sessions, messages, streaming text, live tool calls, pending approvals, pending questions, terminal output, and `sessionAgents` (maps `sessionId → agentName | null`). Only `activeSessionId` is persisted (session data lives in SQLite). `sessionAgents` is restored from `session.agent` via `hydrateSession()` on navigation.
 - `useProjectStore` — projects list, active project. Only `activeProjectId` is persisted.
 
 ### Database
@@ -262,3 +265,20 @@ MCP tools (`mcp__aichemist-tools__*`) are explicitly skipped in the hook (they h
 `customAgents` in Copilot sessions are **sub-agent delegation configs** — the parent Copilot agent decides when to delegate to them based on inference. They are NOT a replacement for the session system prompt.
 
 To make a user-selected agent's instructions the primary context, use `systemMessage: { mode: "replace", content: agentBody }` in the `createSession`/`resumeSession` config. When the agent changes between turns, the cached Copilot SDK session must be discarded (delete from `copilotSessionIds`) so the next turn creates a fresh session with the new system message — `resumeSession` does not update the system message of an existing session.
+
+### Interactive Questions — `ask_user` tool
+
+Both Claude and Copilot expose an `ask_user` tool that pauses the agent and shows a `QuestionCard` in the UI.
+
+**Flow:**
+1. Agent calls `ask_user({ question, options?, placeholder? })`
+2. `electron/agent/question.ts` stores a `Promise` resolve function keyed by `questionId` and emits `SESSION_QUESTION_REQUIRED`
+3. `useSessionEvents` adds a `PendingQuestion` to `useSessionStore` with a `resolve` that calls `ipc.answerQuestion()`
+4. `TimelinePanel` renders a `QuestionCard` per pending question
+5. User submits → `resolve(answer)` → `ipc.answerQuestion(questionId, answer)` → `ipcMain` calls `resolveQuestion()` → Promise resolves → agent continues
+
+**Claude:** registered as an MCP tool in `mcp-tools.ts`. The system prompt in `claude.ts` instructs Claude to use `ask_user` instead of the native `AskUserQuestion` CLI tool (which requires an interactive terminal TUI unavailable in Electron).
+
+**Copilot:** registered via `defineTool` in `copilot.ts`. The system prompt instructs Copilot to use `ask_user` instead of asking questions in plain text, and to always supply `options` when there are distinct alternatives.
+
+**Cleanup:** `clearPendingQuestions(sessionId)` is called on `SESSION_STATUS: "running"` (new turn) to discard orphaned cards.

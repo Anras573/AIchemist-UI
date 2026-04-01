@@ -51,6 +51,7 @@ describe("useSessionEvents", () => {
     expect(registeredChannels).toContain(IPC_CHANNELS.SESSION_TOOL_CALL);
     expect(registeredChannels).toContain(IPC_CHANNELS.SESSION_TOOL_RESULT);
     expect(registeredChannels).toContain(IPC_CHANNELS.SESSION_APPROVAL_REQUIRED);
+    expect(registeredChannels).toContain(IPC_CHANNELS.SESSION_QUESTION_REQUIRED);
   });
 
   it("unregisters all listeners on unmount", () => {
@@ -305,6 +306,62 @@ describe("useSessionEvents", () => {
         true,
         undefined
       );
+    });
+  });
+
+  // ── session:question_required ────────────────────────────────────────────────
+
+  describe("session:question_required event", () => {
+    beforeEach(() => {
+      useSessionStore.setState({ pendingQuestions: {} });
+    });
+
+    it("adds a pending question to the store", () => {
+      renderHook(() => useSessionEvents());
+
+      getCb(IPC_CHANNELS.SESSION_QUESTION_REQUIRED)({
+        session_id: "sess-1",
+        question_id: "q-1",
+        question: "Which approach?",
+        options: ["Option A", "Option B"],
+      });
+
+      const questions = useSessionStore.getState().pendingQuestions["sess-1"];
+      expect(questions).toHaveLength(1);
+      expect(questions[0].question).toBe("Which approach?");
+      expect(questions[0].questionId).toBe("q-1");
+      expect(questions[0].options).toEqual(["Option A", "Option B"]);
+    });
+
+    it("question resolve() calls ipc.answerQuestion with the correct args", () => {
+      renderHook(() => useSessionEvents());
+
+      getCb(IPC_CHANNELS.SESSION_QUESTION_REQUIRED)({
+        session_id: "sess-1",
+        question_id: "q-1",
+        question: "Which approach?",
+      });
+
+      const question = useSessionStore.getState().pendingQuestions["sess-1"][0];
+      question.resolve("Option A");
+
+      expect(window.electronAPI.answerQuestion).toHaveBeenCalledWith("q-1", "Option A");
+    });
+
+    it("clears pending questions when a new turn starts", () => {
+      renderHook(() => useSessionEvents());
+
+      getCb(IPC_CHANNELS.SESSION_QUESTION_REQUIRED)({
+        session_id: "sess-1",
+        question_id: "q-1",
+        question: "Which approach?",
+      });
+
+      expect(useSessionStore.getState().pendingQuestions["sess-1"]).toHaveLength(1);
+
+      getCb(IPC_CHANNELS.SESSION_STATUS)({ session_id: "sess-1", status: "running" });
+
+      expect(useSessionStore.getState().pendingQuestions["sess-1"]).toBeUndefined();
     });
   });
 });
