@@ -5,20 +5,19 @@ import { Message, CompactionEvent } from "@/types";
 import { cn } from "@/lib/utils";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
-  Confirmation,
-  ConfirmationTitle,
-  ConfirmationRequest,
-  ConfirmationAccepted,
-  ConfirmationRejected,
-  ConfirmationActions,
-  ConfirmationAction,
-} from "@/components/ai-elements/confirmation";
+  Tool,
+  ToolHeader,
+  ToolContent,
+  ToolInput,
+  ToolOutput,
+  type ToolPart,
+} from "@/components/ai-elements/tool";
 import {
   Reasoning,
   ReasoningTrigger,
   ReasoningContent,
 } from "@/components/ai-elements/reasoning";
-import { CheckIcon, XIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { AgentPickerButton } from "./AgentPickerButton";
 import { ModelPickerButton } from "./ModelPickerButton";
 import { ipc } from "@/lib/ipc";
@@ -28,7 +27,12 @@ import { ipc } from "@/lib/ipc";
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
   return (
-    <div className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}>
+    <div className={cn("flex flex-col w-full", isUser ? "items-end" : "items-start")}>
+      {!isUser && message.agent && (
+        <span className="text-xs text-muted-foreground/70 px-1 mb-0.5 font-medium">
+          {message.agent}
+        </span>
+      )}
       <div
         className={cn(
           "max-w-[80%] rounded-lg px-4 py-2.5 text-sm",
@@ -71,50 +75,30 @@ function StreamingBubble({ text }: { text: string }) {
 
 function ToolCallBlock({ call }: { call: LiveToolCall }) {
   const isPending = call.result === undefined && call.error === undefined;
+  const [open, setOpen] = useState(!isPending);
+
+  useEffect(() => {
+    if (!isPending) setOpen(true);
+  }, [isPending]);
+
+  const state: ToolPart["state"] = isPending
+    ? "input-available"
+    : call.error
+      ? "output-error"
+      : "output-available";
 
   return (
     <div className="flex w-full justify-start">
-      <div className="max-w-[85%] rounded-lg border bg-background text-xs font-mono overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/50 border-b">
-          <span
-            className={cn(
-              "w-1.5 h-1.5 rounded-full flex-shrink-0",
-              isPending
-                ? "bg-amber-400 animate-pulse"
-                : call.error
-                  ? "bg-destructive"
-                  : "bg-green-500"
+      <div className="max-w-[85%] w-full">
+        <Tool open={open} onOpenChange={setOpen}>
+          <ToolHeader type="dynamic-tool" toolName={call.toolName} state={state} />
+          <ToolContent>
+            <ToolInput input={call.args} />
+            {!isPending && (
+              <ToolOutput output={call.result} errorText={call.error} />
             )}
-          />
-          <span className="text-muted-foreground font-sans text-[11px]">
-            {isPending ? "calling" : call.error ? "error" : "result"}
-          </span>
-          <span className="font-semibold text-foreground">{call.toolName}</span>
-        </div>
-
-        {/* Arguments */}
-        <div className="px-3 py-2 text-muted-foreground border-b">
-          <pre className="whitespace-pre-wrap break-all">
-            {JSON.stringify(call.args, null, 2)}
-          </pre>
-        </div>
-
-        {/* Result / error */}
-        {!isPending && (
-          <div
-            className={cn(
-              "px-3 py-2",
-              call.error ? "text-destructive" : "text-foreground"
-            )}
-          >
-            <pre className="whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
-              {call.error
-                ? call.error
-                : JSON.stringify(call.result, null, 2)}
-            </pre>
-          </div>
-        )}
+          </ToolContent>
+        </Tool>
       </div>
     </div>
   );
@@ -130,16 +114,6 @@ interface ApprovalGateProps {
   onDecide: (approvalId: string, approved: boolean, scope: ApprovalScope) => void;
 }
 
-/** Formats a single arg value for display — strings truncated, objects as compact JSON. */
-function formatArgValue(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "string") {
-    return value.length > 200 ? `${value.slice(0, 200)}…` : value;
-  }
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return JSON.stringify(value);
-}
-
 function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
   const [decision, setDecision] = useState<ApprovalDecision>("pending");
   const [scope, setScope] = useState<ApprovalScope>("once");
@@ -150,15 +124,8 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
     onDecide(approval.approvalId, approved, chosenScope);
   }
 
-  const confirmApproval =
-    decision === "pending"
-      ? { id: approval.approvalId }
-      : { id: approval.approvalId, approved: decision === "approved" };
-
-  const confirmState =
-    decision === "pending" ? "approval-requested" : "approval-responded";
-
-  const argEntries = Object.entries(approval.args ?? {});
+  const isPending = decision === "pending";
+  const state: ToolPart["state"] = isPending ? "approval-requested" : "approval-responded";
   const scopeLabel: Record<ApprovalScope, string> = {
     once: "once",
     session: "for this session",
@@ -167,64 +134,40 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
 
   return (
     <div className="flex w-full justify-start">
-      <div className="max-w-[85%] min-w-[280px]">
-        <Confirmation
-          approval={confirmApproval}
-          state={confirmState}
-          className="text-sm border-amber-400/50 bg-amber-400/10 dark:bg-amber-400/5"
-        >
-          <ConfirmationTitle className="flex items-center gap-2 font-semibold text-foreground">
-            <span className="inline-block size-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse" />
-            {approval.toolName}
-          </ConfirmationTitle>
-
-          {/* Args — only shown while pending */}
-          <ConfirmationRequest>
-            {argEntries.length > 0 && (
-              <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs font-mono">
-                {argEntries.map(([key, val]) => (
-                  <div key={key} className="contents">
-                    <dt className="text-muted-foreground truncate">{key}</dt>
-                    <dd className="text-foreground break-all">{formatArgValue(val)}</dd>
-                  </div>
-                ))}
-              </dl>
+      <div className="max-w-[85%] min-w-[280px] w-full">
+        <Tool defaultOpen={true}>
+          <ToolHeader type="dynamic-tool" toolName={approval.toolName} state={state} />
+          <ToolContent>
+            {Object.keys(approval.args ?? {}).length > 0 && (
+              <ToolInput input={approval.args} />
             )}
-          </ConfirmationRequest>
-
-          <ConfirmationAccepted>
-            <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
-              <CheckIcon className="size-3.5" />
-              Allowed {scopeLabel[scope]}
-            </span>
-          </ConfirmationAccepted>
-
-          <ConfirmationRejected>
-            <span className="flex items-center gap-1.5 text-xs text-destructive">
-              <XIcon className="size-3.5" />
-              Denied
-            </span>
-          </ConfirmationRejected>
-
-          <ConfirmationActions className="flex-wrap justify-start">
-            <ConfirmationAction variant="outline" size="sm" onClick={() => decide(true, "once")}>
-              Allow once
-            </ConfirmationAction>
-            <ConfirmationAction variant="outline" size="sm" onClick={() => decide(true, "session")}>
-              Allow for session
-            </ConfirmationAction>
-            <ConfirmationAction variant="outline" size="sm" onClick={() => decide(true, "project")}>
-              Allow for project
-            </ConfirmationAction>
-            <ConfirmationAction
-              variant="destructive"
-              size="sm"
-              onClick={() => decide(false, "once")}
-            >
-              Deny
-            </ConfirmationAction>
-          </ConfirmationActions>
-        </Confirmation>
+            {isPending ? (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => decide(true, "once")}>
+                  Allow once
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => decide(true, "session")}>
+                  Allow for session
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => decide(true, "project")}>
+                  Allow for project
+                </Button>
+                <Button variant="destructive" size="sm" onClick={() => decide(false, "once")}>
+                  Deny
+                </Button>
+              </div>
+            ) : (
+              <p className={cn(
+                "text-xs font-medium",
+                decision === "approved"
+                  ? "text-green-600 dark:text-green-400"
+                  : "text-destructive"
+              )}>
+                {decision === "approved" ? `Allowed ${scopeLabel[scope]}` : "Denied"}
+              </p>
+            )}
+          </ToolContent>
+        </Tool>
       </div>
     </div>
   );
