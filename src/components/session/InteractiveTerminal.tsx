@@ -1,8 +1,17 @@
-import { useEffect, useRef } from "react";
-import { Terminal } from "@xterm/xterm";
+import { useEffect, useRef, useState } from "react";
+import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { ipc, IPC_CHANNELS } from "@/lib/ipc";
+import {
+  Terminal,
+  TerminalHeader,
+  TerminalTitle,
+  TerminalActions,
+  TerminalClearButton,
+} from "@/components/ai-elements/terminal";
+import { Button } from "@/components/ui/button";
+import { CheckIcon, CopyIcon } from "lucide-react";
 
 interface TerminalOutputPayload {
   id: string;
@@ -21,15 +30,29 @@ interface InteractiveTerminalProps {
 export function InteractiveTerminal({ projectPath }: InteractiveTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Refs so event-handler closures always see the latest values.
-  const xtermRef = useRef<Terminal | null>(null);
+  const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef<string | null>(null);
+  // Accumulate raw output for the copy button (no re-renders on every keystroke).
+  const outputRef = useRef<string>("");
+  const [copied, setCopied] = useState(false);
+
+  const handleClear = () => {
+    xtermRef.current?.clear();
+    outputRef.current = "";
+  };
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(outputRef.current);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   useEffect(() => {
     if (!containerRef.current) return;
 
     // ── Create xterm.js instance ─────────────────────────────────────────────
-    const xterm = new Terminal({
+    const xterm = new XTerm({
       theme: {
         background: "#09090b",
         foreground: "#e4e4e7",
@@ -89,6 +112,7 @@ export function InteractiveTerminal({ projectPath }: InteractiveTerminalProps) {
       const { id, data } = payload as TerminalOutputPayload;
       if (id === terminalIdRef.current) {
         xterm.write(data);
+        outputRef.current += data;
       }
     };
 
@@ -120,8 +144,22 @@ export function InteractiveTerminal({ projectPath }: InteractiveTerminalProps) {
   }, []);
 
   return (
-    <div className="h-full w-full bg-[#09090b] overflow-hidden">
-      <div ref={containerRef} className="h-full w-full p-1" />
-    </div>
+    <Terminal output="" onClear={handleClear} className="h-full rounded-none border-0">
+      <TerminalHeader>
+        <TerminalTitle />
+        <TerminalActions>
+          <Button
+            className="size-7 shrink-0 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+            onClick={handleCopy}
+            size="icon"
+            variant="ghost"
+          >
+            {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+          </Button>
+          <TerminalClearButton />
+        </TerminalActions>
+      </TerminalHeader>
+      <div ref={containerRef} className="flex-1 overflow-hidden p-1" />
+    </Terminal>
   );
 }
