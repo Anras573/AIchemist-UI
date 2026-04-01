@@ -397,8 +397,11 @@ export async function runCopilotAgentTurn(params: {
   const skillsContext = buildSkillsContext(skills ?? [], projectPath);
 
   const askUserInstruction =
-    "\n\nWhen you need clarification or input from the user before proceeding, " +
-    "use the `ask_user` tool so the conversation pauses properly for their response.";
+    "\n\nWhen a task is ambiguous or could reasonably be interpreted multiple ways, " +
+    "always call the `ask_user` tool before proceeding rather than making assumptions or asking questions in plain text. " +
+    "Never ask the user a question by writing it in your response — always use the `ask_user` tool instead. " +
+    "The `ask_user` tool supports an `options` array of short choices the user can click; " +
+    "always provide relevant options when there are distinct alternatives to choose from.";
 
   // When a specific agent is selected, inject its system prompt via `systemMessage`
   // using replace mode so the agent's instructions ARE the primary context.
