@@ -233,6 +233,13 @@ export async function runClaudeAgentTurn(params: {
   // 4. Resolve claude CLI path (Electron doesn't inherit shell PATH on macOS)
   const claudePath = resolveClaudePath();
 
+  // Appended to every system prompt so Claude always uses the ask_user tool
+  // instead of embedding questions in its text responses.
+  const askUserInstruction =
+    "\n\nWhen you need clarification, missing information, or a decision from the user, " +
+    "always call the `ask_user` tool instead of asking a question in your text response. " +
+    "This pauses the conversation properly so the user can respond before you continue.";
+
   // 5. Determine system prompt:
   //    - Named agent selected → read its .md file body as system prompt.
   //      The SDK's `agent` option does NOT load user-defined agent files;
@@ -247,7 +254,7 @@ export async function runClaudeAgentTurn(params: {
     const agentFile = readAgentFileSystemPrompt(agent);
     if (agentFile) {
       // File-based agent: use its body as the system prompt
-      systemPrompt = agentFile.body + skillsContext;
+      systemPrompt = agentFile.body + skillsContext + askUserInstruction;
       if (agentFile.model) effectiveModel = resolveModel(agentFile.model);
     } else {
       // SDK built-in agent (no local file): delegate to the SDK
@@ -255,13 +262,13 @@ export async function runClaudeAgentTurn(params: {
       systemPrompt =
         "You are a helpful AI assistant with access to the user's project files and tools. " +
         "Be concise and precise. When using tools, explain what you're doing before calling them." +
-        skillsContext;
+        skillsContext + askUserInstruction;
     }
   } else {
     systemPrompt =
       "You are a helpful AI assistant with access to the user's project files and tools. " +
       "Be concise and precise. When using tools, explain what you're doing before calling them." +
-      skillsContext;
+      skillsContext + askUserInstruction;
   }
 
   // 6. Stream the query generator
