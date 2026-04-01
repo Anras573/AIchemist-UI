@@ -1,9 +1,10 @@
 import { useEffect, useCallback, useState } from "react";
-import { Activity, ChevronRight, Loader2, Wrench } from "lucide-react";
+import { Activity, ChevronDown, Loader2, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ipc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import type { TraceSpan } from "@/types";
+import { Task, TaskTrigger, TaskContent } from "@/components/ai-elements/task";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -29,46 +30,36 @@ function StatusDot({ status }: { status: TraceSpan["status"] }) {
 // ── TurnCard ──────────────────────────────────────────────────────────────────
 
 function TurnCard({ turn, tools }: { turn: TraceSpan; tools: TraceSpan[] }) {
-  const [expanded, setExpanded] = useState(false);
-
   const turnDuration = turn.durationMs ?? (turn.endMs ? undefined : Date.now() - turn.startMs);
 
   return (
-    <div className="rounded-md border bg-card text-card-foreground text-xs">
-      {/* Turn header */}
-      <button
-        className="flex items-center gap-2 w-full px-2.5 py-2 hover:bg-muted/40 transition-colors rounded-md"
-        onClick={() => tools.length > 0 && setExpanded((v) => !v)}
-      >
-        <StatusDot status={turn.status} />
-        <span className="flex-1 font-medium text-left truncate">{turn.name}</span>
-        {tools.length > 0 && (
-          <span className="text-muted-foreground shrink-0">
-            {tools.length} tool{tools.length !== 1 ? "s" : ""}
+    <Task defaultOpen={false} className="rounded-md border bg-card text-card-foreground text-xs">
+      <TaskTrigger title={turn.name}>
+        <div className="flex items-center gap-2 w-full px-2.5 py-2 hover:bg-muted/40 transition-colors rounded-md">
+          <StatusDot status={turn.status} />
+          <span className="flex-1 font-medium text-left truncate">{turn.name}</span>
+          {tools.length > 0 && (
+            <span className="text-muted-foreground shrink-0">
+              {tools.length} tool{tools.length !== 1 ? "s" : ""}
+            </span>
+          )}
+          <span className="text-muted-foreground shrink-0 tabular-nums">
+            {formatDuration(turnDuration)}
           </span>
-        )}
-        <span className="text-muted-foreground shrink-0 tabular-nums">
-          {formatDuration(turnDuration)}
-        </span>
-        {tools.length > 0 && (
-          <ChevronRight
-            className={cn(
-              "h-3 w-3 text-muted-foreground shrink-0 transition-transform",
-              expanded && "rotate-90"
-            )}
-          />
-        )}
-      </button>
+          {tools.length > 0 && (
+            <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+          )}
+        </div>
+      </TaskTrigger>
 
-      {/* Tool spans */}
-      {expanded && tools.length > 0 && (
-        <div className="border-t divide-y">
+      {tools.length > 0 && (
+        <TaskContent>
           {tools.map((tool) => (
             <ToolRow key={tool.id} tool={tool} turnStartMs={turn.startMs} turnDuration={turn.durationMs} />
           ))}
-        </div>
+        </TaskContent>
       )}
-    </div>
+    </Task>
   );
 }
 
