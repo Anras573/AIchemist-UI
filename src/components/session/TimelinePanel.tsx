@@ -1,9 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { Message, CompactionEvent } from "@/types";
 import { cn } from "@/lib/utils";
 import { MessageResponse } from "@/components/ai-elements/message";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
 import {
   Tool,
   ToolHeader,
@@ -223,27 +229,25 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
     setTimeout(() => removeApproval(sid, approvalId), 1500);
   }
 
-  // Auto-scroll to bottom when messages or streaming text changes
-  const bottomRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [session?.messages.length, streaming, toolCalls.length, approvals.length, thinkingText]);
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (!session) {
     return (
       <div className="flex flex-col h-full">
-        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
-          <p className="text-sm">No sessions yet for this project.</p>
-          {onNewSession && (
-            <button
-              onClick={onNewSession}
-              className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-            >
-              Create a new session
-            </button>
-          )}
-        </div>
+        <Conversation>
+          <ConversationContent>
+            <ConversationEmptyState title="No sessions yet" description="Create a new session to get started">
+              {onNewSession && (
+                <button
+                  onClick={onNewSession}
+                  className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+                >
+                  Create a new session
+                </button>
+              )}
+            </ConversationEmptyState>
+          </ConversationContent>
+        </Conversation>
         <InputBar disabled onSend={onSendMessage} />
       </div>
     );
@@ -267,43 +271,45 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
 
   return (
     <div className="flex flex-col h-full">
-      {/* Message list */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {timelineItems.length === 0 && !streaming && (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-            Send a message to start the conversation
-          </div>
-        )}
-        {timelineItems.map((item) =>
-          item.kind === "message" ? (
-            <MessageBubble key={item.data.id} message={item.data} />
-          ) : (
-            <CompactionMarker key={item.data.id} event={item.data} />
-          )
-        )}
-        {toolCalls.map((call) => (
-          <ToolCallBlock key={call.toolCallId} call={call} />
-        ))}
-        {approvals.map((approval) => (
-          <ApprovalGate
-            key={approval.approvalId}
-            approval={approval}
-            onDecide={handleApprovalDecision}
-          />
-        ))}
-        {thinkingText && (
-          <div className="flex w-full justify-start">
-            <div className="max-w-[85%]">
-              <Reasoning isStreaming={isThinking}>
-                <ReasoningTrigger />
-                <ReasoningContent>{thinkingText}</ReasoningContent>
-              </Reasoning>
+      <Conversation>
+        <ConversationContent className="gap-3">
+          {timelineItems.length === 0 && !streaming && (
+            <ConversationEmptyState
+              title="Send a message to start the conversation"
+              description=""
+            />
+          )}
+          {timelineItems.map((item) =>
+            item.kind === "message" ? (
+              <MessageBubble key={item.data.id} message={item.data} />
+            ) : (
+              <CompactionMarker key={item.data.id} event={item.data} />
+            )
+          )}
+          {toolCalls.map((call) => (
+            <ToolCallBlock key={call.toolCallId} call={call} />
+          ))}
+          {approvals.map((approval) => (
+            <ApprovalGate
+              key={approval.approvalId}
+              approval={approval}
+              onDecide={handleApprovalDecision}
+            />
+          ))}
+          {thinkingText && (
+            <div className="flex w-full justify-start">
+              <div className="max-w-[85%]">
+                <Reasoning isStreaming={isThinking}>
+                  <ReasoningTrigger />
+                  <ReasoningContent>{thinkingText}</ReasoningContent>
+                </Reasoning>
+              </div>
             </div>
-          </div>
-        )}
-        {streaming && <StreamingBubble text={streaming} />}
-        <div ref={bottomRef} />
-      </div>
+          )}
+          {streaming && <StreamingBubble text={streaming} />}
+        </ConversationContent>
+        <ConversationScrollButton />
+      </Conversation>
 
       {/* Input bar */}
       <InputBar
