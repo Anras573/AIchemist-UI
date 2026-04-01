@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import { Message, CompactionEvent } from "@/types";
+import { Message as MessageRecord, CompactionEvent } from "@/types";
 import { cn } from "@/lib/utils";
-import { MessageResponse } from "@/components/ai-elements/message";
+import { MessageResponse, Message, MessageContent } from "@/components/ai-elements/message";
 import {
   Conversation,
   ConversationContent,
@@ -30,30 +30,23 @@ import { ipc } from "@/lib/ipc";
 
 // ─── Individual message bubble ────────────────────────────────────────────────
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({ message }: { message: MessageRecord }) {
   const isUser = message.role === "user";
   return (
-    <div className={cn("flex flex-col w-full", isUser ? "items-end" : "items-start")}>
+    <Message from={message.role as "user" | "assistant"}>
       {!isUser && message.agent && (
-        <span className="text-xs text-muted-foreground/70 px-1 mb-0.5 font-medium">
+        <span className="text-xs text-muted-foreground/70 px-1 font-medium">
           {message.agent}
         </span>
       )}
-      <div
-        className={cn(
-          "max-w-[80%] rounded-lg px-4 py-2.5 text-sm",
-          isUser
-            ? "bg-primary text-primary-foreground whitespace-pre-wrap"
-            : "bg-muted text-foreground"
-        )}
-      >
+      <MessageContent className="group-[.is-user]:bg-primary group-[.is-user]:text-primary-foreground group-[.is-user]:whitespace-pre-wrap group-[.is-assistant]:bg-muted group-[.is-assistant]:rounded-lg group-[.is-assistant]:px-4 group-[.is-assistant]:py-2.5">
         {isUser ? (
           message.content
         ) : (
           <MessageResponse className="text-sm">{message.content}</MessageResponse>
         )}
-      </div>
-    </div>
+      </MessageContent>
+    </Message>
   );
 }
 
@@ -257,7 +250,7 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
 
   // Build a merged, time-sorted list of messages and compaction markers
   type TimelineItem =
-    | { kind: "message"; data: Message }
+    | { kind: "message"; data: MessageRecord }
     | { kind: "compaction"; data: CompactionEvent };
 
   const timelineItems: TimelineItem[] = [
