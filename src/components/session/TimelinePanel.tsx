@@ -263,7 +263,7 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
     <div className="flex flex-col h-full">
       <Conversation>
         <ConversationContent className="gap-3">
-          {timelineItems.length === 0 && !streaming && (
+          {timelineItems.length === 0 && session?.status !== "running" && (
             <ConversationEmptyState
               title="Send a message to start the conversation"
               description=""
@@ -296,7 +296,7 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
               </div>
             </div>
           )}
-          {streaming && <StreamingBubble text={streaming} />}
+          {session?.status === "running" && <StreamingBubble text={streaming} />}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
