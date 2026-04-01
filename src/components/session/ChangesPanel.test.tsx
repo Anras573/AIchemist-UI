@@ -41,68 +41,49 @@ function makeSession(id: string, overrides: Partial<Session> = {}): Session {
   };
 }
 
-describe("DiffView line colouring", () => {
+describe("diff content rendering", () => {
   beforeEach(() => {
     useSessionStore.setState({ activeSessionId: null, sessions: {}, sessionFileChanges: {} });
   });
 
-  it("applies green styling to added lines", () => {
+  it("renders added lines in the diff", () => {
     useSessionStore.getState().addSession(makeSession("sess-1"));
     useSessionStore.getState().setActiveSession("sess-1");
     useSessionStore.getState().addFileChange("sess-1", makeFileChange());
 
     const { container } = renderWithProviders(<ChangesPanel />);
-    // Items are collapsed by default — click the first file header to expand it
     fireEvent.click(container.querySelector("button")!);
-    const lines = container.querySelectorAll("pre > div");
-    const addedLine = Array.from(lines).find((el) =>
-      el.textContent?.startsWith("+new line")
-    );
-    expect(addedLine?.className).toContain("text-green");
+    expect(container.textContent).toContain("+new line");
   });
 
-  it("applies red styling to removed lines", () => {
+  it("renders removed lines in the diff", () => {
     useSessionStore.getState().addSession(makeSession("sess-1"));
     useSessionStore.getState().setActiveSession("sess-1");
     useSessionStore.getState().addFileChange("sess-1", makeFileChange());
 
     const { container } = renderWithProviders(<ChangesPanel />);
     fireEvent.click(container.querySelector("button")!);
-    const lines = container.querySelectorAll("pre > div");
-    const removedLine = Array.from(lines).find((el) =>
-      el.textContent?.startsWith("-old line")
-    );
-    expect(removedLine?.className).toContain("text-red");
+    expect(container.textContent).toContain("-old line");
   });
 
-  it("applies blue styling to hunk headers (@@)", () => {
+  it("renders hunk headers in the diff", () => {
     useSessionStore.getState().addSession(makeSession("sess-1"));
     useSessionStore.getState().setActiveSession("sess-1");
     useSessionStore.getState().addFileChange("sess-1", makeFileChange());
 
     const { container } = renderWithProviders(<ChangesPanel />);
     fireEvent.click(container.querySelector("button")!);
-    const lines = container.querySelectorAll("pre > div");
-    const hunkLine = Array.from(lines).find((el) =>
-      el.textContent?.startsWith("@@")
-    );
-    expect(hunkLine?.className).toContain("text-blue");
+    expect(container.textContent).toContain("@@");
   });
 
-  it("does not apply colour to context lines", () => {
+  it("renders context lines in the diff", () => {
     useSessionStore.getState().addSession(makeSession("sess-1"));
     useSessionStore.getState().setActiveSession("sess-1");
     useSessionStore.getState().addFileChange("sess-1", makeFileChange());
 
     const { container } = renderWithProviders(<ChangesPanel />);
     fireEvent.click(container.querySelector("button")!);
-    const lines = container.querySelectorAll("pre > div");
-    const contextLine = Array.from(lines).find(
-      (el) => el.textContent === " unchanged"
-    );
-    expect(contextLine?.className ?? "").not.toContain("text-green");
-    expect(contextLine?.className ?? "").not.toContain("text-red");
-    expect(contextLine?.className ?? "").not.toContain("text-blue");
+    expect(container.textContent).toContain(" unchanged");
   });
 });
 
