@@ -233,12 +233,12 @@ export async function runClaudeAgentTurn(params: {
   // 4. Resolve claude CLI path (Electron doesn't inherit shell PATH on macOS)
   const claudePath = resolveClaudePath();
 
-  // Appended to every system prompt so Claude always uses the ask_user tool
-  // instead of embedding questions in its text responses.
+  // Appended to every system prompt so Claude uses our ask_user MCP tool
+  // instead of the native AskUserQuestion CLI tool (which requires a terminal TUI
+  // and cannot be intercepted in this Electron environment).
   const askUserInstruction =
-    "\n\nWhen you need clarification, missing information, or a decision from the user, " +
-    "always call the `ask_user` tool instead of asking a question in your text response. " +
-    "This pauses the conversation properly so the user can respond before you continue.";
+    "\n\nWhen you want to use the AskUserQuestion tool, use the `ask_user` MCP tool instead — " +
+    "it provides the same functionality and works correctly in this environment.";
 
   // 5. Determine system prompt:
   //    - Named agent selected → read its .md file body as system prompt.
