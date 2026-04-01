@@ -4,6 +4,7 @@ import { useProjectStore } from "@/lib/store/useProjectStore";
 import { Message as MessageRecord, CompactionEvent } from "@/types";
 import { cn } from "@/lib/utils";
 import { MessageResponse, Message, MessageContent } from "@/components/ai-elements/message";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
   Conversation,
   ConversationContent,
@@ -59,11 +60,7 @@ function StreamingBubble({ text }: { text: string }) {
         {text ? (
           <MessageResponse className="text-sm">{text}</MessageResponse>
         ) : (
-          <span className="flex gap-1 items-center h-4">
-            <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:0ms]" />
-            <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:150ms]" />
-            <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:300ms]" />
-          </span>
+          <Shimmer className="text-sm text-muted-foreground">Thinking…</Shimmer>
         )}
       </div>
     </div>
