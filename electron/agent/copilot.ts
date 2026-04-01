@@ -12,6 +12,7 @@ import { getApiKey } from "../config";
 import * as CH from "../ipc-channels";
 import * as tracer from "../tracer";
 import { requestApproval, needsApproval, requiresApproval } from "./approval";
+import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
 import { readAgentFileSystemPrompt } from "./claude";
 import {
@@ -315,6 +316,37 @@ export async function runCopilotAgentTurn(params: {
     handler: (args) => runTool("web_fetch", args, "web", () => implWebFetch(args)),
   });
 
+  const askUserTool = defineTool<{ question: string; options?: string[]; placeholder?: string }>(
+    "ask_user",
+    {
+      description:
+        "Ask the user a question and wait for their answer before proceeding. Use when you need clarification, missing information, or a decision from the user.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: { type: "string", description: "The question to ask the user" },
+          options: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional list of pre-defined choices the user can click",
+          },
+          placeholder: { type: "string", description: "Placeholder text for the free-form input field" },
+        },
+        required: ["question"],
+      },
+      handler: async (args) => {
+        const answer = await requestQuestion(
+          webContents,
+          sessionId,
+          args.question,
+          args.options,
+          args.placeholder
+        );
+        return answer || "(no answer provided)";
+      },
+    }
+  );
+
   // ── Permission handler for built-in CLI tools ───────────────────────────────
   // Our custom defineTool handlers gate approval themselves; this handles the
   // CLI's built-in tools (read_file, edit_file, run_shell, etc.).
@@ -364,11 +396,16 @@ export async function runCopilotAgentTurn(params: {
 
   const skillsContext = buildSkillsContext(skills ?? [], projectPath);
 
+  const askUserInstruction =
+    "\n\nWhen you need clarification or input from the user before proceeding, " +
+    "use the `ask_user` tool so the conversation pauses properly for their response.";
+
   // When a specific agent is selected, inject its system prompt via `systemMessage`
   // using replace mode so the agent's instructions ARE the primary context.
   // Lookup order: Copilot agent files → Claude agent files (cross-provider, e.g.
   // agents selected via Command Palette which merges both providers).
   let systemMessageContent: string | null = null;
+  let systemMessageMode: "replace" | "append" = "replace";
   let customAgents: CustomAgentConfig[] = [];
 
   if (agent) {
@@ -377,9 +414,11 @@ export async function runCopilotAgentTurn(params: {
       readAgentFileSystemPrompt(agent)?.body ??
       null;
     if (agentBody) {
-      systemMessageContent = agentBody + skillsContext;
+      systemMessageContent = agentBody + skillsContext + askUserInstruction;
     } else {
       console.warn(`[copilot] Agent "${agent}" not found — running without custom system prompt`);
+      systemMessageContent = askUserInstruction;
+      systemMessageMode = "append";
     }
   } else {
     customAgents = toCustomAgentConfigs(projectPath);
@@ -390,18 +429,18 @@ export async function runCopilotAgentTurn(params: {
         customAgents = [{ name: "_skills", description: "Active skills context", prompt: skillsContext }];
       }
     }
+    // Append ask_user instruction to Copilot's default system prompt
+    systemMessageContent = askUserInstruction;
+    systemMessageMode = "append";
   }
 
   const sessionConfig = {
     model: projectConfig.model,
     streaming: true,
     workingDirectory: projectPath,
-    tools: [writeFileTool, deleteFileTool, executeBashTool, webFetchTool],
+    tools: [writeFileTool, deleteFileTool, executeBashTool, webFetchTool, askUserTool],
     onPermissionRequest,
-    // Use replace mode so the agent's instructions become the full system prompt.
-    // Append mode adds after the SDK foundation but may not carry enough weight
-    // to override the default Copilot persona.
-    ...(systemMessageContent ? { systemMessage: { mode: "replace" as const, content: systemMessageContent } } : {}),
+    ...(systemMessageContent ? { systemMessage: { mode: systemMessageMode, content: systemMessageContent } } : {}),
     ...(customAgents.length > 0 ? { customAgents } : {}),
   };
 
@@ -437,7 +476,7 @@ export async function runCopilotAgentTurn(params: {
   // ── Event listeners — set up before sending ─────────────────────────────────
 
   // Names of our custom defineTool handlers — they already send their own TOOL_CALL/RESULT events
-  const customToolNames = new Set(["execute_bash", "write_file", "delete_file", "web_fetch"]);
+  const customToolNames = new Set(["execute_bash", "write_file", "delete_file", "web_fetch", "ask_user"]);
 
   // Track toolCallId → toolName for built-in tools (tool.execution_complete has no toolName)
   const toolCallIdToName = new Map<string, string>();
