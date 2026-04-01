@@ -62,6 +62,7 @@ export async function runAgentTurn(params: {
         sessionId,
         role: "assistant",
         content: fullText,
+        agent,
       });
       webContents.send(CH.SESSION_MESSAGE, {
         session_id: sessionId,

@@ -82,6 +82,16 @@ function migrate(db: Database.Database): void {
   if (!hasColumn("skills")) {
     db.exec("ALTER TABLE sessions ADD COLUMN skills TEXT;");
   }
+
+  // Add agent column to messages table to stamp which agent produced each message.
+  const msgColumns = db
+    .prepare("PRAGMA table_info(messages)")
+    .all() as { name: string }[];
+  const hasMsgColumn = (name: string) => msgColumns.some((col) => col.name === name);
+
+  if (!hasMsgColumn("agent")) {
+    db.exec("ALTER TABLE messages ADD COLUMN agent TEXT;");
+  }
 }
 
 /**

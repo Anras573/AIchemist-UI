@@ -107,7 +107,7 @@ export function getSession(db: Database, sessionId: string): Session {
 
   const messageRows = db
     .prepare(
-      `SELECT id, session_id, role, content, created_at
+      `SELECT id, session_id, role, content, created_at, agent
        FROM messages
        WHERE session_id = ?
        ORDER BY created_at ASC`
@@ -118,6 +118,7 @@ export function getSession(db: Database, sessionId: string): Session {
     role: string;
     content: string;
     created_at: string;
+    agent: string | null;
   }[];
 
   const messages: Message[] = messageRows.map((m) => ({
@@ -127,6 +128,7 @@ export function getSession(db: Database, sessionId: string): Session {
     content: m.content,
     tool_calls: [],
     created_at: m.created_at,
+    agent: m.agent,
   }));
 
   return {
@@ -155,14 +157,14 @@ export function deleteSession(db: Database, sessionId: string): void {
  */
 export function saveMessage(
   db: Database,
-  args: { sessionId: string; role: string; content: string }
+  args: { sessionId: string; role: string; content: string; agent?: string | null }
 ): Message {
   const id = crypto.randomUUID();
   const createdAt = nowIso();
 
   db.prepare(
-    "INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
-  ).run(id, args.sessionId, args.role, args.content, createdAt);
+    "INSERT INTO messages (id, session_id, role, content, created_at, agent) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(id, args.sessionId, args.role, args.content, createdAt, args.agent ?? null);
 
   return {
     id,
@@ -171,6 +173,7 @@ export function saveMessage(
     content: args.content,
     tool_calls: [],
     created_at: createdAt,
+    agent: args.agent ?? null,
   };
 }
 

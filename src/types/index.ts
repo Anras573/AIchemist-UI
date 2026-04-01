@@ -91,6 +91,7 @@ export interface Message {
   content: string;
   tool_calls: ToolCall[];
   created_at: string;
+  agent?: string | null;
 }
 
 export interface Session {
