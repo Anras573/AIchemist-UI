@@ -390,12 +390,12 @@ Fix: Add Zod schema for `ProjectConfig`; validate on every load.
 | ✅ H4 | Read session config once per turn, hold in memory | `237d9d6c` |
 | ✅ M1 | UI warning on agent switch (context loss) | `2ca4b193` |
 | ✅ M2 | Persist tool calls immediately to DB | `5cb89123` |
-| 🟡 M3 | Write session status to DB, recover on startup | — |
-| 🟡 M4 | `IpcClient` interface for testability | — |
-| 🟢 L1 | Directory listing pagination + gitignore filter | — |
-| 🟢 L2 | Session hydration pagination + skeleton | — |
-| 🟢 L3 | API key validation at startup | — |
-| 🟢 L4 | Zod validation for `ProjectConfig` | — |
+| ✅ M3 | Write session status to DB, recover on startup | `644d6737` |
+| ✅ M4 | `IpcClient` interface for testability | `7c16c3c8` |
+| ✅ L1 | Directory listing pagination + gitignore filter | `d2544a95` |
+| ✅ L2 | Session hydration pagination + skeleton | `62ee5cfe` |
+| ✅ L3 | API key validation at startup | `d2544a95` |
+| ✅ L4 | Zod validation for `ProjectConfig` | `d2544a95` |
 
 ---
 
