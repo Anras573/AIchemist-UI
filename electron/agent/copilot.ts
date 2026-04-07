@@ -4,6 +4,8 @@ import type {
   PermissionRequestResult,
   CustomAgentConfig,
 } from "@github/copilot-sdk";
+import type { Database } from "better-sqlite3";
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -15,6 +17,7 @@ import { requestApproval, needsApproval, requiresApproval } from "./approval";
 import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
 import { readAgentFileSystemPrompt } from "./claude";
+import { saveToolCall, updateToolCallStatus } from "../sessions";
 import {
   implWriteFileWithChange,
   implDeleteFileWithChange,
@@ -22,6 +25,14 @@ import {
   implWebFetch,
 } from "./tool-impls";
 import type { AgentProvider, AgentProviderParams } from "./provider";
+
+// ── Native tool category helper ───────────────────────────────────────────────
+
+function nativeToolCategory(name: string): string {
+  if (["bash", "run_shell"].includes(name.toLowerCase())) return "shell";
+  if (["web_fetch", "web_search", "browser"].includes(name.toLowerCase())) return "web";
+  return "filesystem";
+}
 
 // ── Singleton client ──────────────────────────────────────────────────────────
 
@@ -178,7 +189,9 @@ function findCopilotAgentBody(agentName: string, projectPath: string): string | 
 // ── Agent turn ────────────────────────────────────────────────────────────────
 
 export async function runCopilotAgentTurn(params: {
+  db: Database;
   sessionId: string;
+  messageId: string;
   prompt: string;
   projectPath: string;
   projectConfig: ProjectConfig;
@@ -186,7 +199,7 @@ export async function runCopilotAgentTurn(params: {
   agent?: string;
   skills?: string[];
 }): Promise<string> {
-  const { sessionId, prompt, projectPath, projectConfig, webContents, agent, skills } = params;
+  const { db, sessionId, messageId, prompt, projectPath, projectConfig, webContents, agent, skills } = params;
 
   const { defineTool } = await import("@github/copilot-sdk");
 
@@ -211,6 +224,7 @@ export async function runCopilotAgentTurn(params: {
     category: "filesystem" | "web",
     impl: () => Promise<string>
   ): Promise<string> {
+    const toolCallId = crypto.randomUUID();
     const toolSpanId = tracer.startSpan({
       sessionId,
       type: "tool",
@@ -219,12 +233,24 @@ export async function runCopilotAgentTurn(params: {
       startMs: Date.now(),
       meta: { input: args as Record<string, unknown> },
     });
-    webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: name, input: args });
+    const initialStatus = requiresApproval(sessionId, projectConfig, category, name, args)
+      ? "pending_approval" as const
+      : "approved" as const;
+    webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: name, tool_call_id: toolCallId, input: args });
+    saveToolCall(db, {
+      id: toolCallId,
+      messageId,
+      name,
+      args: args as Record<string, unknown>,
+      status: initialStatus,
+      category,
+    });
 
-    if (requiresApproval(sessionId, projectConfig, category, name, args)) {
+    if (initialStatus === "pending_approval") {
       const approved = await requestApproval(webContents, sessionId, name, args);
       if (!approved) {
         const msg = "Tool call denied by user.";
+        updateToolCallStatus(db, toolCallId, "rejected");
         tracer.endSpan(toolSpanId, "error", { denied: true });
         webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: name, output: msg });
         return msg;
@@ -233,10 +259,12 @@ export async function runCopilotAgentTurn(params: {
 
     try {
       const output = await impl();
+      updateToolCallStatus(db, toolCallId, "complete", output);
       tracer.endSpan(toolSpanId, "success");
       webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: name, output });
       return output;
     } catch (e) {
+      updateToolCallStatus(db, toolCallId, "error", String(e));
       tracer.endSpan(toolSpanId, "error", { errorMessage: String(e) });
       throw e;
     }
@@ -293,17 +321,28 @@ export async function runCopilotAgentTurn(params: {
         required: ["command"],
       },
       handler: async (args) => {
-        webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: "execute_bash", input: args });
+        const toolCallId = crypto.randomUUID();
+        webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: "execute_bash", tool_call_id: toolCallId, input: args });
+        saveToolCall(db, {
+          id: toolCallId,
+          messageId,
+          name: "execute_bash",
+          args: args as Record<string, unknown>,
+          status: "pending_approval",
+          category: "shell",
+        });
 
         // Shell is always approval-gated regardless of policy
         const approved = await requestApproval(webContents, sessionId, "execute_bash", args);
         if (!approved) {
           const msg = "Tool call denied by user.";
+          updateToolCallStatus(db, toolCallId, "rejected");
           webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output: msg });
           return msg;
         }
 
         const output = await implExecuteBash({ ...args, projectPath });
+        updateToolCallStatus(db, toolCallId, "complete", output);
         webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output });
         return output;
       },
@@ -534,6 +573,14 @@ export async function runCopilotAgentTurn(params: {
           tool_call_id: data.toolCallId,
           input: data.arguments ?? {},
         });
+        saveToolCall(db, {
+          id: data.toolCallId,
+          messageId,
+          name: data.toolName,
+          args: data.arguments ?? {},
+          status: "approved",
+          category: nativeToolCategory(data.toolName),
+        });
       }
     });
 
@@ -560,6 +607,7 @@ export async function runCopilotAgentTurn(params: {
           : (data.result?.detailedContent ?? data.result?.content ?? "");
         const spanId = toolCallIdToName.get(`span:${data.toolCallId}`);
         if (spanId) tracer.endSpan(spanId, data.success ? "success" : "error");
+        updateToolCallStatus(db, data.toolCallId, data.success ? "complete" : "error", output);
         webContents.send(CH.SESSION_TOOL_RESULT, {
           session_id: sessionId,
           tool_name: toolName,

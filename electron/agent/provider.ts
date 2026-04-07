@@ -6,6 +6,7 @@ import type { AgentInfo, ProjectConfig } from "../../src/types/index";
 export interface AgentProviderParams {
   db: Database;
   sessionId: string;
+  messageId: string;
   prompt: string;
   projectPath: string;
   projectConfig: ProjectConfig;

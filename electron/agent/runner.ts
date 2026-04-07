@@ -2,7 +2,7 @@ import type { Database } from "better-sqlite3";
 import type { ProjectConfig } from "../../src/types/index";
 
 import * as CH from "../ipc-channels";
-import { saveMessage } from "../sessions";
+import { createPlaceholderMessage, updateMessageContent, loadToolCallsForMessage } from "../sessions";
 import { claudeProvider } from "./claude";
 import { copilotProvider } from "./copilot";
 import type { AgentProvider, AgentProviderParams } from "./provider";
@@ -42,9 +42,13 @@ export async function runAgentTurn(params: {
 
   webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "running" });
 
+  // Create a placeholder assistant message that tool calls can FK-reference
+  const placeholderMsg = createPlaceholderMessage(db, { sessionId, agent });
+
   const providerParams: AgentProviderParams = {
     db,
     sessionId,
+    messageId: placeholderMsg.id,
     prompt,
     projectPath,
     projectConfig,
@@ -57,21 +61,23 @@ export async function runAgentTurn(params: {
     const provider = getProvider(projectConfig.provider);
     const fullText = await provider.run(providerParams);
 
-    if (fullText.trim()) {
-      const savedMsg = saveMessage(db, {
-        sessionId,
-        role: "assistant",
-        content: fullText,
-        agent,
-      });
+    const toolCalls = loadToolCallsForMessage(db, placeholderMsg.id);
+    if (fullText.trim() || toolCalls.length > 0) {
+      updateMessageContent(db, placeholderMsg.id, fullText);
       webContents.send(CH.SESSION_MESSAGE, {
         session_id: sessionId,
-        message: savedMsg,
+        message: { ...placeholderMsg, content: fullText, tool_calls: toolCalls },
       });
+    } else {
+      db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);
     }
 
     webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "idle" });
   } catch (err) {
+    const toolCalls = loadToolCallsForMessage(db, placeholderMsg.id);
+    if (toolCalls.length === 0) {
+      db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);
+    }
     webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "error" });
     throw err;
   }

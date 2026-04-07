@@ -12,6 +12,7 @@ interface ToolCallEvent {
   session_id: string;
   tool_name: string;
   input: Record<string, unknown>;
+  tool_call_id?: string;
 }
 
 interface ToolResultEvent {
@@ -113,8 +114,7 @@ export function useSessionEvents() {
 
       onSessionEvent<ToolCallEvent>(IPC_CHANNELS.SESSION_TOOL_CALL, (payload) => {
         addLiveToolCall(payload.session_id, {
-          // Use a random suffix so multiple calls to the same tool get unique keys
-          toolCallId: `${payload.tool_name}-${Math.random().toString(36).slice(2)}`,
+          toolCallId: payload.tool_call_id ?? `${payload.tool_name}-${Math.random().toString(36).slice(2)}`,
           toolName: payload.tool_name,
           args: payload.input ?? {},
         });

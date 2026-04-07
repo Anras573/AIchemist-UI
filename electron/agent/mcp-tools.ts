@@ -1,10 +1,13 @@
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
+import type { Database } from "better-sqlite3";
 import type { ProjectConfig } from "../../src/types/index";
+import * as crypto from "crypto";
 import { z } from "zod";
 
 import * as CH from "../ipc-channels";
 import { requestApproval, needsApproval } from "./approval";
 import { requestQuestion } from "./question";
+import { saveToolCall, updateToolCallStatus } from "../sessions";
 import {
   implWriteFileWithChange,
   implDeleteFileWithChange,
@@ -30,7 +33,9 @@ export async function createApprovalMcpServer(
   webContents: Electron.WebContents,
   sessionId: string,
   config: ProjectConfig,
-  projectPath: string
+  projectPath: string,
+  db: Database,
+  messageId: string
 ): Promise<McpSdkServerConfigWithInstance> {
   const { createSdkMcpServer, tool } = await import(
     "@anthropic-ai/claude-agent-sdk"
@@ -43,22 +48,36 @@ export async function createApprovalMcpServer(
     category: "filesystem" | "web",
     impl: () => Promise<string>
   ) {
+    const toolCallId = crypto.randomUUID();
     webContents.send(CH.SESSION_TOOL_CALL, {
       session_id: sessionId,
       tool_name: name,
+      tool_call_id: toolCallId,
       input: args,
+    });
+
+    const initialStatus = needsApproval(config, category) ? "pending_approval" as const : "approved" as const;
+    saveToolCall(db, {
+      id: toolCallId,
+      messageId,
+      name,
+      args: args as Record<string, unknown>,
+      status: initialStatus,
+      category,
     });
 
     if (needsApproval(config, category)) {
       const approved = await requestApproval(webContents, sessionId, name, args);
       if (!approved) {
         const result = textResult("Tool call denied by user.");
+        updateToolCallStatus(db, toolCallId, "rejected");
         webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: name, output: result });
         return result;
       }
     }
 
     const result = textResult(await impl());
+    updateToolCallStatus(db, toolCallId, "complete", result.content[0]?.text);
     webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: name, output: result });
     return result;
   }
@@ -97,16 +116,27 @@ export async function createApprovalMcpServer(
       cwd: z.string().optional().describe("Working directory for the command"),
     },
     async (args) => {
-      webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: "execute_bash", input: args });
+      const toolCallId = crypto.randomUUID();
+      webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: "execute_bash", tool_call_id: toolCallId, input: args });
+      saveToolCall(db, {
+        id: toolCallId,
+        messageId,
+        name: "execute_bash",
+        args: args as Record<string, unknown>,
+        status: "pending_approval",
+        category: "shell",
+      });
 
       const approved = await requestApproval(webContents, sessionId, "execute_bash", args);
       if (!approved) {
         const result = textResult("Tool call denied by user.");
+        updateToolCallStatus(db, toolCallId, "rejected");
         webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output: result });
         return result;
       }
 
       const result = textResult(await implExecuteBash({ ...args, projectPath }));
+      updateToolCallStatus(db, toolCallId, "complete", result.content[0]?.text);
       webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output: result });
       return result;
     }

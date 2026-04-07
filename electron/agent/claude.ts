@@ -2,6 +2,7 @@ import type { McpSdkServerConfigWithInstance, SDKMessage } from "@anthropic-ai/c
 import type { Database } from "better-sqlite3";
 import type { AgentInfo, ProjectConfig } from "../../src/types/index";
 
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -14,6 +15,7 @@ import { buildSkillsContext } from "./skills";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
 import { requestApproval, requiresApproval } from "./approval";
 import type { ToolCategory } from "./approval";
+import { saveToolCall, updateToolCallStatus } from "../sessions";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 
 // ── Native tool category map ───────────────────────────────────────────────────
@@ -25,6 +27,13 @@ function getNativeToolCategory(toolName: string): ToolCategory | null {
   if (["Bash"].includes(toolName)) return "shell";
   if (["WebFetch", "WebSearch"].includes(toolName)) return "web";
   return null;
+}
+
+/** Maps a Claude Code native tool name to a ToolCategory string for DB storage. */
+function nativeToolCategory(name: string): string {
+  if (name === "Bash") return "shell";
+  if (["WebFetch", "WebSearch"].includes(name)) return "web";
+  return "filesystem";
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -209,6 +218,7 @@ export async function getClaudeAgents(
 export async function runClaudeAgentTurn(params: {
   db: Database;
   sessionId: string;
+  messageId: string;
   sdkSessionId: string | null;
   prompt: string;
   projectPath: string;
@@ -217,12 +227,12 @@ export async function runClaudeAgentTurn(params: {
   agent?: string;
   skills?: string[];
 }): Promise<string> {
-  const { db, sessionId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent, skills } =
+  const { db, sessionId, messageId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent, skills } =
     params;
 
   // 1. Create the in-process MCP server (approval-gated custom tools)
   const mcpServer: McpSdkServerConfigWithInstance =
-    await createApprovalMcpServer(webContents, sessionId, projectConfig, projectPath);
+    await createApprovalMcpServer(webContents, sessionId, projectConfig, projectPath, db, messageId);
 
   // 2. Resolve model — agent file can override the project model
   let effectiveModel = resolveModel(projectConfig.model);
@@ -329,6 +339,8 @@ export async function runClaudeAgentTurn(params: {
   // Map tool_use_id → tool_name/spanId so we can label results and end spans
   const toolUseIdToName = new Map<string, string>();
   const toolUseIdToSpanId = new Map<string, string>();
+  // Map tool_use_id → DB toolCallId for native tools (so we can update status on result)
+  const toolUseIdToDbId = new Map<string, string>();
   // Map tool_use_id → { filePath, beforeContent } for native Write/Edit tracking
   const pendingFileChanges = new Map<string, { filePath: string; before: Buffer | null }>();
 
@@ -399,12 +411,23 @@ export async function runClaudeAgentTurn(params: {
                 }
               }
             }
-            // MCP tools emit SESSION_TOOL_CALL themselves; skip for native tools only
+            // MCP tools emit SESSION_TOOL_CALL themselves; for native tools emit + persist
             if (!isMcp) {
+              const toolCallId = crypto.randomUUID();
+              if (b.id) toolUseIdToDbId.set(b.id, toolCallId);
               webContents.send(CH.SESSION_TOOL_CALL, {
                 session_id: sessionId,
                 tool_name: displayName,
+                tool_call_id: toolCallId,
                 input: b.input ?? {},
+              });
+              saveToolCall(db, {
+                id: toolCallId,
+                messageId,
+                name: displayName,
+                args: (b.input ?? {}) as Record<string, unknown>,
+                status: "approved",
+                category: nativeToolCategory(b.name),
               });
             }
           }
@@ -424,6 +447,10 @@ export async function runClaudeAgentTurn(params: {
               tool_name: toolName,
               output,
             });
+
+            // Persist tool call completion to DB
+            const dbId = toolUseIdToDbId.get(b.tool_use_id);
+            if (dbId) updateToolCallStatus(db, dbId, "complete", output);
 
             // Emit file change event for native write/edit tools
             const pending = pendingFileChanges.get(b.tool_use_id);

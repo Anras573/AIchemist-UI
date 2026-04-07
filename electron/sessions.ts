@@ -1,6 +1,6 @@
 import * as crypto from "crypto";
 import type { Database } from "better-sqlite3";
-import type { Message, Session } from "../src/types/index";
+import type { Message, Session, ToolCall, ToolCallStatus, ToolCategory } from "../src/types/index";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -121,12 +121,49 @@ export function getSession(db: Database, sessionId: string): Session {
     agent: string | null;
   }[];
 
+  // Load tool_calls for all messages in one query and group by message_id
+  const toolCallsByMessageId = new Map<string, ToolCall[]>();
+  if (messageRows.length > 0) {
+    const messageIds = messageRows.map((m) => m.id);
+    const placeholders = messageIds.map(() => "?").join(", ");
+    const toolCallRows = db
+      .prepare(
+        `SELECT id, message_id, name, args, result, status, category
+         FROM tool_calls
+         WHERE message_id IN (${placeholders})
+         ORDER BY rowid ASC`
+      )
+      .all(...messageIds) as {
+      id: string;
+      message_id: string;
+      name: string;
+      args: string;
+      result: string | null;
+      status: string;
+      category: string;
+    }[];
+
+    for (const row of toolCallRows) {
+      const tc: ToolCall = {
+        id: row.id,
+        name: row.name,
+        args: JSON.parse(row.args) as Record<string, unknown>,
+        result: row.result ? (JSON.parse(row.result) as unknown) : null,
+        status: row.status as ToolCallStatus,
+        category: row.category as ToolCategory,
+      };
+      const existing = toolCallsByMessageId.get(row.message_id) ?? [];
+      existing.push(tc);
+      toolCallsByMessageId.set(row.message_id, existing);
+    }
+  }
+
   const messages: Message[] = messageRows.map((m) => ({
     id: m.id,
     session_id: m.session_id,
     role: m.role as Message["role"],
     content: m.content,
-    tool_calls: [],
+    tool_calls: toolCallsByMessageId.get(m.id) ?? [],
     created_at: m.created_at,
     agent: m.agent,
   }));
@@ -225,4 +262,117 @@ export function updateSessionSkills(
 ): void {
   const value = skills.length > 0 ? JSON.stringify(skills) : null;
   db.prepare("UPDATE sessions SET skills = ? WHERE id = ?").run(value, sessionId);
+}
+
+// ── Tool call persistence ─────────────────────────────────────────────────────
+
+/**
+ * Creates an empty placeholder assistant message at turn start.
+ * All tool calls for this turn will reference this message via FK.
+ * Returns the newly created message.
+ */
+export function createPlaceholderMessage(
+  db: Database,
+  args: { sessionId: string; agent?: string | null }
+): Message {
+  const id = crypto.randomUUID();
+  const createdAt = nowIso();
+
+  db.prepare(
+    "INSERT INTO messages (id, session_id, role, content, created_at, agent) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(id, args.sessionId, "assistant", "", createdAt, args.agent ?? null);
+
+  return {
+    id,
+    session_id: args.sessionId,
+    role: "assistant",
+    content: "",
+    tool_calls: [],
+    created_at: createdAt,
+    agent: args.agent ?? null,
+  };
+}
+
+/**
+ * Updates an existing message's content (called at turn end with full text).
+ */
+export function updateMessageContent(
+  db: Database,
+  messageId: string,
+  content: string
+): void {
+  db.prepare("UPDATE messages SET content = ? WHERE id = ?").run(content, messageId);
+}
+
+/**
+ * Inserts a tool_calls row. Call when a tool starts executing.
+ */
+export function saveToolCall(
+  db: Database,
+  args: {
+    id: string;
+    messageId: string;
+    name: string;
+    args: Record<string, unknown>;
+    status: ToolCallStatus;
+    category: string;
+  }
+): void {
+  db.prepare(
+    "INSERT INTO tool_calls (id, message_id, name, args, result, status, category) VALUES (?, ?, ?, ?, NULL, ?, ?)"
+  ).run(
+    args.id,
+    args.messageId,
+    args.name,
+    JSON.stringify(args.args),
+    args.status,
+    args.category
+  );
+}
+
+/**
+ * Updates status (and optionally result) of an existing tool_call row.
+ */
+export function updateToolCallStatus(
+  db: Database,
+  id: string,
+  status: ToolCallStatus,
+  result?: unknown
+): void {
+  if (result !== undefined) {
+    db.prepare("UPDATE tool_calls SET status = ?, result = ? WHERE id = ?").run(
+      status,
+      JSON.stringify(result),
+      id
+    );
+  } else {
+    db.prepare("UPDATE tool_calls SET status = ? WHERE id = ?").run(status, id);
+  }
+}
+
+/**
+ * Loads all tool_calls for a message, ordered by insertion.
+ */
+export function loadToolCallsForMessage(db: Database, messageId: string): ToolCall[] {
+  const rows = db
+    .prepare(
+      "SELECT id, name, args, result, status, category FROM tool_calls WHERE message_id = ? ORDER BY rowid ASC"
+    )
+    .all(messageId) as {
+    id: string;
+    name: string;
+    args: string;
+    result: string | null;
+    status: string;
+    category: string;
+  }[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    args: JSON.parse(row.args) as Record<string, unknown>,
+    result: row.result ? (JSON.parse(row.result) as unknown) : null,
+    status: row.status as ToolCallStatus,
+    category: row.category as ToolCategory,
+  }));
 }
