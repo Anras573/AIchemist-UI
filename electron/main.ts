@@ -36,6 +36,10 @@ let mainWin: BrowserWindow | null = null;
 // Active PTY processes keyed by a UUID assigned at creation time.
 const terminals = new Map<string, IPty>();
 
+// Sessions that currently have an agent turn in progress.
+// Prevents concurrent turns on the same session (e.g. rapid double-send).
+const activeTurns = new Set<string>();
+
 export function getMainWindow(): BrowserWindow | null {
   return mainWin;
 }
@@ -267,6 +271,7 @@ function registerHandlers(): void {  // ── Terminal ────────
     cancelSessionApprovals(sessionId);
     cancelSessionQuestions(sessionId);
     cleanupCopilotSession(sessionId);
+    activeTurns.delete(sessionId);
     return deleteSession(db, sessionId);
   });
   handle(
@@ -350,6 +355,12 @@ function registerHandlers(): void {  // ── Terminal ────────
   handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string; agent?: string }) => {
     const win = getMainWindow();
     if (!win) throw new Error("No window available");
+
+    if (activeTurns.has(args.sessionId)) {
+      throw new Error("A turn is already in progress for this session. Please wait for it to complete.");
+    }
+
+    // Snapshot session + project config synchronously before any async gap.
     const session = getSession(db, args.sessionId);
     const project = listProjects(db).find((p) => p.id === session.project_id);
     if (!project) throw new Error(`Project not found for session ${args.sessionId}`);
@@ -358,16 +369,24 @@ function registerHandlers(): void {  // ── Terminal ────────
       provider: session.provider ?? project.config.provider,
       model: session.model ?? project.config.model,
     };
-    await runAgentTurn({
-      db,
-      sessionId: args.sessionId,
-      prompt: args.prompt,
-      projectPath: project.path,
-      projectConfig: effectiveConfig,
-      webContents: win.webContents,
-      agent: args.agent ?? session.agent ?? undefined,
-      skills: session.skills ?? undefined,
-    });
+    const agent = args.agent ?? session.agent ?? undefined;
+    const skills = session.skills ?? undefined;
+
+    activeTurns.add(args.sessionId);
+    try {
+      await runAgentTurn({
+        db,
+        sessionId: args.sessionId,
+        prompt: args.prompt,
+        projectPath: project.path,
+        projectConfig: effectiveConfig,
+        webContents: win.webContents,
+        agent,
+        skills,
+      });
+    } finally {
+      activeTurns.delete(args.sessionId);
+    }
   });
   handle(CH.GET_COPILOT_MODELS, () => getProvider("copilot").listModels?.());
   handle(CH.GET_CLAUDE_AGENTS, async (_event, projectPath: string) => {
