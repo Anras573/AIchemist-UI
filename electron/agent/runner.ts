@@ -2,7 +2,7 @@ import type { Database } from "better-sqlite3";
 import type { ProjectConfig } from "../../src/types/index";
 
 import * as CH from "../ipc-channels";
-import { createPlaceholderMessage, updateMessageContent, loadToolCallsForMessage } from "../sessions";
+import { createPlaceholderMessage, updateMessageContent, loadToolCallsForMessage, updateSessionStatus } from "../sessions";
 import { claudeProvider } from "./claude";
 import { copilotProvider } from "./copilot";
 import type { AgentProvider, AgentProviderParams } from "./provider";
@@ -41,6 +41,7 @@ export async function runAgentTurn(params: {
   const { db, sessionId, prompt, projectPath, projectConfig, webContents, agent, skills } = params;
 
   webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "running" });
+  updateSessionStatus(db, sessionId, "running");
 
   // Create a placeholder assistant message that tool calls can FK-reference
   const placeholderMsg = createPlaceholderMessage(db, { sessionId, agent });
@@ -73,12 +74,14 @@ export async function runAgentTurn(params: {
     }
 
     webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "idle" });
+    updateSessionStatus(db, sessionId, "idle");
   } catch (err) {
     const toolCalls = loadToolCallsForMessage(db, placeholderMsg.id);
     if (toolCalls.length === 0) {
       db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);
     }
     webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "error" });
+    updateSessionStatus(db, sessionId, "error");
     throw err;
   }
 }

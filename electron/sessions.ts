@@ -190,6 +190,32 @@ export function deleteSession(db: Database, sessionId: string): void {
 }
 
 /**
+ * Persist the runtime status of a session to SQLite.
+ * Called by the agent runner at each status transition so restarts can
+ * detect and recover sessions that were interrupted mid-turn.
+ */
+export function updateSessionStatus(
+  db: Database,
+  sessionId: string,
+  status: Session["status"]
+): void {
+  db.prepare("UPDATE sessions SET status = ? WHERE id = ?").run(status, sessionId);
+}
+
+/**
+ * On startup, mark any session still in "running" status as "error".
+ * A session can only be "running" if the app crashed or was force-quit
+ * mid-turn — it will never complete, so surface it as an error.
+ * Returns the number of sessions recovered.
+ */
+export function recoverStaleSessionStatuses(db: Database): number {
+  const result = db
+    .prepare("UPDATE sessions SET status = 'error' WHERE status = 'running'")
+    .run();
+  return result.changes;
+}
+
+/**
  * Persist a single message to SQLite and return it with its generated id.
  */
 export function saveMessage(

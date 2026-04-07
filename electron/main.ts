@@ -9,7 +9,7 @@ import * as CH from "./ipc-channels";
 import { loadEnv, getApiKey, getAnthropicConfig } from "./config";
 import { openDb } from "./db";
 import { addProject, listProjects, removeProject, getProjectConfig, saveProjectConfig } from "./projects";
-import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent, updateSessionSkills } from "./sessions";
+import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent, updateSessionSkills, recoverStaleSessionStatuses } from "./sessions";
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
@@ -518,6 +518,11 @@ function registerHandlers(): void {  // ── Terminal ────────
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
+  const stale = recoverStaleSessionStatuses(db);
+  if (stale > 0) {
+    console.log(`[startup] Marked ${stale} stale session(s) as "error" (were "running" at last exit)`);
+  }
+
   registerHandlers();
   createWindow();
 
