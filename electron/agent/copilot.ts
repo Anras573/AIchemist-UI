@@ -294,7 +294,7 @@ export async function runCopilotAgentTurn(params: {
           return msg;
         }
 
-        const output = await implExecuteBash(args);
+        const output = await implExecuteBash({ ...args, projectPath });
         webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output });
         return output;
       },

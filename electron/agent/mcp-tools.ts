@@ -106,7 +106,7 @@ export async function createApprovalMcpServer(
         return result;
       }
 
-      const result = textResult(await implExecuteBash(args));
+      const result = textResult(await implExecuteBash({ ...args, projectPath }));
       webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output: result });
       return result;
     }

@@ -11,6 +11,42 @@ import type { FileChange } from "../../src/types/index";
 // provider-specific tool registration API (MCP for Claude, defineTool for
 // Copilot) without duplicating the implementation.
 
+// ── Path validation ───────────────────────────────────────────────────────────
+
+const MAX_WRITE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/** Sensitive sub-paths that must never be written to or deleted. */
+const SENSITIVE_PATH_PATTERNS = [
+  /(?:^|\/)\.git(?:\/|$)/,
+  /(?:^|\/)node_modules(?:\/|$)/,
+  /(?:^|\/|^)\.env(\.|$)/,
+];
+
+/**
+ * Resolves `inputPath` against `projectPath` and verifies the result stays
+ * within the project root. Returns the resolved absolute path.
+ *
+ * Throws if the path escapes the project boundary or matches a sensitive
+ * pattern (`.git`, `node_modules`, `.env*`).
+ */
+function resolveAndValidate(projectPath: string, inputPath: string): string {
+  const root = path.resolve(projectPath);
+  const resolved = path.resolve(root, inputPath);
+
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    throw new Error(`Path escapes project boundary: "${inputPath}"`);
+  }
+
+  const rel = path.relative(root, resolved);
+  for (const pattern of SENSITIVE_PATH_PATTERNS) {
+    if (pattern.test(rel)) {
+      throw new Error(`Access to sensitive path is not allowed: "${rel}"`);
+    }
+  }
+
+  return resolved;
+}
+
 export async function implWriteFile(args: {
   path: string;
   content: string;
@@ -38,10 +74,23 @@ export async function implDeleteFile(args: {
 export async function implExecuteBash(args: {
   command: string;
   cwd?: string;
+  projectPath?: string;
 }): Promise<string> {
+  let cwd = args.cwd;
+  if (cwd !== undefined && args.projectPath !== undefined) {
+    try {
+      cwd = resolveAndValidate(args.projectPath, cwd);
+    } catch (err) {
+      return JSON.stringify({
+        stdout: "",
+        stderr: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        exit_code: 1,
+      });
+    }
+  }
   const proc = childProcess.spawnSync(args.command, {
     shell: true,
-    cwd: args.cwd,
+    cwd,
     encoding: "utf8",
   });
   return JSON.stringify({
@@ -78,36 +127,50 @@ function isBinaryBuffer(buf: Buffer): boolean {
 }
 
 /**
- * Wraps implWriteFile: reads before-content, calls the impl, then returns
- * both the result string and a FileChange (or null on write error).
+ * Wraps implWriteFile: validates the path is within the project boundary,
+ * enforces a 10 MB size limit, reads before-content, calls the impl, then
+ * returns both the result string and a FileChange (or null on write error).
  */
 export async function implWriteFileWithChange(
   args: { path: string; content: string },
   projectPath: string
 ): Promise<{ result: string; change: FileChange | null }> {
+  let resolvedPath: string;
+  try {
+    resolvedPath = resolveAndValidate(projectPath, args.path);
+  } catch (err) {
+    return { result: `Error: ${err instanceof Error ? err.message : String(err)}`, change: null };
+  }
+
+  if (Buffer.byteLength(args.content, "utf8") > MAX_WRITE_SIZE_BYTES) {
+    return { result: "Error: File content exceeds the 10 MB size limit.", change: null };
+  }
+
+  const validatedArgs = { ...args, path: resolvedPath };
+
   let beforeBuf: Buffer | null = null;
   try {
-    beforeBuf = fs.readFileSync(args.path);
+    beforeBuf = fs.readFileSync(resolvedPath);
   } catch {
     // File doesn't exist yet — beforeBuf stays null
   }
 
-  const result = await implWriteFile(args);
+  const result = await implWriteFile(validatedArgs);
 
   if (result.startsWith("Error")) return { result, change: null };
 
-  const relPath = path.relative(projectPath, args.path) || path.basename(args.path);
+  const relPath = path.relative(projectPath, resolvedPath) || path.basename(resolvedPath);
 
   // Detect binary from before or after content
   let afterBuf: Buffer | null = null;
   try {
-    afterBuf = fs.readFileSync(args.path);
+    afterBuf = fs.readFileSync(resolvedPath);
   } catch { /* ignore */ }
 
   if ((beforeBuf && isBinaryBuffer(beforeBuf)) || (afterBuf && isBinaryBuffer(afterBuf))) {
     return {
       result,
-      change: { path: args.path, relativePath: relPath, diff: "", operation: "write", isBinary: true },
+      change: { path: resolvedPath, relativePath: relPath, diff: "", operation: "write", isBinary: true },
     };
   }
 
@@ -116,35 +179,45 @@ export async function implWriteFileWithChange(
 
   return {
     result,
-    change: { path: args.path, relativePath: relPath, diff, operation: "write" },
+    change: { path: resolvedPath, relativePath: relPath, diff, operation: "write" },
   };
 }
 
 /**
- * Wraps implDeleteFile: reads before-content, calls the impl, then returns
- * both the result string and a FileChange (or null on delete error).
+ * Wraps implDeleteFile: validates the path is within the project boundary,
+ * reads before-content, calls the impl, then returns both the result string
+ * and a FileChange (or null on delete error).
  */
 export async function implDeleteFileWithChange(
   args: { path: string },
   projectPath: string
 ): Promise<{ result: string; change: FileChange | null }> {
+  let resolvedPath: string;
+  try {
+    resolvedPath = resolveAndValidate(projectPath, args.path);
+  } catch (err) {
+    return { result: `Error: ${err instanceof Error ? err.message : String(err)}`, change: null };
+  }
+
+  const validatedArgs = { ...args, path: resolvedPath };
+
   let beforeBuf: Buffer | null = null;
   try {
-    beforeBuf = fs.readFileSync(args.path);
+    beforeBuf = fs.readFileSync(resolvedPath);
   } catch {
     beforeBuf = null;
   }
 
-  const result = await implDeleteFile(args);
+  const result = await implDeleteFile(validatedArgs);
 
   if (result.startsWith("Error")) return { result, change: null };
 
-  const relPath = path.relative(projectPath, args.path) || path.basename(args.path);
+  const relPath = path.relative(projectPath, resolvedPath) || path.basename(resolvedPath);
 
   if (beforeBuf && isBinaryBuffer(beforeBuf)) {
     return {
       result,
-      change: { path: args.path, relativePath: relPath, diff: "", operation: "delete", isBinary: true },
+      change: { path: resolvedPath, relativePath: relPath, diff: "", operation: "delete", isBinary: true },
     };
   }
 
@@ -153,6 +226,6 @@ export async function implDeleteFileWithChange(
 
   return {
     result,
-    change: { path: args.path, relativePath: relPath, diff, operation: "delete" },
+    change: { path: resolvedPath, relativePath: relPath, diff, operation: "delete" },
   };
 }
