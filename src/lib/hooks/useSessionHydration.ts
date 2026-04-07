@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 
 /**
@@ -11,6 +11,7 @@ import { useSessionStore } from "@/lib/store/useSessionStore";
  * every fresh app start.
  */
 export function useSessionHydration() {
+  const ipc = useIpc();
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const hydrateSession = useSessionStore((s) => s.hydrateSession);
   const hydrated = useRef(new Set<string>());

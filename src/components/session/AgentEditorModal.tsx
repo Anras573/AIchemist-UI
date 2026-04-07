@@ -5,7 +5,7 @@ import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { Streamdown } from "streamdown";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,6 +61,7 @@ export function AgentEditorModal({
   onSaved,
   readOnly = false,
 }: AgentEditorModalProps) {
+  const ipc = useIpc();
   const isNew = agent === null;
 
   const [name, setName] = useState("");

@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from "react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ interface ProjectSidebarProps {
 }
 
 export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarProps) {
+  const ipc = useIpc();
   const { projects, activeProjectId, setProjects, setActiveProject, addProject, removeProject, openSettings, openProjectSettings } =
     useProjectStore();
   const { sessions } = useSessionStore();

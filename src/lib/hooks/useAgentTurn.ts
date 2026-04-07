@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import type { Message } from "@/types";
@@ -11,6 +11,7 @@ import type { Message } from "@/types";
  * arrive as push events handled by `useSessionEvents`.
  */
 export function useAgentTurn() {
+  const ipc = useIpc();
   const {
     sessions,
     activeSessionId,

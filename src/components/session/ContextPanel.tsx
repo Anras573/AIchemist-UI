@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X, ChevronLeft } from "lucide-react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import {
   FileTree,
   FileTreeFolder,
@@ -46,6 +46,7 @@ function LazyFolderChildren({
   path: string;
   onFileOpen?: (path: string) => void;
 }) {
+  const ipc = useIpc();
   const [children, setChildren] = useState<DirEntry[] | null>(null);
 
   useEffect(() => {
@@ -107,6 +108,7 @@ interface FileTreeViewProps {
 }
 
 function FileTreeView({ projectPath, onFileOpen }: FileTreeViewProps) {
+  const ipc = useIpc();
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);

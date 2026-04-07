@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import type { SettingsMap } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -92,6 +92,7 @@ function SaveRow({
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 export function SettingsView({ onClose }: SettingsViewProps) {
+  const ipc = useIpc();
   const [activeSection, setActiveSection] = useState<Section>("api-keys");
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [draft, setDraft] = useState<Partial<SettingsMap>>({});

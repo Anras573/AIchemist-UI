@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Bot, Blocks, CheckCircle2, AlertCircle, Eye, Loader2 } from "lucide-react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { cn } from "@/lib/utils";
@@ -104,6 +104,7 @@ function SectionHeader({
 // ── AgentsPanel ───────────────────────────────────────────────────────────────
 
 export function AgentsPanel() {
+  const ipc = useIpc();
   const { activeSessionId, sessionAgents, setSessionAgent } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);

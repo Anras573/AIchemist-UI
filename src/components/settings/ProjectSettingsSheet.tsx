@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { X, Check, AlertCircle } from "lucide-react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -201,6 +201,7 @@ interface ProjectSettingsSheetProps {
 }
 
 export function ProjectSettingsSheet({ projectId, onClose }: ProjectSettingsSheetProps) {
+  const ipc = useIpc();
   const [tab, setTab] = useState<Tab>("general");
   const [config, setConfig] = useState<ProjectConfig | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);

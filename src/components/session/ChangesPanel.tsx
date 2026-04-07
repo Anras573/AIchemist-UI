@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import type { FileChange } from "@/types";
 import { CodeBlock } from "@/components/ai-elements/code-block";
@@ -109,6 +109,7 @@ function parseGitDiff(raw: string): GitFileEntry[] {
 // ── GitFileDiff ───────────────────────────────────────────────────────────────
 
 function GitFileDiff({ entry, projectPath }: { entry: GitFileEntry; projectPath: string }) {
+  const ipc = useIpc();
   const [open, setOpen] = useState(false);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -178,6 +179,7 @@ function GitFileDiff({ entry, projectPath }: { entry: GitFileEntry; projectPath:
 // ── GitDiffSection ─────────────────────────────────────────────────────────────
 
 function GitDiffSection({ projectPath }: { projectPath: string }) {
+  const ipc = useIpc();
   const [entries, setEntries] = useState<GitFileEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

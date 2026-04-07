@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import type { AgentInfo } from "@/types";
 import {
   Dialog,
@@ -35,6 +35,7 @@ interface CommandPaletteProps {
 type Page = "root" | "agent";
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+  const ipc = useIpc();
   const { projects, setActiveProject, activeProjectId, openSettings, openProjectSettings } = useProjectStore();
   const {
     sessions,

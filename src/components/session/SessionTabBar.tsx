@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { Bot } from "lucide-react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ interface SessionTabBarProps {
 }
 
 export function SessionTabBar({ projectId }: SessionTabBarProps) {
+  const ipc = useIpc();
   const { sessions, activeSessionId, sessionAgents, mergeSessions, setActiveSession, addSession, removeSession } =
     useSessionStore();
 

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Check, Eye, Loader2, Pencil, Plus } from "lucide-react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { cn } from "@/lib/utils";
@@ -69,6 +69,7 @@ function SkillCard({
 // ── SkillsPanel ───────────────────────────────────────────────────────────────
 
 export function SkillsPanel() {
+  const ipc = useIpc();
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const projectPath = activeProject?.path ?? "";

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import {
   ModelSelector,
   ModelSelectorContent,
@@ -25,6 +25,7 @@ interface ModelPickerButtonProps {
 }
 
 export function ModelPickerButton({ sessionId, provider, model }: ModelPickerButtonProps) {
+  const ipc = useIpc();
   const { updateSessionModel } = useSessionStore();
   const [open, setOpen] = useState(false);
   const [copilotModels, setCopilotModels] = useState<ModelOption[]>([]);

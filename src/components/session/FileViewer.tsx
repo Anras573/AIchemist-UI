@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { codeToHtml } from "shiki";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 
 // ── Language detection ────────────────────────────────────────────────────────
 
@@ -35,6 +35,7 @@ interface FileViewerProps {
 }
 
 export function FileViewer({ filePath }: FileViewerProps) {
+  const ipc = useIpc();
   const [html, setHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 

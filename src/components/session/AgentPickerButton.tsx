@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Bot, Check, ChevronsUpDown, Eye, Loader2, Pencil, Plus } from "lucide-react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import {
@@ -29,6 +29,7 @@ import type { AgentInfo } from "@/types";
  * Agents are loaded lazily when the dropdown is first opened.
  */
 export function AgentPickerButton() {
+  const ipc = useIpc();
   const { activeSessionId, sessions, sessionAgents, setSessionAgent } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);

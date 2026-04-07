@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useState } from "react";
 import { Activity, ChevronDown, Loader2, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import type { TraceSpan } from "@/types";
 import { Task, TaskTrigger, TaskContent } from "@/components/ai-elements/task";
@@ -146,6 +146,7 @@ function ToolRow({
 // ── TracesPanel ───────────────────────────────────────────────────────────────
 
 export function TracesPanel() {
+  const ipc = useIpc();
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const sessionTraces = useSessionStore((s) => s.sessionTraces);
   const addOrUpdateTraceSpan = useSessionStore((s) => s.addOrUpdateTraceSpan);

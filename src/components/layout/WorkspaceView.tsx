@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useAgentTurn } from "@/lib/hooks/useAgentTurn";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { SplitPane } from "@/components/layout/SplitPane";
 import { SessionTabBar } from "@/components/session/SessionTabBar";
 import { TimelinePanel } from "@/components/session/TimelinePanel";
@@ -10,6 +10,7 @@ import { ContextPanel, type ContextTab } from "@/components/session/ContextPanel
 import { ToolStrip } from "@/components/session/ToolStrip";
 
 export function WorkspaceView() {
+  const ipc = useIpc();
   const { activeProjectId, projects } = useProjectStore();
   const { tabSwitchRequest, clearTabSwitchRequest, addSession, setActiveSession } = useSessionStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);

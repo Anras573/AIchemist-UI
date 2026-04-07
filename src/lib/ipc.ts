@@ -1,3 +1,4 @@
+import React from "react";
 import type { ProjectConfig } from "@/types";
 
 // ── Typed wrapper over window.electronAPI ─────────────────────────────────────
@@ -114,6 +115,7 @@ export const IPC_CHANNELS = {
   SESSION_THINKING_DELTA: "session:thinking-delta",
   SESSION_THINKING_DONE: "session:thinking-done",
   SESSION_QUESTION_REQUIRED: "session:question_required",
+  CONFIG_WARNING: "config:warning",
 } as const;
 
 // ── Thinking / reasoning subscription helpers ─────────────────────────────────
@@ -128,4 +130,10 @@ export function onThinkingDone(
   cb: (payload: { session_id: string }) => void
 ): () => void {
   return window.electronAPI.onThinkingDone(cb);
+}
+
+export type IpcClient = typeof ipc;
+export const IpcContext = React.createContext<IpcClient>(ipc);
+export function useIpc(): IpcClient {
+  return React.useContext(IpcContext);
 }

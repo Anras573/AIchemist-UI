@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { onSessionEvent, IPC_CHANNELS, ipc, onThinkingDelta, onThinkingDone } from "@/lib/ipc";
+import { onSessionEvent, IPC_CHANNELS, useIpc, onThinkingDelta, onThinkingDone } from "@/lib/ipc";
 import { useSessionStore, type PendingQuestion } from "@/lib/store/useSessionStore";
 import type {
   SessionStatusEvent,
@@ -72,6 +72,7 @@ function formatBashOutput(raw: string): string {
  * Electron main process and updates the Zustand session store accordingly.
  */
 export function useSessionEvents() {
+  const ipc = useIpc();
   const {
     updateSessionStatus,
     commitMessage,

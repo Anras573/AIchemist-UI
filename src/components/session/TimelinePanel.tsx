@@ -28,7 +28,7 @@ import { Button } from "@/components/ui/button";
 import { AgentPickerButton } from "./AgentPickerButton";
 import { ModelPickerButton } from "./ModelPickerButton";
 import { QuestionCard } from "./QuestionCard";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 
 // ─── Individual message bubble ────────────────────────────────────────────────
 
@@ -333,6 +333,7 @@ interface InputBarProps {
 }
 
 function InputBar({ disabled, placeholder = "Send a message…", onSend }: InputBarProps) {
+  const ipc = useIpc();
   const { sessions, activeSessionId } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;

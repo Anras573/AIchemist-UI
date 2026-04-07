@@ -5,7 +5,7 @@ import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { Streamdown } from "streamdown";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +58,7 @@ export function SkillEditorModal({
   onSaved,
   readOnly = false,
 }: SkillEditorModalProps) {
+  const ipc = useIpc();
   const isNew = skill === null;
 
   const [name, setName] = useState("");

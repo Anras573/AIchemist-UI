@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { ipc } from "@/lib/ipc";
+import { useIpc } from "@/lib/ipc";
 
 export type Theme = "system" | "light" | "dark";
 
@@ -23,6 +23,7 @@ export function initTheme() {
 
 /** Hook for reading and updating the active theme. */
 export function useTheme() {
+  const ipc = useIpc();
   const [theme, setThemeState] = useState<Theme>(
     () => (localStorage.getItem(STORAGE_KEY) as Theme) ?? "system"
   );

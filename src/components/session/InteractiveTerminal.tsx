@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { ipc, IPC_CHANNELS } from "@/lib/ipc";
+import { useIpc, IPC_CHANNELS } from "@/lib/ipc";
 import {
   Terminal,
   TerminalHeader,
@@ -34,6 +34,7 @@ interface InteractiveTerminalProps {
  * up the PTY when unmounted.
  */
 export function InteractiveTerminal({ projectPath }: InteractiveTerminalProps) {
+  const ipc = useIpc();
   const containerRef = useRef<HTMLDivElement>(null);
   // Refs so event-handler closures always see the latest values.
   const xtermRef = useRef<XTerm | null>(null);
