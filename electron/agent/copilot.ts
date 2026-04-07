@@ -499,11 +499,12 @@ export async function runCopilotAgentTurn(params: {
   // created with a different (or no) system message. Resuming it would ignore
   // the new systemMessage, so force a fresh session instead.
   const lastAgentKey = `agent:${sessionId}`;
-  const lastAgent = copilotSessionIds.get(lastAgentKey) ?? null;
-  if (agent !== lastAgent && copilotSessionIds.has(sessionId)) {
+  const normalizedAgent = agent ?? "";
+  const lastAgent = copilotSessionIds.get(lastAgentKey) ?? "";
+  if (normalizedAgent !== lastAgent && copilotSessionIds.has(sessionId)) {
     copilotSessionIds.delete(sessionId);
   }
-  copilotSessionIds.set(lastAgentKey, agent ?? "");
+  copilotSessionIds.set(lastAgentKey, normalizedAgent);
 
   // Resume the existing Copilot SDK session for this AIchemist session (if any)
   // so conversation history is preserved across turns. Fall back to creating a
