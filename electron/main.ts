@@ -63,6 +63,29 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+// ── IPC handler wrapper ───────────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Handler = (event: Electron.IpcMainInvokeEvent, ...args: any[]) => any;
+
+/**
+ * Registers an ipcMain handler that catches all errors, logs them to the
+ * console with the channel name, and re-throws a clean Error so the renderer's
+ * `invoke()` promise always rejects with a readable message rather than
+ * hanging or crashing silently.
+ */
+function handle(channel: string, handler: Handler): void {
+  ipcMain.handle(channel, async (event, ...args) => {
+    try {
+      return await handler(event, ...args);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[IPC] "${channel}" failed:`, err);
+      throw new Error(message);
+    }
+  });
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Scans a skills directory and returns an array of skill entries. */
@@ -100,7 +123,7 @@ function scanSkillsDir(
 }
 
 function registerHandlers(): void {  // ── Terminal ──────────────────────────────────────────────────────────────────
-  ipcMain.handle(CH.TERMINAL_CREATE, (_event, projectPath: string) => {
+  handle(CH.TERMINAL_CREATE, (_event, projectPath: string) => {
     const id = crypto.randomUUID();
     const shell = process.env.SHELL ?? "/bin/bash";
     const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
@@ -128,15 +151,15 @@ function registerHandlers(): void {  // ── Terminal ────────
     return id;
   });
 
-  ipcMain.handle(CH.TERMINAL_INPUT, (_event, id: string, data: string) => {
+  handle(CH.TERMINAL_INPUT, (_event, id: string, data: string) => {
     terminals.get(id)?.write(data);
   });
 
-  ipcMain.handle(CH.TERMINAL_RESIZE, (_event, id: string, cols: number, rows: number) => {
+  handle(CH.TERMINAL_RESIZE, (_event, id: string, cols: number, rows: number) => {
     terminals.get(id)?.resize(cols, rows);
   });
 
-  ipcMain.handle(CH.TERMINAL_CLOSE, (_event, id: string) => {
+  handle(CH.TERMINAL_CLOSE, (_event, id: string) => {
     const term = terminals.get(id);
     if (term) {
       try { term.kill(); } catch { /* already exited */ }
@@ -145,15 +168,15 @@ function registerHandlers(): void {  // ── Terminal ────────
   });
 
   // ── Settings ─────────────────────────────────────────────────────────────────
-  ipcMain.handle(CH.SETTINGS_READ, () => readSettings());
-  ipcMain.handle(CH.SETTINGS_WRITE, (_event, updates: Partial<SettingsMap>) =>
+  handle(CH.SETTINGS_READ, () => readSettings());
+  handle(CH.SETTINGS_WRITE, (_event, updates: Partial<SettingsMap>) =>
     writeSettings(updates)
   );
 
   // ── Traces ───────────────────────────────────────────────────────────────────
-  ipcMain.handle(CH.GET_TRACES, (_event, sessionId?: string) => getSpans(sessionId));
+  handle(CH.GET_TRACES, (_event, sessionId?: string) => getSpans(sessionId));
 
-  ipcMain.handle(CH.GET_GIT_BRANCH, (_event, projectPath: string) => {
+  handle(CH.GET_GIT_BRANCH, (_event, projectPath: string) => {
     const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
     const env = { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` };
     try {
@@ -165,7 +188,7 @@ function registerHandlers(): void {  // ── Terminal ────────
     }
   });
 
-  ipcMain.handle(CH.GET_GIT_DIFF, (_event, projectPath: string) => {
+  handle(CH.GET_GIT_DIFF, (_event, projectPath: string) => {
     // Add common git locations to PATH — Electron on macOS doesn't inherit the shell PATH.
     const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
     const env = { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` };
@@ -206,76 +229,70 @@ function registerHandlers(): void {  // ── Terminal ────────
   });
 
   // ── Config ──────────────────────────────────────────────────────────────────
-  ipcMain.handle(CH.GET_API_KEY, (_event, provider: string) =>
+  handle(CH.GET_API_KEY, (_event, provider: string) =>
     getApiKey(provider)
   );
-  ipcMain.handle(CH.GET_ANTHROPIC_CONFIG, () => getAnthropicConfig());
+  handle(CH.GET_ANTHROPIC_CONFIG, () => getAnthropicConfig());
 
   // ── Projects ─────────────────────────────────────────────────────────────────
-  ipcMain.handle(CH.ADD_PROJECT, async (_event, projectPath: string) => {
-    try {
-      return addProject(db, projectPath);
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : String(err));
-    }
-  });
-  ipcMain.handle(CH.LIST_PROJECTS, () => listProjects(db));
-  ipcMain.handle(CH.REMOVE_PROJECT, (_event, id: string) =>
+  handle(CH.ADD_PROJECT, (_event, projectPath: string) => addProject(db, projectPath));
+  handle(CH.LIST_PROJECTS, () => listProjects(db));
+  handle(CH.REMOVE_PROJECT, (_event, id: string) =>
     removeProject(db, id)
   );
-  ipcMain.handle(CH.GET_PROJECT_CONFIG, (_event, id: string) =>
+  handle(CH.GET_PROJECT_CONFIG, (_event, id: string) =>
     getProjectConfig(db, id)
   );
-  ipcMain.handle(
+  handle(
     CH.SAVE_PROJECT_CONFIG,
     (_event, id: string, config: ProjectConfig) =>
       saveProjectConfig(db, id, config)
   );
 
   // ── Sessions ─────────────────────────────────────────────────────────────────
-  ipcMain.handle(CH.CREATE_SESSION, (_event, projectId: string) => {
+  handle(CH.CREATE_SESSION, (_event, projectId: string) => {
     // Inherit the project's current provider + model so new sessions start
     // with the right model without the user having to configure it again.
     const project = listProjects(db).find((p) => p.id === projectId);
     return createSession(db, projectId, project?.config.provider ?? null, project?.config.model ?? null);
   });
-  ipcMain.handle(CH.LIST_SESSIONS, (_event, projectId: string) =>
+  handle(CH.LIST_SESSIONS, (_event, projectId: string) =>
     listSessions(db, projectId)
   );
-  ipcMain.handle(CH.GET_SESSION, (_event, sessionId: string) =>
+  handle(CH.GET_SESSION, (_event, sessionId: string) =>
     getSession(db, sessionId)
   );
-  ipcMain.handle(CH.DELETE_SESSION, (_event, sessionId: string) =>
+  handle(CH.DELETE_SESSION, (_event, sessionId: string) =>
     deleteSession(db, sessionId)
   );
-  ipcMain.handle(
+  handle(
     CH.SAVE_MESSAGE,
     (_event, args: { sessionId: string; role: string; content: string }) =>
       saveMessage(db, args)
   );
-  ipcMain.handle(
+  handle(
     CH.UPDATE_SESSION_TITLE,
     (_event, sessionId: string, title: string) =>
       updateSessionTitle(db, sessionId, title)
   );
-  ipcMain.handle(
+  handle(
     CH.UPDATE_SESSION_MODEL,
     (_event, sessionId: string, provider: string, model: string) =>
       updateSessionModel(db, sessionId, provider, model)
   );
-  ipcMain.handle(
+  handle(
     CH.UPDATE_SESSION_AGENT,
     (_event, sessionId: string, agent: string | null) =>
       updateSessionAgent(db, sessionId, agent)
   );
-  ipcMain.handle(
+  handle(
     CH.UPDATE_SESSION_SKILLS,
     (_event, sessionId: string, skills: string[]) =>
       updateSessionSkills(db, sessionId, skills)
   );
 
   // ── File system ───────────────────────────────────────────────────────────────
-  ipcMain.handle(CH.LIST_DIRECTORY, (_event, dirPath: string) => {
+  handle(CH.LIST_DIRECTORY, (_event, dirPath: string) => {
     try {
       const entries = fs.readdirSync(dirPath, { withFileTypes: true }).map((dirent) => {
         const entryPath = path.join(dirPath, dirent.name);
@@ -303,7 +320,7 @@ function registerHandlers(): void {  // ── Terminal ────────
     }
   });
 
-  ipcMain.handle(CH.READ_FILE, (_event, filePath: string) => {
+  handle(CH.READ_FILE, (_event, filePath: string) => {
     const MAX_BYTES = 512 * 1024; // 512 KB
     try {
       const stat = fs.statSync(filePath);
@@ -323,10 +340,10 @@ function registerHandlers(): void {  // ── Terminal ────────
   });
 
   // ── Dialog ────────────────────────────────────────────────────────────────────
-  ipcMain.handle(CH.OPEN_FOLDER_DIALOG, () => openFolderDialog());
+  handle(CH.OPEN_FOLDER_DIALOG, () => openFolderDialog());
 
   // ── Agent ─────────────────────────────────────────────────────────────────────
-  ipcMain.handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string; agent?: string }) => {
+  handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string; agent?: string }) => {
     const win = getMainWindow();
     if (!win) throw new Error("No window available");
     const session = getSession(db, args.sessionId);
@@ -348,14 +365,14 @@ function registerHandlers(): void {  // ── Terminal ────────
       skills: session.skills ?? undefined,
     });
   });
-  ipcMain.handle(CH.GET_COPILOT_MODELS, () => getProvider("copilot").listModels?.());
-  ipcMain.handle(CH.GET_CLAUDE_AGENTS, async (_event, projectPath: string) => {
+  handle(CH.GET_COPILOT_MODELS, () => getProvider("copilot").listModels?.());
+  handle(CH.GET_CLAUDE_AGENTS, async (_event, projectPath: string) => {
     return getProvider("anthropic").listAgents?.(projectPath);
   });
-  ipcMain.handle(CH.GET_COPILOT_AGENTS, async (_event, projectPath: string) => {
+  handle(CH.GET_COPILOT_AGENTS, async (_event, projectPath: string) => {
     return getProvider("copilot").listAgents?.(projectPath);
   });
-  ipcMain.handle(CH.LIST_SKILLS, (_event, projectPath: string) => {
+  handle(CH.LIST_SKILLS, (_event, projectPath: string) => {
     const projectSkillsDir = path.join(projectPath, ".agents", "skills");
     const globalSkillsDir = path.join(os.homedir(), ".claude", "skills");
 
@@ -366,7 +383,7 @@ function registerHandlers(): void {  // ── Terminal ────────
     const projectNames = new Set(projectSkills.map((s) => s.name));
     return [...projectSkills, ...globalSkills.filter((s) => !projectNames.has(s.name))];
   });
-  ipcMain.handle(
+  handle(
     CH.APPROVE_TOOL_CALL,
     (_event, args: {
       sessionId: string;
@@ -401,7 +418,7 @@ function registerHandlers(): void {  // ── Terminal ────────
     }
   );
 
-  ipcMain.handle(
+  handle(
     CH.ANSWER_QUESTION,
     (_event, args: { questionId: string; answer: string }) => {
       resolveQuestion(args.questionId, args.answer);
@@ -409,17 +426,17 @@ function registerHandlers(): void {  // ── Terminal ────────
   );
 
   // ── Agent / Skill file management ──────────────────────────────────────────
-  ipcMain.handle(
+  handle(
     CH.WRITE_AGENT_FILE,
     (_event, args: { filePath: string; content: string }) => {
       fs.mkdirSync(path.dirname(args.filePath), { recursive: true });
       fs.writeFileSync(args.filePath, args.content, "utf8");
     }
   );
-  ipcMain.handle(CH.DELETE_AGENT_FILE, (_event, filePath: string) => {
+  handle(CH.DELETE_AGENT_FILE, (_event, filePath: string) => {
     fs.unlinkSync(filePath);
   });
-  ipcMain.handle(
+  handle(
     CH.CREATE_AGENT,
     (
       _event,
@@ -444,17 +461,17 @@ function registerHandlers(): void {  // ── Terminal ────────
       return { filePath };
     }
   );
-  ipcMain.handle(
+  handle(
     CH.WRITE_SKILL_FILE,
     (_event, args: { skillPath: string; content: string }) => {
       fs.mkdirSync(args.skillPath, { recursive: true });
       fs.writeFileSync(path.join(args.skillPath, "SKILL.md"), args.content, "utf8");
     }
   );
-  ipcMain.handle(CH.DELETE_SKILL_DIR, (_event, skillPath: string) => {
+  handle(CH.DELETE_SKILL_DIR, (_event, skillPath: string) => {
     fs.rmSync(skillPath, { recursive: true, force: true });
   });
-  ipcMain.handle(
+  handle(
     CH.CREATE_SKILL,
     (
       _event,
