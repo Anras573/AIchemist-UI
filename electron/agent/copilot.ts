@@ -52,6 +52,15 @@ export async function stopCopilotClient(): Promise<void> {
   }
 }
 
+/**
+ * Removes the Copilot SDK session mapping for the given AIchemist session ID.
+ * Call this when a session is deleted so the SDK session entry doesn't linger.
+ */
+export function cleanupCopilotSession(sessionId: string): void {
+  copilotSessionIds.delete(sessionId);
+  copilotSessionIds.delete(`${sessionId}:lastAgent`);
+}
+
 /** Return the list of models available for the authenticated Copilot user. */
 export async function getCopilotModels(): Promise<Array<{ id: string; name: string }>> {
   const client = await getClient();

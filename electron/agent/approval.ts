@@ -7,9 +7,11 @@ import * as CH from "../ipc-channels";
 // Single source of truth for all provider approval flows.
 // Both Claude (MCP tools) and Copilot tool handlers resolve through this map.
 
+const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
 const pendingApprovals = new Map<
   string,
-  { resolve: (approved: boolean) => void; sessionId: string; toolName: string; args: unknown }
+  { resolve: (approved: boolean) => void; sessionId: string; toolName: string; args: unknown; timer: ReturnType<typeof setTimeout> }
 >();
 
 /**
@@ -19,6 +21,7 @@ const pendingApprovals = new Map<
 export function resolveApproval(approvalId: string, approved: boolean): void {
   const pending = pendingApprovals.get(approvalId);
   if (pending) {
+    clearTimeout(pending.timer);
     pending.resolve(approved);
     pendingApprovals.delete(approvalId);
   }
@@ -34,6 +37,7 @@ export function getPendingApprovalData(
 
 /**
  * Emits SESSION_APPROVAL_REQUIRED and suspends until the user approves/denies.
+ * Auto-denies after 5 minutes if unanswered.
  */
 export function requestApproval(
   webContents: Electron.WebContents,
@@ -43,7 +47,15 @@ export function requestApproval(
 ): Promise<boolean> {
   const approvalId = crypto.randomUUID();
   return new Promise((resolve) => {
-    pendingApprovals.set(approvalId, { resolve, sessionId, toolName, args: input });
+    const timer = setTimeout(() => {
+      if (pendingApprovals.has(approvalId)) {
+        console.warn(`[approval] "${toolName}" (${approvalId}) timed out after 5 min — auto-denying`);
+        pendingApprovals.delete(approvalId);
+        resolve(false);
+      }
+    }, APPROVAL_TIMEOUT_MS);
+
+    pendingApprovals.set(approvalId, { resolve, sessionId, toolName, args: input, timer });
     webContents.send(CH.SESSION_APPROVAL_REQUIRED, {
       session_id: sessionId,
       approval_id: approvalId,
@@ -51,6 +63,21 @@ export function requestApproval(
       input,
     });
   });
+}
+
+/**
+ * Cancels all pending approvals for a session (e.g. on session deletion),
+ * resolving each as denied and clearing the session allowlist.
+ */
+export function cancelSessionApprovals(sessionId: string): void {
+  for (const [id, pending] of pendingApprovals.entries()) {
+    if (pending.sessionId === sessionId) {
+      clearTimeout(pending.timer);
+      pending.resolve(false);
+      pendingApprovals.delete(id);
+    }
+  }
+  sessionAllowlist.delete(sessionId);
 }
 
 // ── Allowlists ────────────────────────────────────────────────────────────────

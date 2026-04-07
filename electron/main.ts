@@ -13,9 +13,10 @@ import { createSession, listSessions, getSession, deleteSession, saveMessage, up
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
-import { resolveApproval, getPendingApprovalData, addToSessionAllowlist, computeFingerprint } from "./agent/approval";
-import { resolveQuestion } from "./agent/question";
+import { resolveApproval, getPendingApprovalData, addToSessionAllowlist, computeFingerprint, cancelSessionApprovals } from "./agent/approval";
+import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
 import { runAgentTurn, getProvider } from "./agent/runner";
+import { cleanupCopilotSession } from "./agent/copilot";
 import { getSpans } from "./tracer";
 import type { ProjectConfig } from "../src/types/index";
 
@@ -262,9 +263,12 @@ function registerHandlers(): void {  // ── Terminal ────────
   handle(CH.GET_SESSION, (_event, sessionId: string) =>
     getSession(db, sessionId)
   );
-  handle(CH.DELETE_SESSION, (_event, sessionId: string) =>
-    deleteSession(db, sessionId)
-  );
+  handle(CH.DELETE_SESSION, (_event, sessionId: string) => {
+    cancelSessionApprovals(sessionId);
+    cancelSessionQuestions(sessionId);
+    cleanupCopilotSession(sessionId);
+    return deleteSession(db, sessionId);
+  });
   handle(
     CH.SAVE_MESSAGE,
     (_event, args: { sessionId: string; role: string; content: string }) =>
