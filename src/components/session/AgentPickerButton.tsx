@@ -10,6 +10,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AgentEditorModal } from "@/components/session/AgentEditorModal";
 import type { AgentInfo } from "@/types";
@@ -20,7 +29,7 @@ import type { AgentInfo } from "@/types";
  * Agents are loaded lazily when the dropdown is first opened.
  */
 export function AgentPickerButton() {
-  const { activeSessionId, sessionAgents, setSessionAgent } = useSessionStore();
+  const { activeSessionId, sessions, sessionAgents, setSessionAgent } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
 
@@ -30,6 +39,10 @@ export function AgentPickerButton() {
   const [open, setOpen] = useState(false);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
+
+  // Confirmation dialog for Copilot agent switches when context would be lost
+  const [pendingAgent, setPendingAgent] = useState<string | null | undefined>(undefined);
+  const confirmOpen = pendingAgent !== undefined;
 
   // Editor modal state
   const [editingAgent, setEditingAgent] = useState<AgentInfo | null | undefined>(undefined);
@@ -61,15 +74,46 @@ export function AgentPickerButton() {
     loadAgents();
   }, [open, projectPath, provider, agents.length, loadAgents]);
 
-  const handleSelect = useCallback(
+  const applyAgentSelection = useCallback(
     (agentName: string | null) => {
       if (!activeSessionId) return;
-      setOpen(false);
       setSessionAgent(activeSessionId, agentName);
       ipc.updateSessionAgent(activeSessionId, agentName).catch(console.error);
     },
     [activeSessionId, setSessionAgent]
   );
+
+  const handleSelect = useCallback(
+    (agentName: string | null) => {
+      if (!activeSessionId) return;
+      setOpen(false);
+
+      // No change — nothing to do
+      if (agentName === selectedAgent) return;
+
+      // For Copilot, warn when the session already has messages — switching
+      // agents discards the SDK session, which resets conversation context.
+      const hasMessages = (sessions[activeSessionId]?.messages.length ?? 0) > 0;
+      if (provider === "copilot" && hasMessages) {
+        setPendingAgent(agentName);
+        return;
+      }
+
+      applyAgentSelection(agentName);
+    },
+    [activeSessionId, selectedAgent, sessions, provider, applyAgentSelection]
+  );
+
+  const handleConfirmSwitch = useCallback(() => {
+    if (pendingAgent !== undefined) {
+      applyAgentSelection(pendingAgent);
+    }
+    setPendingAgent(undefined);
+  }, [pendingAgent, applyAgentSelection]);
+
+  const handleCancelSwitch = useCallback(() => {
+    setPendingAgent(undefined);
+  }, []);
 
   const handleEdit = useCallback((agent: AgentInfo, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -98,6 +142,8 @@ export function AgentPickerButton() {
 
   // Hidden when no provider is set
   if (!provider) return null;
+
+  const pendingAgentLabel = pendingAgent ?? "Default";
 
   return (
     <>
@@ -196,6 +242,28 @@ export function AgentPickerButton() {
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* Copilot agent-switch confirmation — switching resets conversation context */}
+      <Dialog open={confirmOpen} onOpenChange={(o) => { if (!o) handleCancelSwitch(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Switch agent?</DialogTitle>
+            <DialogDescription>
+              Switching to <span className="font-medium text-foreground">{pendingAgentLabel}</span> will
+              reset the Copilot conversation context. Your message history will remain visible, but
+              Copilot will start fresh without memory of previous messages.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={handleCancelSwitch}>
+              Keep current agent
+            </Button>
+            <Button variant="destructive" size="sm" onClick={handleConfirmSwitch}>
+              Switch agent
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Modal rendered outside dropdown to avoid z-index issues */}
       {modalOpen && (
