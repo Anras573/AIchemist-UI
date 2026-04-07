@@ -89,3 +89,6 @@ export const SESSION_THINKING_DONE  = "session:thinking-done";
 // ── Interactive questions (push: main → renderer + renderer → main) ───────────
 export const SESSION_QUESTION_REQUIRED = "session:question_required";
 export const ANSWER_QUESTION           = "agent:answer-question";
+
+// ── Startup warnings (push: main → renderer) ──────────────────────────────────
+export const CONFIG_WARNING            = "config:warning";

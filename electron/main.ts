@@ -6,7 +6,7 @@ import * as childProcess from "child_process";
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import * as CH from "./ipc-channels";
-import { loadEnv, getApiKey, getAnthropicConfig } from "./config";
+import { loadEnv, getApiKey, getAnthropicConfig, checkApiKeys } from "./config";
 import { openDb } from "./db";
 import { addProject, listProjects, removeProject, getProjectConfig, saveProjectConfig } from "./projects";
 import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent, updateSessionSkills, recoverStaleSessionStatuses } from "./sessions";
@@ -301,9 +301,23 @@ function registerHandlers(): void {  // ── Terminal ────────
   );
 
   // ── File system ───────────────────────────────────────────────────────────────
+
+  // Directories that are never useful to browse in the file tree.
+  const IGNORED_DIR_NAMES = new Set([
+    "node_modules", ".git", ".hg", ".svn",
+    "dist", "build", "out", ".next", ".nuxt", ".turbo",
+    "__pycache__", ".cache", ".parcel-cache", ".vite",
+    "coverage", ".nyc_output",
+  ]);
+  const MAX_DIR_ENTRIES = 500;
+
   handle(CH.LIST_DIRECTORY, (_event, dirPath: string) => {
     try {
-      const entries = fs.readdirSync(dirPath, { withFileTypes: true }).map((dirent) => {
+      const dirents = fs.readdirSync(dirPath, { withFileTypes: true });
+      const filtered = dirents.filter((d) => !(d.isDirectory() && IGNORED_DIR_NAMES.has(d.name)));
+      const truncated = filtered.length > MAX_DIR_ENTRIES;
+      const visible = truncated ? filtered.slice(0, MAX_DIR_ENTRIES) : filtered;
+      const entries = visible.map((dirent) => {
         const entryPath = path.join(dirPath, dirent.name);
         let size_bytes = 0;
         if (!dirent.isDirectory()) {
@@ -320,12 +334,9 @@ function registerHandlers(): void {  // ── Terminal ────────
           size_bytes,
         };
       });
-      return { entries };
-    } catch (err) {
-      if (err instanceof Error && ("code" in err) && (err as NodeJS.ErrnoException).code === "ENOENT" || (err as NodeJS.ErrnoException).code === "EACCES") {
-        return { entries: [] };
-      }
-      return { entries: [] };
+      return { entries, truncated };
+    } catch {
+      return { entries: [], truncated: false };
     }
   });
 
@@ -524,7 +535,20 @@ app.whenReady().then(() => {
   }
 
   registerHandlers();
-  createWindow();
+  const win = createWindow();
+
+  // Warn if no API keys are configured — both providers missing means
+  // the user won't be able to run any agent turns.
+  const missingKeys = checkApiKeys();
+  if (missingKeys.length === 2) {
+    // Both Anthropic and Copilot keys are absent — emit warning once window loads
+    win.webContents.once("did-finish-load", () => {
+      win.webContents.send(CH.CONFIG_WARNING, {
+        message: `No API keys configured. Add ANTHROPIC_API_KEY or GITHUB_TOKEN to ~/.aichemist/.env to use the agent.`,
+        missing: missingKeys,
+      });
+    });
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

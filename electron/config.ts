@@ -98,7 +98,17 @@ export function getApiKey(provider: string): string | null {
   return value;
 }
 
-/** Anthropic-specific config resolved from the environment. Mirrors config.rs. */
+/**
+ * Check whether API keys are configured for the known providers.
+ * Returns a list of provider names that have no key set.
+ * Used at startup to surface missing-key warnings before the first agent turn.
+ */
+export function checkApiKeys(): string[] {
+  const missing: string[] = [];
+  if (!getApiKey("anthropic")) missing.push("Anthropic");
+  if (!getApiKey("github")) missing.push("GitHub Copilot");
+  return missing;
+}
 export function getAnthropicConfig(): {
   api_key: string | null;
   base_url: string | null;

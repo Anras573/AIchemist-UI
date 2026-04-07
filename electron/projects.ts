@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import type { Database } from "better-sqlite3";
+import { z } from "zod";
 import type { Project, ProjectConfig } from "../src/types/index";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -25,12 +26,57 @@ function defaultProjectConfig(): ProjectConfig {
   };
 }
 
+// ─── Zod schema ───────────────────────────────────────────────────────────────
+
+const ApprovalRuleSchema = z.object({
+  tool_category: z.enum(["filesystem", "shell", "web", "custom"]),
+  policy: z.enum(["always", "never", "risky_only"]),
+});
+
+const AllowedToolSchema = z.object({
+  tool_name: z.string(),
+  command_pattern: z.string().optional(),
+});
+
+const ToolDefinitionSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  category: z.string(),
+  parameters: z.record(z.string(), z.unknown()).optional(),
+});
+
+const ProjectConfigSchema = z.object({
+  provider: z.string().default("anthropic"),
+  model: z.string().default("claude-sonnet-4-5"),
+  approval_mode: z.enum(["all", "none", "custom"]).default("custom"),
+  approval_rules: z.array(ApprovalRuleSchema).default([]),
+  custom_tools: z.array(ToolDefinitionSchema).default([]),
+  allowed_tools: z.array(AllowedToolSchema).default([]),
+});
+
+/**
+ * Parse raw JSON into a validated ProjectConfig.
+ * Unknown extra fields are stripped; missing optional fields get defaults.
+ * Returns the default config if validation fails (corrupt/incompatible file).
+ */
+function parseProjectConfig(raw: string): ProjectConfig {
+  try {
+    const parsed = JSON.parse(raw);
+    const result = ProjectConfigSchema.safeParse(parsed);
+    if (result.success) return result.data as ProjectConfig;
+    console.warn("[projects] ProjectConfig validation failed, falling back to defaults:", result.error.issues);
+    return defaultProjectConfig();
+  } catch {
+    return defaultProjectConfig();
+  }
+}
+
 function readOrCreateConfig(projectPath: string): ProjectConfig {
   const cfgPath = configPath(projectPath);
   if (fs.existsSync(cfgPath)) {
     try {
       const raw = fs.readFileSync(cfgPath, "utf-8");
-      return JSON.parse(raw) as ProjectConfig;
+      return parseProjectConfig(raw);
     } catch {
       return defaultProjectConfig();
     }
