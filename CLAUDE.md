@@ -320,3 +320,18 @@ Both Claude and Copilot expose an `ask_user` tool that pauses the agent and show
 **Copilot:** registered via `defineTool` in `copilot.ts`. The system prompt instructs Copilot to use `ask_user` instead of asking questions in plain text, and to always supply `options` when there are distinct alternatives.
 
 **Cleanup:** `clearPendingQuestions(sessionId)` is called on `SESSION_STATUS: "running"` (new turn) to discard orphaned cards.
+
+### Session status persistence and crash recovery
+
+`sessions.status` is persisted to SQLite (`idle` / `running` / `error`) via `updateSessionStatus()` called in `runner.ts` at each transition. On `app.whenReady()`, `recoverStaleSessionStatuses()` marks any session stuck in `"running"` as `"error"` — this handles crashes and force-quits where the normal idle/error transition never ran.
+
+If you add a new IPC handler that starts an agent turn, always call `updateSessionStatus(db, sessionId, "running")` at the start and `"idle"` or `"error"` at the end so crash recovery works correctly.
+
+### LIST_DIRECTORY — filtering and cap
+
+The `LIST_DIRECTORY` IPC handler in `main.ts` applies two safeguards before returning entries:
+
+1. **`IGNORED_DIR_NAMES`** — a `Set` of directory names (`node_modules`, `.git`, `dist`, `build`, `.next`, `coverage`, `.turbo`) that are filtered out before counting or returning.
+2. **`MAX_DIR_ENTRIES = 500`** — if more than 500 entries remain after filtering, the list is truncated and `{ entries, truncated: true }` is returned. The caller (agent tool) should surface this to the model so it doesn't assume the listing is complete.
+
+Always check the `truncated` flag in any code that consumes `LIST_DIRECTORY` results.
