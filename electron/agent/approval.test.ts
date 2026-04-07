@@ -4,6 +4,7 @@ import {
   needsApproval,
   requestApproval,
   resolveApproval,
+  cancelSessionApprovals,
   computeFingerprint,
   addToSessionAllowlist,
   isSessionAllowed,
@@ -360,5 +361,49 @@ describe("getPendingApprovalData", () => {
     await promise;
 
     expect(getPendingApprovalData(approvalId)).toBeNull();
+  });
+});
+
+// ── cancelSessionApprovals ────────────────────────────────────────────────────
+
+describe("cancelSessionApprovals", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("auto-denies all pending approvals for the given session", async () => {
+    const wc = makeWebContents();
+    const p1 = requestApproval(wc, "sess-cancel", "write_file", {});
+    const p2 = requestApproval(wc, "sess-cancel", "execute_bash", { command: "ls" });
+
+    cancelSessionApprovals("sess-cancel");
+
+    await expect(p1).resolves.toBe(false);
+    await expect(p2).resolves.toBe(false);
+  });
+
+  it("does not affect approvals for a different session", async () => {
+    const wc = makeWebContents();
+    const kept = requestApproval(wc, "sess-other", "write_file", {});
+    const cancelled = requestApproval(wc, "sess-cancel2", "write_file", {});
+
+    cancelSessionApprovals("sess-cancel2");
+    await expect(cancelled).resolves.toBe(false);
+
+    // Resolve the kept one normally — should still work
+    const keptId = vi.mocked(wc.send).mock.calls[0][1].approval_id;
+    resolveApproval(keptId, true);
+    await expect(kept).resolves.toBe(true);
+  });
+
+  it("clears the session allowlist entries for the cancelled session", () => {
+    addToSessionAllowlist("sess-acl", "write_file", {});
+    expect(isSessionAllowed("sess-acl", "write_file", {})).toBe(true);
+
+    cancelSessionApprovals("sess-acl");
+
+    expect(isSessionAllowed("sess-acl", "write_file", {})).toBe(false);
+  });
+
+  it("is a no-op when there are no pending approvals for the session", () => {
+    expect(() => cancelSessionApprovals("sess-nonexistent")).not.toThrow();
   });
 });

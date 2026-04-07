@@ -6,7 +6,14 @@ vi.mock("child_process");
 
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { implWriteFile, implDeleteFile, implExecuteBash, implWebFetch } from "./tool-impls";
+import {
+  implWriteFile,
+  implDeleteFile,
+  implExecuteBash,
+  implWebFetch,
+  implWriteFileWithChange,
+  implDeleteFileWithChange,
+} from "./tool-impls";
 
 // ── implWriteFile ─────────────────────────────────────────────────────────────
 
@@ -206,5 +213,135 @@ describe("implWebFetch", () => {
 
     const result = await implWebFetch({ url: "https://example.com" });
     expect(result).toBe("Error fetching URL: timeout");
+  });
+});
+
+// ── implWriteFileWithChange — path validation ─────────────────────────────────
+
+describe("implWriteFileWithChange path validation", () => {
+  const projectPath = "/project";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(fs.mkdirSync).mockReturnValue(undefined);
+    vi.mocked(fs.writeFileSync).mockReturnValue(undefined);
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+  });
+
+  it("writes a file within the project root", async () => {
+    const { result } = await implWriteFileWithChange(
+      { path: "/project/src/foo.ts", content: "hello" },
+      projectPath
+    );
+    expect(result).toContain("File written:");
+  });
+
+  it("rejects a path that escapes the project boundary via ../", async () => {
+    const { result } = await implWriteFileWithChange(
+      { path: "../outside.txt", content: "evil" },
+      projectPath
+    );
+    expect(result).toContain("Error:");
+    expect(result).toContain("escapes project boundary");
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects an absolute path outside the project root", async () => {
+    const { result } = await implWriteFileWithChange(
+      { path: "/etc/passwd", content: "evil" },
+      projectPath
+    );
+    expect(result).toContain("Error:");
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects writes to .git/", async () => {
+    const { result } = await implWriteFileWithChange(
+      { path: ".git/hooks/pre-commit", content: "evil" },
+      projectPath
+    );
+    expect(result).toContain("Error:");
+    expect(result).toContain("sensitive path");
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects writes to node_modules/", async () => {
+    const { result } = await implWriteFileWithChange(
+      { path: "node_modules/pkg/index.js", content: "evil" },
+      projectPath
+    );
+    expect(result).toContain("Error:");
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects writes to .env files", async () => {
+    const { result } = await implWriteFileWithChange(
+      { path: ".env.production", content: "SECRET=evil" },
+      projectPath
+    );
+    expect(result).toContain("Error:");
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects content that exceeds the 10 MB size limit", async () => {
+    const bigContent = "x".repeat(10 * 1024 * 1024 + 1);
+    const { result } = await implWriteFileWithChange(
+      { path: "big.txt", content: bigContent },
+      projectPath
+    );
+    expect(result).toContain("10 MB");
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+});
+
+// ── implDeleteFileWithChange — path validation ────────────────────────────────
+
+describe("implDeleteFileWithChange path validation", () => {
+  const projectPath = "/project";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(fs.unlinkSync).mockReturnValue(undefined);
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+  });
+
+  it("deletes a file within the project root", async () => {
+    const { result } = await implDeleteFileWithChange(
+      { path: "/project/src/old.ts" },
+      projectPath
+    );
+    expect(result).toContain("File deleted:");
+  });
+
+  it("rejects a path that escapes the project boundary via ../", async () => {
+    const { result } = await implDeleteFileWithChange(
+      { path: "../../etc/passwd" },
+      projectPath
+    );
+    expect(result).toContain("Error:");
+    expect(result).toContain("escapes project boundary");
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects deletes in .git/", async () => {
+    const { result } = await implDeleteFileWithChange(
+      { path: ".git/config" },
+      projectPath
+    );
+    expect(result).toContain("Error:");
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects deletes of .env files", async () => {
+    const { result } = await implDeleteFileWithChange(
+      { path: ".env" },
+      projectPath
+    );
+    expect(result).toContain("Error:");
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
   });
 });

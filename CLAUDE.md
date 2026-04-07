@@ -266,6 +266,44 @@ MCP tools (`mcp__aichemist-tools__*`) are explicitly skipped in the hook (they h
 
 To make a user-selected agent's instructions the primary context, use `systemMessage: { mode: "replace", content: agentBody }` in the `createSession`/`resumeSession` config. When the agent changes between turns, the cached Copilot SDK session must be discarded (delete from `copilotSessionIds`) so the next turn creates a fresh session with the new system message — `resumeSession` does not update the system message of an existing session.
 
+### Copilot SDK — Agent tracking normalization
+
+`copilot.ts` tracks the last agent used per session in `copilotSessionIds` with key `agent:${sessionId}`. When comparing to detect an agent change, **always normalize both sides to the same type**:
+
+```typescript
+// ✅ Correct — both sides normalize undefined to ""
+const normalizedAgent = agent ?? "";
+const lastAgent = copilotSessionIds.get(lastAgentKey) ?? "";
+if (normalizedAgent !== lastAgent) { ... }
+copilotSessionIds.set(lastAgentKey, normalizedAgent);
+
+// ❌ Wrong — undefined !== "" is always true, resetting the session every turn
+const lastAgent = copilotSessionIds.get(lastAgentKey) ?? null;
+if (agent !== lastAgent) { ... }       // undefined !== "" → session deleted!
+copilotSessionIds.set(lastAgentKey, agent ?? "");
+```
+
+The asymmetry silently destroys conversation history on every turn when no agent is selected.
+
+### Tool call persistence — placeholder message pattern
+
+Tool calls are stored in the `tool_calls` table with a `message_id NOT NULL` FK. The assistant message is created **before** `provider.run()` so tool calls have a valid FK to reference immediately:
+
+```typescript
+// runner.ts pattern
+const placeholder = createPlaceholderMessage(db, { sessionId, agent });
+// messageId threaded into provider params...
+const text = await provider.run({ ...params, messageId: placeholder.id });
+const toolCalls = loadToolCallsForMessage(db, placeholder.id);
+if (text.trim() || toolCalls.length > 0) {
+  updateMessageContent(db, placeholder.id, text);
+} else {
+  db.prepare("DELETE FROM messages WHERE id = ?").run(placeholder.id);
+}
+```
+
+Each tool call goes through status transitions: `pending_approval` → `approved` / `rejected` → `complete` / `error`. `saveToolCall()` inserts at start; `updateToolCallStatus()` updates as it progresses.
+
 ### Interactive Questions — `ask_user` tool
 
 Both Claude and Copilot expose an `ask_user` tool that pauses the agent and shows a `QuestionCard` in the UI.

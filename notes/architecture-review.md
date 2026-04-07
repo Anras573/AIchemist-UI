@@ -267,7 +267,7 @@ App.tsx
 
 ### 🔴 High Priority
 
-#### H1 — Path Traversal in File Tools
+#### H1 — Path Traversal in File Tools ✅ Fixed (`b60cc231`)
 **File:** `electron/agent/mcp-tools.ts`
 
 `write_file` and `delete_file` resolve paths but don't verify they stay within the project root. A prompt injection or model hallucination could write to `../../.ssh/authorized_keys`.
@@ -288,7 +288,7 @@ Also add: max file size limit, blacklist `.git/`, `.env`, `node_modules/`.
 
 ---
 
-#### H2 — No Error Handling on IPC Handlers
+#### H2 — No Error Handling on IPC Handlers ✅ Fixed (`84f94497`)
 **File:** `electron/main.ts`
 
 `ipcMain.handle()` calls have no try/catch. Unhandled rejections silently hang the renderer (spinner forever with no feedback).
@@ -297,7 +297,7 @@ Fix: Wrap every handler, emit `SESSION_ERROR` or a toast event back to renderer 
 
 ---
 
-#### H3 — Memory Leaks in Promise Maps
+#### H3 — Memory Leaks in Promise Maps ✅ Fixed (`3cbb525b`)
 **Files:** `electron/agent/copilot.ts`, `electron/agent/approval.ts`, `electron/agent/question.ts`
 
 - `copilotSessionIds` Map grows unbounded — SDK session IDs accumulate for deleted sessions
@@ -307,7 +307,7 @@ Fix: Add TTL eviction (e.g. 5-min idle), and clear entries when a session is del
 
 ---
 
-#### H4 — Race Condition on Session Config Reads
+#### H4 — Race Condition on Session Config Reads ✅ Fixed (`237d9d6c`)
 If the user changes the agent picker while a turn is running, concurrent SQLite reads produce inconsistent config state (provider, model, agent can be partially updated).
 
 Fix: Read session config once at turn start, hold in memory for the full turn duration.
@@ -316,14 +316,14 @@ Fix: Read session config once at turn start, hold in memory for the full turn du
 
 ### 🟡 Medium Priority
 
-#### M1 — Silent Context Loss on Agent Switch (Copilot)
+#### M1 — Silent Context Loss on Agent Switch (Copilot) ✅ Fixed (`2ca4b193`)
 Switching agents mid-session discards the Copilot SDK session (it cannot update `systemMessage` dynamically). No UI warning is shown; conversation history silently resets.
 
 Fix: Show confirmation dialog — "Switching agents will start a new conversation in this session."
 
 ---
 
-#### M2 — Live Tool Calls Not Persisted
+#### M2 — Live Tool Calls Not Persisted ✅ Fixed (`5cb89123`)
 `tool_calls` rows are only inserted after a tool completes. If the app crashes mid-execution, the tool call vanishes from history.
 
 Fix: Insert the row immediately with `status = "pending_approval"`, update as it progresses.
@@ -382,20 +382,20 @@ Fix: Add Zod schema for `ProjectConfig`; validate on every load.
 
 ## 9. Recommendations Summary
 
-| Priority | Change | Est. Effort |
+| Priority | Change | Commit |
 |---|---|---|
-| 🔴 H1 | Path boundary check on all file tools | ~2h |
-| 🔴 H2 | `try/catch` + error events on all IPC handlers | ~4h |
-| 🔴 H3 | TTL eviction for session/approval/question maps | ~4h |
-| 🔴 H4 | Read session config once per turn, hold in memory | ~3h |
-| 🟡 M1 | UI warning on agent switch (context loss) | ~2h |
-| 🟡 M2 | Persist tool calls immediately to DB | ~8h |
-| 🟡 M3 | Write session status to DB, recover on startup | ~4h |
-| 🟡 M4 | `IpcClient` interface for testability | ~6h |
-| 🟢 L1 | Directory listing pagination + gitignore filter | ~4h |
-| 🟢 L2 | Session hydration pagination + skeleton | ~6h |
-| 🟢 L3 | API key validation at startup | ~3h |
-| 🟢 L4 | Zod validation for `ProjectConfig` | ~3h |
+| ✅ H1 | Path boundary check on all file tools | `b60cc231` |
+| ✅ H2 | `try/catch` + error events on all IPC handlers | `84f94497` |
+| ✅ H3 | TTL eviction for session/approval/question maps | `3cbb525b` |
+| ✅ H4 | Read session config once per turn, hold in memory | `237d9d6c` |
+| ✅ M1 | UI warning on agent switch (context loss) | `2ca4b193` |
+| ✅ M2 | Persist tool calls immediately to DB | `5cb89123` |
+| 🟡 M3 | Write session status to DB, recover on startup | — |
+| 🟡 M4 | `IpcClient` interface for testability | — |
+| 🟢 L1 | Directory listing pagination + gitignore filter | — |
+| 🟢 L2 | Session hydration pagination + skeleton | — |
+| 🟢 L3 | API key validation at startup | — |
+| 🟢 L4 | Zod validation for `ProjectConfig` | — |
 
 ---
 
