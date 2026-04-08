@@ -13,7 +13,7 @@ import type { AgentInfo, ProjectConfig } from "../../src/types/index";
 import { getApiKey } from "../config";
 import * as CH from "../ipc-channels";
 import * as tracer from "../tracer";
-import { requestApproval, needsApproval, requiresApproval } from "./approval";
+import { requestApproval, requiresApproval } from "./approval";
 import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
 import { readAgentFileSystemPrompt } from "./claude";
@@ -322,23 +322,27 @@ export async function runCopilotAgentTurn(params: {
       },
       handler: async (args) => {
         const toolCallId = crypto.randomUUID();
+        const needsGate = requiresApproval(sessionId, projectConfig, "shell", "execute_bash", args);
         webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: "execute_bash", tool_call_id: toolCallId, input: args });
         saveToolCall(db, {
           id: toolCallId,
           messageId,
           name: "execute_bash",
           args: args as Record<string, unknown>,
-          status: "pending_approval",
+          status: needsGate ? "pending_approval" : "approved",
           category: "shell",
         });
 
-        // Shell is always approval-gated regardless of policy
-        const approved = await requestApproval(webContents, sessionId, "execute_bash", args);
-        if (!approved) {
-          const msg = "Tool call denied by user.";
-          updateToolCallStatus(db, toolCallId, "rejected");
-          webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output: msg });
-          return msg;
+        if (needsGate) {
+          const approved = await requestApproval(webContents, sessionId, "execute_bash", args);
+          if (!approved) {
+            const msg = "Tool call denied by user.";
+            updateToolCallStatus(db, toolCallId, "rejected");
+            webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output: msg });
+            return msg;
+          }
+        } else {
+          updateToolCallStatus(db, toolCallId, "approved");
         }
 
         const output = await implExecuteBash({ ...args, projectPath });
@@ -422,9 +426,8 @@ export async function runCopilotAgentTurn(params: {
 
     if (category === null) return { kind: "approved" };
 
-    // Shell operations are always approval-gated; others depend on project config
-    const shouldGate =
-      category === "shell" || needsApproval(projectConfig, category);
+    // Shell operations and others depend on project config and allowlists
+    const shouldGate = requiresApproval(sessionId, projectConfig, category, request.kind, request);
 
     if (!shouldGate) return { kind: "approved" };
 
