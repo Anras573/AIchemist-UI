@@ -27,6 +27,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { AgentPickerButton } from "./AgentPickerButton";
 import { ModelPickerButton } from "./ModelPickerButton";
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+} from "@/components/ai-elements/prompt-input";
 import { QuestionCard } from "./QuestionCard";
 import { useIpc } from "@/lib/ipc";
 
@@ -346,53 +354,35 @@ function InputBar({ disabled, placeholder = "Send a message…", onSend }: Input
     ipc.getGitBranch(activeProject.path).then(setGitBranch).catch(() => setGitBranch(null));
   }, [activeProject?.path]);
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      const text = e.currentTarget.value.trim();
-      if (text && onSend) {
-        onSend(text);
-        e.currentTarget.value = "";
-      }
-    }
-  }
-
   return (
-    <div className="border-t p-3 flex-shrink-0">
-      <textarea
-        rows={1}
-        disabled={disabled}
-        placeholder={placeholder}
-        onKeyDown={handleKeyDown}
-        className={cn(
-          "w-full resize-none rounded-md border bg-background px-3 py-2 text-sm",
-          "focus:outline-none focus:ring-1 focus:ring-ring",
-          "placeholder:text-muted-foreground",
-          "disabled:opacity-50 disabled:cursor-not-allowed",
-          "min-h-[38px] max-h-40 overflow-y-auto"
-        )}
-      />
-      <div className="mt-1.5 flex items-center gap-2">
-        {activeSession && (
-          <ModelPickerButton
-            sessionId={activeSession.id}
-            provider={activeSession.provider}
-            model={activeSession.model}
-          />
-        )}
-        <AgentPickerButton />
-        {gitBranch && (
-          <span className="flex items-center gap-1 text-xs text-muted-foreground/60">
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <path d="M11.75 2.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm.75 2.25a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM4.25 13.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM5 15.75a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM4.25 2.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM5 4.75a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM5.75 8A3.25 3.25 0 0 0 9 11.25v.5a2.25 2.25 0 1 0 1.5 0v-.5a4.75 4.75 0 0 1-4.75-4.75v-.5a2.25 2.25 0 1 0-1.5 0v.5A3.25 3.25 0 0 0 5.75 8Z"/>
-            </svg>
-            {gitBranch}
-          </span>
-        )}
-        <p className="text-xs text-muted-foreground/60 ml-auto">
-          Enter to send · Shift+Enter for new line
-        </p>
-      </div>
-    </div>
+    <PromptInput
+      className="border-t rounded-none border-x-0 border-b-0 flex-shrink-0"
+      onSubmit={({ text }) => { if (text.trim() && onSend) onSend(text.trim()); }}
+    >
+      <PromptInputBody>
+        <PromptInputTextarea placeholder={placeholder} disabled={disabled} />
+      </PromptInputBody>
+      <PromptInputFooter>
+        <PromptInputTools>
+          {activeSession && (
+            <ModelPickerButton
+              sessionId={activeSession.id}
+              provider={activeSession.provider}
+              model={activeSession.model}
+            />
+          )}
+          <AgentPickerButton />
+          {gitBranch && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground/60">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M11.75 2.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm.75 2.25a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM4.25 13.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM5 15.75a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM4.25 2.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM5 4.75a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM5.75 8A3.25 3.25 0 0 0 9 11.25v.5a2.25 2.25 0 1 0 1.5 0v-.5a4.75 4.75 0 0 1-4.75-4.75v-.5a2.25 2.25 0 1 0-1.5 0v.5A3.25 3.25 0 0 0 5.75 8Z"/>
+              </svg>
+              {gitBranch}
+            </span>
+          )}
+        </PromptInputTools>
+        <PromptInputSubmit disabled={disabled} />
+      </PromptInputFooter>
+    </PromptInput>
   );
 }
