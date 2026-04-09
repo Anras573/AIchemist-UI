@@ -82,6 +82,14 @@ function migrate(db: Database.Database): void {
   if (!hasColumn("skills")) {
     db.exec("ALTER TABLE sessions ADD COLUMN skills TEXT;");
   }
+  if (!hasColumn("copilot_session_id")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN copilot_session_id TEXT;");
+  }
+  // Records which agent the Copilot SDK session was created with so we can
+  // detect agent changes across restarts and force a fresh SDK session.
+  if (!hasColumn("copilot_session_agent")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN copilot_session_agent TEXT;");
+  }
 
   // Add agent column to messages table to stamp which agent produced each message.
   const msgColumns = db

@@ -41,8 +41,16 @@ let clientInstance: CopilotClientType | null = null;
 /**
  * Maps AIchemist session ID → Copilot SDK session ID so we can resume the
  * same SDK session across multiple agent turns, preserving conversation history.
+ * This in-memory map is the fast path within a single app run; the DB is the
+ * persistent backing store that survives restarts.
  */
 const copilotSessionIds = new Map<string, string>();
+
+/**
+ * Tracks which sessions have already been seeded from the DB so we only hit
+ * the DB once per session per app run.
+ */
+const seededFromDb = new Set<string>();
 
 async function getClient(): Promise<CopilotClientType> {
   if (clientInstance) return clientInstance;
@@ -60,6 +68,7 @@ export async function stopCopilotClient(): Promise<void> {
     await clientInstance.stop();
     clientInstance = null;
     copilotSessionIds.clear();
+    seededFromDb.clear();
   }
 }
 
@@ -70,6 +79,7 @@ export async function stopCopilotClient(): Promise<void> {
 export function cleanupCopilotSession(sessionId: string): void {
   copilotSessionIds.delete(sessionId);
   copilotSessionIds.delete(`${sessionId}:lastAgent`);
+  seededFromDb.delete(sessionId);
 }
 
 /** Return the list of models available for the authenticated Copilot user. */
@@ -498,6 +508,21 @@ export async function runCopilotAgentTurn(params: {
     ...(customAgents.length > 0 ? { customAgents } : {}),
   };
 
+  // Seed the in-memory map from the DB on first access for this session so
+  // Copilot SDK sessions survive app restarts.
+  if (!seededFromDb.has(sessionId)) {
+    const dbRow = db
+      .prepare("SELECT copilot_session_id, copilot_session_agent FROM sessions WHERE id = ?")
+      .get(sessionId) as { copilot_session_id: string | null; copilot_session_agent: string | null } | undefined;
+    if (dbRow?.copilot_session_id) {
+      copilotSessionIds.set(sessionId, dbRow.copilot_session_id);
+    }
+    if (dbRow?.copilot_session_agent != null) {
+      copilotSessionIds.set(`agent:${sessionId}`, dbRow.copilot_session_agent);
+    }
+    seededFromDb.add(sessionId);
+  }
+
   // If the agent changed since the last turn, the old Copilot SDK session was
   // created with a different (or no) system message. Resuming it would ignore
   // the new systemMessage, so force a fresh session instead.
@@ -506,26 +531,34 @@ export async function runCopilotAgentTurn(params: {
   const lastAgent = copilotSessionIds.get(lastAgentKey) ?? "";
   if (normalizedAgent !== lastAgent && copilotSessionIds.has(sessionId)) {
     copilotSessionIds.delete(sessionId);
+    db.prepare("UPDATE sessions SET copilot_session_id = NULL, copilot_session_agent = NULL WHERE id = ?").run(sessionId);
   }
   copilotSessionIds.set(lastAgentKey, normalizedAgent);
 
   // Resume the existing Copilot SDK session for this AIchemist session (if any)
-  // so conversation history is preserved across turns. Fall back to creating a
-  // new session if no prior session exists or resuming fails.
+  // so conversation history is preserved across turns and app restarts.
+  // Fall back to creating a new session if no prior session exists or resuming fails.
   let session: Awaited<ReturnType<typeof client.createSession>>;
   const existingCopilotSessionId = copilotSessionIds.get(sessionId);
   if (existingCopilotSessionId) {
     try {
       session = await client.resumeSession(existingCopilotSessionId, sessionConfig);
     } catch {
-      // Session state was lost (e.g. CLI restart) — create fresh
+      // Session state was lost (e.g. server expiry) — create fresh and clear DB
       copilotSessionIds.delete(sessionId);
+      db.prepare("UPDATE sessions SET copilot_session_id = NULL, copilot_session_agent = NULL WHERE id = ?").run(sessionId);
       session = await client.createSession(sessionConfig);
       copilotSessionIds.set(sessionId, session.sessionId);
+      db.prepare("UPDATE sessions SET copilot_session_id = ?, copilot_session_agent = ? WHERE id = ?").run(
+        session.sessionId, normalizedAgent || null, sessionId
+      );
     }
   } else {
     session = await client.createSession(sessionConfig);
     copilotSessionIds.set(sessionId, session.sessionId);
+    db.prepare("UPDATE sessions SET copilot_session_id = ?, copilot_session_agent = ? WHERE id = ?").run(
+      session.sessionId, normalizedAgent || null, sessionId
+    );
   }
 
   // ── Event listeners — set up before sending ─────────────────────────────────

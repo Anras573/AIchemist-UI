@@ -107,7 +107,16 @@ bun run rebuild   # electron-rebuild -f -w better-sqlite3 -w node-pty
 
 ### Database
 
-SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `messages` → `tool_calls` (cascade deletes). Config stored as JSON in `projects.config`. The `sessions` table has an `agent TEXT` column storing the selected agent name (nullable). Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
+SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `messages` → `tool_calls` (cascade deletes). Config stored as JSON in `projects.config`. Notable `sessions` columns:
+
+| Column | Purpose |
+|---|---|
+| `agent TEXT` | Selected agent name (nullable) |
+| `sdk_session_id TEXT` | Claude SDK session ID — enables `resume:` across restarts |
+| `copilot_session_id TEXT` | Copilot SDK session ID — enables `resumeSession()` across restarts |
+| `copilot_session_agent TEXT` | Agent active when the Copilot SDK session was created — used to detect agent changes across restarts and force a fresh session |
+
+Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
 
 ---
 
@@ -264,11 +273,11 @@ MCP tools (`mcp__aichemist-tools__*`) are explicitly skipped in the hook (they h
 
 `customAgents` in Copilot sessions are **sub-agent delegation configs** — the parent Copilot agent decides when to delegate to them based on inference. They are NOT a replacement for the session system prompt.
 
-To make a user-selected agent's instructions the primary context, use `systemMessage: { mode: "replace", content: agentBody }` in the `createSession`/`resumeSession` config. When the agent changes between turns, the cached Copilot SDK session must be discarded (delete from `copilotSessionIds`) so the next turn creates a fresh session with the new system message — `resumeSession` does not update the system message of an existing session.
+To make a user-selected agent's instructions the primary context, use `systemMessage: { mode: "replace", content: agentBody }` in the `createSession`/`resumeSession` config. When the agent changes between turns, the cached Copilot SDK session must be discarded (delete from `copilotSessionIds` **and** NULL out `copilot_session_id`/`copilot_session_agent` in the DB) so the next turn creates a fresh session with the new system message — `resumeSession` does not update the system message of an existing session.
 
 ### Copilot SDK — Agent tracking normalization
 
-`copilot.ts` tracks the last agent used per session in `copilotSessionIds` with key `agent:${sessionId}`. When comparing to detect an agent change, **always normalize both sides to the same type**:
+`copilot.ts` tracks the last agent used per session in `copilotSessionIds` (keyed `agent:${sessionId}`) **and** in `sessions.copilot_session_agent` in the DB. The in-memory map is the fast path within a single app run; the DB values are read once per session on first access (via the `seededFromDb` gate) so session continuity survives restarts. When comparing to detect an agent change, **always normalize both sides to the same type**:
 
 ```typescript
 // ✅ Correct — both sides normalize undefined to ""
