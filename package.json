@@ -53,9 +53,9 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.76",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.98",
     "@electron/rebuild": "^3.6.0",
-    "@github/copilot-sdk": "^0.1.32",
+    "@github/copilot-sdk": "^0.2.2",
     "@tailwindcss/vite": "^4.2.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

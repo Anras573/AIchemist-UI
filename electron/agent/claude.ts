@@ -359,7 +359,7 @@ export async function runClaudeAgentTurn(params: {
     for await (const msg of queryStream) {
       if (msg.type === "stream_event") {
         // Extract streaming text deltas from the raw Anthropic stream event
-        const event = msg.event as Record<string, unknown>;
+        const event = msg.event as unknown as Record<string, unknown>;
         if (event["type"] === "content_block_delta") {
           const delta = event["delta"] as Record<string, unknown> | undefined;
           if (delta?.["type"] === "text_delta") {
