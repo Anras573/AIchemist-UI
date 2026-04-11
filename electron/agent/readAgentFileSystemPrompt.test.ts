@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as path from "path";
 
 vi.mock("fs");
 vi.mock("os");
@@ -85,7 +86,7 @@ describe("readAgentFileSystemPrompt", () => {
     readAgentFileSystemPrompt("my-custom-agent");
 
     expect(fs.readFileSync).toHaveBeenCalledWith(
-      "/home/user/.claude/agents/my-custom-agent.md",
+      path.join("/home/user", ".claude", "agents", "my-custom-agent.md"),
       "utf8"
     );
   });

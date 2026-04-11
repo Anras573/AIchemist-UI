@@ -37,7 +37,7 @@ function resolveAndValidate(projectPath: string, inputPath: string): string {
     throw new Error(`Path escapes project boundary: "${inputPath}"`);
   }
 
-  const rel = path.relative(root, resolved);
+  const rel = path.relative(root, resolved).replace(/\\/g, "/");
   for (const pattern of SENSITIVE_PATH_PATTERNS) {
     if (pattern.test(rel)) {
       throw new Error(`Access to sensitive path is not allowed: "${rel}"`);
