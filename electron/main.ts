@@ -130,9 +130,16 @@ function scanSkillsDir(
 function registerHandlers(): void {  // ── Terminal ──────────────────────────────────────────────────────────────────
   handle(CH.TERMINAL_CREATE, (_event, projectPath: string) => {
     const id = crypto.randomUUID();
-    const shell = process.env.SHELL ?? "/bin/bash";
-    const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
-    const env = { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` } as Record<string, string>;
+    const isWindows = process.platform === "win32";
+    const shell = isWindows
+      ? (process.env.COMSPEC ?? "cmd.exe")
+      : (process.env.SHELL ?? "/bin/bash");
+    const env = isWindows
+      ? ({ ...process.env } as Record<string, string>)
+      : (() => {
+          const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
+          return { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` } as Record<string, string>;
+        })();
 
     const term = pty.spawn(shell, [], {
       name: "xterm-256color",
