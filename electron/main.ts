@@ -95,8 +95,25 @@ function handle(channel: string, handler: Handler): void {
 
 /** Extracts a value from YAML frontmatter in a markdown file. */
 function parseFrontmatterField(content: string, field: string): string {
-  const match = content.match(new RegExp(`^${field}:\\s*["']?(.+?)["']?\\s*$`, "m"));
-  return match?.[1]?.trim() ?? "";
+  const singleLine = content.match(new RegExp(`^${field}:\\s*["']?(.+?)["']?\\s*$`, "m"));
+  const value = singleLine?.[1]?.trim() ?? "";
+
+  // YAML block scalar indicators (|, >, |-, >-, etc.) — read the indented block instead
+  if (/^[|>][-+]?$/.test(value)) {
+    const blockMatch = content.match(
+      new RegExp(`^${field}:\\s*[|>][-+]?\\s*\\n((?:[ \\t]+.+\\n?)+)`, "m")
+    );
+    if (blockMatch) {
+      return blockMatch[1]
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join(" ");
+    }
+    return "";
+  }
+
+  return value;
 }
 
 /** Scans a skills directory and returns an array of user-created skill entries. */
