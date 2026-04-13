@@ -86,55 +86,32 @@ function extractToolResultText(content: unknown): string {
 type AgentEntry = { name: string; description: string; model?: string; path?: string; editable?: boolean };
 
 /**
- * Lazy cache: agent name → plugin key (e.g. "my-plugin@marketplace").
- * Built by scanning installed_plugins.json agents/ directories.
+ * Lazy cache: plugin short name (before "@") → full plugin key.
+ * Used to annotate SDK agents whose names use the "pluginName:agentName" format.
  */
-let pluginAgentCache: Map<string, string> | null = null;
+let pluginKeyCache: Map<string, string> | null = null;
 
-function getPluginAgentMap(): Map<string, string> {
-  if (pluginAgentCache !== null) return pluginAgentCache;
-  pluginAgentCache = new Map();
+function getPluginKeyMap(): Map<string, string> {
+  if (pluginKeyCache !== null) return pluginKeyCache;
+  pluginKeyCache = new Map();
 
   const pluginsFile = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json");
   try {
     const data = JSON.parse(fs.readFileSync(pluginsFile, "utf-8")) as {
-      plugins: Record<string, Array<{ installPath: string; lastUpdated?: string }>>;
+      plugins: Record<string, unknown>;
     };
-
-    for (const [pluginKey, entries] of Object.entries(data.plugins)) {
-      const sorted = [...entries].sort((a, b) =>
-        (b.lastUpdated ?? "").localeCompare(a.lastUpdated ?? "")
-      );
-      const installPath = sorted[0]?.installPath;
-      if (!installPath) continue;
-
-      const agentsDir = path.join(installPath, "agents");
-      let dirEntries: fs.Dirent[];
-      try {
-        dirEntries = fs.readdirSync(agentsDir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-
-      for (const entry of dirEntries) {
-        if (entry.isDirectory() || !entry.name.endsWith(".md")) continue;
-        try {
-          const content = fs.readFileSync(path.join(agentsDir, entry.name), "utf-8");
-          const parsed = parseAgentFrontmatter(content);
-          const name = parsed?.name ?? path.basename(entry.name, ".md");
-          if (!pluginAgentCache.has(name)) {
-            pluginAgentCache.set(name, pluginKey);
-          }
-        } catch {
-          // skip unreadable files
-        }
+    for (const fullKey of Object.keys(data.plugins)) {
+      // Keys are like "my-plugin@marketplace" — map shortName → fullKey
+      const shortName = fullKey.includes("@") ? fullKey.slice(0, fullKey.lastIndexOf("@")) : fullKey;
+      if (!pluginKeyCache.has(shortName)) {
+        pluginKeyCache.set(shortName, fullKey);
       }
     }
   } catch {
     // no plugins file — leave cache empty
   }
 
-  return pluginAgentCache;
+  return pluginKeyCache;
 }
 
 /**
@@ -242,10 +219,14 @@ export async function getClaudeAgents(
     });
     try {
       sdkAgents = (await q.supportedAgents()).map((a) => {
-        const pluginKey = getPluginAgentMap().get(a.name);
-        return pluginKey
-          ? { ...a, editable: false, source: "plugin" as const, plugin: pluginKey }
-          : { ...a, editable: false, source: "sdk" as const };
+        // SDK encodes plugin agents as "pluginShortName:agentName"
+        const colonIdx = a.name.indexOf(":");
+        if (colonIdx !== -1) {
+          const shortName = a.name.slice(0, colonIdx);
+          const pluginKey = getPluginKeyMap().get(shortName) ?? shortName;
+          return { ...a, editable: false, source: "plugin" as const, plugin: pluginKey };
+        }
+        return { ...a, editable: false, source: "sdk" as const };
       });
     } finally {
       await q.return(undefined);
