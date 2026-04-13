@@ -158,7 +158,10 @@ export function listCopilotAgents(projectPath: string): AgentInfo[] {
     ...globalEntries.filter((a) => !projectNames.has(a.name)),
   ];
 
-  return merged.map(({ name, description, filePath }) => ({ name, description, path: filePath, editable: true }));
+  return merged.map(({ name, description, filePath }) => {
+    const source = projectEntries.some((e) => e.name === name) ? "project" : "global";
+    return { name, description, path: filePath, editable: true, source } as const;
+  });
 }
 
 /** Convert scanned agent entries to CustomAgentConfig objects for the SDK. */

@@ -148,6 +148,8 @@ export interface AgentInfo {
   path?: string;
   /** Whether the agent file can be edited or deleted. False for SDK built-ins. */
   editable?: boolean;
+  /** Where this agent was discovered. */
+  source?: "sdk" | "project" | "global";
 }
 
 export interface SkillInfo {

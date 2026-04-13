@@ -124,7 +124,7 @@ function scanLocalAgents(): AgentEntry[] {
           const filePath = path.join(agentsDir, file.name);
           const content = fs.readFileSync(filePath, "utf8");
           const agent = parseAgentFrontmatter(content);
-          return agent ? [{ ...agent, path: filePath, editable: true }] : [];
+          return agent ? [{ ...agent, path: filePath, editable: true, source: "global" as const }] : [];
         } catch {
           return [];
         }
@@ -189,7 +189,7 @@ export async function getClaudeAgents(
       },
     });
     try {
-      sdkAgents = (await q.supportedAgents()).map((a) => ({ ...a, editable: false }));
+      sdkAgents = (await q.supportedAgents()).map((a) => ({ ...a, editable: false, source: "sdk" as const }));
     } finally {
       await q.return(undefined);
     }

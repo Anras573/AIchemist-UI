@@ -23,6 +23,23 @@ import { cn } from "@/lib/utils";
 import { AgentEditorModal } from "@/components/session/AgentEditorModal";
 import type { AgentInfo } from "@/types";
 
+const AGENT_SOURCE_META: Record<string, { label: string; className: string }> = {
+  sdk:     { label: "built-in", className: "text-emerald-500/70" },
+  project: { label: "project",  className: "text-blue-500/70" },
+  global:  { label: "global",   className: "text-purple-500/70" },
+};
+
+function AgentSourceBadge({ source }: { source?: string }) {
+  if (!source) return null;
+  const meta = AGENT_SOURCE_META[source];
+  if (!meta) return null;
+  return (
+    <span className={cn("text-[9px] font-medium shrink-0", meta.className)}>
+      {meta.label}
+    </span>
+  );
+}
+
 /**
  * Compact dropdown placed inside the input bar for selecting a sub-agent.
  * Only renders when the active project uses the Anthropic provider.
@@ -198,7 +215,10 @@ export function AgentPickerButton() {
               >
                 <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="truncate">{agent.name}</div>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{agent.name}</span>
+                    <AgentSourceBadge source={agent.source} />
+                  </div>
                   {agent.model && (
                     <div className="text-[9px] text-muted-foreground truncate">
                       {agent.model}
