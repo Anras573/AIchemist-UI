@@ -52,6 +52,11 @@ function getPluginSkillPaths(): Map<string, string> {
   return pluginSkillPathCache;
 }
 
+/** Reset the plugin skill path cache (for testing only). */
+export function _resetPluginSkillCache(): void {
+  pluginSkillPathCache = null;
+}
+
 /**
  * Read the body of a skill's SKILL.md (frontmatter stripped).
  * Returns null if the file cannot be found or read.

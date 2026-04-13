@@ -164,13 +164,34 @@ Both `AgentsPanel` and `AgentPickerButton` show per-agent action icons on hover:
 
 ## Skills Panel
 
-`src/components/session/SkillsPanel.tsx` lists skills discovered from `.agents/skills/` (project) and `~/.claude/skills/` (global). Each card supports three interactions:
+`src/components/session/SkillsPanel.tsx` lists skills discovered from three sources (priority order):
+
+1. **Project** — `<projectPath>/.agents/skills/*/` (`source: "user"`)
+2. **Global** — `~/.claude/skills/*/` (`source: "user"`)
+3. **Plugin** — Claude Code installed plugins at `~/.claude/plugins/installed_plugins.json`; each plugin's `skills/*/SKILL.md` files are scanned (`source: "plugin"`)
+
+Skills with a higher-priority source suppress same-named skills from lower tiers. `SkillInfo.source` controls panel behaviour:
+
+- **`"user"` skills** — show pencil icon (editable); click opens `SkillEditorModal` in edit mode.
+- **`"plugin"` skills** — pencil icon hidden (read-only); click opens viewer instead.
+
+Each card supports three interactions:
 
 - **Click card body** — toggles the skill on/off for the active session (persisted via `ipc.updateSessionSkills`).
 - **Eye icon** (hover) — opens `SkillEditorModal` with `readOnly=true` to view the skill's rendered markdown.
-- **Pencil icon** (hover) — opens `SkillEditorModal` in edit mode to modify `SKILL.md`.
+- **Pencil icon** (hover, user skills only) — opens `SkillEditorModal` in edit mode to modify `SKILL.md`.
 
 A **New Skill** button at the bottom opens `SkillEditorModal` with `skill=null` (create mode).
+
+### Skill discovery implementation
+
+`scanSkillsDir()` in `electron/main.ts` reads skill descriptions from `SKILL.md` frontmatter first (falls back to `README.md`). `scanPluginSkills()` reads `installed_plugins.json`, picks the most-recently-updated install per plugin, and walks `<installPath>/skills/*/SKILL.md`.
+
+`buildSkillsContext()` in `electron/agent/skills.ts` resolves SKILL.md content for active skills: checks project → global → plugin cache (lazy-loaded from `installed_plugins.json`). A module-level `Map<name, dirPath>` cache is built on first access; call `_resetPluginSkillCache()` in tests to reset it.
+
+### Slash command palette
+
+Typing `/` in the message input opens a floating popover listing skills and built-in actions. Selecting a skill adds a one-shot badge (applied to that message only, not persisted to the session). Built-in actions: `/new`, `/clear`, `/help`, `/agent`. See `src/components/session/SlashCommandPopover.tsx` and `InputBarInner` in `src/components/session/TimelinePanel.tsx`.
 
 ### SkillEditorModal / AgentEditorModal — readOnly prop
 
