@@ -26,7 +26,7 @@ function SkillSourceBadge({ source, plugin }: { source?: string; plugin?: string
   const title = source === "plugin" && plugin ? plugin : undefined;
 
   return (
-    <span className={cn("text-[9px] font-medium shrink-0 truncate max-w-[80px]", meta.className)} title={title}>
+    <span className={cn("text-[9px] font-medium shrink-0 truncate max-w-[140px]", meta.className)} title={title}>
       {label}
     </span>
   );
