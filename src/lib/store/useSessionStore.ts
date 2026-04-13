@@ -99,6 +99,8 @@ interface SessionStore {
   addPendingQuestion: (sessionId: string, question: PendingQuestion) => void;
   removePendingQuestion: (sessionId: string, questionId: string) => void;
   clearPendingQuestions: (sessionId: string) => void;
+  /** Clears all messages from the session's timeline (UI-only, does not touch the DB). */
+  clearSessionMessages: (sessionId: string) => void;
 }
 
 export const useSessionStore = create<SessionStore>()(
@@ -426,6 +428,18 @@ export const useSessionStore = create<SessionStore>()(
           (state.pendingQuestions[sessionId] ?? []).forEach((q) => q.resolve(""));
           const { [sessionId]: _cleared, ...rest } = state.pendingQuestions;
           return { pendingQuestions: rest };
+        }),
+
+      clearSessionMessages: (sessionId) =>
+        set((state) => {
+          const session = state.sessions[sessionId];
+          if (!session) return state;
+          return {
+            sessions: {
+              ...state.sessions,
+              [sessionId]: { ...session, messages: [] },
+            },
+          };
         }),
     }),
     {

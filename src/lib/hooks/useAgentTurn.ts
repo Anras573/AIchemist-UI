@@ -27,7 +27,7 @@ export function useAgentTurn() {
   const { projects, activeProjectId } = useProjectStore();
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, oneshotSkills?: string[]) => {
       if (!activeSessionId) return;
 
       const session = sessions[activeSessionId];
@@ -63,7 +63,7 @@ export function useAgentTurn() {
       const activeAgent = sessionAgents[activeSessionId] ?? undefined;
 
       try {
-        await ipc.agentSend({ sessionId: activeSessionId, prompt: text, agent: activeAgent });
+        await ipc.agentSend({ sessionId: activeSessionId, prompt: text, agent: activeAgent, oneshotSkills });
         clearLiveToolCalls(sessionIdAtStart);
         clearPendingApprovals(sessionIdAtStart);
         // Status is updated via session:status push event from runner

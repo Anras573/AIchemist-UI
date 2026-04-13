@@ -370,7 +370,7 @@ function registerHandlers(): void {  // ── Terminal ────────
   handle(CH.OPEN_FOLDER_DIALOG, () => openFolderDialog());
 
   // ── Agent ─────────────────────────────────────────────────────────────────────
-  handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string; agent?: string }) => {
+  handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[] }) => {
     const win = getMainWindow();
     if (!win) throw new Error("No window available");
 
@@ -388,7 +388,11 @@ function registerHandlers(): void {  // ── Terminal ────────
       model: session.model ?? project.config.model,
     };
     const agent = args.agent ?? session.agent ?? undefined;
-    const skills = session.skills ?? undefined;
+    // Merge session-level skills with any one-shot skills for this turn only
+    const sessionSkills = session.skills ?? [];
+    const oneshotSkills = args.oneshotSkills ?? [];
+    const allSkills = [...new Set([...sessionSkills, ...oneshotSkills])];
+    const skills = allSkills.length > 0 ? allSkills : undefined;
 
     activeTurns.add(args.sessionId);
     try {

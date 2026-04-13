@@ -49,7 +49,7 @@ export interface ElectronAPI {
   openFolderDialog: () => Promise<string | null>;
 
   // ── Agent ─────────────────────────────────────────────────────────────────
-  agentSend: (args: { sessionId: string; prompt: string; agent?: string }) => Promise<void>;
+  agentSend: (args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[] }) => Promise<void>;
   approveToolCall: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) => Promise<void>;
   answerQuestion: (questionId: string, answer: string) => Promise<void>;
   getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
