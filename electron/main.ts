@@ -101,8 +101,9 @@ function parseFrontmatterField(content: string, field: string): string {
 
 /** Scans a skills directory and returns an array of user-created skill entries. */
 function scanSkillsDir(
-  dir: string
-): Array<{ name: string; description: string; path: string; source: "user" }> {
+  dir: string,
+  source: "project" | "global"
+): Array<{ name: string; description: string; path: string; source: "project" | "global" }> {
   try {
     return fs
       .readdirSync(dir, { withFileTypes: true })
@@ -128,7 +129,7 @@ function scanSkillsDir(
             // no README either — description stays empty
           }
         }
-        return { name: d.name, description, path: skillPath, source: "user" as const };
+        return { name: d.name, description, path: skillPath, source };
       });
   } catch {
     return [];
@@ -488,8 +489,8 @@ function registerHandlers(): void {  // ── Terminal ────────
     const projectSkillsDir = path.join(projectPath, ".agents", "skills");
     const globalSkillsDir = path.join(os.homedir(), ".claude", "skills");
 
-    const projectSkills = scanSkillsDir(projectSkillsDir);
-    const globalSkills = scanSkillsDir(globalSkillsDir);
+    const projectSkills = scanSkillsDir(projectSkillsDir, "project");
+    const globalSkills = scanSkillsDir(globalSkillsDir, "global");
     const pluginSkills = scanPluginSkills();
 
     // Project-local skills take highest priority, then global, then plugins.

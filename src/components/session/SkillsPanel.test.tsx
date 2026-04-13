@@ -13,7 +13,7 @@ const USER_SKILL: SkillInfo = {
   name: "brainstorming",
   description: "Explores user intent before implementation.",
   path: "/home/user/.claude/skills/brainstorming",
-  source: "user",
+  source: "global",
 };
 
 const PLUGIN_SKILL: SkillInfo = {

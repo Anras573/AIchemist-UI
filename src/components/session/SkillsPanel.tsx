@@ -8,6 +8,23 @@ import { Button } from "@/components/ui/button";
 import { SkillEditorModal } from "@/components/session/SkillEditorModal";
 import type { SkillInfo } from "@/types";
 
+const SOURCE_LABEL: Record<string, { label: string; className: string }> = {
+  project: { label: "project", className: "text-blue-500/70" },
+  global:  { label: "global",  className: "text-purple-500/70" },
+  plugin:  { label: "plugin",  className: "text-amber-500/70" },
+};
+
+function SkillSourceBadge({ source }: { source?: string }) {
+  if (!source) return null;
+  const meta = SOURCE_LABEL[source];
+  if (!meta) return null;
+  return (
+    <span className={cn("text-[9px] font-medium shrink-0", meta.className)}>
+      {meta.label}
+    </span>
+  );
+}
+
 // ── SkillCard ─────────────────────────────────────────────────────────────────
 
 function SkillCard({
@@ -37,7 +54,10 @@ function SkillCard({
         className="w-full text-left hover:bg-transparent"
       >
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-semibold truncate">{skill.name}</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-xs font-semibold truncate">{skill.name}</span>
+            <SkillSourceBadge source={skill.source} />
+          </div>
           <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={(e) => { e.stopPropagation(); onView(); }}
