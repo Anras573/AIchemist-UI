@@ -93,10 +93,16 @@ function handle(channel: string, handler: Handler): void {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Scans a skills directory and returns an array of skill entries. */
+/** Extracts a value from YAML frontmatter in a markdown file. */
+function parseFrontmatterField(content: string, field: string): string {
+  const match = content.match(new RegExp(`^${field}:\\s*["']?(.+?)["']?\\s*$`, "m"));
+  return match?.[1]?.trim() ?? "";
+}
+
+/** Scans a skills directory and returns an array of user-created skill entries. */
 function scanSkillsDir(
   dir: string
-): Array<{ name: string; description: string; path: string }> {
+): Array<{ name: string; description: string; path: string; source: "user" }> {
   try {
     return fs
       .readdirSync(dir, { withFileTypes: true })
@@ -104,24 +110,85 @@ function scanSkillsDir(
       .map((d) => {
         const skillPath = path.join(dir, d.name);
         let description = "";
+        // Try SKILL.md frontmatter first, fall back to README.md first paragraph
         try {
-          const content = fs.readFileSync(
-            path.join(skillPath, "README.md"),
-            "utf8"
-          );
-          // First non-empty, non-heading line becomes the description
-          for (const line of content.split("\n")) {
-            const trimmed = line.trim();
-            if (trimmed && !trimmed.startsWith("#")) {
-              description = trimmed.slice(0, 150);
-              break;
-            }
-          }
+          const content = fs.readFileSync(path.join(skillPath, "SKILL.md"), "utf8");
+          description = parseFrontmatterField(content, "description").slice(0, 150);
         } catch {
-          // no README — description stays empty
+          try {
+            const content = fs.readFileSync(path.join(skillPath, "README.md"), "utf8");
+            for (const line of content.split("\n")) {
+              const trimmed = line.trim();
+              if (trimmed && !trimmed.startsWith("#")) {
+                description = trimmed.slice(0, 150);
+                break;
+              }
+            }
+          } catch {
+            // no README either — description stays empty
+          }
         }
-        return { name: d.name, description, path: skillPath };
+        return { name: d.name, description, path: skillPath, source: "user" as const };
       });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Scans Claude Code's installed plugin cache for skills (plugins that ship
+ * a `skills/<name>/SKILL.md` layout). Returns read-only skill entries.
+ */
+function scanPluginSkills(): Array<{ name: string; description: string; path: string; source: "plugin" }> {
+  const pluginsFile = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json");
+  try {
+    const data = JSON.parse(fs.readFileSync(pluginsFile, "utf-8")) as {
+      plugins: Record<string, Array<{ installPath: string; lastUpdated?: string }>>;
+    };
+
+    const results: Array<{ name: string; description: string; path: string; source: "plugin" }> = [];
+    const seen = new Set<string>();
+
+    for (const entries of Object.values(data.plugins)) {
+      // Pick the most recently updated install of this plugin
+      const sorted = [...entries].sort((a, b) =>
+        (b.lastUpdated ?? "").localeCompare(a.lastUpdated ?? "")
+      );
+      const installPath = sorted[0]?.installPath;
+      if (!installPath) continue;
+
+      const skillsDir = path.join(installPath, "skills");
+      let dirEntries: fs.Dirent[];
+      try {
+        dirEntries = fs.readdirSync(skillsDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of dirEntries) {
+        if (!entry.isDirectory()) continue;
+        const skillMd = path.join(skillsDir, entry.name, "SKILL.md");
+        let content: string;
+        try {
+          content = fs.readFileSync(skillMd, "utf-8");
+        } catch {
+          continue;
+        }
+
+        const name = parseFrontmatterField(content, "name") || entry.name;
+        if (seen.has(name)) continue;
+        seen.add(name);
+
+        results.push({
+          name,
+          description: parseFrontmatterField(content, "description").slice(0, 150),
+          path: path.join(skillsDir, entry.name),
+          source: "plugin",
+        });
+      }
+    }
+
+    return results;
   } catch {
     return [];
   }
@@ -423,10 +490,16 @@ function registerHandlers(): void {  // ── Terminal ────────
 
     const projectSkills = scanSkillsDir(projectSkillsDir);
     const globalSkills = scanSkillsDir(globalSkillsDir);
+    const pluginSkills = scanPluginSkills();
 
-    // Project-local skills take priority — skip globals with the same name
+    // Project-local skills take highest priority, then global, then plugins.
+    // Later tiers skip any name already claimed by a higher-priority tier.
     const projectNames = new Set(projectSkills.map((s) => s.name));
-    return [...projectSkills, ...globalSkills.filter((s) => !projectNames.has(s.name))];
+    const globalFiltered = globalSkills.filter((s) => !projectNames.has(s.name));
+    const usedNames = new Set([...projectNames, ...globalFiltered.map((s) => s.name)]);
+    const pluginFiltered = pluginSkills.filter((s) => !usedNames.has(s.name));
+
+    return [...projectSkills, ...globalFiltered, ...pluginFiltered];
   });
   handle(
     CH.APPROVE_TOOL_CALL,

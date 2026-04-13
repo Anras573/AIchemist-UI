@@ -154,6 +154,8 @@ export interface SkillInfo {
   name: string;
   description: string;
   path: string;
+  /** "user" = editable, manually-created skill; "plugin" = installed via Claude Code plugin, read-only */
+  source?: "user" | "plugin";
 }
 
 // ─── File changes ─────────────────────────────────────────────────────────────

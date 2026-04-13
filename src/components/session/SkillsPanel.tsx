@@ -46,13 +46,15 @@ function SkillCard({
             >
               <Eye className="h-2.5 w-2.5 text-muted-foreground" />
             </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onEdit(); }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
-              title="Edit skill"
-            >
-              <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
-            </button>
+            {skill.source !== "plugin" && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
+                title="Edit skill"
+              >
+                <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+              </button>
+            )}
             {active && <Check className="size-3 text-primary" />}
           </div>
         </div>
@@ -139,7 +141,7 @@ export function SkillsPanel() {
                 active={activeSkills.includes(skill.name)}
                 onToggle={() => handleToggle(skill.name)}
                 onView={() => setViewingSkill(skill)}
-                onEdit={() => setEditingSkill(skill)}
+                onEdit={() => skill.source !== "plugin" ? setEditingSkill(skill) : setViewingSkill(skill)}
               />
             ))
           )}

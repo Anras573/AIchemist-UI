@@ -55,7 +55,7 @@ export interface ElectronAPI {
   getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
   getClaudeAgents: (projectPath: string) => Promise<Array<{ name: string; description: string; model?: string }>>;
   getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
-  listSkills: (projectPath: string) => Promise<Array<{ name: string; description: string; path: string }>>;
+  listSkills: (projectPath: string) => Promise<Array<import("../src/types").SkillInfo>>;
 
   // ── Agent / Skill file management ─────────────────────────────────────────
   writeAgentFile: (args: { filePath: string; content: string }) => Promise<void>;
