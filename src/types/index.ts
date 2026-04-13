@@ -149,7 +149,9 @@ export interface AgentInfo {
   /** Whether the agent file can be edited or deleted. False for SDK built-ins. */
   editable?: boolean;
   /** Where this agent was discovered. */
-  source?: "sdk" | "project" | "global";
+  source?: "sdk" | "project" | "global" | "plugin";
+  /** For plugin agents: the plugin identifier (e.g. "my-plugin@marketplace"). */
+  plugin?: string;
 }
 
 export interface SkillInfo {

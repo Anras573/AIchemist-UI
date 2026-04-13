@@ -86,6 +86,58 @@ function extractToolResultText(content: unknown): string {
 type AgentEntry = { name: string; description: string; model?: string; path?: string; editable?: boolean };
 
 /**
+ * Lazy cache: agent name → plugin key (e.g. "my-plugin@marketplace").
+ * Built by scanning installed_plugins.json agents/ directories.
+ */
+let pluginAgentCache: Map<string, string> | null = null;
+
+function getPluginAgentMap(): Map<string, string> {
+  if (pluginAgentCache !== null) return pluginAgentCache;
+  pluginAgentCache = new Map();
+
+  const pluginsFile = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json");
+  try {
+    const data = JSON.parse(fs.readFileSync(pluginsFile, "utf-8")) as {
+      plugins: Record<string, Array<{ installPath: string; lastUpdated?: string }>>;
+    };
+
+    for (const [pluginKey, entries] of Object.entries(data.plugins)) {
+      const sorted = [...entries].sort((a, b) =>
+        (b.lastUpdated ?? "").localeCompare(a.lastUpdated ?? "")
+      );
+      const installPath = sorted[0]?.installPath;
+      if (!installPath) continue;
+
+      const agentsDir = path.join(installPath, "agents");
+      let dirEntries: fs.Dirent[];
+      try {
+        dirEntries = fs.readdirSync(agentsDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of dirEntries) {
+        if (entry.isDirectory() || !entry.name.endsWith(".md")) continue;
+        try {
+          const content = fs.readFileSync(path.join(agentsDir, entry.name), "utf-8");
+          const parsed = parseAgentFrontmatter(content);
+          const name = parsed?.name ?? path.basename(entry.name, ".md");
+          if (!pluginAgentCache.has(name)) {
+            pluginAgentCache.set(name, pluginKey);
+          }
+        } catch {
+          // skip unreadable files
+        }
+      }
+    }
+  } catch {
+    // no plugins file — leave cache empty
+  }
+
+  return pluginAgentCache;
+}
+
+/**
  * Parses a Claude agent markdown file's YAML frontmatter.
  * Returns null if the file does not have a valid `name` field.
  * Exported for testing.
@@ -189,7 +241,12 @@ export async function getClaudeAgents(
       },
     });
     try {
-      sdkAgents = (await q.supportedAgents()).map((a) => ({ ...a, editable: false, source: "sdk" as const }));
+      sdkAgents = (await q.supportedAgents()).map((a) => {
+        const pluginKey = getPluginAgentMap().get(a.name);
+        return pluginKey
+          ? { ...a, editable: false, source: "plugin" as const, plugin: pluginKey }
+          : { ...a, editable: false, source: "sdk" as const };
+      });
     } finally {
       await q.return(undefined);
     }

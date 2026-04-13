@@ -27,15 +27,21 @@ const AGENT_SOURCE_META: Record<string, { label: string; className: string }> = 
   sdk:     { label: "built-in", className: "text-emerald-500/70" },
   project: { label: "project",  className: "text-blue-500/70" },
   global:  { label: "global",   className: "text-purple-500/70" },
+  plugin:  { label: "plugin",   className: "text-amber-500/70" },
 };
 
-function AgentSourceBadge({ source }: { source?: string }) {
+function AgentSourceBadge({ source, plugin }: { source?: string; plugin?: string }) {
   if (!source) return null;
   const meta = AGENT_SOURCE_META[source];
   if (!meta) return null;
+  // For plugin agents, show the short name before "@" with full key as tooltip
+  const label = source === "plugin" && plugin
+    ? (plugin.includes("@") ? plugin.slice(0, plugin.lastIndexOf("@")) : plugin)
+    : meta.label;
+  const title = source === "plugin" && plugin ? plugin : undefined;
   return (
-    <span className={cn("text-[9px] font-medium shrink-0", meta.className)}>
-      {meta.label}
+    <span className={cn("text-[9px] font-medium shrink-0 truncate max-w-[140px]", meta.className)} title={title}>
+      {label}
     </span>
   );
 }
@@ -217,7 +223,7 @@ export function AgentPickerButton() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span className="truncate">{agent.name}</span>
-                    <AgentSourceBadge source={agent.source} />
+                    <AgentSourceBadge source={agent.source} plugin={agent.plugin} />
                   </div>
                   {agent.model && (
                     <div className="text-[9px] text-muted-foreground truncate">
