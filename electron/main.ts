@@ -140,17 +140,17 @@ function scanSkillsDir(
  * Scans Claude Code's installed plugin cache for skills (plugins that ship
  * a `skills/<name>/SKILL.md` layout). Returns read-only skill entries.
  */
-function scanPluginSkills(): Array<{ name: string; description: string; path: string; source: "plugin" }> {
+function scanPluginSkills(): Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> {
   const pluginsFile = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json");
   try {
     const data = JSON.parse(fs.readFileSync(pluginsFile, "utf-8")) as {
       plugins: Record<string, Array<{ installPath: string; lastUpdated?: string }>>;
     };
 
-    const results: Array<{ name: string; description: string; path: string; source: "plugin" }> = [];
+    const results: Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> = [];
     const seen = new Set<string>();
 
-    for (const entries of Object.values(data.plugins)) {
+    for (const [pluginKey, entries] of Object.entries(data.plugins)) {
       // Pick the most recently updated install of this plugin
       const sorted = [...entries].sort((a, b) =>
         (b.lastUpdated ?? "").localeCompare(a.lastUpdated ?? "")
@@ -185,6 +185,7 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
           description: parseFrontmatterField(content, "description").slice(0, 150),
           path: path.join(skillsDir, entry.name),
           source: "plugin",
+          plugin: pluginKey,
         });
       }
     }

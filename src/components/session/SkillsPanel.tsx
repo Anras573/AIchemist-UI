@@ -14,13 +14,20 @@ const SOURCE_LABEL: Record<string, { label: string; className: string }> = {
   plugin:  { label: "plugin",  className: "text-amber-500/70" },
 };
 
-function SkillSourceBadge({ source }: { source?: string }) {
+function SkillSourceBadge({ source, plugin }: { source?: string; plugin?: string }) {
   if (!source) return null;
   const meta = SOURCE_LABEL[source];
   if (!meta) return null;
+
+  // For plugin skills, show the short repo name (after last "/") with full key as tooltip
+  const label = source === "plugin" && plugin
+    ? (plugin.includes("/") ? plugin.slice(plugin.lastIndexOf("/") + 1) : plugin)
+    : meta.label;
+  const title = source === "plugin" && plugin ? plugin : undefined;
+
   return (
-    <span className={cn("text-[9px] font-medium shrink-0", meta.className)}>
-      {meta.label}
+    <span className={cn("text-[9px] font-medium shrink-0 truncate max-w-[80px]", meta.className)} title={title}>
+      {label}
     </span>
   );
 }
@@ -56,7 +63,7 @@ function SkillCard({
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-xs font-semibold truncate">{skill.name}</span>
-            <SkillSourceBadge source={skill.source} />
+            <SkillSourceBadge source={skill.source} plugin={skill.plugin} />
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <button
