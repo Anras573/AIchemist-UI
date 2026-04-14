@@ -19,6 +19,7 @@ import { runAgentTurn, getProvider } from "./agent/runner";
 import { cleanupCopilotSession } from "./agent/copilot";
 import { getSpans } from "./tracer";
 import type { ProjectConfig } from "../src/types/index";
+import { parseMcpListOutput, readCopilotMcpServers, mergeMcpServers } from "./mcp-utils";
 import type { McpServerInfo } from "../src/types/index";
 
 // ── Prevent multiple instances ───────────────────────────────────────────────
@@ -212,167 +213,6 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
   } catch {
     return [];
   }
-}
-
-function parseMcpListOutput(output: string): McpServerInfo[] {
-  const servers: McpServerInfo[] = [];
-  // Each line (after the "Checking…" header) looks like:
-  //   name: command_or_url - ✓ Connected
-  //   name: command_or_url (HTTP) - ✗ Failed to connect
-  const lineRe = /^(.+?):\s+(.*?)\s+-\s+([✓✗])\s+(.+)$/;
-  for (const raw of output.split("\n")) {
-    const line = raw.trim();
-    if (!line || line.startsWith("Checking MCP")) continue;
-    const m = line.match(lineRe);
-    if (!m) continue;
-    const [, name, rest, tick] = m;
-    // Detect transport hint "(HTTP)" at end of command string
-    const transportMatch = rest.match(/\s+\(([A-Z]+)\)$/);
-    const transport = transportMatch?.[1];
-    const command = transportMatch ? rest.slice(0, -transportMatch[0].length).trim() : rest.trim();
-    servers.push({
-      name: name.trim(),
-      command,
-      transport,
-      connected: tick === "✓",
-      status: m[4].trim(),
-      source: "claude",
-    });
-  }
-  return servers;
-}
-
-/** Read MCP servers from the Copilot CLI config (~/.copilot/mcp-config.json). */
-// ── MCP server fingerprinting ─────────────────────────────────────────────────
-
-/**
- * Extract stable fingerprints from a server command/URL string so we can
- * match the same server across Claude and Copilot configs regardless of how
- * each names it.
- *
- * Rules:
- *  - HTTP(S) URL → normalised URL (lowercase, trailing slash stripped)
- *  - stdio → npm package name extracted from npx/uvx args (@scope/pkg, strip version)
- *  - docker → the main image name/digest
- *  - bare command (e.g. "aspire mcp start") → normalised full command string
- */
-function commandFingerprints(command: string): Set<string> {
-  const fps = new Set<string>();
-
-  // HTTP URL (works for both `url` fields and inline URLs)
-  const urlMatch = command.match(/https?:\/\/[^\s]+/);
-  if (urlMatch) {
-    fps.add(urlMatch[0].replace(/\/+$/, "").toLowerCase());
-    return fps; // URL is conclusive — no need for further extraction
-  }
-
-  // npm package after npx (npx -y @scope/pkg@ver  or  npx @scope/pkg@ver)
-  const npxMatch = command.match(/npx\s+(?:-y\s+)?([\w@][\w@/.-]*)/);
-  if (npxMatch) {
-    fps.add(npxMatch[1].replace(/@[\d][\d.]*$/, "").toLowerCase());
-    return fps;
-  }
-
-  // uvx --from pkg … (used by Python MCP servers)
-  const uvxMatch = command.match(/uvx\s+(?:--from\s+)?([\w@][\w@/.-]*)/);
-  if (uvxMatch) {
-    fps.add(uvxMatch[1].replace(/@[\d][\d.]*$/, "").toLowerCase());
-    return fps;
-  }
-
-  // docker image name: last non-flag token after "docker run"
-  if (command.startsWith("docker")) {
-    const imgMatch = command.match(/docker\s+run\s+.*?\s+([\w./-]+(?:@sha256:[a-f0-9]+)?)\s*$/);
-    if (imgMatch) {
-      // Strip digest/tag for a stable fingerprint
-      fps.add(imgMatch[1].replace(/[:@].*$/, "").toLowerCase());
-      return fps;
-    }
-    // "docker mcp gateway run" style — use full normalised command
-    fps.add(command.trim().toLowerCase());
-    return fps;
-  }
-
-  // Fallback: normalised full command string
-  fps.add(command.trim().toLowerCase());
-  return fps;
-}
-
-// ── Copilot MCP config readers ────────────────────────────────────────────────
-
-type RawMcpEntry = { name: string; command: string; transport?: string };
-
-/** Parse ~/.copilot/mcp-config.json → flat list of entries. */
-function readDotCopilotMcp(): RawMcpEntry[] {
-  const cfgPath = path.join(os.homedir(), ".copilot", "mcp-config.json");
-  try {
-    const parsed = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as {
-      mcpServers?: Record<string, { type?: string; command?: string; args?: string[]; url?: string }>;
-    };
-    return Object.entries(parsed.mcpServers ?? {}).map(([name, cfg]) => {
-      const isHttp = cfg.type === "http" || cfg.url != null;
-      return {
-        name,
-        command: cfg.url ?? [cfg.command, ...(cfg.args ?? [])].filter(Boolean).join(" "),
-        transport: isHttp ? "HTTP" : "stdio",
-      };
-    });
-  } catch { return []; }
-}
-
-/** Parse VS Code's mcp.json (User/mcp.json) → flat list of entries. */
-function readVsCodeMcp(): RawMcpEntry[] {
-  const candidates = [
-    // macOS
-    path.join(os.homedir(), "Library", "Application Support", "Code", "User", "mcp.json"),
-    // Linux
-    path.join(os.homedir(), ".config", "Code", "User", "mcp.json"),
-    // Windows
-    path.join(os.homedir(), "AppData", "Roaming", "Code", "User", "mcp.json"),
-  ];
-  for (const cfgPath of candidates) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as {
-        servers?: Record<string, { type?: string; command?: string; args?: string[]; url?: string }>;
-      };
-      const servers = parsed.servers ?? {};
-      return Object.entries(servers).map(([name, cfg]) => {
-        const isHttp = cfg.type === "http" || cfg.url != null;
-        return {
-          name,
-          command: cfg.url ?? [cfg.command, ...(cfg.args ?? [])].filter(Boolean).join(" "),
-          transport: isHttp ? "HTTP" : "stdio",
-        };
-      });
-    } catch { /* try next */ }
-  }
-  return [];
-}
-
-/**
- * Collect all MCP servers from Copilot config sources (CLI + VS Code).
- * Returns a flat list with duplicates removed (by fingerprint).
- */
-function readCopilotMcpServers(): McpServerInfo[] {
-  const all = [...readDotCopilotMcp(), ...readVsCodeMcp()];
-  // Deduplicate by fingerprint so the same server from two sources appears once.
-  const seen = new Set<string>();
-  const result: McpServerInfo[] = [];
-  for (const entry of all) {
-    const fps = commandFingerprints(entry.command);
-    const key = [...fps].sort().join("|");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push({
-      name: entry.name,
-      command: entry.command,
-      transport: entry.transport,
-      connected: null,
-      status: "Configured",
-      source: "copilot",
-    });
-  }
-  return result;
 }
 
 function registerHandlers(): void {  // ── Terminal ──────────────────────────────────────────────────────────────────
@@ -696,29 +536,7 @@ function registerHandlers(): void {  // ── Terminal ────────
     });
 
     const copilotServers = readCopilotMcpServers();
-
-    // Build a fingerprint set from all Copilot-configured servers for
-    // URL/package-name matching (names differ between Claude and Copilot).
-    const copilotFingerprints = new Set<string>();
-    for (const s of copilotServers) {
-      for (const fp of commandFingerprints(s.command)) copilotFingerprints.add(fp);
-    }
-
-    // Promote Claude entries that Copilot also knows about to source "both".
-    const merged = claudeServers.map((s) => {
-      const inCopilot = [...commandFingerprints(s.command)].some((fp) => copilotFingerprints.has(fp));
-      return inCopilot ? { ...s, source: "both" as const } : s;
-    });
-
-    // Keep Copilot-only entries whose fingerprints don't appear in any Claude server.
-    const claudeFingerprints = new Set<string>(
-      claudeServers.flatMap((s) => [...commandFingerprints(s.command)])
-    );
-    const copilotOnly = copilotServers.filter((s) =>
-      ![...commandFingerprints(s.command)].some((fp) => claudeFingerprints.has(fp))
-    );
-
-    return [...merged, ...copilotOnly];
+    return mergeMcpServers(claudeServers, copilotServers);
   });
   handle(
     CH.APPROVE_TOOL_CALL,
