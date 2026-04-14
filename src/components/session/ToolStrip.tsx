@@ -9,12 +9,12 @@ interface ToolStripItem {
 }
 
 const TOOLS: ToolStripItem[] = [
+  { id: "changes", icon: GitCommitHorizontal, label: "Changes" },
   { id: "files", icon: Files, label: "Files" },
   { id: "terminal", icon: Terminal, label: "Terminal" },
   { id: "skills", icon: Blocks, label: "Skills" },
-  { id: "traces", icon: Activity, label: "Traces" },
-  { id: "changes", icon: GitCommitHorizontal, label: "Changes" },
   { id: "mcp", icon: Server, label: "MCP" },
+  { id: "traces", icon: Activity, label: "Traces" },
 ];
 
 interface ToolStripProps {

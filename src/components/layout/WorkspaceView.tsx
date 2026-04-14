@@ -17,7 +17,7 @@ export function WorkspaceView() {
   const { sendMessage } = useAgentTurn();
 
   // null = panel closed; a tab value = panel open on that tab
-  const [activeTab, setActiveTab] = useState<ContextTab | null>("files");
+  const [activeTab, setActiveTab] = useState<ContextTab | null>("changes");
 
   const handleToolSelect = useCallback((tab: ContextTab) => {
     setActiveTab((current) => (current === tab ? null : tab));
@@ -70,7 +70,7 @@ export function WorkspaceView() {
           left={<TimelinePanel onSendMessage={sendMessage} onNewSession={handleNewSession} />}
           right={
             <ContextPanel
-              activeTab={activeTab ?? "files"}
+              activeTab={activeTab ?? "changes"}
               onClose={() => setActiveTab(null)}
               onAutoSwitch={handleAutoSwitch}
             />
