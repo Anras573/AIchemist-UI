@@ -46,6 +46,7 @@ export const GET_COPILOT_MODELS     = "agent:get-copilot-models";
 export const GET_CLAUDE_AGENTS      = "agent:get-claude-agents";
 export const GET_COPILOT_AGENTS     = "agent:get-copilot-agents";
 export const LIST_SKILLS            = "agent:list-skills";
+export const LIST_MCP_SERVERS       = "agent:list-mcp-servers";
 
 // ── Agent / Skill file management ────────────────────────────────────────────
 export const WRITE_AGENT_FILE   = "agents:write-file";

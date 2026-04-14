@@ -57,6 +57,7 @@ export const ipc = {
   getClaudeAgents: (projectPath: string) => window.electronAPI.getClaudeAgents(projectPath),
   getCopilotAgents: (projectPath: string) => window.electronAPI.getCopilotAgents(projectPath),
   listSkills: (projectPath: string) => window.electronAPI.listSkills(projectPath),
+  listMcpServers: () => window.electronAPI.listMcpServers(),
 
   // Agent / Skill file management
   writeAgentFile: (args: { filePath: string; content: string }) =>

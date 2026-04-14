@@ -164,6 +164,21 @@ export interface SkillInfo {
   plugin?: string;
 }
 
+export interface McpServerInfo {
+  /** Display name of the MCP server. */
+  name: string;
+  /** The command or URL used to connect. */
+  command: string;
+  /** Transport type, if available (e.g. "HTTP", "stdio"). */
+  transport?: string;
+  /** Whether the server is currently connected. null = status unknown (Copilot config). */
+  connected: boolean | null;
+  /** Status message returned by `claude mcp list`. */
+  status: string;
+  /** Which provider(s) configured this server. */
+  source: "claude" | "copilot" | "both";
+}
+
 // ─── File changes ─────────────────────────────────────────────────────────────
 
 export interface FileChange {

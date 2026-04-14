@@ -13,6 +13,7 @@ import { SkillsPanel } from "./SkillsPanel";
 import { TracesPanel } from "./TracesPanel";
 import { ChangesPanel } from "./ChangesPanel";
 import { InteractiveTerminal } from "./InteractiveTerminal";
+import { McpServersPanel } from "./McpServersPanel";
 
 // ── Rust types ────────────────────────────────────────────────────────────────
 
@@ -158,7 +159,7 @@ function FileTreeView({ projectPath, onFileOpen }: FileTreeViewProps) {
 
 // ── ContextPanel ──────────────────────────────────────────────────────────────
 
-export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes";
+export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes" | "mcp";
 
 /**
  * Right panel content — renders whichever tool is active (files or terminal).
@@ -197,7 +198,7 @@ export function ContextPanel({
   // Header content depends on whether we're viewing a file
   const isViewingFile = activeTab === "files" && viewingFile !== null;
   const fileName = viewingFile?.split("/").pop() ?? "";
-  const headerLabel = isViewingFile ? fileName : activeTab === "files" ? "Files" : activeTab === "terminal" ? "Terminal" : activeTab === "traces" ? "Traces" : activeTab === "changes" ? "Changes" : "Skills";
+  const headerLabel = isViewingFile ? fileName : activeTab === "files" ? "Files" : activeTab === "terminal" ? "Terminal" : activeTab === "traces" ? "Traces" : activeTab === "changes" ? "Changes" : activeTab === "mcp" ? "MCP Servers" : "Skills";
 
   return (
     <div className="flex flex-col h-full">
@@ -245,6 +246,8 @@ export function ContextPanel({
           <TracesPanel />
         ) : activeTab === "changes" ? (
           <ChangesPanel />
+        ) : activeTab === "mcp" ? (
+          <McpServersPanel />
         ) : activeTab === "terminal" ? (
           activeProject ? (
             <InteractiveTerminal projectPath={activeProject.path} />

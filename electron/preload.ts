@@ -56,6 +56,7 @@ export interface ElectronAPI {
   getClaudeAgents: (projectPath: string) => Promise<Array<{ name: string; description: string; model?: string }>>;
   getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
   listSkills: (projectPath: string) => Promise<Array<import("../src/types").SkillInfo>>;
+  listMcpServers: () => Promise<Array<import("../src/types").McpServerInfo>>;
 
   // ── Agent / Skill file management ─────────────────────────────────────────
   writeAgentFile: (args: { filePath: string; content: string }) => Promise<void>;
@@ -129,6 +130,7 @@ const api: ElectronAPI = {
   getClaudeAgents: (projectPath) => ipcRenderer.invoke(CH.GET_CLAUDE_AGENTS, projectPath),
   getCopilotAgents: (projectPath) => ipcRenderer.invoke(CH.GET_COPILOT_AGENTS, projectPath),
   listSkills: (projectPath) => ipcRenderer.invoke(CH.LIST_SKILLS, projectPath),
+  listMcpServers: () => ipcRenderer.invoke(CH.LIST_MCP_SERVERS),
 
   writeAgentFile: (args) => ipcRenderer.invoke(CH.WRITE_AGENT_FILE, args),
   deleteAgentFile: (filePath) => ipcRenderer.invoke(CH.DELETE_AGENT_FILE, filePath),
