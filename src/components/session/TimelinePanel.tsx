@@ -214,7 +214,7 @@ interface TimelinePanelProps {
 }
 
 /** Empty-state chooser: radio buttons pick provider, button creates session. */
-function EmptyStateNewSession({
+export function EmptyStateNewSession({
   defaultProvider,
   onNewSession,
 }: {
