@@ -213,6 +213,63 @@ interface TimelinePanelProps {
   onNewSession?: (providerOverride?: string) => void;
 }
 
+/** Empty-state chooser: radio buttons pick provider, button creates session. */
+function EmptyStateNewSession({
+  defaultProvider,
+  onNewSession,
+}: {
+  defaultProvider: string | null;
+  onNewSession: (providerOverride?: string) => void;
+}) {
+  const initial = defaultProvider === "copilot" ? "copilot" : "anthropic";
+  const [selected, setSelected] = useState<"anthropic" | "copilot">(initial);
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <div
+        role="radiogroup"
+        aria-label="Session provider"
+        className="flex items-center gap-4"
+      >
+        <label className="flex items-center gap-1.5 cursor-pointer text-sm">
+          <input
+            type="radio"
+            name="new-session-provider"
+            value="anthropic"
+            checked={selected === "anthropic"}
+            onChange={() => setSelected("anthropic")}
+            className="accent-primary"
+          />
+          <ModelSelectorLogo provider="anthropic" className="size-3.5" />
+          <span>Use Claude{defaultProvider === "anthropic" && (
+            <span className="ml-1 text-[10px] text-muted-foreground">(default)</span>
+          )}</span>
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer text-sm">
+          <input
+            type="radio"
+            name="new-session-provider"
+            value="copilot"
+            checked={selected === "copilot"}
+            onChange={() => setSelected("copilot")}
+            className="accent-primary"
+          />
+          <ModelSelectorLogo provider="github-copilot" className="size-3.5" />
+          <span>Use Copilot{defaultProvider === "copilot" && (
+            <span className="ml-1 text-[10px] text-muted-foreground">(default)</span>
+          )}</span>
+        </label>
+      </div>
+      <button
+        onClick={() => onNewSession(selected)}
+        className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+      >
+        Create a new session
+      </button>
+    </div>
+  );
+}
+
 export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProps) {
   const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking } = useSessionStore();
   const { activeProjectId, projects } = useProjectStore();
@@ -248,39 +305,10 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
           <ConversationContent>
             <ConversationEmptyState title="No sessions yet" description="Create a new session to get started">
               {onNewSession && (
-                <div className="flex flex-col items-center gap-2">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => onNewSession("anthropic")}
-                      className={cn(
-                        "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
-                        defaultProvider === "anthropic"
-                          ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90"
-                          : "bg-background text-foreground border-border hover:bg-accent"
-                      )}
-                    >
-                      <ModelSelectorLogo provider="anthropic" className="size-3.5" />
-                      New Claude Session
-                    </button>
-                    <button
-                      onClick={() => onNewSession("copilot")}
-                      className={cn(
-                        "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
-                        defaultProvider === "copilot"
-                          ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90"
-                          : "bg-background text-foreground border-border hover:bg-accent"
-                      )}
-                    >
-                      <ModelSelectorLogo provider="github-copilot" className="size-3.5" />
-                      New Copilot Session
-                    </button>
-                  </div>
-                  {defaultProvider && (
-                    <p className="text-[11px] text-muted-foreground">
-                      Project default: {defaultProvider === "anthropic" ? "Claude" : "Copilot"}
-                    </p>
-                  )}
-                </div>
+                <EmptyStateNewSession
+                  defaultProvider={defaultProvider}
+                  onNewSession={onNewSession}
+                />
               )}
             </ConversationEmptyState>
           </ConversationContent>
