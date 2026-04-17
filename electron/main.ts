@@ -20,6 +20,13 @@ import { cleanupCopilotSession } from "./agent/copilot";
 import { getSpans } from "./tracer";
 import type { ProjectConfig } from "../src/types/index";
 import { parseMcpListOutput, readCopilotMcpServers, mergeMcpServers } from "./mcp-utils";
+import {
+  readMcpServers as readMcpServersConfig,
+  writeMcpServers as writeMcpServersConfig,
+  deleteMcpServer as deleteMcpServerConfig,
+  type McpScope,
+  type McpServersMap,
+} from "./mcp-config";
 import type { McpServerInfo } from "../src/types/index";
 
 // ── Prevent multiple instances ───────────────────────────────────────────────
@@ -538,6 +545,21 @@ function registerHandlers(): void {  // ── Terminal ────────
     const copilotServers = readCopilotMcpServers();
     return mergeMcpServers(claudeServers, copilotServers);
   });
+  handle(CH.MCP_READ_CONFIG, (_event, args: { scope: McpScope; projectPath?: string }) => {
+    return readMcpServersConfig(args.scope, args.projectPath);
+  });
+  handle(
+    CH.MCP_WRITE_CONFIG,
+    (_event, args: { scope: McpScope; servers: McpServersMap; projectPath?: string }) => {
+      writeMcpServersConfig(args.scope, args.servers, args.projectPath);
+    },
+  );
+  handle(
+    CH.MCP_DELETE_SERVER,
+    (_event, args: { scope: McpScope; name: string; projectPath?: string }) => {
+      deleteMcpServerConfig(args.scope, args.name, args.projectPath);
+    },
+  );
   handle(
     CH.APPROVE_TOOL_CALL,
     (_event, args: {

@@ -58,6 +58,12 @@ export const ipc = {
   getCopilotAgents: (projectPath: string) => window.electronAPI.getCopilotAgents(projectPath),
   listSkills: (projectPath: string) => window.electronAPI.listSkills(projectPath),
   listMcpServers: () => window.electronAPI.listMcpServers(),
+  mcpReadConfig: (args: Parameters<typeof window.electronAPI.mcpReadConfig>[0]) =>
+    window.electronAPI.mcpReadConfig(args),
+  mcpWriteConfig: (args: Parameters<typeof window.electronAPI.mcpWriteConfig>[0]) =>
+    window.electronAPI.mcpWriteConfig(args),
+  mcpDeleteServer: (args: Parameters<typeof window.electronAPI.mcpDeleteServer>[0]) =>
+    window.electronAPI.mcpDeleteServer(args),
 
   // Agent / Skill file management
   writeAgentFile: (args: { filePath: string; content: string }) =>

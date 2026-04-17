@@ -55,6 +55,9 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     getCopilotAgents: vi.fn().mockResolvedValue([]),
     listSkills: vi.fn().mockResolvedValue([]),
     listMcpServers: vi.fn().mockResolvedValue([]),
+    mcpReadConfig: vi.fn().mockResolvedValue({}),
+    mcpWriteConfig: vi.fn().mockResolvedValue(undefined),
+    mcpDeleteServer: vi.fn().mockResolvedValue(undefined),
 
     // Agent / Skill file management
     writeAgentFile: vi.fn().mockResolvedValue(undefined),

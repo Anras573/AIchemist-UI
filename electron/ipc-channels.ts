@@ -47,6 +47,9 @@ export const GET_CLAUDE_AGENTS      = "agent:get-claude-agents";
 export const GET_COPILOT_AGENTS     = "agent:get-copilot-agents";
 export const LIST_SKILLS            = "agent:list-skills";
 export const LIST_MCP_SERVERS       = "agent:list-mcp-servers";
+export const MCP_READ_CONFIG        = "mcp:read-config";
+export const MCP_WRITE_CONFIG       = "mcp:write-config";
+export const MCP_DELETE_SERVER      = "mcp:delete-server";
 
 // ── Agent / Skill file management ────────────────────────────────────────────
 export const WRITE_AGENT_FILE   = "agents:write-file";

@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
-import { RefreshCw, Server, CheckCircle2, XCircle, MinusCircle, Loader2 } from "lucide-react";
+import { RefreshCw, Server, CheckCircle2, XCircle, MinusCircle, Loader2, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIpc } from "@/lib/ipc";
+import { useProjectStore } from "@/lib/store/useProjectStore";
+import { McpConfigEditorDialog } from "./McpConfigEditorDialog";
 import type { McpServerInfo } from "@/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -73,9 +75,13 @@ function ServerCard({ server }: { server: McpServerInfo }) {
 
 export function McpServersPanel() {
   const ipc = useIpc();
+  const { projects, activeProjectId } = useProjectStore();
+  const activeProject = projects.find((p) => p.id === activeProjectId);
+  const projectPath = activeProject?.path ?? "";
   const [servers, setServers] = useState<McpServerInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -111,10 +117,17 @@ export function McpServersPanel() {
           <span className="text-[11px] text-muted-foreground">Loading…</span>
         )}
         <button
+          onClick={() => setEditorOpen(true)}
+          className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-auto"
+          title="Edit MCP config"
+        >
+          <Settings className="h-3.5 w-3.5" />
+        </button>
+        <button
           onClick={load}
           disabled={loading}
           className={cn(
-            "flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-auto",
+            "flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
             loading && "opacity-50 cursor-not-allowed"
           )}
           title="Refresh"
@@ -149,6 +162,13 @@ export function McpServersPanel() {
           </div>
         )}
       </div>
+
+      <McpConfigEditorDialog
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        projectPath={projectPath}
+        onSaved={load}
+      />
     </div>
   );
 }

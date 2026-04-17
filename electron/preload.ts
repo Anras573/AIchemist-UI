@@ -57,6 +57,12 @@ export interface ElectronAPI {
   getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
   listSkills: (projectPath: string) => Promise<Array<import("../src/types").SkillInfo>>;
   listMcpServers: () => Promise<Array<import("../src/types").McpServerInfo>>;
+  mcpReadConfig: (args: { scope: import("./mcp-config").McpScope; projectPath?: string }) =>
+    Promise<import("./mcp-config").McpServersMap>;
+  mcpWriteConfig: (args: { scope: import("./mcp-config").McpScope; servers: import("./mcp-config").McpServersMap; projectPath?: string }) =>
+    Promise<void>;
+  mcpDeleteServer: (args: { scope: import("./mcp-config").McpScope; name: string; projectPath?: string }) =>
+    Promise<void>;
 
   // ── Agent / Skill file management ─────────────────────────────────────────
   writeAgentFile: (args: { filePath: string; content: string }) => Promise<void>;
@@ -131,6 +137,9 @@ const api: ElectronAPI = {
   getCopilotAgents: (projectPath) => ipcRenderer.invoke(CH.GET_COPILOT_AGENTS, projectPath),
   listSkills: (projectPath) => ipcRenderer.invoke(CH.LIST_SKILLS, projectPath),
   listMcpServers: () => ipcRenderer.invoke(CH.LIST_MCP_SERVERS),
+  mcpReadConfig: (args) => ipcRenderer.invoke(CH.MCP_READ_CONFIG, args),
+  mcpWriteConfig: (args) => ipcRenderer.invoke(CH.MCP_WRITE_CONFIG, args),
+  mcpDeleteServer: (args) => ipcRenderer.invoke(CH.MCP_DELETE_SERVER, args),
 
   writeAgentFile: (args) => ipcRenderer.invoke(CH.WRITE_AGENT_FILE, args),
   deleteAgentFile: (filePath) => ipcRenderer.invoke(CH.DELETE_AGENT_FILE, filePath),
