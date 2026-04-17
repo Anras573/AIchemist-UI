@@ -74,6 +74,8 @@ export interface ElectronAPI {
 
   // ── Traces ────────────────────────────────────────────────────────────────
   getTraces: (sessionId?: string) => Promise<import("../src/types").TraceSpan[]>;
+  bindTranscript: (sessionId: string) => Promise<{ ok: boolean; reason?: string }>;
+  unbindTranscript: (sessionId: string) => Promise<{ ok: boolean }>;
 
   // ── Changes ───────────────────────────────────────────────────────────────
   getGitDiff: (projectPath: string) => Promise<string | { error: string }>;
@@ -148,6 +150,8 @@ const api: ElectronAPI = {
   deleteSkillDir: (skillPath) => ipcRenderer.invoke(CH.DELETE_SKILL_DIR, skillPath),
   createSkill: (args) => ipcRenderer.invoke(CH.CREATE_SKILL, args),
   getTraces: (sessionId) => ipcRenderer.invoke(CH.GET_TRACES, sessionId),
+  bindTranscript: (sessionId) => ipcRenderer.invoke(CH.TRACE_BIND_TRANSCRIPT, sessionId),
+  unbindTranscript: (sessionId) => ipcRenderer.invoke(CH.TRACE_UNBIND_TRANSCRIPT, sessionId),
   getGitDiff: (projectPath) => ipcRenderer.invoke(CH.GET_GIT_DIFF, projectPath),
   getGitBranch: (projectPath) => ipcRenderer.invoke(CH.GET_GIT_BRANCH, projectPath),
 

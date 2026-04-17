@@ -12,7 +12,6 @@ import * as path from "path";
 import type { AgentInfo, ProjectConfig } from "../../src/types/index";
 import { getApiKey } from "../config";
 import * as CH from "../ipc-channels";
-import * as tracer from "../tracer";
 import { requestApproval, requiresApproval } from "./approval";
 import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
@@ -218,17 +217,6 @@ export async function runCopilotAgentTurn(params: {
 
   const client = await getClient();
 
-  // ── Tracing: start turn span and relay updates to the renderer ───────────────
-  const turnStartMs = Date.now();
-  const turnSpanId = tracer.startSpan({
-    sessionId,
-    type: "turn",
-    name: agent ? `Agent: ${agent}` : "Agent Turn",
-    startMs: turnStartMs,
-  });
-  let firstTokenMs: number | null = null;
-  const unsubTracer = tracer.onSpanUpdate((span) => webContents.send(CH.SESSION_TRACE, span));
-
   // ── Shared helper ───────────────────────────────────────────────────────────
 
   async function runTool(
@@ -238,14 +226,6 @@ export async function runCopilotAgentTurn(params: {
     impl: () => Promise<string>
   ): Promise<string> {
     const toolCallId = crypto.randomUUID();
-    const toolSpanId = tracer.startSpan({
-      sessionId,
-      type: "tool",
-      name,
-      parentId: turnSpanId,
-      startMs: Date.now(),
-      meta: { input: args as Record<string, unknown> },
-    });
     const initialStatus = requiresApproval(sessionId, projectConfig, category, name, args)
       ? "pending_approval" as const
       : "approved" as const;
@@ -264,7 +244,6 @@ export async function runCopilotAgentTurn(params: {
       if (!approved) {
         const msg = "Tool call denied by user.";
         updateToolCallStatus(db, toolCallId, "rejected");
-        tracer.endSpan(toolSpanId, "error", { denied: true });
         webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: name, output: msg });
         return msg;
       }
@@ -273,12 +252,10 @@ export async function runCopilotAgentTurn(params: {
     try {
       const output = await impl();
       updateToolCallStatus(db, toolCallId, "complete", output);
-      tracer.endSpan(toolSpanId, "success");
       webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: name, output });
       return output;
     } catch (e) {
       updateToolCallStatus(db, toolCallId, "error", String(e));
-      tracer.endSpan(toolSpanId, "error", { errorMessage: String(e) });
       throw e;
     }
   }
@@ -581,7 +558,6 @@ export async function runCopilotAgentTurn(params: {
       const delta = newText.slice(fullText.length);
       fullText = newText;
       if (delta) {
-        if (!firstTokenMs) firstTokenMs = Date.now();
         webContents.send(CH.SESSION_DELTA, {
           session_id: sessionId,
           text_delta: delta,
@@ -598,15 +574,6 @@ export async function runCopilotAgentTurn(params: {
       };
       toolCallIdToName.set(data.toolCallId, data.toolName);
       if (!customToolNames.has(data.toolName)) {
-        const spanId = tracer.startSpan({
-          sessionId,
-          type: "tool",
-          name: data.toolName,
-          parentId: turnSpanId,
-          startMs: Date.now(),
-          meta: { input: data.arguments ?? {} },
-        });
-        toolCallIdToName.set(`span:${data.toolCallId}`, spanId);
         webContents.send(CH.SESSION_TOOL_CALL, {
           session_id: sessionId,
           tool_name: data.toolName,
@@ -645,8 +612,6 @@ export async function runCopilotAgentTurn(params: {
         const output = terminalBlock
           ? (terminalBlock as { type: "terminal"; text: string }).text
           : (data.result?.detailedContent ?? data.result?.content ?? "");
-        const spanId = toolCallIdToName.get(`span:${data.toolCallId}`);
-        if (spanId) tracer.endSpan(spanId, data.success ? "success" : "error");
         updateToolCallStatus(db, data.toolCallId, data.success ? "complete" : "error", output);
         webContents.send(CH.SESSION_TOOL_RESULT, {
           session_id: sessionId,
@@ -707,22 +672,17 @@ export async function runCopilotAgentTurn(params: {
     await session.send({ prompt });
     await done;
 
-    tracer.endSpan(turnSpanId, "success", {
-      firstTokenLatencyMs: firstTokenMs ? firstTokenMs - turnStartMs : undefined,
-    });
     webContents.send(CH.SESSION_STATUS, {
       session_id: sessionId,
       status: "complete",
     });
   } catch (err) {
-    tracer.endSpan(turnSpanId, "error", { errorMessage: String(err) });
     webContents.send(CH.SESSION_STATUS, {
       session_id: sessionId,
       status: "error",
     });
     throw err;
   } finally {
-    unsubTracer();
     await session.disconnect();
   }
 

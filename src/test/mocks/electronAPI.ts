@@ -67,6 +67,8 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     deleteSkillDir: vi.fn().mockResolvedValue(undefined),
     createSkill: vi.fn().mockResolvedValue({ skillPath: "" }),
     getTraces: vi.fn().mockResolvedValue([]),
+    bindTranscript: vi.fn().mockResolvedValue({ ok: true }),
+    unbindTranscript: vi.fn().mockResolvedValue({ ok: true }),
     getGitDiff: vi.fn().mockResolvedValue(""),
     getGitBranch: vi.fn().mockResolvedValue(null),
     terminalCreate: vi.fn().mockResolvedValue("mock-terminal-id"),

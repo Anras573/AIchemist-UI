@@ -9,7 +9,6 @@ import * as path from "path";
 import { createPatch } from "diff";
 
 import * as CH from "../ipc-channels";
-import * as tracer from "../tracer";
 import { createApprovalMcpServer } from "./mcp-tools";
 import { buildSkillsContext } from "./skills";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
@@ -374,24 +373,12 @@ export async function runClaudeAgentTurn(params: {
   let resultSessionId: string | null = null;
   let fullText = "";
 
-  // Map tool_use_id → tool_name/spanId so we can label results and end spans
+  // Map tool_use_id → tool_name so we can label results
   const toolUseIdToName = new Map<string, string>();
-  const toolUseIdToSpanId = new Map<string, string>();
   // Map tool_use_id → DB toolCallId for native tools (so we can update status on result)
   const toolUseIdToDbId = new Map<string, string>();
   // Map tool_use_id → { filePath, beforeContent } for native Write/Edit tracking
   const pendingFileChanges = new Map<string, { filePath: string; before: Buffer | null }>();
-
-  // ── Tracing: start turn span and relay updates to the renderer ───────────────
-  const turnStartMs = Date.now();
-  const turnSpanId = tracer.startSpan({
-    sessionId,
-    type: "turn",
-    name: agent ? `Agent: ${agent}` : "Agent Turn",
-    startMs: turnStartMs,
-  });
-  let firstTokenMs: number | null = null;
-  const unsubTracer = tracer.onSpanUpdate((span) => webContents.send(CH.SESSION_TRACE, span));
 
   try {
     for await (const msg of queryStream) {
@@ -403,7 +390,6 @@ export async function runClaudeAgentTurn(params: {
           if (delta?.["type"] === "text_delta") {
             const text = delta["text"];
             if (typeof text === "string" && text.length > 0) {
-              if (!firstTokenMs) firstTokenMs = Date.now();
               fullText += text;
               webContents.send(CH.SESSION_DELTA, {
                 session_id: sessionId,
@@ -427,15 +413,6 @@ export async function runClaudeAgentTurn(params: {
               : b.name;
             if (b.id) {
               toolUseIdToName.set(b.id, displayName);
-              const toolSpanId = tracer.startSpan({
-                sessionId,
-                type: "tool",
-                name: displayName,
-                parentId: turnSpanId,
-                startMs: Date.now(),
-                meta: { input: b.input ?? {} },
-              });
-              toolUseIdToSpanId.set(b.id, toolSpanId);
 
               // Capture before-content for native file write/edit tools
               const FILE_WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEditCell"]);
@@ -477,8 +454,6 @@ export async function runClaudeAgentTurn(params: {
           const b = block as { type: string; tool_use_id?: string; content?: unknown };
           if (b.type === "tool_result" && b.tool_use_id) {
             const toolName = toolUseIdToName.get(b.tool_use_id) ?? "unknown";
-            const spanId = toolUseIdToSpanId.get(b.tool_use_id);
-            if (spanId) tracer.endSpan(spanId, "success");
             const output = extractToolResultText(b.content);
             webContents.send(CH.SESSION_TOOL_RESULT, {
               session_id: sessionId,
@@ -541,14 +516,8 @@ export async function runClaudeAgentTurn(params: {
         }
       }
     }
-    tracer.endSpan(turnSpanId, "success", {
-      firstTokenLatencyMs: firstTokenMs ? firstTokenMs - turnStartMs : undefined,
-    });
   } catch (err) {
-    tracer.endSpan(turnSpanId, "error", { errorMessage: String(err) });
     throw err;
-  } finally {
-    unsubTracer();
   }
 
   // 5. Persist sdk_session_id if it changed or was assigned for the first time

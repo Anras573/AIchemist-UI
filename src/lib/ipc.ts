@@ -81,6 +81,8 @@ export const ipc = {
 
   // Traces
   getTraces: (sessionId?: string) => window.electronAPI.getTraces(sessionId),
+  bindTranscript: (sessionId: string) => window.electronAPI.bindTranscript(sessionId),
+  unbindTranscript: (sessionId: string) => window.electronAPI.unbindTranscript(sessionId),
 
   // Changes
   getGitDiff: (projectPath: string) => window.electronAPI.getGitDiff(projectPath),

@@ -17,7 +17,21 @@ import { resolveApproval, getPendingApprovalData, addToSessionAllowlist, compute
 import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
 import { runAgentTurn, getProvider } from "./agent/runner";
 import { cleanupCopilotSession } from "./agent/copilot";
-import { getSpans } from "./tracer";
+import type { TraceSpan } from "../src/types/index";
+import {
+  findTranscriptFile,
+  parseTranscript,
+  transcriptToSpans,
+  watchTranscript,
+  type TranscriptWatcher,
+} from "./claude-transcript";
+import {
+  findCopilotEventsFile,
+  parseCopilotEvents,
+  copilotEventsToSpans,
+  watchCopilotTranscript,
+  type CopilotTranscriptWatcher,
+} from "./copilot-transcript";
 import type { ProjectConfig } from "../src/types/index";
 import { parseMcpListOutput, readCopilotMcpServers, mergeMcpServers } from "./mcp-utils";
 import {
@@ -281,7 +295,98 @@ function registerHandlers(): void {  // ── Terminal ────────
   );
 
   // ── Traces ───────────────────────────────────────────────────────────────────
-  handle(CH.GET_TRACES, (_event, sessionId?: string) => getSpans(sessionId));
+
+  /**
+   * Per-session transcript watchers. The renderer binds one when a session
+   * is opened and unbinds on cleanup / session switch. We dispatch to the
+   * Claude or Copilot transcript reader based on which SDK id the session
+   * has persisted.
+   */
+  const claudeWatchers = new Map<string, TranscriptWatcher>();
+  const copilotWatchers = new Map<string, CopilotTranscriptWatcher>();
+
+  type TraceSource =
+    | { kind: "claude"; projectPath: string; sdkSessionId: string }
+    | { kind: "copilot"; copilotSessionId: string }
+    | null;
+
+  function resolveTraceSource(sessionId: string): TraceSource {
+    const row = db
+      .prepare(
+        `SELECT s.sdk_session_id AS sdkSessionId,
+                s.copilot_session_id AS copilotSessionId,
+                p.path AS projectPath
+         FROM sessions s
+         JOIN projects p ON p.id = s.project_id
+         WHERE s.id = ?`
+      )
+      .get(sessionId) as
+      | { sdkSessionId: string | null; copilotSessionId: string | null; projectPath: string }
+      | undefined;
+    if (!row) return null;
+    if (row.sdkSessionId) {
+      return { kind: "claude", projectPath: row.projectPath, sdkSessionId: row.sdkSessionId };
+    }
+    if (row.copilotSessionId) {
+      return { kind: "copilot", copilotSessionId: row.copilotSessionId };
+    }
+    return null;
+  }
+
+  async function loadTranscriptSpans(sessionId: string): Promise<TraceSpan[]> {
+    const src = resolveTraceSource(sessionId);
+    if (!src) return [];
+    if (src.kind === "claude") {
+      const file = await findTranscriptFile(src.projectPath, src.sdkSessionId);
+      if (!file) return [];
+      const entries = await parseTranscript(file);
+      return transcriptToSpans(entries, { sessionId, sdkSessionId: src.sdkSessionId });
+    }
+    const file = await findCopilotEventsFile(src.copilotSessionId);
+    if (!file) return [];
+    const events = await parseCopilotEvents(file);
+    return copilotEventsToSpans(events, { sessionId, copilotSessionId: src.copilotSessionId });
+  }
+
+  handle(CH.GET_TRACES, async (_event, sessionId?: string) => {
+    if (!sessionId) return [];
+    try {
+      return await loadTranscriptSpans(sessionId);
+    } catch {
+      return [];
+    }
+  });
+
+  handle(CH.TRACE_BIND_TRANSCRIPT, (_event, sessionId: string) => {
+    if (!sessionId) return { ok: false };
+    if (claudeWatchers.has(sessionId) || copilotWatchers.has(sessionId)) return { ok: true };
+
+    const src = resolveTraceSource(sessionId);
+    if (!src) return { ok: false, reason: "no-sdk-session-id" };
+
+    const onUpdate = (spans: TraceSpan[]) => {
+      const win = getMainWindow();
+      if (!win) return;
+      for (const span of spans) win.webContents.send(CH.SESSION_TRACE, span);
+    };
+
+    if (src.kind === "claude") {
+      const watcher = watchTranscript(src.projectPath, src.sdkSessionId, sessionId, { onUpdate });
+      claudeWatchers.set(sessionId, watcher);
+    } else {
+      const watcher = watchCopilotTranscript(src.copilotSessionId, sessionId, { onUpdate });
+      copilotWatchers.set(sessionId, watcher);
+    }
+    return { ok: true };
+  });
+
+  handle(CH.TRACE_UNBIND_TRANSCRIPT, (_event, sessionId: string) => {
+    const a = claudeWatchers.get(sessionId);
+    if (a) { a.close(); claudeWatchers.delete(sessionId); }
+    const b = copilotWatchers.get(sessionId);
+    if (b) { b.close(); copilotWatchers.delete(sessionId); }
+    return { ok: true };
+  });
 
   handle(CH.GET_GIT_BRANCH, (_event, projectPath: string) => {
     const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");

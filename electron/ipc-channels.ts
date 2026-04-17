@@ -72,6 +72,8 @@ export const SESSION_TRACE            = "session:trace";
 
 // ── Traces ────────────────────────────────────────────────────────────────────
 export const GET_TRACES             = "traces:get";
+export const TRACE_BIND_TRANSCRIPT   = "traces:bind-transcript";
+export const TRACE_UNBIND_TRANSCRIPT = "traces:unbind-transcript";
 
 // ── Changes (session file writes + git diff) ──────────────────────────────────
 export const SESSION_FILE_CHANGE    = "session:file_change";
