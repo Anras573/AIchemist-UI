@@ -133,46 +133,74 @@ describe("createCopilotEventsReader — incremental", () => {
 });
 
 describe("copilotEventsToSpans", () => {
-  it("pairs turn_start/turn_end and sets model from session.start", () => {
+  it("groups inner turns by interactionId into one user-visible turn", () => {
+    const IID = "user-1";
     const events: CopilotEvent[] = [
       { type: "session.start", timestamp: "2025-01-01T00:00:00.000Z", data: { selectedModel: "gpt-5" } },
-      { type: "assistant.turn_start", timestamp: "2025-01-01T00:00:01.000Z", data: { turnId: "0" } },
-      { type: "assistant.turn_end", timestamp: "2025-01-01T00:00:03.000Z", data: { turnId: "0" } },
+      { type: "user.message", timestamp: "2025-01-01T00:00:00.500Z", data: { content: "Hello there", interactionId: IID } },
+      { type: "assistant.turn_start", timestamp: "2025-01-01T00:00:01.000Z", data: { turnId: "0", interactionId: IID } },
+      { type: "assistant.turn_end", timestamp: "2025-01-01T00:00:02.000Z", data: { turnId: "0" } },
+      { type: "assistant.turn_start", timestamp: "2025-01-01T00:00:02.100Z", data: { turnId: "1", interactionId: IID } },
+      { type: "assistant.turn_end", timestamp: "2025-01-01T00:00:03.000Z", data: { turnId: "1" } },
     ];
-    const spans = copilotEventsToSpans(events, { sessionId: "app-1", copilotSessionId: SID });
-    expect(spans).toHaveLength(1);
-    expect(spans[0].type).toBe("turn");
-    expect(spans[0].status).toBe("success");
-    expect(spans[0].durationMs).toBe(2000);
-    expect((spans[0].meta as { model?: string }).model).toBe("gpt-5");
+    const turns = copilotEventsToSpans(events, { sessionId: "app-1", copilotSessionId: SID })
+      .filter((s) => s.type === "turn");
+    expect(turns).toHaveLength(1);
+    expect(turns[0].startMs).toBe(Date.parse("2025-01-01T00:00:00.500Z"));
+    expect(turns[0].endMs).toBe(Date.parse("2025-01-01T00:00:03.000Z"));
+    expect(turns[0].status).toBe("success");
+    expect((turns[0].meta as { model?: string }).model).toBe("gpt-5");
+    expect(turns[0].name).toContain("Hello there");
   });
 
-  it("running turn has no endMs and 'running' status until turn_end", () => {
+  it("starts a new turn when interactionId changes", () => {
     const events: CopilotEvent[] = [
-      { type: "assistant.turn_start", timestamp: "2025-01-01T00:00:01.000Z", data: { turnId: "0" } },
+      { type: "user.message", data: { content: "first", interactionId: "a" } },
+      { type: "assistant.turn_start", data: { turnId: "0", interactionId: "a" } },
+      { type: "assistant.turn_end", data: { turnId: "0" } },
+      { type: "user.message", data: { content: "second", interactionId: "b" } },
+      { type: "assistant.turn_start", data: { turnId: "1", interactionId: "b" } },
     ];
-    const spans = copilotEventsToSpans(events, { sessionId: "app-1", copilotSessionId: SID });
-    expect(spans[0].status).toBe("running");
-    expect(spans[0].endMs).toBeUndefined();
+    const turns = copilotEventsToSpans(events, { sessionId: "s", copilotSessionId: SID })
+      .filter((s) => s.type === "turn");
+    expect(turns).toHaveLength(2);
+    expect(turns[0].status).toBe("success"); // finalized when "b" started
+    expect(turns[1].status).toBe("running"); // no turn_end yet
   });
 
-  it("accumulates outputTokens and reasoningText on the active turn", () => {
+  it("running turn (no turn_end) stays running", () => {
+    const events: CopilotEvent[] = [
+      { type: "user.message", timestamp: "2025-01-01T00:00:01.000Z", data: { content: "hi", interactionId: "a" } },
+      { type: "assistant.turn_start", timestamp: "2025-01-01T00:00:01.100Z", data: { turnId: "0", interactionId: "a" } },
+    ];
+    const [turn] = copilotEventsToSpans(events, { sessionId: "s", copilotSessionId: SID });
+    expect(turn.status).toBe("running");
+    expect(turn.endMs).toBeUndefined();
+  });
+
+  it("accumulates outputTokens and reasoningText across inner turns of the same interaction", () => {
+    const IID = "a";
     const events: CopilotEvent[] = [
       { type: "session.start", data: { selectedModel: "gpt-5" } },
-      { type: "assistant.turn_start", timestamp: "2025-01-01T00:00:01.000Z", data: { turnId: "0" } },
-      { type: "assistant.message", data: { outputTokens: 40, reasoningText: "Thinking step 1" } },
-      { type: "assistant.message", data: { outputTokens: 60, reasoningText: "Thinking step 2" } },
-      { type: "assistant.turn_end", timestamp: "2025-01-01T00:00:02.000Z", data: { turnId: "0" } },
+      { type: "user.message", data: { content: "hi", interactionId: IID } },
+      { type: "assistant.turn_start", data: { turnId: "0", interactionId: IID } },
+      { type: "assistant.message", data: { outputTokens: 40, reasoningText: "Step 1", interactionId: IID } },
+      { type: "assistant.turn_end", data: { turnId: "0" } },
+      { type: "assistant.turn_start", data: { turnId: "1", interactionId: IID } },
+      { type: "assistant.message", data: { outputTokens: 60, reasoningText: "Step 2", interactionId: IID } },
+      { type: "assistant.turn_end", data: { turnId: "1" } },
     ];
     const [turn] = copilotEventsToSpans(events, { sessionId: "s", copilotSessionId: SID });
     const meta = turn.meta as { tokens: { output: number }; thinking: string };
     expect(meta.tokens.output).toBe(100);
-    expect(meta.thinking).toBe("Thinking step 1\n\nThinking step 2");
+    expect(meta.thinking).toBe("Step 1\n\nStep 2");
   });
 
-  it("pairs tool.execution_start + tool.execution_complete under the active turn", () => {
+  it("pairs tool.execution_start + tool.execution_complete under the active interaction's turn", () => {
+    const IID = "a";
     const events: CopilotEvent[] = [
-      { type: "assistant.turn_start", timestamp: "2025-01-01T00:00:01.000Z", data: { turnId: "0" } },
+      { type: "user.message", data: { content: "run ls", interactionId: IID } },
+      { type: "assistant.turn_start", data: { turnId: "0", interactionId: IID } },
       {
         type: "tool.execution_start",
         timestamp: "2025-01-01T00:00:02.000Z",
@@ -187,7 +215,7 @@ describe("copilotEventsToSpans", () => {
           result: { content: "file1.txt\nfile2.txt" },
         },
       },
-      { type: "assistant.turn_end", timestamp: "2025-01-01T00:00:04.000Z", data: { turnId: "0" } },
+      { type: "assistant.turn_end", data: { turnId: "0" } },
     ];
     const spans = copilotEventsToSpans(events, { sessionId: "s", copilotSessionId: SID });
     const turn = spans.find((s) => s.type === "turn")!;
@@ -200,9 +228,31 @@ describe("copilotEventsToSpans", () => {
     expect(meta.toolResult?.isError).toBe(false);
   });
 
+  it("tool spans from multiple inner turns all attach to the same outer turn", () => {
+    const IID = "a";
+    const events: CopilotEvent[] = [
+      { type: "user.message", data: { content: "hi", interactionId: IID } },
+      { type: "assistant.turn_start", data: { turnId: "0", interactionId: IID } },
+      { type: "tool.execution_start", data: { toolCallId: "t1", toolName: "bash" } },
+      { type: "tool.execution_complete", data: { toolCallId: "t1", success: true, result: { content: "" } } },
+      { type: "assistant.turn_end", data: { turnId: "0" } },
+      { type: "assistant.turn_start", data: { turnId: "1", interactionId: IID } },
+      { type: "tool.execution_start", data: { toolCallId: "t2", toolName: "grep" } },
+      { type: "tool.execution_complete", data: { toolCallId: "t2", success: true, result: { content: "" } } },
+      { type: "assistant.turn_end", data: { turnId: "1" } },
+    ];
+    const spans = copilotEventsToSpans(events, { sessionId: "s", copilotSessionId: SID });
+    const turns = spans.filter((s) => s.type === "turn");
+    const tools = spans.filter((s) => s.type === "tool");
+    expect(turns).toHaveLength(1);
+    expect(tools).toHaveLength(2);
+    expect(tools.every((t) => t.parentId === turns[0].id)).toBe(true);
+  });
+
   it("marks tool span as error when success=false and propagates isError", () => {
     const events: CopilotEvent[] = [
-      { type: "assistant.turn_start", data: { turnId: "0" } },
+      { type: "user.message", data: { content: "hi", interactionId: "a" } },
+      { type: "assistant.turn_start", data: { turnId: "0", interactionId: "a" } },
       { type: "tool.execution_start", data: { toolCallId: "tc_1", toolName: "bash" } },
       {
         type: "tool.execution_complete",
@@ -218,7 +268,8 @@ describe("copilotEventsToSpans", () => {
 
   it("unmatched tool.execution_start stays 'running'", () => {
     const events: CopilotEvent[] = [
-      { type: "assistant.turn_start", data: { turnId: "0" } },
+      { type: "user.message", data: { content: "hi", interactionId: "a" } },
+      { type: "assistant.turn_start", data: { turnId: "0", interactionId: "a" } },
       { type: "tool.execution_start", data: { toolCallId: "tc_1", toolName: "bash" } },
     ];
     const spans = copilotEventsToSpans(events, { sessionId: "s", copilotSessionId: SID });
@@ -229,13 +280,14 @@ describe("copilotEventsToSpans", () => {
 
   it("produces stable span ids across re-parses", () => {
     const events: CopilotEvent[] = [
-      { type: "assistant.turn_start", data: { turnId: "0" } },
+      { type: "user.message", data: { content: "hi", interactionId: "int-a" } },
+      { type: "assistant.turn_start", data: { turnId: "0", interactionId: "int-a" } },
       { type: "tool.execution_start", data: { toolCallId: "tc_1", toolName: "bash" } },
     ];
     const a = copilotEventsToSpans(events, { sessionId: "s", copilotSessionId: SID }).map((s) => s.id);
     const b = copilotEventsToSpans(events, { sessionId: "s", copilotSessionId: SID }).map((s) => s.id);
     expect(a).toEqual(b);
     expect(a).toContain("tool:tc_1");
-    expect(a).toContain(`turn:copilot:${SID}:0`);
+    expect(a).toContain(`turn:copilot:${SID}:int-a`);
   });
 });

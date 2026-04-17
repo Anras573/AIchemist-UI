@@ -157,10 +157,17 @@ export interface CopilotSpanOptions {
 /**
  * Build TraceSpans from a copilot events.jsonl event list.
  *
- * Turns are anchored at `assistant.turn_start`; all tool spans between that
- * and the matching `assistant.turn_end` (or next turn_start) belong to it.
- * outputTokens + reasoningText from each `assistant.message` in the turn
- * are accumulated into turn meta.
+ * Turns are anchored at `user.message.interactionId` — Copilot emits a
+ * cascade of inner `assistant.turn_start/end` pairs per user message (one
+ * per tool-call batch), all sharing the same `interactionId`. Grouping by
+ * interactionId yields one user-visible turn per user prompt, which wraps
+ * all the tool calls + reasoning that answered it.
+ *
+ * - Turn start = first event carrying the interactionId (user.message or
+ *   assistant.turn_start).
+ * - Turn end   = when a subsequent interactionId appears (previous turn is
+ *   finalized to "success"), or the event stream ends.
+ * - Tool spans + assistant.messages attach to the currently-active turn.
  */
 export function copilotEventsToSpans(
   events: CopilotEvent[],
@@ -168,20 +175,58 @@ export function copilotEventsToSpans(
 ): TraceSpan[] {
   const { sessionId, copilotSessionId } = opts;
 
-  // Track the active model (may change across session.start / session.resume).
   let model: string | undefined;
 
   const spans: TraceSpan[] = [];
-  const turnById = new Map<string, TraceSpan>();
+  const turnByInteraction = new Map<string, TraceSpan>();
   const toolById = new Map<string, TraceSpan>();
-  let currentTurnId: string | null = null;   // the turnId data field (e.g. "0")
+  let currentInteractionId: string | null = null;
   let currentTurnSpanId: string | null = null;
 
-  const turnSpanId = (turnId: string) => `turn:copilot:${copilotSessionId}:${turnId}`;
+  const turnSpanId = (interactionId: string) =>
+    `turn:copilot:${copilotSessionId}:${interactionId}`;
   const toolSpanId = (toolCallId: string) => `tool:${toolCallId}`;
 
+  // When an interaction rolls forward (new user.message or new interactionId
+  // observed on assistant.turn_start), finalize the previous turn.
+  const finalizePrevious = () => {
+    if (!currentInteractionId) return;
+    const prev = turnByInteraction.get(currentInteractionId);
+    if (prev && prev.status === "running") prev.status = "success";
+  };
+
+  // Open a new turn span for a user prompt / assistant interaction, or return
+  // the existing one if we've already seen this interactionId.
+  const ensureTurn = (interactionId: string, ts: number, namePreview?: string): TraceSpan => {
+    const existing = turnByInteraction.get(interactionId);
+    if (existing) {
+      if (namePreview && existing.name === "Agent Turn") existing.name = namePreview;
+      return existing;
+    }
+    finalizePrevious();
+    const span: TraceSpan = {
+      id: turnSpanId(interactionId),
+      sessionId,
+      type: "turn",
+      name: namePreview ?? "Agent Turn",
+      startMs: ts,
+      status: "running",
+      meta: {
+        model,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+        thinking: undefined as string | undefined,
+        interactionId,
+      },
+    };
+    spans.push(span);
+    turnByInteraction.set(interactionId, span);
+    currentInteractionId = interactionId;
+    currentTurnSpanId = span.id;
+    return span;
+  };
+
   for (const ev of events) {
-    const ts = ev.timestamp ? Date.parse(ev.timestamp) : undefined;
+    const ts = ev.timestamp ? Date.parse(ev.timestamp) : Date.now();
     const data = ev.data ?? {};
 
     switch (ev.type) {
@@ -190,46 +235,39 @@ export function copilotEventsToSpans(
         if (typeof data.selectedModel === "string") model = data.selectedModel;
         break;
       }
+      case "user.message": {
+        const interactionId = typeof data.interactionId === "string" ? data.interactionId : "";
+        if (!interactionId) break;
+        const content = typeof data.content === "string" ? data.content : "";
+        const preview = content.split("\n")[0]?.slice(0, 60).trim();
+        ensureTurn(interactionId, ts, preview ? `"${preview}${content.length > (preview?.length ?? 0) ? "…" : ""}"` : undefined);
+        break;
+      }
       case "assistant.turn_start": {
-        const turnId = String(data.turnId ?? "");
-        if (!turnId) break;
-        const span: TraceSpan = {
-          id: turnSpanId(turnId),
-          sessionId,
-          type: "turn",
-          name: "Agent Turn",
-          startMs: ts ?? Date.now(),
-          status: "running",
-          meta: {
-            model,
-            tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
-            thinking: undefined as string | undefined,
-            turnId,
-          },
-        };
-        spans.push(span);
-        turnById.set(turnId, span);
-        currentTurnId = turnId;
-        currentTurnSpanId = span.id;
+        const interactionId = typeof data.interactionId === "string" ? data.interactionId : "";
+        if (!interactionId) break;
+        ensureTurn(interactionId, ts);
         break;
       }
       case "assistant.turn_end": {
-        const turnId = String(data.turnId ?? "");
-        const span = turnById.get(turnId);
+        // Inner-turn end — roll the outer turn's endMs forward. Do NOT mark
+        // it success yet (more inner turns may follow within the same
+        // interaction). Finalization happens when the next interaction
+        // starts or the stream ends.
+        const span = currentTurnSpanId ? turnByInteraction.get(currentInteractionId ?? "") : undefined;
         if (span) {
-          span.endMs = ts ?? Date.now();
+          span.endMs = ts;
           span.durationMs = Math.max(0, span.endMs - span.startMs);
-          // Status promotes to success unless it already ended in error.
-          if (span.status === "running") span.status = "success";
-        }
-        if (turnId === currentTurnId) {
-          currentTurnId = null;
-          currentTurnSpanId = null;
         }
         break;
       }
       case "assistant.message": {
-        const span = currentTurnSpanId ? turnById.get(currentTurnId ?? "") : undefined;
+        const interactionId = typeof data.interactionId === "string" ? data.interactionId : "";
+        const span = interactionId
+          ? turnByInteraction.get(interactionId)
+          : currentTurnSpanId
+          ? turnByInteraction.get(currentInteractionId ?? "")
+          : undefined;
         if (!span) break;
         const meta = (span.meta ?? {}) as Record<string, unknown>;
         const tokens = meta.tokens as { input: number; output: number; cacheRead: number; cacheCreation: number } | undefined;
@@ -254,7 +292,7 @@ export function copilotEventsToSpans(
           sessionId,
           type: "tool",
           name: toolName,
-          startMs: ts ?? Date.now(),
+          startMs: ts,
           status: "running",
           meta: { input: data.arguments ?? {}, toolCallId },
         };
@@ -266,7 +304,7 @@ export function copilotEventsToSpans(
         const toolCallId = String(data.toolCallId ?? "");
         const span = toolById.get(toolCallId);
         if (!span) break;
-        span.endMs = ts ?? Date.now();
+        span.endMs = ts;
         span.durationMs = Math.max(0, span.endMs - span.startMs);
         const success = !!data.success;
         span.status = success ? "success" : "error";
@@ -281,6 +319,15 @@ export function copilotEventsToSpans(
       }
       default:
         break;
+    }
+  }
+
+  // End-of-stream: if the current turn has any inner assistant.turn_end
+  // (i.e. endMs was set), consider it done; otherwise leave it running.
+  if (currentInteractionId) {
+    const cur = turnByInteraction.get(currentInteractionId);
+    if (cur && cur.status === "running" && cur.endMs !== undefined) {
+      cur.status = "success";
     }
   }
 
