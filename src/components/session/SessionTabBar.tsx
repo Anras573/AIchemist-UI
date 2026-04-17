@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from "react";
-import { Bot } from "lucide-react";
+import { Bot, ChevronDown, Plus } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { cn } from "@/lib/utils";
@@ -7,6 +7,12 @@ import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/session/StatusDot";
 import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
 import { getModelLabel, getLogoProvider } from "@/lib/models";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 
 interface SessionTabBarProps {
   projectId: string;
@@ -40,9 +46,9 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  const handleNewSession = useCallback(async () => {
+  const handleNewSession = useCallback(async (providerOverride?: string) => {
     try {
-      const session = await ipc.createSession(projectId);
+      const session = await ipc.createSession(projectId, providerOverride);
       addSession(session);
       setActiveSession(session.id);
     } catch (err) {
@@ -124,16 +130,36 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
         })}
       </div>
 
-      {/* New session button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-9 w-9 flex-shrink-0 text-muted-foreground hover:text-foreground rounded-none"
-        onClick={handleNewSession}
-        title="New session"
-      >
-        +
-      </Button>
+      {/* New session split-button: primary + uses project default; chevron opens a provider menu */}
+      <div className="flex items-center flex-shrink-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 text-muted-foreground hover:text-foreground rounded-none"
+          onClick={() => handleNewSession()}
+          title="New session (project default)"
+        >
+          <Plus className="size-4" />
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="h-9 px-1 flex items-center text-muted-foreground hover:text-foreground hover:bg-accent rounded-none border-none bg-transparent cursor-pointer"
+            title="New session with specific provider"
+          >
+            <ChevronDown className="size-3" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => handleNewSession("anthropic")}>
+              <ModelSelectorLogo provider="anthropic" className="size-3.5" />
+              <span>New Claude Session</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleNewSession("copilot")}>
+              <ModelSelectorLogo provider="github-copilot" className="size-3.5" />
+              <span>New Copilot Session</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   );
 }

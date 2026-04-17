@@ -27,7 +27,7 @@ export interface ElectronAPI {
   saveProjectConfig: (id: string, config: import("../src/types").ProjectConfig) => Promise<void>;
 
   // ── Sessions ──────────────────────────────────────────────────────────────
-  createSession: (projectId: string) => Promise<import("../src/types").Session>;
+  createSession: (projectId: string, providerOverride?: string) => Promise<import("../src/types").Session>;
   listSessions: (projectId: string) => Promise<import("../src/types").Session[]>;
   getSession: (sessionId: string) => Promise<import("../src/types").Session>;
   deleteSession: (sessionId: string) => Promise<void>;
@@ -111,7 +111,8 @@ const api: ElectronAPI = {
   getProjectConfig: (id) => ipcRenderer.invoke(CH.GET_PROJECT_CONFIG, id),
   saveProjectConfig: (id, config) => ipcRenderer.invoke(CH.SAVE_PROJECT_CONFIG, id, config),
 
-  createSession: (projectId) => ipcRenderer.invoke(CH.CREATE_SESSION, projectId),
+  createSession: (projectId, providerOverride) =>
+    ipcRenderer.invoke(CH.CREATE_SESSION, { projectId, providerOverride }),
   listSessions: (projectId) => ipcRenderer.invoke(CH.LIST_SESSIONS, projectId),
   getSession: (sessionId) => ipcRenderer.invoke(CH.GET_SESSION, sessionId),
   deleteSession: (sessionId) => ipcRenderer.invoke(CH.DELETE_SESSION, sessionId),

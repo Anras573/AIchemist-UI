@@ -19,7 +19,8 @@ export const ipc = {
     window.electronAPI.saveProjectConfig(id, config),
 
   // Sessions
-  createSession: (projectId: string) => window.electronAPI.createSession(projectId),
+  createSession: (projectId: string, providerOverride?: string) =>
+    window.electronAPI.createSession(projectId, providerOverride),
   listSessions: (projectId: string) => window.electronAPI.listSessions(projectId),
   getSession: (sessionId: string) => window.electronAPI.getSession(sessionId),
   deleteSession: (sessionId: string) => window.electronAPI.deleteSession(sessionId),

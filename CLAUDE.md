@@ -118,6 +118,14 @@ SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `me
 
 Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
 
+### Session provider lock
+
+Each session is locked to a single provider (`"anthropic"` or `"copilot"`) at creation. Switching providers mid-session loses context because each SDK has its own session id (`sdk_session_id` vs `copilot_session_id`) and cannot resume the other's state.
+
+- **Creation:** `SessionTabBar` shows a split button — the main `+` creates with the project default, the chevron opens a menu to explicitly pick Claude or Copilot. The renderer calls `ipc.createSession(projectId, providerOverride?)`; `CREATE_SESSION` handler accepts either a bare `projectId` string (back-compat) or `{ projectId, providerOverride }`, and seeds a sensible default model when the override differs from the project default.
+- **In-session:** `ModelPickerButton` filters its groups to the session's provider — you cannot switch SDK from the model picker. Only models within the locked SDK are listed. Copilot models are fetched lazily only when the session is Copilot-locked.
+- **Runtime:** `AGENT_SEND` already resolves `session.provider ?? project.config.provider` before dispatching, so no runner changes were needed.
+
 ---
 
 ## Traces (transcript-based)

@@ -462,11 +462,28 @@ function registerHandlers(): void {  // ── Terminal ────────
   );
 
   // ── Sessions ─────────────────────────────────────────────────────────────────
-  handle(CH.CREATE_SESSION, (_event, projectId: string) => {
-    // Inherit the project's current provider + model so new sessions start
-    // with the right model without the user having to configure it again.
+  handle(CH.CREATE_SESSION, (_event, payload: string | { projectId: string; providerOverride?: string }) => {
+    // Backward-compat: older callers pass projectId as a string; newer ones
+    // pass { projectId, providerOverride } to explicitly lock the session's
+    // provider at creation time (e.g. from the split-button new-session menu).
+    const projectId = typeof payload === "string" ? payload : payload.projectId;
+    const providerOverride = typeof payload === "string" ? undefined : payload.providerOverride;
+
     const project = listProjects(db).find((p) => p.id === projectId);
-    return createSession(db, projectId, project?.config.provider ?? null, project?.config.model ?? null);
+    const provider = providerOverride ?? project?.config.provider ?? null;
+
+    // When the user explicitly picks a provider different from the project
+    // default, we can't reuse project.config.model (it belongs to the other
+    // SDK). Anthropic has a known default list; Copilot models are dynamic
+    // so we leave model null and let the runner fall back to the SDK default.
+    let model: string | null;
+    if (providerOverride && providerOverride !== project?.config.provider) {
+      model = provider === "anthropic" ? "claude-sonnet-4-6" : null;
+    } else {
+      model = project?.config.model ?? null;
+    }
+
+    return createSession(db, projectId, provider, model);
   });
   handle(CH.LIST_SESSIONS, (_event, projectId: string) =>
     listSessions(db, projectId)

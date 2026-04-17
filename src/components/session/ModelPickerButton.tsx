@@ -10,7 +10,6 @@ import {
   ModelSelectorList,
   ModelSelectorLogo,
   ModelSelectorName,
-  ModelSelectorSeparator,
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -30,9 +29,11 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
   const [open, setOpen] = useState(false);
   const [copilotModels, setCopilotModels] = useState<ModelOption[]>([]);
 
-  // Fetch Copilot models once when the picker is first opened
+  // Provider is locked at session creation time. Only load Copilot models if
+  // this session is a Copilot session — saves an IPC round trip for Claude
+  // sessions and avoids showing the other SDK's models at all.
   useEffect(() => {
-    if (!open || copilotModels.length > 0) return;
+    if (!open || provider !== "copilot" || copilotModels.length > 0) return;
     ipc.getCopilotModels()
       .then((models) => {
         setCopilotModels(
@@ -45,9 +46,12 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
         );
       })
       .catch(() => {/* Copilot not configured — silently hide the group */});
-  }, [open, copilotModels.length]);
+  }, [open, provider, copilotModels.length]);
 
-  const allModels = [...ANTHROPIC_MODELS, ...copilotModels];
+  // Only show the group matching the session's locked provider.
+  const visibleAnthropic = provider === "anthropic" ? ANTHROPIC_MODELS : [];
+  const visibleCopilot = provider === "copilot" ? copilotModels : [];
+  const allModels = [...visibleAnthropic, ...visibleCopilot];
 
   const current =
     allModels.find((m) => m.provider === provider && m.model === model) ??
@@ -95,43 +99,42 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
         <ModelSelectorList>
           <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
 
-          <ModelSelectorGroup heading="Anthropic">
-            {ANTHROPIC_MODELS.map((option) => {
-              const isActive = option.provider === provider && option.model === model;
-              return (
-                <ModelSelectorItem
-                  key={option.model}
-                  value={`${option.label} ${option.provider}`}
-                  onSelect={() => handleSelect(option)}
-                >
-                  <ModelSelectorLogo provider={option.logoProvider} />
-                  <ModelSelectorName>{option.label}</ModelSelectorName>
-                  {isActive && <span className="text-xs text-primary">✓</span>}
-                </ModelSelectorItem>
-              );
-            })}
-          </ModelSelectorGroup>
+          {visibleAnthropic.length > 0 && (
+            <ModelSelectorGroup heading="Anthropic">
+              {visibleAnthropic.map((option) => {
+                const isActive = option.provider === provider && option.model === model;
+                return (
+                  <ModelSelectorItem
+                    key={option.model}
+                    value={`${option.label} ${option.provider}`}
+                    onSelect={() => handleSelect(option)}
+                  >
+                    <ModelSelectorLogo provider={option.logoProvider} />
+                    <ModelSelectorName>{option.label}</ModelSelectorName>
+                    {isActive && <span className="text-xs text-primary">✓</span>}
+                  </ModelSelectorItem>
+                );
+              })}
+            </ModelSelectorGroup>
+          )}
 
-          {copilotModels.length > 0 && (
-            <>
-              <ModelSelectorSeparator />
-              <ModelSelectorGroup heading="GitHub Copilot">
-                {copilotModels.map((option) => {
-                  const isActive = option.provider === provider && option.model === model;
-                  return (
-                    <ModelSelectorItem
-                      key={option.model}
-                      value={`${option.label} ${option.provider}`}
-                      onSelect={() => handleSelect(option)}
-                    >
-                      <ModelSelectorLogo provider={option.logoProvider} />
-                      <ModelSelectorName>{option.label}</ModelSelectorName>
-                      {isActive && <span className="text-xs text-primary">✓</span>}
-                    </ModelSelectorItem>
-                  );
-                })}
-              </ModelSelectorGroup>
-            </>
+          {visibleCopilot.length > 0 && (
+            <ModelSelectorGroup heading="GitHub Copilot">
+              {visibleCopilot.map((option) => {
+                const isActive = option.provider === provider && option.model === model;
+                return (
+                  <ModelSelectorItem
+                    key={option.model}
+                    value={`${option.label} ${option.provider}`}
+                    onSelect={() => handleSelect(option)}
+                  >
+                    <ModelSelectorLogo provider={option.logoProvider} />
+                    <ModelSelectorName>{option.label}</ModelSelectorName>
+                    {isActive && <span className="text-xs text-primary">✓</span>}
+                  </ModelSelectorItem>
+                );
+              })}
+            </ModelSelectorGroup>
           )}
         </ModelSelectorList>
       </ModelSelectorContent>

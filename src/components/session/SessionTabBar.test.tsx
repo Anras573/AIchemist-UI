@@ -77,7 +77,7 @@ describe("SessionTabBar", () => {
     });
   });
 
-  it("calls ipc.createSession when the new-session button is clicked", async () => {
+  it("calls ipc.createSession with no provider override when the main new-session button is clicked", async () => {
     vi.mocked(window.electronAPI.listSessions).mockResolvedValue([]);
     vi.mocked(window.electronAPI.createSession).mockResolvedValue(
       makeSession({ id: "sess-new", title: "New session" })
@@ -85,10 +85,38 @@ describe("SessionTabBar", () => {
 
     renderWithProviders(<SessionTabBar projectId="proj-1" />);
 
-    const newBtn = screen.getByTitle("New session");
+    const newBtn = screen.getByTitle("New session (project default)");
     await userEvent.click(newBtn);
 
-    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1");
+    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", undefined);
+  });
+
+  it("calls ipc.createSession with 'anthropic' when New Claude Session is picked from the split-button menu", async () => {
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([]);
+    vi.mocked(window.electronAPI.createSession).mockResolvedValue(
+      makeSession({ id: "sess-new", title: "New session" })
+    );
+
+    renderWithProviders(<SessionTabBar projectId="proj-1" />);
+
+    await userEvent.click(screen.getByTitle("New session with specific provider"));
+    await userEvent.click(await screen.findByText("New Claude Session"));
+
+    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "anthropic");
+  });
+
+  it("calls ipc.createSession with 'copilot' when New Copilot Session is picked", async () => {
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([]);
+    vi.mocked(window.electronAPI.createSession).mockResolvedValue(
+      makeSession({ id: "sess-new", title: "New session" })
+    );
+
+    renderWithProviders(<SessionTabBar projectId="proj-1" />);
+
+    await userEvent.click(screen.getByTitle("New session with specific provider"));
+    await userEvent.click(await screen.findByText("New Copilot Session"));
+
+    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "copilot");
   });
 
   it("reflects session status via StatusDot title attribute", async () => {
