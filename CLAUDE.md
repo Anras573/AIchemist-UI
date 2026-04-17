@@ -120,6 +120,44 @@ Migrations in `electron/db.ts` are **append-only** — never modify existing SQL
 
 ---
 
+## Traces (transcript-based)
+
+The Traces tab does **not** use an in-memory tracer. Instead, both providers write structured session transcripts to disk, and we parse them on demand (non-blocking reads) into `TraceSpan[]`.
+
+| Provider | Transcript path | Parser |
+|---|---|---|
+| Claude | `~/.claude/projects/<encoded-cwd>/<sdk_session_id>.jsonl` | `electron/claude-transcript.ts` |
+| Copilot | `~/.copilot/session-state/<copilot_session_id>/events.jsonl` | `electron/copilot-transcript.ts` |
+
+### IPC surface
+
+- **`GET_TRACES({ sessionId })`** in `electron/main.ts` — dispatches by provider: looks up `sessions.sdk_session_id` (Claude) or `sessions.copilot_session_id` (Copilot) and parses the corresponding file.
+- **`TRACE_BIND_TRANSCRIPT({ sessionId })`** — sets up a `chokidar` watcher on the transcript file and streams incremental spans via `SESSION_TRACE_UPDATE`. The `TracesPanel` calls this when the tab opens.
+
+### Copilot turn grouping — anchor on `interactionId`, not `turnId`
+
+Copilot emits a cascade of inner `assistant.turn_start` / `assistant.turn_end` pairs per user prompt — one per tool-call batch. All inner turns for a single user message share the same `interactionId`, while `turnId` increments per inner step.
+
+`copilotEventsToSpans()` anchors turn spans on `interactionId` so a single user prompt becomes a single user-visible turn that wraps the full chain of reasoning + tool calls:
+
+- Turn span id: `turn:copilot:<sid>:<interactionId>`
+- Tool spans use `currentTurnSpanId` as `parentId` regardless of which inner `turn_start` they arrived under
+- `outputTokens` and `reasoningText` from all inner `assistant.message` events with the same `interactionId` accumulate onto the single turn
+- The previous interaction's turn finalizes to `success` when a new `user.message` with a different `interactionId` appears
+- End-of-stream promotes the last turn to `success` iff it saw at least one `assistant.turn_end`
+
+**If you add a new Copilot event type** that carries an `interactionId`, route it through the current-interaction map rather than `currentTurnId`, or the tab will regress to one-row-per-inner-turn.
+
+### Claude transcripts
+
+Claude's `.jsonl` format has one line per SDK message. `claude-transcript.ts` builds turns from `user`/`assistant` blocks and tool spans from `tool_use` / `tool_result` content items. Stable ids: `turn:claude:<sdk_session_id>:<messageIndex>` and `tool:<tool_use_id>`.
+
+### Session ID lookup
+
+Traces only appear once the session has run at least one turn — that's when `sdk_session_id` / `copilot_session_id` is first populated. Before then, `GET_TRACES` returns an empty array. Don't add a fallback that synthesizes spans from `tool_calls` rows; the transcript is the source of truth.
+
+---
+
 ## Agent Selection
 
 The app has a VS Code-style **agent picker** in the input bar (`src/components/session/AgentPickerButton.tsx`). It replaces the old Agents tab (which is now the **Skills** tab, showing only skills/tools from `.agents/skills/`).

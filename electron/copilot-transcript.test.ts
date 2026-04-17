@@ -278,6 +278,34 @@ describe("copilotEventsToSpans", () => {
     expect(tool.endMs).toBeUndefined();
   });
 
+  it("handles assistant.turn_start without a preceding user.message (resume mid-interaction)", () => {
+    const events: CopilotEvent[] = [
+      { type: "session.resume", data: { selectedModel: "gpt-5" } },
+      { type: "assistant.turn_start", timestamp: "2025-01-01T00:00:01.000Z", data: { turnId: "5", interactionId: "mid" } },
+      { type: "tool.execution_start", data: { toolCallId: "t1", toolName: "bash" } },
+      { type: "tool.execution_complete", data: { toolCallId: "t1", success: true, result: { content: "" } } },
+      { type: "assistant.turn_end", timestamp: "2025-01-01T00:00:02.000Z", data: { turnId: "5" } },
+    ];
+    const spans = copilotEventsToSpans(events, { sessionId: "s", copilotSessionId: SID });
+    const turn = spans.find((s) => s.type === "turn")!;
+    const tool = spans.find((s) => s.type === "tool")!;
+    expect(turn.id).toBe(`turn:copilot:${SID}:mid`);
+    expect(turn.startMs).toBe(Date.parse("2025-01-01T00:00:01.000Z"));
+    expect(turn.status).toBe("success");
+    expect(tool.parentId).toBe(turn.id);
+  });
+
+  it("ignores events with missing interactionId", () => {
+    const events: CopilotEvent[] = [
+      // Malformed — no interactionId on any of these.
+      { type: "user.message", data: { content: "orphan" } },
+      { type: "assistant.turn_start", data: { turnId: "0" } },
+      { type: "assistant.turn_end", data: { turnId: "0" } },
+    ];
+    const spans = copilotEventsToSpans(events, { sessionId: "s", copilotSessionId: SID });
+    expect(spans.filter((s) => s.type === "turn")).toHaveLength(0);
+  });
+
   it("produces stable span ids across re-parses", () => {
     const events: CopilotEvent[] = [
       { type: "user.message", data: { content: "hi", interactionId: "int-a" } },
