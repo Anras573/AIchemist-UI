@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from "react";
 import { Bot, ChevronDown, Plus } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
+import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,12 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
   const ipc = useIpc();
   const { sessions, activeSessionId, sessionAgents, mergeSessions, setActiveSession, addSession, removeSession } =
     useSessionStore();
+  const projects = useProjectStore((s) => s.projects);
+  const defaultProvider = projects.find((p) => p.id === projectId)?.config.provider ?? null;
+  const defaultProviderLabel =
+    defaultProvider === "anthropic" ? "Claude" : defaultProvider === "copilot" ? "Copilot" : null;
+  const defaultLogoProvider =
+    defaultProvider === "anthropic" ? "anthropic" : defaultProvider === "copilot" ? "github-copilot" : null;
 
   const projectSessions = Object.values(sessions)
     .filter((s) => s.project_id === projectId)
@@ -134,12 +141,19 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
       <div className="flex items-center flex-shrink-0">
         <Button
           variant="ghost"
-          size="icon"
-          className="h-9 w-9 text-muted-foreground hover:text-foreground rounded-none"
+          size="sm"
+          className="h-9 px-2 gap-1.5 text-muted-foreground hover:text-foreground rounded-none"
           onClick={() => handleNewSession()}
-          title="New session (project default)"
+          title={
+            defaultProviderLabel
+              ? `New session (${defaultProviderLabel} — project default)`
+              : "New session (project default)"
+          }
         >
           <Plus className="size-4" />
+          {defaultLogoProvider && (
+            <ModelSelectorLogo provider={defaultLogoProvider} className="size-3.5 opacity-80" />
+          )}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -152,10 +166,16 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
             <DropdownMenuItem onClick={() => handleNewSession("anthropic")}>
               <ModelSelectorLogo provider="anthropic" className="size-3.5" />
               <span>New Claude Session</span>
+              {defaultProvider === "anthropic" && (
+                <span className="ml-auto text-[10px] text-muted-foreground">default</span>
+              )}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => handleNewSession("copilot")}>
               <ModelSelectorLogo provider="github-copilot" className="size-3.5" />
               <span>New Copilot Session</span>
+              {defaultProvider === "copilot" && (
+                <span className="ml-auto text-[10px] text-muted-foreground">default</span>
+              )}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

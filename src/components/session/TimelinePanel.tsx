@@ -25,6 +25,7 @@ import {
   ReasoningContent,
 } from "@/components/ai-elements/reasoning";
 import { Button } from "@/components/ui/button";
+import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
 import { AgentPickerButton } from "./AgentPickerButton";
 import { ModelPickerButton } from "./ModelPickerButton";
 import {
@@ -208,13 +209,15 @@ function CompactionMarker({ event }: { event: CompactionEvent }) {
 interface TimelinePanelProps {
   /** Called by Phase 4 when the user submits a message. */
   onSendMessage?: (text: string, oneshotSkills?: string[]) => void;
-  /** Called when the user clicks "Create new session" from the empty state. */
-  onNewSession?: () => void;
+  /** Called when the user clicks "Create new session" from the empty state. Optional provider override locks the new session to Claude or Copilot. */
+  onNewSession?: (providerOverride?: string) => void;
 }
 
 export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProps) {
   const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking } = useSessionStore();
-  const { activeProjectId } = useProjectStore();
+  const { activeProjectId, projects } = useProjectStore();
+  const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
+  const defaultProvider = activeProject?.config.provider ?? null;
   const session = activeSessionId ? sessions[activeSessionId] : null;
   const streaming = activeSessionId ? (streamingText[activeSessionId] ?? "") : "";
   const toolCalls = activeSessionId ? (liveToolCalls[activeSessionId] ?? []) : [];
@@ -245,12 +248,39 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
           <ConversationContent>
             <ConversationEmptyState title="No sessions yet" description="Create a new session to get started">
               {onNewSession && (
-                <button
-                  onClick={onNewSession}
-                  className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-                >
-                  Create a new session
-                </button>
+                <div className="flex flex-col items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => onNewSession("anthropic")}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
+                        defaultProvider === "anthropic"
+                          ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90"
+                          : "bg-background text-foreground border-border hover:bg-accent"
+                      )}
+                    >
+                      <ModelSelectorLogo provider="anthropic" className="size-3.5" />
+                      New Claude Session
+                    </button>
+                    <button
+                      onClick={() => onNewSession("copilot")}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
+                        defaultProvider === "copilot"
+                          ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90"
+                          : "bg-background text-foreground border-border hover:bg-accent"
+                      )}
+                    >
+                      <ModelSelectorLogo provider="github-copilot" className="size-3.5" />
+                      New Copilot Session
+                    </button>
+                  </div>
+                  {defaultProvider && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Project default: {defaultProvider === "anthropic" ? "Claude" : "Copilot"}
+                    </p>
+                  )}
+                </div>
               )}
             </ConversationEmptyState>
           </ConversationContent>
@@ -346,7 +376,7 @@ interface InputBarProps {
   disabled?: boolean;
   placeholder?: string;
   onSend?: (text: string, oneshotSkills?: string[]) => void;
-  onNewSession?: () => void;
+  onNewSession?: (providerOverride?: string) => void;
 }
 
 /** Outer shell — provides the controlled text context for the inner bar. */

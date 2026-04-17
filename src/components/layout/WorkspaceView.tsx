@@ -35,16 +35,16 @@ export function WorkspaceView() {
     }
   }, [tabSwitchRequest, clearTabSwitchRequest]);
 
-  const handleNewSession = useCallback(async () => {
+  const handleNewSession = useCallback(async (providerOverride?: string) => {
     if (!activeProjectId) return;
     try {
-      const session = await ipc.createSession(activeProjectId);
+      const session = await ipc.createSession(activeProjectId, providerOverride);
       addSession(session);
       setActiveSession(session.id);
     } catch (err) {
       console.error("create_session failed:", err);
     }
-  }, [activeProjectId, addSession, setActiveSession]);
+  }, [activeProjectId, addSession, setActiveSession, ipc]);
 
   if (!activeProject) {
     return (
