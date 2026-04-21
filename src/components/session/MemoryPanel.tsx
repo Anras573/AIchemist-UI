@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { FileText } from "lucide-react";
+import { FileText, Brain } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
+import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 
 interface MemoryFile {
@@ -16,13 +17,19 @@ interface MemoryPanelProps {
 /**
  * Lists Claude memory files (~/.claude/projects/<sanitized-cwd>/memory/*.md)
  * for the active project. Read-only — clicking a file opens it in the
- * shared FileViewer via the parent ContextPanel.
+ * shared FileViewer via the parent ContextPanel. Memory is Claude-specific;
+ * Copilot sessions show a "not available" placeholder.
  */
 export function MemoryPanel({ projectPath, onFileOpen }: MemoryPanelProps) {
   const ipc = useIpc();
+  const provider = useActiveSessionProvider();
   const [files, setFiles] = useState<MemoryFile[] | null>(null);
 
   useEffect(() => {
+    if (provider && provider !== "anthropic") {
+      setFiles([]);
+      return;
+    }
     let cancelled = false;
     setFiles(null);
     ipc
@@ -36,7 +43,16 @@ export function MemoryPanel({ projectPath, onFileOpen }: MemoryPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [projectPath]);
+  }, [projectPath, provider]);
+
+  if (provider && provider !== "anthropic") {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs px-3 text-center">
+        <Brain className="h-8 w-8 opacity-30" />
+        <span>Memory files are only available for Claude sessions.</span>
+      </div>
+    );
+  }
 
   if (files === null) {
     return (

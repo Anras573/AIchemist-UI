@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { RefreshCw, Server, CheckCircle2, XCircle, MinusCircle, Loader2, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
+import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 import { McpConfigEditorDialog } from "./McpConfigEditorDialog";
 import type { McpServerInfo } from "@/types";
@@ -79,6 +80,7 @@ export function McpServersPanel() {
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const projectPath = activeProject?.path ?? "";
+  const provider = useActiveSessionProvider();
   const [servers, setServers] = useState<McpServerInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,21 +102,32 @@ export function McpServersPanel() {
 
   useEffect(() => { load(); }, [load]);
 
-  const connected = servers?.filter((s) => s.connected === true) ?? [];
-  const failed = servers?.filter((s) => s.connected === false) ?? [];
-  const unknown = servers?.filter((s) => s.connected === null) ?? [];
+  // Filter to only servers configured for the active session's provider.
+  // 'both' rows show in both. With no provider lock, show everything.
+  const visibleServers = useMemo(() => {
+    if (!servers) return null;
+    if (!provider) return servers;
+    const providerKey = provider === "anthropic" ? "claude" : "copilot";
+    return servers.filter(
+      (s) => s.source === providerKey || s.source === "both",
+    );
+  }, [servers, provider]);
+
+  const connected = visibleServers?.filter((s) => s.connected === true) ?? [];
+  const failed = visibleServers?.filter((s) => s.connected === false) ?? [];
+  const unknown = visibleServers?.filter((s) => s.connected === null) ?? [];
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Toolbar */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b shrink-0">
-        {servers !== null && !loading && (
+        {visibleServers !== null && !loading && (
           <span className="text-[11px] text-muted-foreground">
             {connected.length} connected · {failed.length} failed
             {unknown.length > 0 && ` · ${unknown.length} configured`}
           </span>
         )}
-        {(servers === null || loading) && (
+        {(visibleServers === null || loading) && (
           <span className="text-[11px] text-muted-foreground">Loading…</span>
         )}
         <WithTooltip label="Edit MCP config">
@@ -143,7 +156,7 @@ export function McpServersPanel() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        {loading && servers === null && (
+        {loading && visibleServers === null && (
           <div className="flex items-center justify-center h-full gap-2 text-muted-foreground text-xs">
             <Loader2 className="h-4 w-4 animate-spin" />
             Checking MCP servers…
@@ -152,16 +165,21 @@ export function McpServersPanel() {
         {error && (
           <div className="p-3 text-xs text-destructive">{error}</div>
         )}
-        {!loading && servers !== null && servers.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs">
+        {!loading && visibleServers !== null && visibleServers.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs px-3 text-center">
             <Server className="h-8 w-8 opacity-30" />
-            <span>No MCP servers found</span>
-            <span className="text-[11px]">Configure servers via <code className="font-mono">claude mcp add</code></span>
+            <span>
+              No MCP servers configured for{" "}
+              {provider === "copilot" ? "Copilot" : provider === "anthropic" ? "Claude" : "this session"}
+            </span>
+            {provider === "anthropic" && (
+              <span className="text-[11px]">Configure servers via <code className="font-mono">claude mcp add</code></span>
+            )}
           </div>
         )}
-        {servers && servers.length > 0 && (
+        {visibleServers && visibleServers.length > 0 && (
           <div className="divide-y-0">
-            {servers.map((s) => (
+            {visibleServers.map((s) => (
               <ServerCard key={`${s.source}:${s.name}`} server={s} />
             ))}
           </div>
