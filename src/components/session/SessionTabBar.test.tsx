@@ -67,8 +67,8 @@ describe("SessionTabBar", () => {
     renderWithProviders(<SessionTabBar projectId="proj-1" />);
     await screen.findByText("Closeable");
 
-    // The close button is a span[role=button] with title="Close session"
-    const closeBtn = screen.getByTitle("Close session");
+    // The close button is a span[role=button] with aria-label="Close session"
+    const closeBtn = screen.getByLabelText("Close session");
     await userEvent.click(closeBtn);
 
     expect(window.electronAPI.deleteSession).toHaveBeenCalledWith("sess-1");
@@ -85,7 +85,7 @@ describe("SessionTabBar", () => {
 
     renderWithProviders(<SessionTabBar projectId="proj-1" />);
 
-    const newBtn = screen.getByTitle("New session (project default)");
+    const newBtn = screen.getByLabelText("New session (project default)");
     await userEvent.click(newBtn);
 
     expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", undefined);
@@ -99,7 +99,7 @@ describe("SessionTabBar", () => {
 
     renderWithProviders(<SessionTabBar projectId="proj-1" />);
 
-    await userEvent.click(screen.getByTitle("New session with specific provider"));
+    await userEvent.click(screen.getByLabelText("New session with specific provider"));
     await userEvent.click(await screen.findByText("New Claude Session"));
 
     expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "anthropic");
@@ -113,13 +113,13 @@ describe("SessionTabBar", () => {
 
     renderWithProviders(<SessionTabBar projectId="proj-1" />);
 
-    await userEvent.click(screen.getByTitle("New session with specific provider"));
+    await userEvent.click(screen.getByLabelText("New session with specific provider"));
     await userEvent.click(await screen.findByText("New Copilot Session"));
 
     expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "copilot");
   });
 
-  it("reflects session status via StatusDot title attribute", async () => {
+  it("reflects session status via StatusDot aria-label", async () => {
     vi.mocked(window.electronAPI.listSessions).mockResolvedValue([
       makeSession({ id: "sess-1", title: "Running session", status: "running" }),
     ]);
@@ -127,7 +127,7 @@ describe("SessionTabBar", () => {
     renderWithProviders(<SessionTabBar projectId="proj-1" />);
 
     await screen.findByText("Running session");
-    expect(screen.getByTitle("running")).toBeInTheDocument();
+    expect(screen.getByLabelText("running")).toBeInTheDocument();
   });
 
   it("does not render tabs for sessions from a different project", async () => {

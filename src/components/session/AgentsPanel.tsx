@@ -5,6 +5,7 @@ import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { cn } from "@/lib/utils";
 import { AgentEditorModal } from "@/components/session/AgentEditorModal";
+import { WithTooltip } from "@/components/ui/with-tooltip";
 import type { AgentInfo, SkillInfo } from "@/types";
 
 // ── AgentCard ─────────────────────────────────────────────────────────────────
@@ -50,13 +51,15 @@ function AgentCard({
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={(e) => { e.stopPropagation(); onView(); }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
-              title="View agent"
-            >
-              <Eye className="h-2.5 w-2.5 text-muted-foreground" />
-            </button>
+            <WithTooltip label="View agent">
+              <button
+                onClick={(e) => { e.stopPropagation(); onView(); }}
+                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
+                aria-label="View agent"
+              >
+                <Eye className="h-2.5 w-2.5 text-muted-foreground" />
+              </button>
+            </WithTooltip>
             {isSelected && (
               <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
             )}

@@ -5,6 +5,7 @@ import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { WithTooltip } from "@/components/ui/with-tooltip";
 import { SkillEditorModal } from "@/components/session/SkillEditorModal";
 import type { SkillInfo } from "@/types";
 
@@ -66,21 +67,25 @@ function SkillCard({
             <SkillSourceBadge source={skill.source} plugin={skill.plugin} />
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={(e) => { e.stopPropagation(); onView(); }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
-              title="View skill"
-            >
-              <Eye className="h-2.5 w-2.5 text-muted-foreground" />
-            </button>
-            {skill.source !== "plugin" && (
+            <WithTooltip label="View skill">
               <button
-                onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                onClick={(e) => { e.stopPropagation(); onView(); }}
                 className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
-                title="Edit skill"
+                aria-label="View skill"
               >
-                <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+                <Eye className="h-2.5 w-2.5 text-muted-foreground" />
               </button>
+            </WithTooltip>
+            {skill.source !== "plugin" && (
+              <WithTooltip label="Edit skill">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
+                  aria-label="Edit skill"
+                >
+                  <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+                </button>
+              </WithTooltip>
             )}
             {active && <Check className="size-3 text-primary" />}
           </div>

@@ -15,6 +15,7 @@ import { ChangesPanel } from "./ChangesPanel";
 import { InteractiveTerminal } from "./InteractiveTerminal";
 import { McpServersPanel } from "./McpServersPanel";
 import { MemoryPanel } from "./MemoryPanel";
+import { WithTooltip } from "@/components/ui/with-tooltip";
 
 // ── Rust types ────────────────────────────────────────────────────────────────
 
@@ -219,27 +220,31 @@ export function ContextPanel({
       {/* Panel header */}
       <div className="flex items-center h-9 px-2 border-b shrink-0 bg-background gap-1">
         {(isViewingFile || isViewingMemory) && (
-          <button
-            onClick={() => {
-              if (isViewingFile) setViewingFile(null);
-              if (isViewingMemory) setViewingMemoryFile(null);
-            }}
-            className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-            title="Back"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </button>
+          <WithTooltip label="Back">
+            <button
+              onClick={() => {
+                if (isViewingFile) setViewingFile(null);
+                if (isViewingMemory) setViewingMemoryFile(null);
+              }}
+              className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+              aria-label="Back"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+          </WithTooltip>
         )}
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex-1 truncate">
           {headerLabel}
         </span>
-        <button
-          onClick={onClose}
-          className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-          title="Close panel"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <WithTooltip label="Close panel">
+          <button
+            onClick={onClose}
+            className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+            aria-label="Close panel"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </WithTooltip>
       </div>
 
       {/* Content */}

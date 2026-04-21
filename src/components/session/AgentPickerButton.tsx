@@ -19,6 +19,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { WithTooltip } from "@/components/ui/with-tooltip";
 import { cn } from "@/lib/utils";
 import { AgentEditorModal } from "@/components/session/AgentEditorModal";
 import type { AgentInfo } from "@/types";
@@ -172,22 +173,30 @@ export function AgentPickerButton() {
   return (
     <>
       <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger
-          className={cn(
-            "flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-colors",
-            "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            selectedAgent !== null
-              ? "border border-primary/50 bg-primary/10 text-primary hover:bg-primary/15 font-medium"
-              : "border border-border/60 bg-background/50 text-muted-foreground hover:text-foreground hover:bg-muted"
-          )}
-          title="Select agent"
+        <WithTooltip
+          label={
+            selectedAgent
+              ? `Active agent: ${selectedAgent} (click to change)`
+              : "Select an agent for this session"
+          }
         >
-            <Bot className="h-3 w-3 shrink-0" />
-            <span className="max-w-[100px] truncate">
-              {selectedAgent ?? "Default"}
-            </span>
-          <ChevronsUpDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
-        </DropdownMenuTrigger>
+          <DropdownMenuTrigger
+            className={cn(
+              "flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-colors",
+              "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              selectedAgent !== null
+                ? "border border-primary/50 bg-primary/10 text-primary hover:bg-primary/15 font-medium"
+                : "border border-border/60 bg-background/50 text-muted-foreground hover:text-foreground hover:bg-muted"
+            )}
+            aria-label="Select agent"
+          >
+              <Bot className="h-3 w-3 shrink-0" />
+              <span className="max-w-[100px] truncate">
+                {selectedAgent ?? "Default"}
+              </span>
+            <ChevronsUpDown className="h-2.5 w-2.5 opacity-50 shrink-0" />
+          </DropdownMenuTrigger>
+        </WithTooltip>
 
         <DropdownMenuContent
           side="top"
@@ -234,21 +243,25 @@ export function AgentPickerButton() {
                 {selectedAgent === agent.name && (
                   <Check className="h-3 w-3 text-primary shrink-0" />
                 )}
-                <button
-                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
-                  title="View agent"
-                  onClick={(e) => handleView(agent, e)}
-                >
-                  <Eye className="h-2.5 w-2.5 text-muted-foreground" />
-                </button>
-                {agent.editable !== false && agent.path && (
+                <WithTooltip label="View agent">
                   <button
                     className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
-                    title="Edit agent"
-                    onClick={(e) => handleEdit(agent, e)}
+                    aria-label="View agent"
+                    onClick={(e) => handleView(agent, e)}
                   >
-                    <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+                    <Eye className="h-2.5 w-2.5 text-muted-foreground" />
                   </button>
+                </WithTooltip>
+                {agent.editable !== false && agent.path && (
+                  <WithTooltip label="Edit agent">
+                    <button
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
+                      aria-label="Edit agent"
+                      onClick={(e) => handleEdit(agent, e)}
+                    >
+                      <Pencil className="h-2.5 w-2.5 text-muted-foreground" />
+                    </button>
+                  </WithTooltip>
                 )}
               </DropdownMenuItem>
             ))

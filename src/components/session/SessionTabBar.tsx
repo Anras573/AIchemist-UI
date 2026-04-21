@@ -5,6 +5,7 @@ import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { WithTooltip } from "@/components/ui/with-tooltip";
 import { StatusDot } from "@/components/session/StatusDot";
 import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
 import { getModelLabel, getLogoProvider } from "@/lib/models";
@@ -121,16 +122,18 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
                   </span>
                 )}
                 {/* Close button — visible on hover */}
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => handleDeleteSession(e, session.id)}
-                  onKeyDown={(e) => e.key === "Enter" && handleDeleteSession(e as unknown as React.MouseEvent, session.id)}
-                  className="ml-0.5 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity leading-none"
-                  title="Close session"
-                >
-                  ×
-                </span>
+                <WithTooltip label="Close session">
+                  <span
+                    role="button"
+                    aria-label="Close session"
+                    tabIndex={0}
+                    onClick={(e) => handleDeleteSession(e, session.id)}
+                    onKeyDown={(e) => e.key === "Enter" && handleDeleteSession(e as unknown as React.MouseEvent, session.id)}
+                    className="ml-0.5 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity leading-none"
+                  >
+                    ×
+                  </span>
+                </WithTooltip>
               </button>
             </div>
           );
@@ -139,29 +142,39 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
 
       {/* New session split-button: primary + uses project default; chevron opens a provider menu */}
       <div className="flex items-center flex-shrink-0">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-9 px-2 gap-1.5 text-muted-foreground hover:text-foreground rounded-none"
-          onClick={() => handleNewSession()}
-          title={
+        <WithTooltip
+          label={
             defaultProviderLabel
               ? `New session (${defaultProviderLabel} — project default)`
               : "New session (project default)"
           }
         >
-          <Plus className="size-4" />
-          {defaultLogoProvider && (
-            <ModelSelectorLogo provider={defaultLogoProvider} className="size-3.5 opacity-80" />
-          )}
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className="h-9 px-1 flex items-center text-muted-foreground hover:text-foreground hover:bg-accent rounded-none border-none bg-transparent cursor-pointer"
-            title="New session with specific provider"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 px-2 gap-1.5 text-muted-foreground hover:text-foreground rounded-none"
+            onClick={() => handleNewSession()}
+            aria-label={
+              defaultProviderLabel
+                ? `New session (${defaultProviderLabel} — project default)`
+                : "New session (project default)"
+            }
           >
-            <ChevronDown className="size-3" />
-          </DropdownMenuTrigger>
+            <Plus className="size-4" />
+            {defaultLogoProvider && (
+              <ModelSelectorLogo provider={defaultLogoProvider} className="size-3.5 opacity-80" />
+            )}
+          </Button>
+        </WithTooltip>
+        <DropdownMenu>
+          <WithTooltip label="New session with specific provider">
+            <DropdownMenuTrigger
+              className="h-9 px-1 flex items-center text-muted-foreground hover:text-foreground hover:bg-accent rounded-none border-none bg-transparent cursor-pointer"
+              aria-label="New session with specific provider"
+            >
+              <ChevronDown className="size-3" />
+            </DropdownMenuTrigger>
+          </WithTooltip>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => handleNewSession("anthropic")}>
               <ModelSelectorLogo provider="anthropic" className="size-3.5" />

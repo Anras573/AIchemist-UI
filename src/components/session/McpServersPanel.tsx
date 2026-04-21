@@ -3,6 +3,7 @@ import { RefreshCw, Server, CheckCircle2, XCircle, MinusCircle, Loader2, Setting
 import { cn } from "@/lib/utils";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
+import { WithTooltip } from "@/components/ui/with-tooltip";
 import { McpConfigEditorDialog } from "./McpConfigEditorDialog";
 import type { McpServerInfo } from "@/types";
 
@@ -116,24 +117,28 @@ export function McpServersPanel() {
         {(servers === null || loading) && (
           <span className="text-[11px] text-muted-foreground">Loading…</span>
         )}
-        <button
-          onClick={() => setEditorOpen(true)}
-          className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-auto"
-          title="Edit MCP config"
-        >
-          <Settings className="h-3.5 w-3.5" />
-        </button>
-        <button
-          onClick={load}
-          disabled={loading}
-          className={cn(
-            "flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
-            loading && "opacity-50 cursor-not-allowed"
-          )}
-          title="Refresh"
-        >
-          <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-        </button>
+        <WithTooltip label="Edit MCP config">
+          <button
+            onClick={() => setEditorOpen(true)}
+            className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-auto"
+            aria-label="Edit MCP config"
+          >
+            <Settings className="h-3.5 w-3.5" />
+          </button>
+        </WithTooltip>
+        <WithTooltip label="Refresh">
+          <button
+            onClick={load}
+            disabled={loading}
+            className={cn(
+              "flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
+              loading && "opacity-50 cursor-not-allowed"
+            )}
+            aria-label="Refresh"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+          </button>
+        </WithTooltip>
       </div>
 
       {/* Content */}

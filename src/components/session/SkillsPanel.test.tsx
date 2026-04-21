@@ -100,7 +100,7 @@ describe("SkillsPanel", () => {
 
     // Hover over the user skill card to reveal action buttons
     await user.hover(screen.getByText("brainstorming").closest("[class*='group']")!);
-    const editButtons = screen.getAllByTitle("Edit skill");
+    const editButtons = screen.getAllByLabelText("Edit skill");
     expect(editButtons).toHaveLength(1); // only user skill card has a pencil
   });
 
@@ -113,7 +113,7 @@ describe("SkillsPanel", () => {
     await waitFor(() => expect(screen.getByText("brainstorming")).toBeInTheDocument());
 
     // Eye buttons are rendered for both skill types (opacity-0 until hover, but present in DOM)
-    const viewButtons = screen.getAllByTitle("View skill");
+    const viewButtons = screen.getAllByLabelText("View skill");
     expect(viewButtons).toHaveLength(2);
   });
 

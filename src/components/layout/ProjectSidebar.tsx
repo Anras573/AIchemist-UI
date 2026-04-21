@@ -5,6 +5,7 @@ import { useSessionStore } from "@/lib/store/useSessionStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { WithTooltip } from "@/components/ui/with-tooltip";
 import { Settings, Settings2 } from "lucide-react";
 
 interface ProjectSidebarProps {
@@ -78,15 +79,20 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
           </span>
         )}
         {collapsed && <div className="flex-1" />}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="no-drag-region h-8 w-8 text-sidebar-foreground/60 hover:text-sidebar-foreground"
-          onClick={() => onCollapsedChange(!collapsed)}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        <WithTooltip
+          label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          side="right"
         >
-          {collapsed ? "›" : "‹"}
-        </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="no-drag-region h-8 w-8 text-sidebar-foreground/60 hover:text-sidebar-foreground"
+            onClick={() => onCollapsedChange(!collapsed)}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? "›" : "‹"}
+          </Button>
+        </WithTooltip>
       </div>
 
       {/* Project list */}
@@ -102,52 +108,58 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
 
           return (
             <div key={project.id} className="group relative mx-1">
-              <button
-                onClick={() => setActiveProject(project.id)}
-                className={cn(
-                  "w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors",
-                  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                  active && "bg-sidebar-primary text-sidebar-primary-foreground"
-                )}
-                title={project.path}
-              >
-                <span className="relative text-base flex-shrink-0">
-                  📁
-                  {collapsed && badgeCount > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-500 ring-1 ring-sidebar" />
+              <WithTooltip label={project.path} side="right">
+                <button
+                  onClick={() => setActiveProject(project.id)}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors",
+                    "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    active && "bg-sidebar-primary text-sidebar-primary-foreground"
                   )}
-                </span>
-                {!collapsed && (
-                  <>
-                    <span className="flex-1 text-sm truncate">{project.name}</span>
-                    {badgeCount > 0 && (
-                      <Badge variant="secondary" className="text-xs h-5 px-1.5 flex-shrink-0">
-                        {badgeCount}
-                      </Badge>
+                  aria-label={project.name}
+                >
+                  <span className="relative text-base flex-shrink-0">
+                    📁
+                    {collapsed && badgeCount > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-500 ring-1 ring-sidebar" />
                     )}
-                  </>
-                )}
-              </button>
+                  </span>
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1 text-sm truncate">{project.name}</span>
+                      {badgeCount > 0 && (
+                        <Badge variant="secondary" className="text-xs h-5 px-1.5 flex-shrink-0">
+                          {badgeCount}
+                        </Badge>
+                      )}
+                    </>
+                  )}
+                </button>
+              </WithTooltip>
 
               {/* Remove button — visible on hover when expanded */}
               {!collapsed && (
-                <button
-                  onClick={(e) => handleRemoveProject(e, project.id)}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-xs text-muted-foreground hover:text-destructive transition-opacity px-1"
-                  title="Remove project"
-                >
-                  ✕
-                </button>
+                <WithTooltip label="Remove project">
+                  <button
+                    onClick={(e) => handleRemoveProject(e, project.id)}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-xs text-muted-foreground hover:text-destructive transition-opacity px-1"
+                    aria-label="Remove project"
+                  >
+                    ✕
+                  </button>
+                </WithTooltip>
               )}
               {/* Project settings gear — visible on hover for active project */}
               {!collapsed && active && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); openProjectSettings(); }}
-                  className="absolute right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity p-0.5"
-                  title="Project settings"
-                >
-                  <Settings2 className="w-3.5 h-3.5" />
-                </button>
+                <WithTooltip label="Project settings">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openProjectSettings(); }}
+                    className="absolute right-6 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity p-0.5"
+                    aria-label="Project settings"
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                  </button>
+                </WithTooltip>
               )}
             </div>
           );
@@ -178,15 +190,17 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
       )}
       {collapsed && (
         <div className="p-1 border-t border-sidebar-border flex-shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-sidebar-foreground/60 hover:text-sidebar-foreground mx-auto flex"
-            onClick={openSettings}
-            title="Settings"
-          >
-            <Settings className="h-4 w-4" />
-          </Button>
+          <WithTooltip label="Settings" side="right">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-sidebar-foreground/60 hover:text-sidebar-foreground mx-auto flex"
+              onClick={openSettings}
+              aria-label="Settings"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
+          </WithTooltip>
         </div>
       )}
     </aside>

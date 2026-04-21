@@ -208,7 +208,7 @@ describe("AgentsPanel", () => {
     renderWithProviders(<AgentsPanel />);
 
     await waitFor(() => screen.getByText("research"));
-    const viewButtons = screen.getAllByTitle("View agent");
+    const viewButtons = screen.getAllByLabelText("View agent");
     expect(viewButtons).toHaveLength(AGENTS.length);
   });
 
@@ -220,7 +220,7 @@ describe("AgentsPanel", () => {
     renderWithProviders(<AgentsPanel />);
 
     await waitFor(() => screen.getByText("research"));
-    const [researchViewButton] = screen.getAllByTitle("View agent");
+    const [researchViewButton] = screen.getAllByLabelText("View agent");
     await userEvent.click(researchViewButton);
 
     expect(screen.getByText("Agent — research")).toBeInTheDocument();

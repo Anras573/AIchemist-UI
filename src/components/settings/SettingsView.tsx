@@ -4,6 +4,7 @@ import type { SettingsMap } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { WithTooltip } from "@/components/ui/with-tooltip";
 import { X, Eye, EyeOff, Check, AlertCircle } from "lucide-react";
 import { useTheme } from "@/lib/hooks/useTheme";
 import type { Theme } from "@/lib/hooks/useTheme";
@@ -188,9 +189,11 @@ export function SettingsView({ onClose }: SettingsViewProps) {
           <h1 className="text-base font-semibold">
             {NAV.find((n) => n.id === activeSection)?.label}
           </h1>
-          <Button variant="ghost" size="icon" onClick={onClose} title="Close settings (Esc)">
-            <X className="h-4 w-4" />
-          </Button>
+          <WithTooltip label="Close settings (Esc)">
+            <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close settings">
+              <X className="h-4 w-4" />
+            </Button>
+          </WithTooltip>
         </div>
 
         <div className="flex-1 px-8 py-6 max-w-xl space-y-6">

@@ -37,7 +37,7 @@ export function ToolStrip({ activeTab, onSelect }: ToolStripProps) {
           <button
             key={id}
             onClick={() => onSelect(id)}
-            title={label}
+            aria-label={label}
             className={cn(
               "group relative flex flex-col items-center justify-center w-8 h-16 rounded-sm transition-colors gap-1",
               isActive

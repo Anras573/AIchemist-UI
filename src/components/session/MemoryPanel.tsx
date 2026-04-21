@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { FileText } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
+import { WithTooltip } from "@/components/ui/with-tooltip";
 
 interface MemoryFile {
   name: string;
@@ -54,15 +55,16 @@ export function MemoryPanel({ projectPath, onFileOpen }: MemoryPanelProps) {
   return (
     <div className="h-full overflow-y-auto py-1">
       {files.map((f) => (
-        <button
-          key={f.path}
-          onClick={() => onFileOpen(f.path)}
-          className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted/60 transition-colors"
-          title={f.path}
-        >
-          <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">{f.name}</span>
-        </button>
+        <WithTooltip key={f.path} label={f.path} side="left">
+          <button
+            onClick={() => onFileOpen(f.path)}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted/60 transition-colors"
+            aria-label={f.name}
+          >
+            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{f.name}</span>
+          </button>
+        </WithTooltip>
       ))}
     </div>
   );

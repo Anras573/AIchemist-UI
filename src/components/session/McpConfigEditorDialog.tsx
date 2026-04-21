@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { WithTooltip } from "@/components/ui/with-tooltip";
 import {
   Dialog,
   DialogContent,
@@ -121,9 +122,11 @@ function ServerEditor({
             </p>
           )}
         </div>
-        <Button variant="ghost" size="icon" onClick={onDelete} title="Remove server">
-          <Trash2 className="h-4 w-4 text-destructive" />
-        </Button>
+        <WithTooltip label="Remove server">
+          <Button variant="ghost" size="icon" onClick={onDelete} aria-label="Remove server">
+            <Trash2 className="h-4 w-4 text-destructive" />
+          </Button>
+        </WithTooltip>
       </div>
 
       <div className="grid grid-cols-[100px_1fr] gap-2 items-center">
@@ -362,21 +365,24 @@ export function McpConfigEditorDialog({ open, onClose, projectPath, onSaved }: P
           {SCOPES.map((s) => {
             const disabled = s.needsProject && !projectPath;
             return (
-              <button
+              <WithTooltip
                 key={s.id}
-                onClick={() => !disabled && setScope(s.id)}
-                disabled={disabled}
-                className={cn(
-                  "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-                  scope === s.id
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
-                  disabled && "opacity-40 cursor-not-allowed",
-                )}
-                title={s.sublabel + (disabled ? " — requires an active project" : "")}
+                label={s.sublabel + (disabled ? " — requires an active project" : "")}
               >
-                {s.label}
-              </button>
+                <button
+                  onClick={() => !disabled && setScope(s.id)}
+                  disabled={disabled}
+                  className={cn(
+                    "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+                    scope === s.id
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground",
+                    disabled && "opacity-40 cursor-not-allowed",
+                  )}
+                >
+                  {s.label}
+                </button>
+              </WithTooltip>
             );
           })}
           <div className="ml-auto flex items-center gap-1 pb-1">
