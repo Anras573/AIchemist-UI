@@ -79,9 +79,10 @@ export interface TranscriptEntry {
 
 /** Sanitize a cwd path to Claude Code's project directory name. */
 export function sanitizeCwd(cwd: string): string {
-  // Claude Code replaces `/` with `-`. Leading `/` becomes leading `-`.
-  // We also strip trailing slashes to keep things consistent.
-  return cwd.replace(/\/+$/, "").replace(/\//g, "-");
+  // Claude Code replaces every non-alphanumeric character (except `-`) with `-`.
+  // E.g. `/Users/me/code/My_App.v2/` → `-Users-me-code-My-App-v2`.
+  // We strip trailing slashes first to keep things consistent.
+  return cwd.replace(/\/+$/, "").replace(/[^a-zA-Z0-9-]/g, "-");
 }
 
 /** `~/.claude/projects` root. */

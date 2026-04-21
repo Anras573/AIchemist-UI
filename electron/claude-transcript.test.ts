@@ -109,6 +109,16 @@ describe("sanitizeCwd", () => {
   it("strips trailing slashes", () => {
     expect(sanitizeCwd("/tmp/p/")).toBe("-tmp-p");
   });
+  it("replaces underscores with dashes", () => {
+    expect(sanitizeCwd("/Users/me/code/DACM_AI_Discovery")).toBe(
+      "-Users-me-code-DACM-AI-Discovery"
+    );
+  });
+  it("replaces dots with dashes", () => {
+    expect(sanitizeCwd("/Users/me/code/08.04.tada-api")).toBe(
+      "-Users-me-code-08-04-tada-api"
+    );
+  });
 });
 
 describe("findTranscriptFile", () => {
