@@ -70,6 +70,9 @@ export const SESSION_APPROVAL_REQUIRED = "session:approval_required";
 export const SESSION_MESSAGE          = "session:message";
 export const SESSION_TRACE            = "session:trace";
 
+// ── Memory ────────────────────────────────────────────────────────────────────
+export const LIST_MEMORY            = "memory:list";
+
 // ── Traces ────────────────────────────────────────────────────────────────────
 export const GET_TRACES             = "traces:get";
 export const TRACE_BIND_TRANSCRIPT   = "traces:bind-transcript";

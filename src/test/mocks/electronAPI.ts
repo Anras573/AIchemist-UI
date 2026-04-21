@@ -38,6 +38,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     // File system
     listDirectory: vi.fn().mockResolvedValue({ entries: [] }),
     readFile: vi.fn().mockResolvedValue({ content: "" }),
+    listMemory: vi.fn().mockResolvedValue({ files: [] }),
 
     // Settings
     settingsRead: vi.fn().mockResolvedValue({}),

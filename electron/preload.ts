@@ -40,6 +40,7 @@ export interface ElectronAPI {
   // ── File system ───────────────────────────────────────────────────────────
   listDirectory: (path: string) => Promise<{ entries: Array<{ name: string; path: string; is_dir: boolean; size_bytes: number }> }>;
   readFile: (path: string) => Promise<{ content: string } | { error: string }>;
+  listMemory: (projectPath: string) => Promise<{ files: Array<{ name: string; path: string }> }>;
 
   // ── Settings ──────────────────────────────────────────────────────────────
   settingsRead: () => Promise<import("./settings").SettingsMap>;
@@ -124,6 +125,7 @@ const api: ElectronAPI = {
 
   listDirectory: (path) => ipcRenderer.invoke(CH.LIST_DIRECTORY, path),
   readFile: (path) => ipcRenderer.invoke(CH.READ_FILE, path),
+  listMemory: (projectPath) => ipcRenderer.invoke(CH.LIST_MEMORY, projectPath),
 
   settingsRead: () => ipcRenderer.invoke(CH.SETTINGS_READ),
   settingsWrite: (updates) => ipcRenderer.invoke(CH.SETTINGS_WRITE, updates),

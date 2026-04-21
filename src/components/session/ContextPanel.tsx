@@ -14,6 +14,7 @@ import { TracesPanel } from "./TracesPanel";
 import { ChangesPanel } from "./ChangesPanel";
 import { InteractiveTerminal } from "./InteractiveTerminal";
 import { McpServersPanel } from "./McpServersPanel";
+import { MemoryPanel } from "./MemoryPanel";
 
 // ── Rust types ────────────────────────────────────────────────────────────────
 
@@ -159,7 +160,7 @@ function FileTreeView({ projectPath, onFileOpen }: FileTreeViewProps) {
 
 // ── ContextPanel ──────────────────────────────────────────────────────────────
 
-export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes" | "mcp";
+export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes" | "mcp" | "memory";
 
 /**
  * Right panel content — renders whichever tool is active (files or terminal).
@@ -175,10 +176,12 @@ export function ContextPanel({
   onClose: () => void;
   onAutoSwitch?: (tab: ContextTab) => void;
 }) {
-  const { liveToolCalls, activeSessionId } = useSessionStore();
+  const { liveToolCalls, activeSessionId, sessions } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
+  const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
   const [viewingFile, setViewingFile] = useState<string | null>(null);
+  const [viewingMemoryFile, setViewingMemoryFile] = useState<string | null>(null);
 
   // Auto-switch to terminal when an execute_bash call arrives
   const lastToolCall = activeSessionId
@@ -193,22 +196,36 @@ export function ContextPanel({
   // Clear file viewer when switching away from the Files tab
   useEffect(() => {
     if (activeTab !== "files") setViewingFile(null);
+    if (activeTab !== "memory") setViewingMemoryFile(null);
   }, [activeTab]);
 
   // Header content depends on whether we're viewing a file
   const isViewingFile = activeTab === "files" && viewingFile !== null;
-  const fileName = viewingFile?.split("/").pop() ?? "";
-  const headerLabel = isViewingFile ? fileName : activeTab === "files" ? "Files" : activeTab === "terminal" ? "Terminal" : activeTab === "traces" ? "Traces" : activeTab === "changes" ? "Changes" : activeTab === "mcp" ? "MCP Servers" : "Skills";
+  const isViewingMemory = activeTab === "memory" && viewingMemoryFile !== null;
+  const fileName = (isViewingMemory ? viewingMemoryFile : viewingFile)?.split("/").pop() ?? "";
+  const headerLabel =
+    isViewingFile || isViewingMemory
+      ? fileName
+      : activeTab === "files" ? "Files"
+      : activeTab === "terminal" ? "Terminal"
+      : activeTab === "traces" ? "Traces"
+      : activeTab === "changes" ? "Changes"
+      : activeTab === "mcp" ? "MCP Servers"
+      : activeTab === "memory" ? "Memory"
+      : "Skills";
 
   return (
     <div className="flex flex-col h-full">
       {/* Panel header */}
       <div className="flex items-center h-9 px-2 border-b shrink-0 bg-background gap-1">
-        {isViewingFile && (
+        {(isViewingFile || isViewingMemory) && (
           <button
-            onClick={() => setViewingFile(null)}
+            onClick={() => {
+              if (isViewingFile) setViewingFile(null);
+              if (isViewingMemory) setViewingMemoryFile(null);
+            }}
             className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
-            title="Back to file tree"
+            title="Back"
           >
             <ChevronLeft className="h-3.5 w-3.5" />
           </button>
@@ -248,6 +265,19 @@ export function ContextPanel({
           <ChangesPanel />
         ) : activeTab === "mcp" ? (
           <McpServersPanel />
+        ) : activeTab === "memory" ? (
+          activeSession?.provider === "copilot" ? (
+            <div className="p-3 text-xs text-muted-foreground">
+              Memory is not yet supported for Copilot sessions.
+            </div>
+          ) : isViewingMemory ? (
+            <FileViewer filePath={viewingMemoryFile!} />
+          ) : (
+            <MemoryPanel
+              projectPath={activeProject.path}
+              onFileOpen={setViewingMemoryFile}
+            />
+          )
         ) : activeTab === "terminal" ? (
           activeProject ? (
             <InteractiveTerminal projectPath={activeProject.path} />

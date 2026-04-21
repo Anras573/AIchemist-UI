@@ -23,6 +23,7 @@ import {
   parseTranscript,
   transcriptToSpans,
   watchTranscript,
+  resolveProjectDir,
   type TranscriptWatcher,
 } from "./claude-transcript";
 import {
@@ -354,6 +355,31 @@ function registerHandlers(): void {  // ── Terminal ────────
       return await loadTranscriptSpans(sessionId);
     } catch {
       return [];
+    }
+  });
+
+  // ── Memory ──────────────────────────────────────────────────────────────────
+  // Lists Claude memory files for a project (provider-agnostic dir lookup).
+  // Memory files live at ~/.claude/projects/<sanitized-cwd>/memory/*.md
+  handle(CH.LIST_MEMORY, async (_event, projectPath: string) => {
+    if (!projectPath) return { files: [] as Array<{ name: string; path: string }> };
+    try {
+      const projectDir = await resolveProjectDir(projectPath);
+      if (!projectDir) return { files: [] };
+      const memDir = path.join(projectDir, "memory");
+      let names: string[];
+      try {
+        names = await fs.promises.readdir(memDir);
+      } catch {
+        return { files: [] };
+      }
+      const files = names
+        .filter((n) => n.toLowerCase().endsWith(".md"))
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+        .map((name) => ({ name, path: path.join(memDir, name) }));
+      return { files };
+    } catch {
+      return { files: [] };
     }
   });
 

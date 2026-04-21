@@ -38,6 +38,7 @@ export const ipc = {
   // File system
   listDirectory: (path: string) => window.electronAPI.listDirectory(path),
   readFile: (path: string) => window.electronAPI.readFile(path),
+  listMemory: (projectPath: string) => window.electronAPI.listMemory(projectPath),
 
   // Dialog
   openFolderDialog: () => window.electronAPI.openFolderDialog(),
