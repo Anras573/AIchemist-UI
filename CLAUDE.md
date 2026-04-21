@@ -211,15 +211,17 @@ Both `AgentsPanel` and `AgentPickerButton` show per-agent action icons on hover:
 
 ## Skills Panel
 
-`src/components/session/SkillsPanel.tsx` lists skills discovered from three sources (priority order):
+`src/components/session/SkillsPanel.tsx` lists skills discovered from three source tiers (priority order). The exact paths depend on the active session's provider:
 
-1. **Project** — `<projectPath>/.agents/skills/*/` (`source: "user"`)
-2. **Global** — `~/.claude/skills/*/` (`source: "user"`)
-3. **Plugin** — Claude Code installed plugins at `~/.claude/plugins/installed_plugins.json`; each plugin's `skills/*/SKILL.md` files are scanned (`source: "plugin"`)
+| Tier | Claude session | Copilot session |
+|---|---|---|
+| **Project** | `<projectPath>/.agents/skills/*/` | `<projectPath>/.agents/skills/*/` |
+| **Global** | `~/.claude/skills/*/` | `~/.agents/skills/*/` |
+| **Plugin** | `~/.claude/plugins/installed_plugins.json` → each install's `skills/*/SKILL.md` | `~/.copilot/installed-plugins/<scope>/<plugin>/skills/*/SKILL.md` |
 
 Skills with a higher-priority source suppress same-named skills from lower tiers. `SkillInfo.source` controls panel behaviour:
 
-- **`"user"` skills** — show pencil icon (editable); click opens `SkillEditorModal` in edit mode.
+- **`"user"` skills** (project/global) — show pencil icon (editable); click opens `SkillEditorModal` in edit mode.
 - **`"plugin"` skills** — pencil icon hidden (read-only); click opens viewer instead.
 
 Each card supports three interactions:
@@ -232,9 +234,11 @@ A **New Skill** button at the bottom opens `SkillEditorModal` with `skill=null` 
 
 ### Skill discovery implementation
 
-`scanSkillsDir()` in `electron/main.ts` reads skill descriptions from `SKILL.md` frontmatter first (falls back to `README.md`). `scanPluginSkills()` reads `installed_plugins.json`, picks the most-recently-updated install per plugin, and walks `<installPath>/skills/*/SKILL.md`.
+`scanSkillsDir()` in `electron/main.ts` reads skill descriptions from `SKILL.md` frontmatter first (falls back to `README.md`). `scanPluginSkills()` reads `~/.claude/plugins/installed_plugins.json`, picks the most-recently-updated install per plugin, and walks `<installPath>/skills/*/SKILL.md`. `scanCopilotPluginSkills()` walks `~/.copilot/installed-plugins/<scope>/<plugin>/skills/*/SKILL.md` directly (no manifest file).
 
-`buildSkillsContext()` in `electron/agent/skills.ts` resolves SKILL.md content for active skills: checks project → global → plugin cache (lazy-loaded from `installed_plugins.json`). A module-level `Map<name, dirPath>` cache is built on first access; call `_resetPluginSkillCache()` in tests to reset it.
+`LIST_SKILLS` accepts `{ projectPath, provider }` (or a bare `projectPath` string for back-compat — treated as Claude). The handler branches on `provider` to choose between the Claude and Copilot global/plugin scanners. The renderer (`SkillsPanel`) passes `useActiveSessionProvider()` so the listing always matches the active session's provider lock.
+
+`buildSkillsContext()` in `electron/agent/skills.ts` resolves SKILL.md content for active skills. It searches **all** known locations in priority order (project → Claude global → Copilot global → Claude plugins → Copilot plugins) so a toggled skill is injectable regardless of which provider runs the turn. Two module-level lazy caches (`pluginSkillPathCache`, `copilotPluginSkillPathCache`) map skill name → dir path; call `_resetPluginSkillCache()` in tests to reset both.
 
 ### Slash command palette
 
@@ -302,6 +306,18 @@ The AI Elements skill is installed at `.agents/skills/ai-elements/`. Reference d
 Tailwind CSS v4 (via `@tailwindcss/vite` plugin). UI primitives are shadcn/ui components in `src/components/ui/`. Use `cn()` from `src/lib/utils.ts` for conditional class merging.
 
 **⚠️ Tailwind v4 does not scan `node_modules`:** If a third-party component (e.g. `streamdown`) renders Tailwind arbitrary-value classes from its dist bundle, those classes will never be generated. Add explicit CSS rules in `src/index.css` instead of relying on those classes being present. Example: streamdown's syntax-highlighted token spans write color values as inline CSS custom properties (`--sdm-c`, `--shiki-dark`); `index.css` has `[data-streamdown="code-block"] span { color: var(--sdm-c, inherit); }` to apply them.
+
+### Tooltips
+
+Use `<WithTooltip label="…">` from `src/components/ui/with-tooltip.tsx` for hover hints on interactive controls. It wraps the Base UI `Tooltip` primitives via the `render` prop (Base UI does not support `asChild`). Pair `label` with `aria-label` (or visible text) on the inner element so the control stays accessible to screen readers and discoverable in tests via `getByLabelText`. Avoid native `title=` on the same element — it would race with the Tooltip and create a duplicate browser tooltip. The global `TooltipProvider` is mounted in `src/App.tsx`.
+
+### Provider-aware right panel
+
+The right-side context panels (Skills, MCP, Memory) filter their content to the active session's provider, matching the per-session provider lock. Use `useActiveSessionProvider()` from `src/lib/hooks/useActiveSessionProvider.ts` — it resolves the session's `provider` and falls back to the active project's default for legacy sessions, returning `"anthropic" | "copilot" | null`.
+
+- **MCP** (`McpServersPanel`) filters its rows by `source`: Claude sessions see `claude`/`both`, Copilot sees `copilot`/`both`.
+- **Memory** (`MemoryPanel`) is Claude-only — Copilot sessions render a "not available" placeholder and skip the IPC fetch entirely.
+- **Skills** (`SkillsPanel`) passes the provider through to `LIST_SKILLS` so the backend scans the right global / plugin paths (see Skills Panel section).
 
 ---
 

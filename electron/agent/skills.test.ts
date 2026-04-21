@@ -122,4 +122,57 @@ describe("buildSkillsContext", () => {
     expect(result).toContain("Instructions A.");
     expect(result).toContain("Instructions B.");
   });
+
+  it("falls back to the Copilot user-global skill dir (~/.agents/skills/)", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (String(filePath) === "/home/user/.agents/skills/copilot-user-skill/SKILL.md") {
+        return "---\nname: copilot-user-skill\n---\n\nCopilot user content.";
+      }
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+
+    const result = buildSkillsContext(["copilot-user-skill"], "/project");
+    expect(result).toContain("Copilot user content.");
+  });
+
+  it("falls back to a Copilot plugin skill (~/.copilot/installed-plugins/...)", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      const p = String(filePath);
+      if (p === "/home/user/.copilot/installed-plugins/scope/myplugin/skills/copilot-plugin-skill/SKILL.md") {
+        return "---\nname: copilot-plugin-skill\n---\n\nCopilot plugin content.";
+      }
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (vi.mocked(fs.readdirSync) as any).mockImplementation((dir: string) => {
+      const d = String(dir);
+      if (d === "/home/user/.copilot/installed-plugins") return [makeEntry("scope")];
+      if (d === "/home/user/.copilot/installed-plugins/scope") return [makeEntry("myplugin")];
+      if (d === "/home/user/.copilot/installed-plugins/scope/myplugin/skills") {
+        return [makeEntry("copilot-plugin-skill")];
+      }
+      return [];
+    });
+
+    const result = buildSkillsContext(["copilot-plugin-skill"], "/project");
+    expect(result).toContain("Copilot plugin content.");
+  });
+
+  it("prefers project skill over Copilot user-global with the same name", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      const p = String(filePath);
+      if (p === "/project/.agents/skills/dup/SKILL.md") {
+        return "---\nname: dup\n---\n\nProject wins.";
+      }
+      if (p === "/home/user/.agents/skills/dup/SKILL.md") {
+        return "---\nname: dup\n---\n\nCopilot user loses.";
+      }
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+
+    const result = buildSkillsContext(["dup"], "/project");
+    expect(result).toContain("Project wins.");
+    expect(result).not.toContain("Copilot user loses.");
+  });
 });
