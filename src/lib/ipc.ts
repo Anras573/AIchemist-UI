@@ -58,7 +58,8 @@ export const ipc = {
   getCopilotModels: () => window.electronAPI.getCopilotModels(),
   getClaudeAgents: (projectPath: string) => window.electronAPI.getClaudeAgents(projectPath),
   getCopilotAgents: (projectPath: string) => window.electronAPI.getCopilotAgents(projectPath),
-  listSkills: (projectPath: string) => window.electronAPI.listSkills(projectPath),
+  listSkills: (projectPath: string, provider?: string) =>
+    window.electronAPI.listSkills(projectPath, provider),
   listMcpServers: () => window.electronAPI.listMcpServers(),
   mcpReadConfig: (args: Parameters<typeof window.electronAPI.mcpReadConfig>[0]) =>
     window.electronAPI.mcpReadConfig(args),

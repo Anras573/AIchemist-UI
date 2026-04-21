@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Check, Eye, Info, Loader2, Pencil, Plus } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -115,30 +115,20 @@ export function SkillsPanel() {
 
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
 
-  // Copilot sessions only get project-local skills; the global (~/.claude/skills)
-  // and plugin sources are Claude-specific.
-  const visibleSkills = useMemo(() => {
-    if (!skills) return null;
-    if (provider === "copilot") {
-      return skills.filter((s) => s.source === "project");
-    }
-    return skills;
-  }, [skills, provider]);
+  const loadSkills = useCallback(() => {
+    if (!projectPath) return;
+    setSkills(null);
+    ipc
+      .listSkills(projectPath, provider ?? undefined)
+      .then(setSkills)
+      .catch(() => setSkills([]));
+  }, [projectPath, provider, ipc]);
 
   // Modal state — undefined means closed, null means "new", SkillInfo means "edit/view"
   const [editingSkill, setEditingSkill] = useState<SkillInfo | null | undefined>(undefined);
   const [viewingSkill, setViewingSkill] = useState<SkillInfo | undefined>(undefined);
   const modalOpen = editingSkill !== undefined;
   const viewModalOpen = viewingSkill !== undefined;
-
-  const loadSkills = useCallback(() => {
-    if (!projectPath) return;
-    setSkills(null);
-    ipc
-      .listSkills(projectPath)
-      .then(setSkills)
-      .catch(() => setSkills([]));
-  }, [projectPath]);
 
   useEffect(() => {
     loadSkills();
@@ -169,14 +159,25 @@ export function SkillsPanel() {
         <div className="flex items-center justify-end px-2 pt-1.5 pb-0.5">
           <WithTooltip
             label={
-              <div className="flex flex-col gap-1 max-w-[260px] text-[11px]">
+              <div className="flex flex-col gap-1 max-w-[280px] text-[11px]">
                 <span className="font-medium">Skills are loaded from:</span>
                 <ul className="space-y-0.5">
                   <li>
                     <span className="text-blue-300">project</span> ·{" "}
                     <code>&lt;project&gt;/.agents/skills/</code>
                   </li>
-                  {provider !== "copilot" && (
+                  {provider === "copilot" ? (
+                    <>
+                      <li>
+                        <span className="text-purple-300">global</span> ·{" "}
+                        <code>~/.agents/skills/</code>
+                      </li>
+                      <li>
+                        <span className="text-amber-300">plugin</span> ·
+                        installed Copilot CLI plugins
+                      </li>
+                    </>
+                  ) : (
                     <>
                       <li>
                         <span className="text-purple-300">global</span> ·{" "}
@@ -189,16 +190,9 @@ export function SkillsPanel() {
                     </>
                   )}
                 </ul>
-                {provider === "copilot" ? (
-                  <span className="text-muted-foreground">
-                    Copilot sessions only see project-local skills. Global and
-                    plugin skills are Claude-specific.
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">
-                    Higher-priority sources override same-named skills below.
-                  </span>
-                )}
+                <span className="text-muted-foreground">
+                  Higher-priority sources override same-named skills below.
+                </span>
               </div>
             }
             side="left"
@@ -213,18 +207,18 @@ export function SkillsPanel() {
           </WithTooltip>
         </div>
         <div className="p-2 pt-1 flex flex-col gap-1.5">
-          {visibleSkills === null ? (
+          {skills === null ? (
             <div className="flex items-center gap-2 px-2 py-3 text-[10px] text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               Loading skills…
             </div>
-          ) : visibleSkills.length === 0 ? (
+          ) : skills.length === 0 ? (
             <div className="px-2 py-3 text-[10px] text-muted-foreground">
               No skills installed in{" "}
               <code className="font-mono">.agents/skills/</code>.
             </div>
           ) : (
-            visibleSkills.map((skill) => (
+            skills.map((skill) => (
               <SkillCard
                 key={skill.name}
                 skill={skill}

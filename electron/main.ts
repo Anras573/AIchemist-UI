@@ -237,6 +237,66 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
   }
 }
 
+/**
+ * Scans Copilot CLI's installed plugins for skills under
+ * `~/.copilot/installed-plugins/<scope>/<plugin>/skills/<name>/SKILL.md`.
+ */
+function scanCopilotPluginSkills(): Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> {
+  const root = path.join(os.homedir(), ".copilot", "installed-plugins");
+  let scopes: fs.Dirent[];
+  try {
+    scopes = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const results: Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> = [];
+  const seen = new Set<string>();
+
+  for (const scope of scopes) {
+    if (!scope.isDirectory()) continue;
+    const scopeDir = path.join(root, scope.name);
+    let plugins: fs.Dirent[];
+    try {
+      plugins = fs.readdirSync(scopeDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const plugin of plugins) {
+      if (!plugin.isDirectory()) continue;
+      const skillsDir = path.join(scopeDir, plugin.name, "skills");
+      let skillEntries: fs.Dirent[];
+      try {
+        skillEntries = fs.readdirSync(skillsDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of skillEntries) {
+        if (!entry.isDirectory()) continue;
+        const skillMd = path.join(skillsDir, entry.name, "SKILL.md");
+        let content: string;
+        try {
+          content = fs.readFileSync(skillMd, "utf-8");
+        } catch {
+          continue;
+        }
+        const name = parseFrontmatterField(content, "name") || entry.name;
+        if (seen.has(name)) continue;
+        seen.add(name);
+        results.push({
+          name,
+          description: parseFrontmatterField(content, "description").slice(0, 150),
+          path: path.join(skillsDir, entry.name),
+          source: "plugin",
+          plugin: `${scope.name}/${plugin.name}`,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
 function registerHandlers(): void {  // ── Terminal ──────────────────────────────────────────────────────────────────
   handle(CH.TERMINAL_CREATE, (_event, projectPath: string) => {
     const id = crypto.randomUUID();
@@ -660,13 +720,20 @@ function registerHandlers(): void {  // ── Terminal ────────
   handle(CH.GET_COPILOT_AGENTS, async (_event, projectPath: string) => {
     return getProvider("copilot").listAgents?.(projectPath);
   });
-  handle(CH.LIST_SKILLS, (_event, projectPath: string) => {
-    const projectSkillsDir = path.join(projectPath, ".agents", "skills");
-    const globalSkillsDir = path.join(os.homedir(), ".claude", "skills");
+  handle(CH.LIST_SKILLS, (_event, args: string | { projectPath: string; provider?: string }) => {
+    // Back-compat: bare string is the legacy signature (treated as Claude).
+    const projectPath = typeof args === "string" ? args : args.projectPath;
+    const provider = typeof args === "string" ? undefined : args.provider;
 
+    const projectSkillsDir = path.join(projectPath, ".agents", "skills");
     const projectSkills = scanSkillsDir(projectSkillsDir, "project");
+
+    const isCopilot = provider === "copilot";
+    const globalSkillsDir = isCopilot
+      ? path.join(os.homedir(), ".agents", "skills")
+      : path.join(os.homedir(), ".claude", "skills");
     const globalSkills = scanSkillsDir(globalSkillsDir, "global");
-    const pluginSkills = scanPluginSkills();
+    const pluginSkills = isCopilot ? scanCopilotPluginSkills() : scanPluginSkills();
 
     // Project-local skills take highest priority, then global, then plugins.
     // Later tiers skip any name already claimed by a higher-priority tier.

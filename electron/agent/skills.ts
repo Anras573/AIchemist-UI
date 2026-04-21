@@ -4,6 +4,8 @@ import * as path from "path";
 
 /** Lazy-loaded cache: skill name → directory path, built from installed_plugins.json. */
 let pluginSkillPathCache: Map<string, string> | null = null;
+/** Lazy-loaded cache for Copilot plugin skills under ~/.copilot/installed-plugins. */
+let copilotPluginSkillPathCache: Map<string, string> | null = null;
 
 function getPluginSkillPaths(): Map<string, string> {
   if (pluginSkillPathCache !== null) return pluginSkillPathCache;
@@ -52,25 +54,86 @@ function getPluginSkillPaths(): Map<string, string> {
   return pluginSkillPathCache;
 }
 
-/** Reset the plugin skill path cache (for testing only). */
+/**
+ * Lazy-loaded cache of Copilot plugin skill paths
+ * (~/.copilot/installed-plugins/<scope>/<plugin>/skills/<name>/SKILL.md).
+ */
+function getCopilotPluginSkillPaths(): Map<string, string> {
+  if (copilotPluginSkillPathCache !== null) return copilotPluginSkillPathCache;
+
+  copilotPluginSkillPathCache = new Map();
+  const root = path.join(os.homedir(), ".copilot", "installed-plugins");
+  let scopes: fs.Dirent[];
+  try {
+    scopes = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return copilotPluginSkillPathCache;
+  }
+
+  for (const scope of scopes) {
+    if (!scope.isDirectory()) continue;
+    let plugins: fs.Dirent[];
+    try {
+      plugins = fs.readdirSync(path.join(root, scope.name), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const plugin of plugins) {
+      if (!plugin.isDirectory()) continue;
+      const skillsDir = path.join(root, scope.name, plugin.name, "skills");
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const skillMd = path.join(skillsDir, entry.name, "SKILL.md");
+        try {
+          const content = fs.readFileSync(skillMd, "utf-8");
+          const nameMatch = content.match(/^name:\s*["']?(.+?)["']?\s*$/m);
+          const name = nameMatch?.[1]?.trim() || entry.name;
+          if (!copilotPluginSkillPathCache!.has(name)) {
+            copilotPluginSkillPathCache!.set(name, path.join(skillsDir, entry.name));
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+  }
+
+  return copilotPluginSkillPathCache;
+}
+
+/** Reset both plugin skill path caches (for testing only). */
 export function _resetPluginSkillCache(): void {
   pluginSkillPathCache = null;
+  copilotPluginSkillPathCache = null;
 }
 
 /**
  * Read the body of a skill's SKILL.md (frontmatter stripped).
  * Returns null if the file cannot be found or read.
+ *
+ * Search order: project → Claude global → Copilot global → Claude plugins
+ * → Copilot plugins. The first hit wins, which matches the panel's priority.
  */
 function readSkillContent(skillName: string, projectPath: string): string | null {
   const candidates: string[] = [
     path.join(projectPath, ".agents", "skills", skillName, "SKILL.md"),
     path.join(os.homedir(), ".claude", "skills", skillName, "SKILL.md"),
+    path.join(os.homedir(), ".agents", "skills", skillName, "SKILL.md"),
   ];
 
-  // Also check plugin skills
-  const pluginDir = getPluginSkillPaths().get(skillName);
-  if (pluginDir) {
-    candidates.push(path.join(pluginDir, "SKILL.md"));
+  const claudePluginDir = getPluginSkillPaths().get(skillName);
+  if (claudePluginDir) {
+    candidates.push(path.join(claudePluginDir, "SKILL.md"));
+  }
+  const copilotPluginDir = getCopilotPluginSkillPaths().get(skillName);
+  if (copilotPluginDir) {
+    candidates.push(path.join(copilotPluginDir, "SKILL.md"));
   }
 
   for (const filePath of candidates) {

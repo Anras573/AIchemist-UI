@@ -56,7 +56,7 @@ export interface ElectronAPI {
   getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
   getClaudeAgents: (projectPath: string) => Promise<Array<{ name: string; description: string; model?: string }>>;
   getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
-  listSkills: (projectPath: string) => Promise<Array<import("../src/types").SkillInfo>>;
+  listSkills: (projectPath: string, provider?: string) => Promise<Array<import("../src/types").SkillInfo>>;
   listMcpServers: () => Promise<Array<import("../src/types").McpServerInfo>>;
   mcpReadConfig: (args: { scope: import("./mcp-config").McpScope; projectPath?: string }) =>
     Promise<import("./mcp-config").McpServersMap>;
@@ -140,7 +140,8 @@ const api: ElectronAPI = {
   getCopilotModels: () => ipcRenderer.invoke(CH.GET_COPILOT_MODELS),
   getClaudeAgents: (projectPath) => ipcRenderer.invoke(CH.GET_CLAUDE_AGENTS, projectPath),
   getCopilotAgents: (projectPath) => ipcRenderer.invoke(CH.GET_COPILOT_AGENTS, projectPath),
-  listSkills: (projectPath) => ipcRenderer.invoke(CH.LIST_SKILLS, projectPath),
+  listSkills: (projectPath, provider) =>
+    ipcRenderer.invoke(CH.LIST_SKILLS, { projectPath, provider }),
   listMcpServers: () => ipcRenderer.invoke(CH.LIST_MCP_SERVERS),
   mcpReadConfig: (args) => ipcRenderer.invoke(CH.MCP_READ_CONFIG, args),
   mcpWriteConfig: (args) => ipcRenderer.invoke(CH.MCP_WRITE_CONFIG, args),
