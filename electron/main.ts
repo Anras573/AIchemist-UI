@@ -34,7 +34,7 @@ import {
   type CopilotTranscriptWatcher,
 } from "./copilot-transcript";
 import type { ProjectConfig } from "../src/types/index";
-import { parseMcpListOutput, readCopilotMcpServers, mergeMcpServers } from "./mcp-utils";
+import { parseMcpListOutput, readCopilotMcpServers, readAichemistMcpServers, mergeMcpServers } from "./mcp-utils";
 import {
   readMcpServers as readMcpServersConfig,
   writeMcpServers as writeMcpServersConfig,
@@ -758,7 +758,8 @@ function registerHandlers(): void {  // ── Terminal ────────
     });
 
     const copilotServers = readCopilotMcpServers();
-    return mergeMcpServers(claudeServers, copilotServers);
+    const aichemistServers = readAichemistMcpServers();
+    return mergeMcpServers(claudeServers, copilotServers, aichemistServers);
   });
   handle(CH.MCP_READ_CONFIG, (_event, args: { scope: McpScope; projectPath?: string }) => {
     return readMcpServersConfig(args.scope, args.projectPath);

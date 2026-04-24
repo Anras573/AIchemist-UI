@@ -16,6 +16,11 @@ import { requestApproval, requiresApproval } from "./approval";
 import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
 import { readAgentFileSystemPrompt } from "./claude";
+import {
+  loadManagedMcpServers,
+  toCopilotMcpServers,
+  fingerprintManaged,
+} from "./mcp-managed";
 import { saveToolCall, updateToolCallStatus } from "../sessions";
 import {
   implWriteFileWithChange,
@@ -478,6 +483,12 @@ export async function runCopilotAgentTurn(params: {
     systemMessageMode = "append";
   }
 
+  // Load AIchemist-managed MCP servers (~/.aichemist/mcp.json) and compute a
+  // fingerprint we'll use to detect mid-session changes that require a fresh
+  // SDK session (resumeSession does NOT honour an updated mcpServers map).
+  const managedMcpRaw = loadManagedMcpServers();
+  const mcpFingerprint = fingerprintManaged(managedMcpRaw);
+
   const sessionConfig = {
     model: projectConfig.model,
     streaming: true,
@@ -486,34 +497,55 @@ export async function runCopilotAgentTurn(params: {
     onPermissionRequest,
     ...(systemMessageContent ? { systemMessage: { mode: systemMessageMode, content: systemMessageContent } } : {}),
     ...(customAgents.length > 0 ? { customAgents } : {}),
+    // AIchemist-managed MCP servers (~/.aichemist/mcp.json), injected per-session
+    // so they don't pollute Copilot CLI's global ~/.copilot/mcp-config.json.
+    ...(Object.keys(managedMcpRaw).length > 0
+      ? { mcpServers: toCopilotMcpServers(managedMcpRaw) }
+      : {}),
   };
 
   // Seed the in-memory map from the DB on first access for this session so
   // Copilot SDK sessions survive app restarts.
   if (!seededFromDb.has(sessionId)) {
     const dbRow = db
-      .prepare("SELECT copilot_session_id, copilot_session_agent FROM sessions WHERE id = ?")
-      .get(sessionId) as { copilot_session_id: string | null; copilot_session_agent: string | null } | undefined;
+      .prepare("SELECT copilot_session_id, copilot_session_agent, copilot_session_mcp_fp FROM sessions WHERE id = ?")
+      .get(sessionId) as {
+        copilot_session_id: string | null;
+        copilot_session_agent: string | null;
+        copilot_session_mcp_fp: string | null;
+      } | undefined;
     if (dbRow?.copilot_session_id) {
       copilotSessionIds.set(sessionId, dbRow.copilot_session_id);
     }
     if (dbRow?.copilot_session_agent != null) {
       copilotSessionIds.set(`agent:${sessionId}`, dbRow.copilot_session_agent);
     }
+    if (dbRow?.copilot_session_mcp_fp != null) {
+      copilotSessionIds.set(`mcp:${sessionId}`, dbRow.copilot_session_mcp_fp);
+    }
     seededFromDb.add(sessionId);
   }
 
-  // If the agent changed since the last turn, the old Copilot SDK session was
-  // created with a different (or no) system message. Resuming it would ignore
-  // the new systemMessage, so force a fresh session instead.
+  // If the agent OR the managed-MCP fingerprint changed since the last turn,
+  // the old SDK session was created with a stale systemMessage / mcpServers map.
+  // resumeSession ignores both, so we must force a fresh session.
   const lastAgentKey = `agent:${sessionId}`;
+  const lastMcpKey = `mcp:${sessionId}`;
   const normalizedAgent = agent ?? "";
   const lastAgent = copilotSessionIds.get(lastAgentKey) ?? "";
-  if (normalizedAgent !== lastAgent && copilotSessionIds.has(sessionId)) {
+  const normalizedMcpFp = mcpFingerprint ?? "";
+  const lastMcpFp = copilotSessionIds.get(lastMcpKey) ?? "";
+  const sessionInvalidated =
+    (normalizedAgent !== lastAgent || normalizedMcpFp !== lastMcpFp) &&
+    copilotSessionIds.has(sessionId);
+  if (sessionInvalidated) {
     copilotSessionIds.delete(sessionId);
-    db.prepare("UPDATE sessions SET copilot_session_id = NULL, copilot_session_agent = NULL WHERE id = ?").run(sessionId);
+    db.prepare(
+      "UPDATE sessions SET copilot_session_id = NULL, copilot_session_agent = NULL, copilot_session_mcp_fp = NULL WHERE id = ?"
+    ).run(sessionId);
   }
   copilotSessionIds.set(lastAgentKey, normalizedAgent);
+  copilotSessionIds.set(lastMcpKey, normalizedMcpFp);
 
   // Resume the existing Copilot SDK session for this AIchemist session (if any)
   // so conversation history is preserved across turns and app restarts.
@@ -526,19 +558,21 @@ export async function runCopilotAgentTurn(params: {
     } catch {
       // Session state was lost (e.g. server expiry) — create fresh and clear DB
       copilotSessionIds.delete(sessionId);
-      db.prepare("UPDATE sessions SET copilot_session_id = NULL, copilot_session_agent = NULL WHERE id = ?").run(sessionId);
+      db.prepare(
+        "UPDATE sessions SET copilot_session_id = NULL, copilot_session_agent = NULL, copilot_session_mcp_fp = NULL WHERE id = ?"
+      ).run(sessionId);
       session = await client.createSession(sessionConfig);
       copilotSessionIds.set(sessionId, session.sessionId);
-      db.prepare("UPDATE sessions SET copilot_session_id = ?, copilot_session_agent = ? WHERE id = ?").run(
-        session.sessionId, normalizedAgent || null, sessionId
-      );
+      db.prepare(
+        "UPDATE sessions SET copilot_session_id = ?, copilot_session_agent = ?, copilot_session_mcp_fp = ? WHERE id = ?"
+      ).run(session.sessionId, normalizedAgent || null, normalizedMcpFp || null, sessionId);
     }
   } else {
     session = await client.createSession(sessionConfig);
     copilotSessionIds.set(sessionId, session.sessionId);
-    db.prepare("UPDATE sessions SET copilot_session_id = ?, copilot_session_agent = ? WHERE id = ?").run(
-      session.sessionId, normalizedAgent || null, sessionId
-    );
+    db.prepare(
+      "UPDATE sessions SET copilot_session_id = ?, copilot_session_agent = ?, copilot_session_mcp_fp = ? WHERE id = ?"
+    ).run(session.sessionId, normalizedAgent || null, normalizedMcpFp || null, sessionId);
   }
 
   // ── Event listeners — set up before sending ─────────────────────────────────

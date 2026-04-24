@@ -176,7 +176,7 @@ export interface McpServerInfo {
   /** Status message returned by `claude mcp list`. */
   status: string;
   /** Which provider(s) configured this server. */
-  source: "claude" | "copilot" | "both";
+  source: "claude" | "copilot" | "both" | "aichemist";
 }
 
 // ─── File changes ─────────────────────────────────────────────────────────────

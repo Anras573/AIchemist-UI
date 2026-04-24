@@ -10,6 +10,10 @@ import { createPatch } from "diff";
 
 import * as CH from "../ipc-channels";
 import { createApprovalMcpServer } from "./mcp-tools";
+import {
+  loadManagedMcpServers,
+  toClaudeMcpServers,
+} from "./mcp-managed";
 import { buildSkillsContext } from "./skills";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
 import { requestApproval, requiresApproval } from "./approval";
@@ -325,7 +329,10 @@ export async function runClaudeAgentTurn(params: {
       resume: sdkSessionId ?? undefined,
       model: effectiveModel,
       cwd: projectPath,
-      mcpServers: { "aichemist-tools": mcpServer },
+      // Spread managed servers FIRST, then aichemist-tools — guarantees the
+      // built-in approval-gated tools cannot be displaced by a managed entry
+      // (loadManagedMcpServers also strips that name defensively).
+      mcpServers: { ...toClaudeMcpServers(loadManagedMcpServers()), "aichemist-tools": mcpServer },
       settingSources: ["local", "user", "project"],
       permissionMode: "acceptEdits",
       // ⚠️  SDK naming trap:

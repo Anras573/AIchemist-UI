@@ -16,7 +16,7 @@ import {
 
 // ── Types (mirror electron/mcp-config.ts) ────────────────────────────────────
 
-type McpScope = "claude-local" | "claude-project" | "claude-user" | "copilot-global";
+type McpScope = "claude-local" | "claude-project" | "claude-user" | "copilot-global" | "aichemist-global";
 
 interface McpServerEntry {
   type?: "stdio" | "http" | "sse";
@@ -39,10 +39,11 @@ const SCOPES: Array<{
   needsProject: boolean;
   tier: "local" | "global";
 }> = [
-  { id: "claude-local",   label: "Local",    sublabel: "Claude · per-project, private (~/.claude.json)", needsProject: true,  tier: "local" },
-  { id: "claude-project", label: "Project",  sublabel: "Claude · shared .mcp.json (committed to repo)",  needsProject: true,  tier: "local" },
-  { id: "claude-user",    label: "User",     sublabel: "Claude · global for all projects",               needsProject: false, tier: "global" },
-  { id: "copilot-global", label: "Copilot",  sublabel: "Copilot · ~/.copilot/mcp-config.json",           needsProject: false, tier: "global" },
+  { id: "aichemist-global", label: "AIchemist", sublabel: "AIchemist · ~/.aichemist/mcp.json — injected per-session into both Claude and Copilot", needsProject: false, tier: "global" },
+  { id: "claude-local",     label: "Local",     sublabel: "Claude · per-project, private (~/.claude.json)", needsProject: true,  tier: "local" },
+  { id: "claude-project",   label: "Project",   sublabel: "Claude · shared .mcp.json (committed to repo)",  needsProject: true,  tier: "local" },
+  { id: "claude-user",      label: "User",      sublabel: "Claude · global for all projects",               needsProject: false, tier: "global" },
+  { id: "copilot-global",   label: "Copilot",   sublabel: "Copilot · ~/.copilot/mcp-config.json",           needsProject: false, tier: "global" },
 ];
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -205,7 +206,7 @@ function ServerEditor({
 
 export function McpConfigEditorDialog({ open, onClose, projectPath, onSaved }: Props) {
   const ipc = useIpc();
-  const [scope, setScope] = useState<McpScope>("claude-local");
+  const [scope, setScope] = useState<McpScope>("aichemist-global");
   const [servers, setServers] = useState<McpServersMap | null>(null);
   const [draftNames, setDraftNames] = useState<string[]>([]);
   const [mode, setMode] = useState<"form" | "json">("form");

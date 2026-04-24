@@ -2,20 +2,26 @@
  * MCP server config read/write across the four supported scopes.
  *
  * Scopes:
- *  - "claude-local"   → ~/.claude.json → projects[projectPath].mcpServers (requires projectPath)
- *  - "claude-project" → <projectPath>/.mcp.json → mcpServers               (requires projectPath)
- *  - "claude-user"    → ~/.claude.json → mcpServers
- *  - "copilot-global" → ~/.copilot/mcp-config.json → mcpServers
+ *  - "claude-local"     → ~/.claude.json → projects[projectPath].mcpServers (requires projectPath)
+ *  - "claude-project"   → <projectPath>/.mcp.json → mcpServers               (requires projectPath)
+ *  - "claude-user"      → ~/.claude.json → mcpServers
+ *  - "copilot-global"   → ~/.copilot/mcp-config.json → mcpServers
+ *  - "aichemist-global" → ~/.aichemist/mcp.json → mcpServers
  *
  * All readers return `{}` when the file (or target key) is missing, and writers
  * preserve every other key in the underlying JSON document so we don't clobber
- * Claude Code's or Copilot's state.
+ * Claude Code's, Copilot's, or AIchemist's state.
  */
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-export type McpScope = "claude-local" | "claude-project" | "claude-user" | "copilot-global";
+export type McpScope =
+  | "claude-local"
+  | "claude-project"
+  | "claude-user"
+  | "copilot-global"
+  | "aichemist-global";
 
 /**
  * Raw MCP server entry. We preserve unknown keys so users can save arbitrary
@@ -45,7 +51,14 @@ export function getConfigPath(scope: McpScope, projectPath?: string): string {
       return path.join(projectPath, ".mcp.json");
     case "copilot-global":
       return path.join(os.homedir(), ".copilot", "mcp-config.json");
+    case "aichemist-global":
+      return path.join(os.homedir(), ".aichemist", "mcp.json");
   }
+}
+
+/** Convenience wrapper for the AIchemist-managed scope. */
+export function getAichemistMcpPath(): string {
+  return getConfigPath("aichemist-global");
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

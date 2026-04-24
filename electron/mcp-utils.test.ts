@@ -6,6 +6,7 @@ import {
   readDotCopilotMcp,
   readVsCodeMcp,
   readCopilotMcpServers,
+  readAichemistMcpServers,
   mergeMcpServers,
 } from "./mcp-utils";
 import type { McpServerInfo } from "../src/types/index";
@@ -255,6 +256,39 @@ describe("readCopilotMcpServers", () => {
   });
 });
 
+// ── readAichemistMcpServers ───────────────────────────────────────────────────
+
+describe("readAichemistMcpServers", () => {
+  it("returns [] when ~/.aichemist/mcp.json is missing", () => {
+    expect(readAichemistMcpServers()).toEqual([]);
+  });
+
+  it("returns stdio entries with source=aichemist", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+      mcpServers: { echo: { command: "node", args: ["echo.js"] } },
+    }));
+    const result = readAichemistMcpServers();
+    expect(result).toEqual([
+      {
+        name: "echo",
+        command: "node echo.js",
+        transport: "stdio",
+        connected: null,
+        status: "Configured",
+        source: "aichemist",
+      },
+    ]);
+  });
+
+  it("returns http entries with the URL as command", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+      mcpServers: { remote: { type: "http", url: "https://api/mcp" } },
+    }));
+    const result = readAichemistMcpServers();
+    expect(result[0]).toMatchObject({ command: "https://api/mcp", transport: "HTTP", source: "aichemist" });
+  });
+});
+
 // ── mergeMcpServers ───────────────────────────────────────────────────────────
 
 describe("mergeMcpServers", () => {
@@ -299,6 +333,16 @@ describe("mergeMcpServers", () => {
     const result = mergeMcpServers(claude, copilot);
     expect(result).toHaveLength(1);
     expect(result[0].source).toBe("both");
+  });
+
+  it("appends aichemist servers in their own bucket without deduping", () => {
+    const cmd = "npx -y @lego/tada-mcp";
+    const claude = [makeServer({ name: "tada", command: cmd, source: "claude" })];
+    const aichemist = [makeServer({ name: "tada", command: cmd, source: "aichemist" })];
+    const result = mergeMcpServers(claude, [], aichemist);
+    expect(result).toHaveLength(2);
+    expect(result[0].source).toBe("claude");
+    expect(result[1].source).toBe("aichemist");
   });
 
   it("handles empty inputs", () => {

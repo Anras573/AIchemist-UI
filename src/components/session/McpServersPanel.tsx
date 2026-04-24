@@ -61,6 +61,11 @@ function ServerCard({ server }: { server: McpServerInfo }) {
               Copilot
             </span>
           )}
+          {server.source === "aichemist" && (
+            <span className="text-[10px] px-1 py-0 rounded shrink-0 bg-violet-500/10 text-violet-500">
+              AIchemist
+            </span>
+          )}
           {prefix && (
             <span className="text-[10px] text-muted-foreground truncate">{prefix}</span>
           )}
@@ -103,13 +108,15 @@ export function McpServersPanel() {
   useEffect(() => { load(); }, [load]);
 
   // Filter to only servers configured for the active session's provider.
-  // 'both' rows show in both. With no provider lock, show everything.
+  // 'both' rows show in both. AIchemist-managed rows are injected into both
+  // Claude and Copilot SDK sessions, so they show under either provider lock.
+  // With no provider lock, show everything.
   const visibleServers = useMemo(() => {
     if (!servers) return null;
     if (!provider) return servers;
     const providerKey = provider === "anthropic" ? "claude" : "copilot";
     return servers.filter(
-      (s) => s.source === providerKey || s.source === "both",
+      (s) => s.source === providerKey || s.source === "both" || s.source === "aichemist",
     );
   }, [servers, provider]);
 

@@ -165,6 +165,31 @@ export function readCopilotMcpServers(): McpServerInfo[] {
 }
 
 /**
+ * Read AIchemist-managed servers (~/.aichemist/mcp.json) into McpServerInfo
+ * shape. These are injected per-session into both Claude and Copilot, so they
+ * appear in both sessions' filtered views in the panel.
+ */
+export function readAichemistMcpServers(): McpServerInfo[] {
+  const cfgPath = path.join(os.homedir(), ".aichemist", "mcp.json");
+  try {
+    const parsed = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as {
+      mcpServers?: Record<string, { type?: string; command?: string; args?: string[]; url?: string }>;
+    };
+    return Object.entries(parsed.mcpServers ?? {}).map(([name, cfg]) => {
+      const isHttp = cfg.type === "http" || cfg.type === "sse" || cfg.url != null;
+      return {
+        name,
+        command: cfg.url ?? [cfg.command, ...(cfg.args ?? [])].filter(Boolean).join(" "),
+        transport: isHttp ? (cfg.type === "sse" ? "SSE" : "HTTP") : "stdio",
+        connected: null,
+        status: "Configured",
+        source: "aichemist" as const,
+      };
+    });
+  } catch { return []; }
+}
+
+/**
  * Merge Claude and Copilot server lists.
  * Claude entries whose fingerprints overlap with a Copilot server are promoted
  * to source "both". Copilot-only entries are appended at the end.
@@ -172,6 +197,7 @@ export function readCopilotMcpServers(): McpServerInfo[] {
 export function mergeMcpServers(
   claudeServers: McpServerInfo[],
   copilotServers: McpServerInfo[],
+  aichemistServers: McpServerInfo[] = [],
 ): McpServerInfo[] {
   const copilotFingerprints = new Set<string>();
   for (const s of copilotServers) {
@@ -190,5 +216,8 @@ export function mergeMcpServers(
     ![...commandFingerprints(s.command)].some((fp) => claudeFingerprints.has(fp))
   );
 
-  return [...merged, ...copilotOnly];
+  // AIchemist-managed servers are kept in their own bucket — they are the
+  // editor's own config, not something Claude or Copilot is also configuring,
+  // so we deliberately don't dedupe them against the SDK-provided lists.
+  return [...merged, ...copilotOnly, ...aichemistServers];
 }

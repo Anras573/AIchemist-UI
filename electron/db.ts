@@ -90,6 +90,12 @@ function migrate(db: Database.Database): void {
   if (!hasColumn("copilot_session_agent")) {
     db.exec("ALTER TABLE sessions ADD COLUMN copilot_session_agent TEXT;");
   }
+  // Fingerprint of the AIchemist-managed MCP server map active when the Copilot
+  // SDK session was created. If the fingerprint changes, we recreate the SDK
+  // session so the new mcpServers map takes effect (resumeSession ignores it).
+  if (!hasColumn("copilot_session_mcp_fp")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN copilot_session_mcp_fp TEXT;");
+  }
 
   // Add agent column to messages table to stamp which agent produced each message.
   const msgColumns = db

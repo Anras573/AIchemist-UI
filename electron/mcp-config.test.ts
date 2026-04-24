@@ -42,6 +42,7 @@ describe("getConfigPath", () => {
     expect(getConfigPath("claude-local", "/proj")).toBe("/home/user/.claude.json");
     expect(getConfigPath("claude-project", "/proj")).toBe("/proj/.mcp.json");
     expect(getConfigPath("copilot-global")).toBe("/home/user/.copilot/mcp-config.json");
+    expect(getConfigPath("aichemist-global")).toBe("/home/user/.aichemist/mcp.json");
   });
 
   it("throws when projectPath missing for project scope", () => {
@@ -85,6 +86,15 @@ describe("readMcpServers", () => {
       mcpServers: { c: { command: "c" } },
     });
     expect(readMcpServers("copilot-global")).toEqual({ c: { command: "c" } });
+  });
+
+  it("reads aichemist-global", () => {
+    files["/home/user/.aichemist/mcp.json"] = JSON.stringify({
+      mcpServers: { custom: { command: "node", args: ["server.js"] } },
+    });
+    expect(readMcpServers("aichemist-global")).toEqual({
+      custom: { command: "node", args: ["server.js"] },
+    });
   });
 
   it("requires projectPath for local/project scopes", () => {
@@ -136,6 +146,23 @@ describe("writeMcpServers", () => {
     writeMcpServers("claude-project", { s: { command: "s" } }, "/proj");
     const doc = JSON.parse(files["/proj/.mcp.json"]);
     expect(doc.mcpServers).toEqual({ s: { command: "s" } });
+  });
+
+  it("writes aichemist-global round-trip, preserving other keys", () => {
+    files["/home/user/.aichemist/mcp.json"] = JSON.stringify({
+      mcpServers: { old: { command: "old" } },
+      version: 1,
+    });
+    writeMcpServers("aichemist-global", { fresh: { url: "https://x" } });
+    const doc = JSON.parse(files["/home/user/.aichemist/mcp.json"]);
+    expect(doc.mcpServers).toEqual({ fresh: { url: "https://x" } });
+    expect(doc.version).toBe(1);
+  });
+
+  it("writes aichemist-global to a brand-new file", () => {
+    writeMcpServers("aichemist-global", { a: { command: "a" } });
+    const doc = JSON.parse(files["/home/user/.aichemist/mcp.json"]);
+    expect(doc.mcpServers).toEqual({ a: { command: "a" } });
   });
 
   it("writes copilot-global, preserving other keys", () => {
