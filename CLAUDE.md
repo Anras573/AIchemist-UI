@@ -115,6 +115,7 @@ SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `me
 | `sdk_session_id TEXT` | Claude SDK session ID — enables `resume:` across restarts |
 | `copilot_session_id TEXT` | Copilot SDK session ID — enables `resumeSession()` across restarts |
 | `copilot_session_agent TEXT` | Agent active when the Copilot SDK session was created — used to detect agent changes across restarts and force a fresh session |
+| `copilot_session_mcp_fp TEXT` | Fingerprint of the AIchemist-managed MCP server map active when the Copilot SDK session was created — change forces a fresh session |
 
 Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
 
@@ -315,9 +316,26 @@ Use `<WithTooltip label="…">` from `src/components/ui/with-tooltip.tsx` for ho
 
 The right-side context panels (Skills, MCP, Memory) filter their content to the active session's provider, matching the per-session provider lock. Use `useActiveSessionProvider()` from `src/lib/hooks/useActiveSessionProvider.ts` — it resolves the session's `provider` and falls back to the active project's default for legacy sessions, returning `"anthropic" | "copilot" | null`.
 
-- **MCP** (`McpServersPanel`) filters its rows by `source`: Claude sessions see `claude`/`both`, Copilot sees `copilot`/`both`.
+- **MCP** (`McpServersPanel`) filters its rows by `source`: Claude sessions see `claude`/`both`, Copilot sees `copilot`/`both`. AIchemist-managed servers (`source: "aichemist"`) are passed through to **both** providers.
 - **Memory** (`MemoryPanel`) is Claude-only — Copilot sessions render a "not available" placeholder and skip the IPC fetch entirely.
 - **Skills** (`SkillsPanel`) passes the provider through to `LIST_SKILLS` so the backend scans the right global / plugin paths (see Skills Panel section).
+
+---
+
+## AIchemist-managed MCP servers
+
+VS Code-style editor-owned MCP config. AIchemist maintains its own MCP server list at `~/.aichemist/mcp.json` and injects it per-session into both Claude and Copilot SDK runs — without writing to the SDKs' own global config files (`~/.claude.json`, `~/.copilot/mcp-config.json`).
+
+| Layer | Detail |
+|---|---|
+| Config file | `~/.aichemist/mcp.json` (scope id `aichemist-global` in `electron/mcp-config.ts`) |
+| Loader / adapters | `electron/agent/mcp-managed.ts` — `loadManagedMcpServers()`, `toClaudeMcpServers()`, `toCopilotMcpServers()`, `fingerprintManaged()` |
+| Reserved name | `aichemist-tools` is the in-process approval-gated server. `loadManagedMcpServers()` strips it defensively; the Claude runner spreads `{...managed, "aichemist-tools": mcpServer}` so the literal key always wins. |
+| Claude injection | `electron/agent/claude.ts` spreads managed servers into `query({ mcpServers })` before `aichemist-tools`. |
+| Copilot injection | `electron/agent/copilot.ts` adds them to `SessionConfig.mcpServers`. `MCPServerConfig` typed import from `@github/copilot-sdk` is required for the adapter return type. |
+| Copilot invalidation | `client.resumeSession()` does NOT honour an updated `mcpServers`. A stable fingerprint is stored in `sessions.copilot_session_mcp_fp`; on each turn, an agent change OR fingerprint change forces a fresh `createSession`. |
+| Panel | `McpServersPanel` shows a violet "AIchemist" badge for `source === "aichemist"`. The "AIchemist" tab in `McpConfigEditorDialog` is the default scope. |
+| No project-level managed scope | Intentional — projects should use the de-facto `.mcp.json` at the project root, which both SDKs already discover. |
 
 ---
 
