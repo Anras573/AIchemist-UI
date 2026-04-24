@@ -175,7 +175,9 @@ export function readAichemistMcpServers(): McpServerInfo[] {
     const parsed = JSON.parse(fs.readFileSync(cfgPath, "utf-8")) as {
       mcpServers?: Record<string, { type?: string; command?: string; args?: string[]; url?: string }>;
     };
-    return Object.entries(parsed.mcpServers ?? {}).map(([name, cfg]) => {
+    return Object.entries(parsed.mcpServers ?? {})
+      .filter(([name]) => name !== "aichemist-tools") // reserved — see electron/agent/mcp-managed.ts
+      .map(([name, cfg]) => {
       const isHttp = cfg.type === "http" || cfg.type === "sse" || cfg.url != null;
       return {
         name,

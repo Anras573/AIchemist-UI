@@ -39,6 +39,7 @@ export function createSession(
     model,
     agent: null,
     skills: null,
+    disabled_mcp_servers: null,
   };
 }
 
@@ -48,7 +49,7 @@ export function createSession(
 export function listSessions(db: Database, projectId: string): Session[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, title, status, created_at, provider, model, agent, skills
+      `SELECT id, project_id, title, status, created_at, provider, model, agent, skills, disabled_mcp_servers
        FROM sessions
        WHERE project_id = ?
        ORDER BY created_at ASC`
@@ -63,6 +64,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
     model: string | null;
     agent: string | null;
     skills: string | null;
+    disabled_mcp_servers: string | null;
   }[];
 
   return rows.map((row) => ({
@@ -75,7 +77,8 @@ export function listSessions(db: Database, projectId: string): Session[] {
     provider: row.provider,
     model: row.model,
     agent: row.agent,
-    skills: row.skills ? (JSON.parse(row.skills) as string[]) : null,
+    skills: parseJsonStringArray(row.skills),
+    disabled_mcp_servers: parseJsonStringArray(row.disabled_mcp_servers),
   }));
 }
 
@@ -85,7 +88,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
 export function getSession(db: Database, sessionId: string): Session {
   const row = db
     .prepare(
-      "SELECT id, project_id, title, status, created_at, provider, model, agent, skills FROM sessions WHERE id = ?"
+      "SELECT id, project_id, title, status, created_at, provider, model, agent, skills, disabled_mcp_servers FROM sessions WHERE id = ?"
     )
     .get(sessionId) as
     | {
@@ -98,6 +101,7 @@ export function getSession(db: Database, sessionId: string): Session {
         model: string | null;
         agent: string | null;
         skills: string | null;
+        disabled_mcp_servers: string | null;
       }
     | undefined;
 
@@ -178,7 +182,8 @@ export function getSession(db: Database, sessionId: string): Session {
     provider: row.provider,
     model: row.model,
     agent: row.agent,
-    skills: row.skills ? (JSON.parse(row.skills) as string[]) : null,
+    skills: parseJsonStringArray(row.skills),
+    disabled_mcp_servers: parseJsonStringArray(row.disabled_mcp_servers),
   };
 }
 
@@ -288,6 +293,52 @@ export function updateSessionSkills(
 ): void {
   const value = skills.length > 0 ? JSON.stringify(skills) : null;
   db.prepare("UPDATE sessions SET skills = ? WHERE id = ?").run(value, sessionId);
+}
+
+/**
+ * Get the names of AIchemist-managed MCP servers that are disabled for this
+ * session. Returns an empty array if none are disabled (or the JSON is malformed).
+ *
+ * The list is defensive — invalid entries are dropped and duplicates removed —
+ * so a corrupted DB row never causes the runner to throw.
+ */
+export function getDisabledMcpServers(db: Database, sessionId: string): string[] {
+  const row = db
+    .prepare("SELECT disabled_mcp_servers FROM sessions WHERE id = ?")
+    .get(sessionId) as { disabled_mcp_servers: string | null } | undefined;
+  return parseJsonStringArray(row?.disabled_mcp_servers) ?? [];
+}
+
+/**
+ * Set the disabled-server list for a session. Pass an empty array to clear it.
+ * Names are deduped and sorted before storage so the on-disk JSON is stable
+ * (helps fingerprint comparisons).
+ */
+export function setDisabledMcpServers(
+  db: Database,
+  sessionId: string,
+  names: string[]
+): void {
+  const cleaned = [...new Set(names.filter((n) => typeof n === "string" && n.length > 0))].sort();
+  const value = cleaned.length > 0 ? JSON.stringify(cleaned) : null;
+  db.prepare("UPDATE sessions SET disabled_mcp_servers = ? WHERE id = ?").run(value, sessionId);
+}
+
+/**
+ * Defensive parse: returns null for null/empty input, drops non-string entries,
+ * dedupes, and silently swallows JSON errors (returning null) so a corrupted
+ * row never throws on hydration.
+ */
+function parseJsonStringArray(raw: string | null | undefined): string[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const cleaned = [...new Set(parsed.filter((v): v is string => typeof v === "string"))];
+    return cleaned.length > 0 ? cleaned : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Tool call persistence ─────────────────────────────────────────────────────

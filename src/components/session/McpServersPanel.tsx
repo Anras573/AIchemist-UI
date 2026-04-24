@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { RefreshCw, Server, CheckCircle2, XCircle, MinusCircle, Loader2, Settings } from "lucide-react";
+import { RefreshCw, Server, CheckCircle2, XCircle, MinusCircle, Loader2, Settings, ChevronRight, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
+import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 import { McpConfigEditorDialog } from "./McpConfigEditorDialog";
@@ -26,7 +27,10 @@ function pluginPrefix(name: string): string | undefined {
 
 // ── ServerCard ────────────────────────────────────────────────────────────────
 
-function StatusIcon({ connected }: { connected: boolean | null }) {
+function StatusIcon({ connected, disabled }: { connected: boolean | null; disabled?: boolean }) {
+  if (disabled) {
+    return <MinusCircle className="h-4 w-4 text-muted-foreground/50" />;
+  }
   if (connected === null) {
     return <MinusCircle className="h-4 w-4 text-muted-foreground" />;
   }
@@ -35,45 +39,120 @@ function StatusIcon({ connected }: { connected: boolean | null }) {
     : <XCircle className="h-4 w-4 text-destructive" />;
 }
 
-function ServerCard({ server }: { server: McpServerInfo }) {
+function ServerCard({
+  server,
+  disabled,
+  canToggle,
+  onToggle,
+}: {
+  server: McpServerInfo;
+  disabled: boolean;
+  canToggle: boolean;
+  onToggle: () => void;
+}) {
   const prefix = pluginPrefix(server.name);
+  const [expanded, setExpanded] = useState(false);
+  const hasTools = (server.tools?.length ?? 0) > 0;
+  const hasError = server.connected === false && !!server.error;
+  const isExpandable = hasTools || hasError;
 
   return (
-    <div className="flex items-start gap-2.5 px-3 py-2.5 border-b last:border-b-0 hover:bg-muted/30 transition-colors">
-      <div className="shrink-0 mt-0.5">
-        <StatusIcon connected={server.connected} />
+    <div className="border-b last:border-b-0 hover:bg-muted/30 transition-colors">
+      <div className="flex items-start gap-2.5 px-3 py-2.5">
+        {isExpandable ? (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="shrink-0 mt-0.5 text-muted-foreground hover:text-foreground"
+            aria-label={expanded ? "Collapse" : "Expand"}
+            aria-expanded={expanded}
+          >
+            <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-90")} />
+          </button>
+        ) : (
+          <div className="shrink-0 mt-0.5 w-3.5" />
+        )}
+        <div className="shrink-0 mt-0.5">
+          <StatusIcon connected={server.connected} disabled={disabled} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={cn("text-xs font-medium truncate", disabled && "line-through text-muted-foreground")}>
+              {displayName(server.name)}
+            </span>
+            {server.transport && (
+              <span className="text-[10px] px-1 py-0 rounded bg-muted text-muted-foreground font-mono shrink-0">
+                {server.transport}
+              </span>
+            )}
+            {(server.source === "claude" || server.source === "both") && (
+              <span className="text-[10px] px-1 py-0 rounded shrink-0 bg-orange-500/10 text-orange-500">
+                Claude
+              </span>
+            )}
+            {(server.source === "copilot" || server.source === "both") && (
+              <span className="text-[10px] px-1 py-0 rounded shrink-0 bg-blue-500/10 text-blue-500">
+                Copilot
+              </span>
+            )}
+            {server.source === "aichemist" && (
+              <span className="text-[10px] px-1 py-0 rounded shrink-0 bg-violet-500/10 text-violet-500">
+                AIchemist
+              </span>
+            )}
+            {hasTools && (
+              <span className="text-[10px] text-muted-foreground shrink-0">
+                {server.tools!.length} tool{server.tools!.length === 1 ? "" : "s"}
+              </span>
+            )}
+            {prefix && (
+              <span className="text-[10px] text-muted-foreground truncate">{prefix}</span>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground font-mono truncate mt-0.5" title={server.command}>
+            {server.command}
+          </p>
+        </div>
+        {canToggle && (
+          <WithTooltip label={disabled ? "Enable for this session" : "Disable for this session"}>
+            <button
+              onClick={onToggle}
+              role="switch"
+              aria-checked={!disabled}
+              aria-label={disabled ? "Enable for this session" : "Disable for this session"}
+              className={cn(
+                "shrink-0 relative inline-flex h-4 w-7 items-center rounded-full transition-colors",
+                disabled ? "bg-muted" : "bg-emerald-500/70",
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform",
+                  disabled ? "translate-x-0.5" : "translate-x-3.5",
+                )}
+              />
+            </button>
+          </WithTooltip>
+        )}
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs font-medium truncate">{displayName(server.name)}</span>
-          {server.transport && (
-            <span className="text-[10px] px-1 py-0 rounded bg-muted text-muted-foreground font-mono shrink-0">
-              {server.transport}
-            </span>
+      {expanded && (
+        <div className="pl-10 pr-3 pb-2.5 -mt-1">
+          {hasError && (
+            <div className="flex items-start gap-1.5 text-[11px] text-destructive font-mono break-words">
+              <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+              <span>{server.error}</span>
+            </div>
           )}
-          {(server.source === "claude" || server.source === "both") && (
-            <span className="text-[10px] px-1 py-0 rounded shrink-0 bg-orange-500/10 text-orange-500">
-              Claude
-            </span>
-          )}
-          {(server.source === "copilot" || server.source === "both") && (
-            <span className="text-[10px] px-1 py-0 rounded shrink-0 bg-blue-500/10 text-blue-500">
-              Copilot
-            </span>
-          )}
-          {server.source === "aichemist" && (
-            <span className="text-[10px] px-1 py-0 rounded shrink-0 bg-violet-500/10 text-violet-500">
-              AIchemist
-            </span>
-          )}
-          {prefix && (
-            <span className="text-[10px] text-muted-foreground truncate">{prefix}</span>
+          {hasTools && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {server.tools!.map((t) => (
+                <span key={t} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                  {t}
+                </span>
+              ))}
+            </div>
           )}
         </div>
-        <p className="text-[11px] text-muted-foreground font-mono truncate mt-0.5" title={server.command}>
-          {server.command}
-        </p>
-      </div>
+      )}
     </div>
   );
 }
@@ -86,16 +165,26 @@ export function McpServersPanel() {
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const projectPath = activeProject?.path ?? "";
   const provider = useActiveSessionProvider();
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const sessionDisabledMcp = useSessionStore((s) => s.sessionDisabledMcp);
+  const setSessionDisabledMcp = useSessionStore((s) => s.setSessionDisabledMcp);
+  const disabledSet = useMemo(
+    () => new Set(activeSessionId ? sessionDisabledMcp[activeSessionId] ?? [] : []),
+    [activeSessionId, sessionDisabledMcp],
+  );
+
   const [servers, setServers] = useState<McpServerInfo[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
 
-  const load = useCallback(async () => {
+  // `force=true` bypasses the 30s probe cache and re-spawns each managed server.
+  // Used by the manual refresh button so users can re-test after editing config.
+  const load = useCallback(async (force = false) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await ipc.listMcpServers();
+      const result = force ? await ipc.mcpProbeManaged() : await ipc.listMcpServers();
       setServers(result);
     } catch (e) {
       setError(String(e));
@@ -106,6 +195,24 @@ export function McpServersPanel() {
   }, [ipc]);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleToggle = useCallback(async (name: string) => {
+    if (!activeSessionId) return;
+    const current = sessionDisabledMcp[activeSessionId] ?? [];
+    const isDisabled = current.includes(name);
+    const next = isDisabled ? current.filter((n) => n !== name) : [...current, name];
+    setSessionDisabledMcp(activeSessionId, next);
+    try {
+      const persisted = await ipc.updateSessionDisabledMcp(activeSessionId, next);
+      // Reconcile with what the backend actually stored (defensive parse may
+      // have dropped invalid entries).
+      setSessionDisabledMcp(activeSessionId, persisted);
+    } catch (e) {
+      console.error("Failed to toggle MCP server:", e);
+      // Roll back on failure.
+      setSessionDisabledMcp(activeSessionId, current);
+    }
+  }, [activeSessionId, sessionDisabledMcp, setSessionDisabledMcp, ipc]);
 
   // Filter to only servers configured for the active session's provider.
   // 'both' rows show in both. AIchemist-managed rows are injected into both
@@ -146,9 +253,9 @@ export function McpServersPanel() {
             <Settings className="h-3.5 w-3.5" />
           </button>
         </WithTooltip>
-        <WithTooltip label="Refresh">
+        <WithTooltip label="Refresh (re-probe)">
           <button
-            onClick={load}
+            onClick={() => load(true)}
             disabled={loading}
             className={cn(
               "flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
@@ -187,7 +294,13 @@ export function McpServersPanel() {
         {visibleServers && visibleServers.length > 0 && (
           <div className="divide-y-0">
             {visibleServers.map((s) => (
-              <ServerCard key={`${s.source}:${s.name}`} server={s} />
+              <ServerCard
+                key={`${s.source}:${s.name}`}
+                server={s}
+                disabled={s.source === "aichemist" && disabledSet.has(s.name)}
+                canToggle={s.source === "aichemist" && activeSessionId !== null}
+                onToggle={() => handleToggle(s.name)}
+              />
             ))}
           </div>
         )}
@@ -197,7 +310,7 @@ export function McpServersPanel() {
         open={editorOpen}
         onClose={() => setEditorOpen(false)}
         projectPath={projectPath}
-        onSaved={load}
+        onSaved={() => load(true)}
       />
     </div>
   );

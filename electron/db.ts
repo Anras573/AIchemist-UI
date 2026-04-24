@@ -96,6 +96,12 @@ function migrate(db: Database.Database): void {
   if (!hasColumn("copilot_session_mcp_fp")) {
     db.exec("ALTER TABLE sessions ADD COLUMN copilot_session_mcp_fp TEXT;");
   }
+  // Per-session disabled MCP server names (JSON array of strings). Applied on
+  // top of `loadManagedMcpServers()` so users can silence a managed server for
+  // a single session without deleting it from ~/.aichemist/mcp.json.
+  if (!hasColumn("disabled_mcp_servers")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN disabled_mcp_servers TEXT;");
+  }
 
   // Add agent column to messages table to stamp which agent produced each message.
   const msgColumns = db

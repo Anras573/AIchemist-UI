@@ -36,6 +36,7 @@ export interface ElectronAPI {
   updateSessionModel: (sessionId: string, provider: string, model: string) => Promise<void>;
   updateSessionAgent: (sessionId: string, agent: string | null) => Promise<void>;
   updateSessionSkills: (sessionId: string, skills: string[]) => Promise<void>;
+  updateSessionDisabledMcp: (sessionId: string, names: string[]) => Promise<string[]>;
 
   // ── File system ───────────────────────────────────────────────────────────
   listDirectory: (path: string) => Promise<{ entries: Array<{ name: string; path: string; is_dir: boolean; size_bytes: number }> }>;
@@ -58,6 +59,7 @@ export interface ElectronAPI {
   getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
   listSkills: (projectPath: string, provider?: string) => Promise<Array<import("../src/types").SkillInfo>>;
   listMcpServers: () => Promise<Array<import("../src/types").McpServerInfo>>;
+  mcpProbeManaged: () => Promise<Array<import("../src/types").McpServerInfo>>;
   mcpReadConfig: (args: { scope: import("./mcp-config").McpScope; projectPath?: string }) =>
     Promise<import("./mcp-config").McpServersMap>;
   mcpWriteConfig: (args: { scope: import("./mcp-config").McpScope; servers: import("./mcp-config").McpServersMap; projectPath?: string }) =>
@@ -122,6 +124,7 @@ const api: ElectronAPI = {
   updateSessionModel: (sessionId, provider, model) => ipcRenderer.invoke(CH.UPDATE_SESSION_MODEL, sessionId, provider, model),
   updateSessionAgent: (sessionId, agent) => ipcRenderer.invoke(CH.UPDATE_SESSION_AGENT, sessionId, agent),
   updateSessionSkills: (sessionId, skills) => ipcRenderer.invoke(CH.UPDATE_SESSION_SKILLS, sessionId, skills),
+  updateSessionDisabledMcp: (sessionId, names) => ipcRenderer.invoke(CH.UPDATE_SESSION_DISABLED_MCP, sessionId, names),
 
   listDirectory: (path) => ipcRenderer.invoke(CH.LIST_DIRECTORY, path),
   readFile: (path) => ipcRenderer.invoke(CH.READ_FILE, path),
@@ -143,6 +146,7 @@ const api: ElectronAPI = {
   listSkills: (projectPath, provider) =>
     ipcRenderer.invoke(CH.LIST_SKILLS, { projectPath, provider }),
   listMcpServers: () => ipcRenderer.invoke(CH.LIST_MCP_SERVERS),
+  mcpProbeManaged: () => ipcRenderer.invoke(CH.MCP_PROBE_MANAGED),
   mcpReadConfig: (args) => ipcRenderer.invoke(CH.MCP_READ_CONFIG, args),
   mcpWriteConfig: (args) => ipcRenderer.invoke(CH.MCP_WRITE_CONFIG, args),
   mcpDeleteServer: (args) => ipcRenderer.invoke(CH.MCP_DELETE_SERVER, args),

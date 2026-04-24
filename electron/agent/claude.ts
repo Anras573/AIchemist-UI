@@ -18,7 +18,7 @@ import { buildSkillsContext } from "./skills";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
 import { requestApproval, requiresApproval } from "./approval";
 import type { ToolCategory } from "./approval";
-import { saveToolCall, updateToolCallStatus } from "../sessions";
+import { saveToolCall, updateToolCallStatus, getDisabledMcpServers } from "../sessions";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 
 // ── Native tool category map ───────────────────────────────────────────────────
@@ -332,7 +332,15 @@ export async function runClaudeAgentTurn(params: {
       // Spread managed servers FIRST, then aichemist-tools — guarantees the
       // built-in approval-gated tools cannot be displaced by a managed entry
       // (loadManagedMcpServers also strips that name defensively).
-      mcpServers: { ...toClaudeMcpServers(loadManagedMcpServers()), "aichemist-tools": mcpServer },
+      // Per-session disabled set is applied at load time so the next turn
+      // simply omits the user-disabled servers — Claude takes mcpServers
+      // fresh per query() call, no cache invalidation needed.
+      mcpServers: {
+        ...toClaudeMcpServers(
+          loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) }),
+        ),
+        "aichemist-tools": mcpServer,
+      },
       settingSources: ["local", "user", "project"],
       permissionMode: "acceptEdits",
       // ⚠️  SDK naming trap:

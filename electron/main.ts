@@ -9,7 +9,7 @@ import * as CH from "./ipc-channels";
 import { loadEnv, getApiKey, getAnthropicConfig, checkApiKeys, resolveClaudePath } from "./config";
 import { openDb } from "./db";
 import { addProject, listProjects, removeProject, getProjectConfig, saveProjectConfig } from "./projects";
-import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent, updateSessionSkills, recoverStaleSessionStatuses } from "./sessions";
+import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent, updateSessionSkills, setDisabledMcpServers, getDisabledMcpServers, recoverStaleSessionStatuses } from "./sessions";
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
@@ -35,6 +35,8 @@ import {
 } from "./copilot-transcript";
 import type { ProjectConfig } from "../src/types/index";
 import { parseMcpListOutput, readCopilotMcpServers, readAichemistMcpServers, mergeMcpServers } from "./mcp-utils";
+import { loadManagedMcpServers } from "./agent/mcp-managed";
+import { probeManagedServers } from "./agent/mcp-probe";
 import {
   readMcpServers as readMcpServersConfig,
   writeMcpServers as writeMcpServersConfig,
@@ -609,6 +611,13 @@ function registerHandlers(): void {  // ── Terminal ────────
     (_event, sessionId: string, skills: string[]) =>
       updateSessionSkills(db, sessionId, skills)
   );
+  handle(
+    CH.UPDATE_SESSION_DISABLED_MCP,
+    (_event, sessionId: string, names: string[]) => {
+      setDisabledMcpServers(db, sessionId, names);
+      return getDisabledMcpServers(db, sessionId);
+    }
+  );
 
   // ── File system ───────────────────────────────────────────────────────────────
 
@@ -758,7 +767,65 @@ function registerHandlers(): void {  // ── Terminal ────────
     });
 
     const copilotServers = readCopilotMcpServers();
-    const aichemistServers = readAichemistMcpServers();
+    let aichemistServers = readAichemistMcpServers();
+
+    // Overlay live probe results onto AIchemist rows. Cached (30s TTL) so
+    // we don't re-spawn children on every panel mount.
+    if (aichemistServers.length > 0) {
+      try {
+        const probeResults = await probeManagedServers(loadManagedMcpServers());
+        aichemistServers = aichemistServers.map((s) => {
+          const r = probeResults.get(s.name);
+          if (!r) return s;
+          return {
+            ...s,
+            connected: r.connected,
+            tools: r.tools,
+            error: r.error,
+            status: r.connected ? "Connected" : (r.error ?? "Failed to connect"),
+          };
+        });
+      } catch (err) {
+        console.error("[mcp-probe] LIST_MCP_SERVERS probe failed", err);
+        // Fall through with un-probed entries so the panel still renders.
+      }
+    }
+
+    return mergeMcpServers(claudeServers, copilotServers, aichemistServers);
+  });
+  handle(CH.MCP_PROBE_MANAGED, async () => {
+    // Force a fresh probe (bypasses the 30s cache). Returns the fully merged
+    // server list — same shape as LIST_MCP_SERVERS — so the renderer can drop
+    // it straight into state.
+    const claudePath = resolveClaudePath() ?? "claude";
+    const claudeServers = await new Promise<McpServerInfo[]>((resolve) => {
+      childProcess.execFile(
+        claudePath,
+        ["mcp", "list"],
+        { encoding: "utf-8", timeout: 15_000 },
+        (_err, stdout) => resolve(parseMcpListOutput(stdout ?? "")),
+      );
+    });
+    const copilotServers = readCopilotMcpServers();
+    let aichemistServers = readAichemistMcpServers();
+    if (aichemistServers.length > 0) {
+      try {
+        const probeResults = await probeManagedServers(loadManagedMcpServers(), { force: true });
+        aichemistServers = aichemistServers.map((s) => {
+          const r = probeResults.get(s.name);
+          if (!r) return s;
+          return {
+            ...s,
+            connected: r.connected,
+            tools: r.tools,
+            error: r.error,
+            status: r.connected ? "Connected" : (r.error ?? "Failed to connect"),
+          };
+        });
+      } catch (err) {
+        console.error("[mcp-probe] MCP_PROBE_MANAGED probe failed", err);
+      }
+    }
     return mergeMcpServers(claudeServers, copilotServers, aichemistServers);
   });
   handle(CH.MCP_READ_CONFIG, (_event, args: { scope: McpScope; projectPath?: string }) => {

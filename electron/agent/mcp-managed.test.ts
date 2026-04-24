@@ -64,6 +64,30 @@ describe("loadManagedMcpServers", () => {
     expect(result).toEqual({ good: { command: "good" } });
     expect(RESERVED_MCP_NAME in result).toBe(false);
   });
+
+  it("excludes names listed in opts.excludeNames", () => {
+    files["/home/user/.aichemist/mcp.json"] = JSON.stringify({
+      mcpServers: {
+        a: { command: "a" },
+        b: { command: "b" },
+        c: { command: "c" },
+      },
+    });
+    const result = loadManagedMcpServers({ excludeNames: new Set(["b"]) });
+    expect(result).toEqual({ a: { command: "a" }, c: { command: "c" } });
+  });
+
+  it("excludeNames + reserved name strip stack correctly", () => {
+    files["/home/user/.aichemist/mcp.json"] = JSON.stringify({
+      mcpServers: {
+        [RESERVED_MCP_NAME]: { command: "x" },
+        a: { command: "a" },
+        b: { command: "b" },
+      },
+    });
+    const result = loadManagedMcpServers({ excludeNames: new Set(["a"]) });
+    expect(result).toEqual({ b: { command: "b" } });
+  });
 });
 
 describe("toClaudeMcpServers", () => {

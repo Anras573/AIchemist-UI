@@ -24,16 +24,19 @@ export const RESERVED_MCP_NAME = "aichemist-tools";
 /**
  * Read AIchemist-managed servers from `~/.aichemist/mcp.json`.
  * Returns an empty map if the file is missing or unreadable.
- * Filters out any entry that uses the reserved name.
+ * Filters out any entry that uses the reserved name and any name in
+ * `excludeNames` (used for per-session disable).
  */
-export function loadManagedMcpServers(): McpServersMap {
-  const map = readMcpServers("aichemist-global");
-  if (RESERVED_MCP_NAME in map) {
-    // Defensive: never let a managed entry shadow the built-in tools server.
-    const { [RESERVED_MCP_NAME]: _omit, ...rest } = map;
-    return rest;
+export function loadManagedMcpServers(opts?: { excludeNames?: Set<string> }): McpServersMap {
+  const raw = readMcpServers("aichemist-global");
+  const exclude = opts?.excludeNames;
+  const out: McpServersMap = {};
+  for (const [name, entry] of Object.entries(raw)) {
+    if (name === RESERVED_MCP_NAME) continue;
+    if (exclude?.has(name)) continue;
+    out[name] = entry;
   }
-  return map;
+  return out;
 }
 
 // ── Adapters ─────────────────────────────────────────────────────────────────

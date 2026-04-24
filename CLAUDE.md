@@ -116,6 +116,7 @@ SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `me
 | `copilot_session_id TEXT` | Copilot SDK session ID — enables `resumeSession()` across restarts |
 | `copilot_session_agent TEXT` | Agent active when the Copilot SDK session was created — used to detect agent changes across restarts and force a fresh session |
 | `copilot_session_mcp_fp TEXT` | Fingerprint of the AIchemist-managed MCP server map active when the Copilot SDK session was created — change forces a fresh session |
+| `disabled_mcp_servers TEXT` | JSON array of AIchemist-managed MCP server names disabled for this session. Filtered out by `loadManagedMcpServers({ excludeNames })` before injection. |
 
 Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
 
@@ -335,6 +336,8 @@ VS Code-style editor-owned MCP config. AIchemist maintains its own MCP server li
 | Copilot injection | `electron/agent/copilot.ts` adds them to `SessionConfig.mcpServers`. `MCPServerConfig` typed import from `@github/copilot-sdk` is required for the adapter return type. |
 | Copilot invalidation | `client.resumeSession()` does NOT honour an updated `mcpServers`. A stable fingerprint is stored in `sessions.copilot_session_mcp_fp`; on each turn, an agent change OR fingerprint change forces a fresh `createSession`. |
 | Panel | `McpServersPanel` shows a violet "AIchemist" badge for `source === "aichemist"`. The "AIchemist" tab in `McpConfigEditorDialog` is the default scope. |
+| Health probing | `electron/agent/mcp-probe.ts` actively connects to each managed server (stdio/HTTP/SSE), runs `tools/list`, and surfaces `{ connected, tools, error }` on each row. Cached 30s by fingerprint of the unfiltered managed map; `force: true` (`MCP_PROBE_MANAGED` IPC, used by the refresh button) bypasses the cache. Stdio probes have a 4-parallel concurrency cap to avoid spawn storms. The SDK loader is injected via `_setSdkLoader` for tests — see `mcp-probe.test.ts`. |
+| Per-session disable | Toggle in the panel persists names to `sessions.disabled_mcp_servers` via `MCP_TOGGLE_SESSION_SERVER` and `setDisabledMcpServers`. Both runners read the disabled set per turn and pass it via `loadManagedMcpServers({ excludeNames })`. Claude picks up the new map per-turn (no cache work needed). For Copilot, the disabled set is filtered BEFORE `fingerprintManaged()` so toggling naturally invalidates the cached SDK session. |
 | No project-level managed scope | Intentional — projects should use the de-facto `.mcp.json` at the project root, which both SDKs already discover. |
 
 ---

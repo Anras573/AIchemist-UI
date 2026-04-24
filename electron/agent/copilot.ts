@@ -21,7 +21,7 @@ import {
   toCopilotMcpServers,
   fingerprintManaged,
 } from "./mcp-managed";
-import { saveToolCall, updateToolCallStatus } from "../sessions";
+import { saveToolCall, updateToolCallStatus, getDisabledMcpServers } from "../sessions";
 import {
   implWriteFileWithChange,
   implDeleteFileWithChange,
@@ -486,7 +486,11 @@ export async function runCopilotAgentTurn(params: {
   // Load AIchemist-managed MCP servers (~/.aichemist/mcp.json) and compute a
   // fingerprint we'll use to detect mid-session changes that require a fresh
   // SDK session (resumeSession does NOT honour an updated mcpServers map).
-  const managedMcpRaw = loadManagedMcpServers();
+  // Per-session disabled servers are filtered out BEFORE fingerprinting so
+  // toggling a server off naturally invalidates the cached SDK session.
+  const managedMcpRaw = loadManagedMcpServers({
+    excludeNames: new Set(getDisabledMcpServers(db, sessionId)),
+  });
   const mcpFingerprint = fingerprintManaged(managedMcpRaw);
 
   const sessionConfig = {

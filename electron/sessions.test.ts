@@ -72,3 +72,70 @@ describe("recoverStaleSessionStatuses", () => {
     expect(recoverStaleSessionStatuses(db)).toBe(0);
   });
 });
+
+// ─── Disabled MCP helpers ────────────────────────────────────────────────────
+
+import { getDisabledMcpServers, setDisabledMcpServers } from "./sessions";
+
+describe("getDisabledMcpServers", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns [] when row is missing", () => {
+    const { db, mockGet } = makeDb();
+    mockGet.mockReturnValueOnce(undefined);
+    expect(getDisabledMcpServers(db, "s1")).toEqual([]);
+  });
+
+  it("returns [] when stored value is null", () => {
+    const { db, mockGet } = makeDb();
+    mockGet.mockReturnValueOnce({ disabled_mcp_servers: null });
+    expect(getDisabledMcpServers(db, "s1")).toEqual([]);
+  });
+
+  it("parses a JSON array of strings", () => {
+    const { db, mockGet } = makeDb();
+    mockGet.mockReturnValueOnce({ disabled_mcp_servers: '["a","b"]' });
+    expect(getDisabledMcpServers(db, "s1")).toEqual(["a", "b"]);
+  });
+
+  it("returns [] for malformed JSON instead of throwing", () => {
+    const { db, mockGet } = makeDb();
+    mockGet.mockReturnValueOnce({ disabled_mcp_servers: "{not json" });
+    expect(getDisabledMcpServers(db, "s1")).toEqual([]);
+  });
+
+  it("filters out non-string array entries", () => {
+    const { db, mockGet } = makeDb();
+    mockGet.mockReturnValueOnce({ disabled_mcp_servers: '["a", 5, null, "b"]' });
+    expect(getDisabledMcpServers(db, "s1")).toEqual(["a", "b"]);
+  });
+
+  it("returns [] for non-array JSON (e.g. object)", () => {
+    const { db, mockGet } = makeDb();
+    mockGet.mockReturnValueOnce({ disabled_mcp_servers: '{"a":1}' });
+    expect(getDisabledMcpServers(db, "s1")).toEqual([]);
+  });
+});
+
+describe("setDisabledMcpServers", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("dedupes, sorts, and stores as JSON", () => {
+    const { db, mockRun } = makeDb();
+    setDisabledMcpServers(db, "s1", ["zeta", "alpha", "alpha", "beta"]);
+    expect(mockRun).toHaveBeenCalledWith('["alpha","beta","zeta"]', "s1");
+  });
+
+  it("stores NULL for empty array", () => {
+    const { db, mockRun } = makeDb();
+    setDisabledMcpServers(db, "s1", []);
+    expect(mockRun).toHaveBeenCalledWith(null, "s1");
+  });
+
+  it("filters out non-string and empty entries", () => {
+    const { db, mockRun } = makeDb();
+    // @ts-expect-error — exercising defensive runtime check
+    setDisabledMcpServers(db, "s1", ["ok", "", null, undefined, 5]);
+    expect(mockRun).toHaveBeenCalledWith('["ok"]', "s1");
+  });
+});

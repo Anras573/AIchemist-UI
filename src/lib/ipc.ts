@@ -34,6 +34,8 @@ export const ipc = {
     window.electronAPI.updateSessionAgent(sessionId, agent),
   updateSessionSkills: (sessionId: string, skills: string[]) =>
     window.electronAPI.updateSessionSkills(sessionId, skills),
+  updateSessionDisabledMcp: (sessionId: string, names: string[]) =>
+    window.electronAPI.updateSessionDisabledMcp(sessionId, names),
 
   // File system
   listDirectory: (path: string) => window.electronAPI.listDirectory(path),
@@ -61,6 +63,7 @@ export const ipc = {
   listSkills: (projectPath: string, provider?: string) =>
     window.electronAPI.listSkills(projectPath, provider),
   listMcpServers: () => window.electronAPI.listMcpServers(),
+  mcpProbeManaged: () => window.electronAPI.mcpProbeManaged(),
   mcpReadConfig: (args: Parameters<typeof window.electronAPI.mcpReadConfig>[0]) =>
     window.electronAPI.mcpReadConfig(args),
   mcpWriteConfig: (args: Parameters<typeof window.electronAPI.mcpWriteConfig>[0]) =>

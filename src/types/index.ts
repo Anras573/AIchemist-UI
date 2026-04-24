@@ -109,6 +109,8 @@ export interface Session {
   agent: string | null;
   /** The active skills for this session (array of skill names). Null means no skills toggled. */
   skills: string[] | null;
+  /** Names of AIchemist-managed MCP servers disabled for this session. Null/empty/undefined means none disabled. */
+  disabled_mcp_servers?: string[] | null;
 }
 
 // ─── IPC event payloads ──────────────────────────────────────────────────────
@@ -177,6 +179,16 @@ export interface McpServerInfo {
   status: string;
   /** Which provider(s) configured this server. */
   source: "claude" | "copilot" | "both" | "aichemist";
+  /**
+   * Tool names exposed by this server, populated when the server has been
+   * actively probed (currently AIchemist-managed servers only).
+   */
+  tools?: string[];
+  /**
+   * Error message captured during the most recent probe. Set when
+   * `connected === false` for an AIchemist-managed server.
+   */
+  error?: string;
 }
 
 // ─── File changes ─────────────────────────────────────────────────────────────

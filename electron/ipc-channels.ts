@@ -31,6 +31,7 @@ export const UPDATE_SESSION_TITLE   = "sessions:update-title";
 export const UPDATE_SESSION_MODEL   = "sessions:update-model";
 export const UPDATE_SESSION_AGENT   = "sessions:update-agent";
 export const UPDATE_SESSION_SKILLS  = "sessions:update-skills";
+export const UPDATE_SESSION_DISABLED_MCP = "sessions:update-disabled-mcp";
 
 // ── File system (renderer direct use — ContextPanel) ────────────────────────
 export const LIST_DIRECTORY         = "fs:list-directory";
@@ -46,10 +47,12 @@ export const GET_COPILOT_MODELS     = "agent:get-copilot-models";
 export const GET_CLAUDE_AGENTS      = "agent:get-claude-agents";
 export const GET_COPILOT_AGENTS     = "agent:get-copilot-agents";
 export const LIST_SKILLS            = "agent:list-skills";
+// ── MCP servers ───────────────────────────────────────────────────────────────
 export const LIST_MCP_SERVERS       = "agent:list-mcp-servers";
 export const MCP_READ_CONFIG        = "mcp:read-config";
 export const MCP_WRITE_CONFIG       = "mcp:write-config";
 export const MCP_DELETE_SERVER      = "mcp:delete-server";
+export const MCP_PROBE_MANAGED      = "mcp:probe-managed";
 
 // ── Agent / Skill file management ────────────────────────────────────────────
 export const WRITE_AGENT_FILE   = "agents:write-file";

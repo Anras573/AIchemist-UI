@@ -42,6 +42,7 @@ interface SessionStore {
   pendingQuestions: Record<string, PendingQuestion[]>;
   // Active sub-agent per session (Claude only); null = default agent
   sessionAgents: Record<string, string | null>;
+  sessionDisabledMcp: Record<string, string[]>;
   // Active skills per session; empty array = no skills toggled
   sessionSkills: Record<string, string[]>;
   // Trace spans per session; accumulates live during a turn
@@ -85,6 +86,7 @@ interface SessionStore {
   terminalOutput: Record<string, string>;
   setSessionAgent: (sessionId: string, agent: string | null) => void;
   setSessionSkills: (sessionId: string, skills: string[]) => void;
+  setSessionDisabledMcp: (sessionId: string, names: string[]) => void;
   addOrUpdateTraceSpan: (span: TraceSpan) => void;
   addFileChange: (sessionId: string, change: FileChange) => void;
   // Signals WorkspaceView to switch the context panel to a given tab
@@ -115,6 +117,7 @@ export const useSessionStore = create<SessionStore>()(
       terminalOutput: {},
       sessionAgents: {},
       sessionSkills: {},
+      sessionDisabledMcp: {},
       sessionTraces: {},
       sessionFileChanges: {},
       sessionCompactions: {},
@@ -152,6 +155,9 @@ export const useSessionStore = create<SessionStore>()(
           const skillsUpdate = session.skills != null && session.skills.length > 0
             ? { sessionSkills: { ...state.sessionSkills, [session.id]: session.skills } }
             : {};
+          const disabledMcpUpdate = session.disabled_mcp_servers != null && session.disabled_mcp_servers.length > 0
+            ? { sessionDisabledMcp: { ...state.sessionDisabledMcp, [session.id]: session.disabled_mcp_servers } }
+            : {};
           return {
             sessions: {
               ...state.sessions,
@@ -163,6 +169,7 @@ export const useSessionStore = create<SessionStore>()(
             },
             ...agentUpdate,
             ...skillsUpdate,
+            ...disabledMcpUpdate,
           };
         }),
 
@@ -343,6 +350,11 @@ export const useSessionStore = create<SessionStore>()(
       setSessionSkills: (sessionId, skills) =>
         set((state) => ({
           sessionSkills: { ...state.sessionSkills, [sessionId]: skills },
+        })),
+
+      setSessionDisabledMcp: (sessionId, names) =>
+        set((state) => ({
+          sessionDisabledMcp: { ...state.sessionDisabledMcp, [sessionId]: names },
         })),
 
       addOrUpdateTraceSpan: (span) =>
