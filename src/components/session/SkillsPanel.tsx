@@ -195,6 +195,15 @@ export function SkillsPanel() {
     loadSkills();
   }, [loadSkills]);
 
+  if (provider === "acp") {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs px-3 text-center">
+        <span>Skills are not available for ACP sessions.</span>
+        <span className="opacity-60">Skill injection is provider-specific; ACP agents manage their own context.</span>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="flex flex-col h-full overflow-y-auto">

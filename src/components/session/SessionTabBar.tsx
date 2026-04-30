@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from "react";
-import { Bot, ChevronDown, Plus } from "lucide-react";
+import { Bot, Cable, ChevronDown, Plus } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -27,9 +27,19 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
   const projects = useProjectStore((s) => s.projects);
   const defaultProvider = projects.find((p) => p.id === projectId)?.config.provider ?? null;
   const defaultProviderLabel =
-    defaultProvider === "anthropic" ? "Claude" : defaultProvider === "copilot" ? "Copilot" : null;
+    defaultProvider === "anthropic"
+      ? "Claude"
+      : defaultProvider === "copilot"
+        ? "Copilot"
+        : defaultProvider === "acp"
+          ? "ACP"
+          : null;
   const defaultLogoProvider =
-    defaultProvider === "anthropic" ? "anthropic" : defaultProvider === "copilot" ? "github-copilot" : null;
+    defaultProvider === "anthropic"
+      ? "anthropic"
+      : defaultProvider === "copilot"
+        ? "github-copilot"
+        : null;
 
   const projectSessions = Object.values(sessions)
     .filter((s) => s.project_id === projectId)
@@ -164,6 +174,9 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
             {defaultLogoProvider && (
               <ModelSelectorLogo provider={defaultLogoProvider} className="size-3.5 opacity-80" />
             )}
+            {defaultProvider === "acp" && (
+              <Cable className="size-3.5 opacity-80" />
+            )}
           </Button>
         </WithTooltip>
         <DropdownMenu>
@@ -187,6 +200,13 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
               <ModelSelectorLogo provider="github-copilot" className="size-3.5" />
               <span>New Copilot Session</span>
               {defaultProvider === "copilot" && (
+                <span className="ml-auto text-[10px] text-muted-foreground">default</span>
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleNewSession("acp")}>
+              <Cable className="size-3.5" />
+              <span>New ACP Session</span>
+              {defaultProvider === "acp" && (
                 <span className="ml-auto text-[10px] text-muted-foreground">default</span>
               )}
             </DropdownMenuItem>

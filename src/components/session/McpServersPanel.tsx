@@ -217,10 +217,12 @@ export function McpServersPanel() {
   // Filter to only servers configured for the active session's provider.
   // 'both' rows show in both. AIchemist-managed rows are injected into both
   // Claude and Copilot SDK sessions, so they show under either provider lock.
+  // For ACP sessions: hide everything (v1 sends an empty mcpServers list).
   // With no provider lock, show everything.
   const visibleServers = useMemo(() => {
     if (!servers) return null;
     if (!provider) return servers;
+    if (provider === "acp") return [];
     const providerKey = provider === "anthropic" ? "claude" : "copilot";
     return servers.filter(
       (s) => s.source === providerKey || s.source === "both" || s.source === "aichemist",
@@ -230,6 +232,15 @@ export function McpServersPanel() {
   const connected = visibleServers?.filter((s) => s.connected === true) ?? [];
   const failed = visibleServers?.filter((s) => s.connected === false) ?? [];
   const unknown = visibleServers?.filter((s) => s.connected === null) ?? [];
+
+  if (provider === "acp") {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs px-3 text-center">
+        <span>MCP servers are not injected into ACP sessions in v1.</span>
+        <span className="opacity-60">ACP agents may declare their own MCP support; configure that in the agent itself.</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">

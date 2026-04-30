@@ -102,6 +102,12 @@ function migrate(db: Database.Database): void {
   if (!hasColumn("disabled_mcp_servers")) {
     db.exec("ALTER TABLE sessions ADD COLUMN disabled_mcp_servers TEXT;");
   }
+  // ACP (Agent Client Protocol) session id, returned by the agent on session/new.
+  // Persisted for diagnostics; we do NOT call session/load on resume in v1
+  // because replay semantics conflict with our placeholder-message-per-turn model.
+  if (!hasColumn("acp_session_id")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN acp_session_id TEXT;");
+  }
 
   // Add agent column to messages table to stamp which agent produced each message.
   const msgColumns = db

@@ -3,7 +3,26 @@
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
-export type Provider = "anthropic" | "copilot" | string;
+export type Provider = "anthropic" | "copilot" | "acp" | string;
+
+// ─── ACP Agent ───────────────────────────────────────────────────────────────
+
+/**
+ * Per-project configuration for a local ACP-compatible agent (subprocess over stdio).
+ * Used when ProjectConfig.provider === "acp".
+ */
+export interface AcpAgentConfig {
+  /** Executable to launch (PATH-resolved or absolute). Required when provider is "acp". */
+  command: string;
+  /** Command-line arguments. */
+  args?: string[];
+  /** Extra environment variables merged onto process.env. */
+  env?: Record<string, string>;
+  /** Working directory for the subprocess. Defaults to the project path. */
+  cwd?: string;
+  /** Selected ACP authMethod id, populated after the user picks one in the config UI. */
+  authMethodId?: string;
+}
 
 // ─── Tool ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +82,8 @@ export interface ProjectConfig {
   approval_rules: ApprovalRule[];
   custom_tools: ToolDefinition[];
   allowed_tools: AllowedTool[];
+  /** Configured ACP agent for this project. Required when `provider === "acp"`. */
+  acp_agent?: AcpAgentConfig;
 }
 
 export interface Project {
@@ -111,6 +132,8 @@ export interface Session {
   skills: string[] | null;
   /** Names of AIchemist-managed MCP servers disabled for this session. Null/empty/undefined means none disabled. */
   disabled_mcp_servers?: string[] | null;
+  /** ACP session id returned by the agent on session/new. Persisted for diagnostics; we do not resume in v1. */
+  acp_session_id?: string | null;
 }
 
 // ─── IPC event payloads ──────────────────────────────────────────────────────

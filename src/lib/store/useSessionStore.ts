@@ -16,8 +16,18 @@ export interface PendingApproval {
   toolCallId: string;
   toolName: string;
   args: Record<string, unknown>;
+  /** ACP option-based permission options. When present, render option buttons instead of allow/deny. */
+  permissionOptions?: { id: string; name: string; kind: string }[];
   /** Call with true to allow, false to deny. Resolves the Promise in the agent loop. */
-  resolve: (approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) => void;
+  resolve: (
+    approved: boolean,
+    options?: {
+      scope?: "once" | "session" | "project";
+      projectId?: string;
+      /** ACP: chosen option id from `permissionOptions`. null = cancelled. */
+      optionId?: string | null;
+    }
+  ) => void;
 }
 
 export interface PendingQuestion {
@@ -77,7 +87,7 @@ interface SessionStore {
   clearLiveToolCalls: (sessionId: string) => void;
   // Approval gate actions
   addPendingApproval: (sessionId: string, approval: PendingApproval) => void;
-  resolveApproval: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) => void;
+  resolveApproval: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string; optionId?: string | null }) => void;
   removeApproval: (sessionId: string, approvalId: string) => void;
   clearPendingApprovals: (sessionId: string) => void;
   // Terminal log — accumulates execute_bash output across a session's lifetime

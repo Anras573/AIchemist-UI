@@ -1,3 +1,4 @@
+import { Cable } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -130,11 +131,21 @@ interface ApprovalGateProps {
 function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
   const [decision, setDecision] = useState<ApprovalDecision>("pending");
   const [scope, setScope] = useState<ApprovalScope>("once");
+  const [chosenOptionName, setChosenOptionName] = useState<string | null>(null);
 
   function decide(approved: boolean, chosenScope: ApprovalScope) {
     setDecision(approved ? "approved" : "denied");
     setScope(chosenScope);
     onDecide(approval.approvalId, approved, chosenScope);
+  }
+
+  function decideOption(opt: { id: string; name: string; kind: string }) {
+    const isAllow = opt.kind === "allow_once" || opt.kind === "allow_always";
+    setDecision(isAllow ? "approved" : "denied");
+    setChosenOptionName(opt.name);
+    // Resolve through the existing pipeline; main process routes to resolvePermissionChoice
+    // when optionId is present in the IPC payload.
+    approval.resolve(isAllow, { optionId: opt.id });
   }
 
   const isPending = decision === "pending";
@@ -144,6 +155,7 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
     session: "for this session",
     project: "for this project",
   };
+  const hasOptions = (approval.permissionOptions?.length ?? 0) > 0;
 
   return (
     <div className="flex w-full justify-start">
@@ -155,20 +167,38 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
               <ToolInput input={approval.args} />
             )}
             {isPending ? (
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={() => decide(true, "once")}>
-                  Allow once
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => decide(true, "session")}>
-                  Allow for session
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => decide(true, "project")}>
-                  Allow for project
-                </Button>
-                <Button variant="destructive" size="sm" onClick={() => decide(false, "once")}>
-                  Deny
-                </Button>
-              </div>
+              hasOptions ? (
+                <div className="flex flex-wrap gap-2">
+                  {approval.permissionOptions!.map((opt) => {
+                    const isAllow = opt.kind === "allow_once" || opt.kind === "allow_always";
+                    return (
+                      <Button
+                        key={opt.id}
+                        variant={isAllow ? "outline" : "destructive"}
+                        size="sm"
+                        onClick={() => decideOption(opt)}
+                      >
+                        {opt.name}
+                      </Button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => decide(true, "once")}>
+                    Allow once
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => decide(true, "session")}>
+                    Allow for session
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => decide(true, "project")}>
+                    Allow for project
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => decide(false, "once")}>
+                    Deny
+                  </Button>
+                </div>
+              )
             ) : (
               <p className={cn(
                 "text-xs font-medium",
@@ -176,7 +206,11 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
                   ? "text-green-600 dark:text-green-400"
                   : "text-destructive"
               )}>
-                {decision === "approved" ? `Allowed ${scopeLabel[scope]}` : "Denied"}
+                {chosenOptionName
+                  ? chosenOptionName
+                  : decision === "approved"
+                    ? `Allowed ${scopeLabel[scope]}`
+                    : "Denied"}
               </p>
             )}
           </ToolContent>
@@ -221,8 +255,13 @@ export function EmptyStateNewSession({
   defaultProvider: string | null;
   onNewSession: (providerOverride?: string) => void;
 }) {
-  const initial = defaultProvider === "copilot" ? "copilot" : "anthropic";
-  const [selected, setSelected] = useState<"anthropic" | "copilot">(initial);
+  const initial =
+    defaultProvider === "copilot"
+      ? "copilot"
+      : defaultProvider === "acp"
+        ? "acp"
+        : "anthropic";
+  const [selected, setSelected] = useState<"anthropic" | "copilot" | "acp">(initial);
 
   return (
     <div className="flex flex-col items-center gap-3">
@@ -256,6 +295,20 @@ export function EmptyStateNewSession({
           />
           <ModelSelectorLogo provider="github-copilot" className="size-3.5" />
           <span>Use Copilot{defaultProvider === "copilot" && (
+            <span className="ml-1 text-[10px] text-muted-foreground">(default)</span>
+          )}</span>
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer text-sm">
+          <input
+            type="radio"
+            name="new-session-provider"
+            value="acp"
+            checked={selected === "acp"}
+            onChange={() => setSelected("acp")}
+            className="accent-primary"
+          />
+          <Cable className="size-3.5" />
+          <span>Use ACP{defaultProvider === "acp" && (
             <span className="ml-1 text-[10px] text-muted-foreground">(default)</span>
           )}</span>
         </label>

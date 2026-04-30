@@ -14,9 +14,33 @@ const pendingApprovals = new Map<
   { resolve: (approved: boolean) => void; sessionId: string; toolName: string; args: unknown; timer: ReturnType<typeof setTimeout> }
 >();
 
+/** Option-based approval (ACP). Resolution carries an `optionId` from the agent's
+ * `permissionOptions` array, or `null` if cancelled. */
+export interface PermissionOption {
+  id: string;
+  name: string;
+  /** ACP `PermissionOptionKind`: "allow_once" | "allow_always" | "reject_once" | "reject_always". */
+  kind: string;
+}
+
+const pendingChoiceApprovals = new Map<
+  string,
+  {
+    resolve: (optionId: string | null) => void;
+    sessionId: string;
+    toolName: string;
+    args: unknown;
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
+
 /**
  * Called by the IPC handler for `agent:approve-tool-call` to unblock a
  * waiting tool, regardless of which provider initiated the request.
+ *
+ * Resolves boolean-flavor approvals as well as option-flavor approvals
+ * (the latter map `approved=true` → first allow option, `false` → first reject option;
+ * for ACP callers prefer `resolvePermissionChoice` instead).
  */
 export function resolveApproval(approvalId: string, approved: boolean): void {
   const pending = pendingApprovals.get(approvalId);
@@ -24,6 +48,24 @@ export function resolveApproval(approvalId: string, approved: boolean): void {
     clearTimeout(pending.timer);
     pending.resolve(approved);
     pendingApprovals.delete(approvalId);
+    return;
+  }
+  // Fallback for any stale ACP-flavor approval that arrived through the legacy path.
+  const choice = pendingChoiceApprovals.get(approvalId);
+  if (choice) {
+    clearTimeout(choice.timer);
+    choice.resolve(approved ? "__legacy_allow__" : null);
+    pendingChoiceApprovals.delete(approvalId);
+  }
+}
+
+/** Resolves an option-based (ACP) approval with the user-selected option id, or null on cancel. */
+export function resolvePermissionChoice(approvalId: string, optionId: string | null): void {
+  const choice = pendingChoiceApprovals.get(approvalId);
+  if (choice) {
+    clearTimeout(choice.timer);
+    choice.resolve(optionId);
+    pendingChoiceApprovals.delete(approvalId);
   }
 }
 
@@ -32,7 +74,9 @@ export function getPendingApprovalData(
   approvalId: string
 ): { sessionId: string; toolName: string; args: unknown } | null {
   const p = pendingApprovals.get(approvalId);
-  return p ? { sessionId: p.sessionId, toolName: p.toolName, args: p.args } : null;
+  if (p) return { sessionId: p.sessionId, toolName: p.toolName, args: p.args };
+  const c = pendingChoiceApprovals.get(approvalId);
+  return c ? { sessionId: c.sessionId, toolName: c.toolName, args: c.args } : null;
 }
 
 /**
@@ -77,7 +121,51 @@ export function cancelSessionApprovals(sessionId: string): void {
       pendingApprovals.delete(id);
     }
   }
+  for (const [id, choice] of pendingChoiceApprovals.entries()) {
+    if (choice.sessionId === sessionId) {
+      clearTimeout(choice.timer);
+      choice.resolve(null);
+      pendingChoiceApprovals.delete(id);
+    }
+  }
   sessionAllowlist.delete(sessionId);
+}
+
+/**
+ * ACP-style approval — emits SESSION_APPROVAL_REQUIRED with a `permission_options`
+ * array and suspends until the user picks an option (or cancels). Auto-cancels
+ * after 5 minutes.
+ *
+ * Resolves with the chosen option id, or null if the user cancelled / timed out.
+ */
+export function requestPermissionChoice(
+  webContents: Electron.WebContents,
+  sessionId: string,
+  toolCallId: string,
+  toolName: string,
+  input: unknown,
+  options: PermissionOption[]
+): Promise<string | null> {
+  const approvalId = crypto.randomUUID();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (pendingChoiceApprovals.has(approvalId)) {
+        console.warn(`[approval] choice "${toolName}" (${approvalId}) timed out — cancelling`);
+        pendingChoiceApprovals.delete(approvalId);
+        resolve(null);
+      }
+    }, APPROVAL_TIMEOUT_MS);
+
+    pendingChoiceApprovals.set(approvalId, { resolve, sessionId, toolName, args: input, timer });
+    webContents.send(CH.SESSION_APPROVAL_REQUIRED, {
+      session_id: sessionId,
+      approval_id: approvalId,
+      tool_call_id: toolCallId,
+      tool_name: toolName,
+      input,
+      permission_options: options,
+    });
+  });
 }
 
 // ── Allowlists ────────────────────────────────────────────────────────────────
