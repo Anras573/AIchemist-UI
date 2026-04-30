@@ -144,4 +144,29 @@ describe("SkillsPanel", () => {
       expect(screen.getByText(/no skills installed/i)).toBeInTheDocument();
     });
   });
+
+  it("filters skills by source when a filter chip is toggled off", async () => {
+    const user = userEvent.setup();
+    setupStores();
+    vi.mocked(window.electronAPI.listSkills).mockResolvedValue([USER_SKILL, PLUGIN_SKILL]);
+
+    renderWithProviders(<SkillsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByText("brainstorming")).toBeInTheDocument();
+      expect(screen.getByText("optimizing-ef-core")).toBeInTheDocument();
+    });
+
+    // Toggle off the "plugin" filter — plugin skill should disappear
+    await user.click(screen.getByLabelText("Filter plugin skills"));
+
+    expect(screen.getByText("brainstorming")).toBeInTheDocument();
+    expect(screen.queryByText("optimizing-ef-core")).not.toBeInTheDocument();
+
+    // Toggle off "global" too — both gone, empty-filter message shows
+    await user.click(screen.getByLabelText("Filter global skills"));
+
+    expect(screen.queryByText("brainstorming")).not.toBeInTheDocument();
+    expect(screen.getByText(/no skills match the selected filters/i)).toBeInTheDocument();
+  });
 });

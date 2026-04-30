@@ -10,15 +10,31 @@ import { WithTooltip } from "@/components/ui/with-tooltip";
 import { SkillEditorModal } from "@/components/session/SkillEditorModal";
 import type { SkillInfo } from "@/types";
 
-const SOURCE_LABEL: Record<string, { label: string; className: string }> = {
-  project: { label: "project", className: "text-blue-500/70" },
-  global:  { label: "global",  className: "text-purple-500/70" },
-  plugin:  { label: "plugin",  className: "text-amber-500/70" },
+type SkillSource = "project" | "global" | "plugin";
+
+const SOURCE_LABEL: Record<SkillSource, { label: string; className: string; activeClassName: string }> = {
+  project: {
+    label: "project",
+    className: "text-blue-500/70",
+    activeClassName: "border-blue-500/40 bg-blue-500/10 text-blue-300",
+  },
+  global: {
+    label: "global",
+    className: "text-purple-500/70",
+    activeClassName: "border-purple-500/40 bg-purple-500/10 text-purple-300",
+  },
+  plugin: {
+    label: "plugin",
+    className: "text-amber-500/70",
+    activeClassName: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  },
 };
+
+const ALL_SOURCES: SkillSource[] = ["project", "global", "plugin"];
 
 function SkillSourceBadge({ source, plugin }: { source?: string; plugin?: string }) {
   if (!source) return null;
-  const meta = SOURCE_LABEL[source];
+  const meta = SOURCE_LABEL[source as SkillSource];
   if (!meta) return null;
 
   // For plugin skills, show the short repo name (after last "/") with full key as tooltip
@@ -114,6 +130,23 @@ export function SkillsPanel() {
   const provider = useActiveSessionProvider();
 
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
+  const [enabledSources, setEnabledSources] = useState<Set<SkillSource>>(
+    () => new Set(ALL_SOURCES)
+  );
+
+  const toggleSource = useCallback((source: SkillSource) => {
+    setEnabledSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(source)) next.delete(source);
+      else next.add(source);
+      return next;
+    });
+  }, []);
+
+  const visibleSkills = skills?.filter((s) => {
+    const src = s.source as SkillSource | undefined;
+    return src ? enabledSources.has(src) : true;
+  }) ?? null;
 
   const loadSkills = useCallback(() => {
     if (!projectPath) return;
@@ -206,6 +239,34 @@ export function SkillsPanel() {
             </button>
           </WithTooltip>
         </div>
+        <div className="px-2 pt-0.5 pb-1 flex items-center gap-1">
+          {ALL_SOURCES.map((src) => {
+            const meta = SOURCE_LABEL[src];
+            const enabled = enabledSources.has(src);
+            const count = skills?.filter((s) => s.source === src).length ?? 0;
+            return (
+              <WithTooltip key={src} label={enabled ? `Hide ${meta.label} skills` : `Show ${meta.label} skills`}>
+                <button
+                  type="button"
+                  onClick={() => toggleSource(src)}
+                  aria-pressed={enabled}
+                  aria-label={`Filter ${meta.label} skills`}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded border text-[9px] font-medium transition-colors",
+                    enabled
+                      ? meta.activeClassName
+                      : "border-border bg-background text-muted-foreground/60 hover:text-muted-foreground"
+                  )}
+                >
+                  {meta.label}
+                  {skills !== null && (
+                    <span className="ml-1 opacity-60">{count}</span>
+                  )}
+                </button>
+              </WithTooltip>
+            );
+          })}
+        </div>
         <div className="p-2 pt-1 flex flex-col gap-1.5">
           {skills === null ? (
             <div className="flex items-center gap-2 px-2 py-3 text-[10px] text-muted-foreground">
@@ -217,8 +278,12 @@ export function SkillsPanel() {
               No skills installed in{" "}
               <code className="font-mono">.agents/skills/</code>.
             </div>
+          ) : visibleSkills && visibleSkills.length === 0 ? (
+            <div className="px-2 py-3 text-[10px] text-muted-foreground">
+              No skills match the selected filters.
+            </div>
           ) : (
-            skills.map((skill) => (
+            visibleSkills!.map((skill) => (
               <SkillCard
                 key={skill.name}
                 skill={skill}
