@@ -21,6 +21,7 @@ const PLUGIN_SKILL: SkillInfo = {
   description: "EF Core query optimization guidance.",
   path: "/home/user/.claude/plugins/ef-plugin/skills/optimizing-ef-core",
   source: "plugin",
+  plugin: "anras573/ef-toolkit",
 };
 
 function makeSession(overrides: Partial<Session> = {}): Session {
@@ -196,6 +197,12 @@ describe("SkillsPanel", () => {
     await user.type(searchInput, "user intent");
     expect(screen.getByText("brainstorming")).toBeInTheDocument();
     expect(screen.queryByText("optimizing-ef-core")).not.toBeInTheDocument();
+
+    // Match by plugin name
+    await user.clear(searchInput);
+    await user.type(searchInput, "ef-toolkit");
+    expect(screen.queryByText("brainstorming")).not.toBeInTheDocument();
+    expect(screen.getByText("optimizing-ef-core")).toBeInTheDocument();
 
     // No matches → empty state mentions the query
     await user.clear(searchInput);

@@ -152,7 +152,8 @@ export function SkillsPanel() {
     if (!normalizedQuery) return true;
     return (
       s.name.toLowerCase().includes(normalizedQuery) ||
-      (s.description?.toLowerCase().includes(normalizedQuery) ?? false)
+      (s.description?.toLowerCase().includes(normalizedQuery) ?? false) ||
+      (s.plugin?.toLowerCase().includes(normalizedQuery) ?? false)
     );
   }) ?? null;
 
@@ -254,7 +255,7 @@ export function SkillsPanel() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search skills…"
+              placeholder="Search name, description, or plugin…"
               aria-label="Search skills"
               className="h-7 pl-7 pr-7 text-xs"
             />
