@@ -169,4 +169,37 @@ describe("SkillsPanel", () => {
     expect(screen.queryByText("brainstorming")).not.toBeInTheDocument();
     expect(screen.getByText(/no skills match the selected filters/i)).toBeInTheDocument();
   });
+
+  it("filters skills by search query (matches name and description)", async () => {
+    const user = userEvent.setup();
+    setupStores();
+    vi.mocked(window.electronAPI.listSkills).mockResolvedValue([USER_SKILL, PLUGIN_SKILL]);
+
+    renderWithProviders(<SkillsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByText("brainstorming")).toBeInTheDocument();
+    });
+
+    const searchInput = screen.getByLabelText("Search skills");
+
+    await user.type(searchInput, "ef-core");
+    expect(screen.queryByText("brainstorming")).not.toBeInTheDocument();
+    expect(screen.getByText("optimizing-ef-core")).toBeInTheDocument();
+
+    // Clear via the X button restores everything
+    await user.click(screen.getByLabelText("Clear search"));
+    expect(screen.getByText("brainstorming")).toBeInTheDocument();
+    expect(screen.getByText("optimizing-ef-core")).toBeInTheDocument();
+
+    // Match by description text
+    await user.type(searchInput, "user intent");
+    expect(screen.getByText("brainstorming")).toBeInTheDocument();
+    expect(screen.queryByText("optimizing-ef-core")).not.toBeInTheDocument();
+
+    // No matches → empty state mentions the query
+    await user.clear(searchInput);
+    await user.type(searchInput, "nonexistent");
+    expect(screen.getByText(/no skills match "nonexistent"/i)).toBeInTheDocument();
+  });
 });

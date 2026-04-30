@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
-import { Check, Eye, Info, Loader2, Pencil, Plus } from "lucide-react";
+import { Check, Eye, Info, Loader2, Pencil, Plus, Search, X } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 import { SkillEditorModal } from "@/components/session/SkillEditorModal";
 import type { SkillInfo } from "@/types";
@@ -133,6 +134,7 @@ export function SkillsPanel() {
   const [enabledSources, setEnabledSources] = useState<Set<SkillSource>>(
     () => new Set(ALL_SOURCES)
   );
+  const [searchQuery, setSearchQuery] = useState("");
 
   const toggleSource = useCallback((source: SkillSource) => {
     setEnabledSources((prev) => {
@@ -143,9 +145,15 @@ export function SkillsPanel() {
     });
   }, []);
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
   const visibleSkills = skills?.filter((s) => {
     const src = s.source as SkillSource | undefined;
-    return src ? enabledSources.has(src) : true;
+    if (src && !enabledSources.has(src)) return false;
+    if (!normalizedQuery) return true;
+    return (
+      s.name.toLowerCase().includes(normalizedQuery) ||
+      (s.description?.toLowerCase().includes(normalizedQuery) ?? false)
+    );
   }) ?? null;
 
   const loadSkills = useCallback(() => {
@@ -239,6 +247,29 @@ export function SkillsPanel() {
             </button>
           </WithTooltip>
         </div>
+        <div className="px-2 pb-1">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
+            <Input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search skills…"
+              aria-label="Search skills"
+              className="h-7 pl-7 pr-7 text-xs"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                aria-label="Clear search"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
         <div className="px-2 pt-0.5 pb-1 flex items-center gap-1">
           {ALL_SOURCES.map((src) => {
             const meta = SOURCE_LABEL[src];
@@ -280,7 +311,9 @@ export function SkillsPanel() {
             </div>
           ) : visibleSkills && visibleSkills.length === 0 ? (
             <div className="px-2 py-3 text-[10px] text-muted-foreground">
-              No skills match the selected filters.
+              {normalizedQuery
+                ? `No skills match "${searchQuery.trim()}".`
+                : "No skills match the selected filters."}
             </div>
           ) : (
             visibleSkills!.map((skill) => (
