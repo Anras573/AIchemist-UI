@@ -215,8 +215,8 @@ function AcpAgentFields({
         <FieldLabel htmlFor="ps-acp-auth">Auth method id (optional)</FieldLabel>
         <Input
           id="ps-acp-auth"
-          value={acp.authMethodId ?? ""}
-          onChange={(e) => update({ authMethodId: e.target.value || undefined })}
+          value={acp.auth_method_id ?? ""}
+          onChange={(e) => update({ auth_method_id: e.target.value || undefined })}
           placeholder="Set this if the agent reports authMethods"
           className="font-mono text-sm"
         />

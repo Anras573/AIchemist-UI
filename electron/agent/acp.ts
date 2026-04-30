@@ -15,7 +15,7 @@
  *   - no `session/load` replay on resume — every AIchemist session gets a fresh
  *     ACP session on first run() call
  *   - no terminal capability advertised
- *   - no auth flow UI; users must set `acp_agent.authMethodId` manually
+ *   - no auth flow UI; users must set `acp_agent.auth_method_id` manually
  */
 
 import * as crypto from "crypto";
@@ -71,6 +71,20 @@ interface AcpConnectionHandle {
 const connections = new Map<string, AcpConnectionHandle>();
 
 /**
+ * In-flight `spawnConnection` promises keyed by the same connectionKey. Lets
+ * concurrent `getOrCreateConnection` calls for the same (projectPath, agent)
+ * share a single subprocess instead of racing and leaking duplicates.
+ */
+const pendingConnections = new Map<string, Promise<AcpConnectionHandle>>();
+
+/**
+ * connectionKey → set of ACP session ids issued by that subprocess. Lets us
+ * evict stale entries from `acpSessionIds` and `activeRuntimes` when the
+ * subprocess exits, so the next `run()` reissues `newSession`.
+ */
+const acpSessionsByConnection = new Map<string, Set<string>>();
+
+/**
  * Per-AIchemist-session ACP session id. Cached in memory + persisted to
  * `sessions.acp_session_id` so a fresh app launch can read the prior id for
  * diagnostics (we still always create a new ACP session in v1).
@@ -111,7 +125,7 @@ function fingerprintAgentConfig(cfg: AcpAgentConfig): string {
     args: cfg.args ?? [],
     env: cfg.env ?? {},
     cwd: cfg.cwd ?? "",
-    authMethodId: cfg.authMethodId ?? "",
+    authMethodId: cfg.auth_method_id ?? "",
   });
   return crypto.createHash("sha1").update(normalized).digest("hex").slice(0, 12);
 }
@@ -162,11 +176,13 @@ async function spawnConnection(
   proc.on("exit", (code, signal) => {
     handle.closed = true;
     connections.delete(key);
+    evictAcpSessionsForConnection(key);
     console.warn(`[acp] agent ${cfg.command} exited (code=${code} signal=${signal}); connection ${key} discarded`);
   });
   proc.on("error", (err) => {
     handle.closed = true;
     connections.delete(key);
+    evictAcpSessionsForConnection(key);
     console.error(`[acp] agent ${cfg.command} error:`, err);
   });
 
@@ -197,7 +213,33 @@ async function getOrCreateConnection(
   const key = connectionKey(projectPath, cfg);
   const existing = connections.get(key);
   if (existing && !existing.closed) return existing;
-  return spawnConnection(projectPath, cfg);
+
+  // Coalesce concurrent callers onto a single in-flight spawn.
+  const inFlight = pendingConnections.get(key);
+  if (inFlight) return inFlight;
+
+  const spawnPromise = spawnConnection(projectPath, cfg).finally(() => {
+    pendingConnections.delete(key);
+  });
+  pendingConnections.set(key, spawnPromise);
+  return spawnPromise;
+}
+
+/**
+ * Removes any cached ACP sessionIds (and their runtime contexts) that were
+ * issued by the subprocess at `connectionKey`. Called on subprocess exit/error
+ * so a stale id is not reused with a freshly-spawned subprocess.
+ */
+function evictAcpSessionsForConnection(key: string): void {
+  const sids = acpSessionsByConnection.get(key);
+  if (!sids) return;
+  for (const sid of sids) {
+    activeRuntimes.delete(sid);
+    for (const [aiSessionId, cachedSid] of acpSessionIds.entries()) {
+      if (cachedSid === sid) acpSessionIds.delete(aiSessionId);
+    }
+  }
+  acpSessionsByConnection.delete(key);
 }
 
 // ── Client implementation ────────────────────────────────────────────────────
@@ -510,13 +552,20 @@ async function run(params: AgentProviderParams): Promise<string> {
       });
       acpSessionId = newRes.sessionId;
       acpSessionIds.set(params.sessionId, acpSessionId);
+      // Track which subprocess issued this id so we can evict on exit/error.
+      let connSet = acpSessionsByConnection.get(handle.key);
+      if (!connSet) {
+        connSet = new Set();
+        acpSessionsByConnection.set(handle.key, connSet);
+      }
+      connSet.add(acpSessionId);
       setAcpSessionId(params.db, params.sessionId, acpSessionId);
     } catch (err) {
       const msg = String((err as Error)?.message ?? err);
       if (handle.authMethods.length > 0 && /auth/i.test(msg)) {
         const methods = handle.authMethods.map((m) => `- ${m.id}${m.name ? ` (${m.name})` : ""}`).join("\n");
         throw new Error(
-          `ACP agent requires authentication. Set \`acp_agent.authMethodId\` in project settings.\nAvailable methods:\n${methods}`
+          `ACP agent requires authentication. Set \`acp_agent.auth_method_id\` in project settings.\nAvailable methods:\n${methods}`
         );
       }
       throw err;
@@ -567,7 +616,9 @@ async function stop(): Promise<void> {
     }
   }
   connections.clear();
+  pendingConnections.clear();
   acpSessionIds.clear();
+  acpSessionsByConnection.clear();
   activeRuntimes.clear();
 }
 
@@ -582,7 +633,9 @@ export function _resetAcpStateForTests(): void {
     } catch { /* ignore */ }
   }
   connections.clear();
+  pendingConnections.clear();
   acpSessionIds.clear();
+  acpSessionsByConnection.clear();
   activeRuntimes.clear();
   sdkPromise = null;
 }

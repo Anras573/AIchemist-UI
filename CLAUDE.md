@@ -132,13 +132,13 @@ Each session is locked to a single provider (`"anthropic"`, `"copilot"`, or `"ac
 
 ### ACP (Agent Client Protocol) provider
 
-`electron/agent/acp.ts` implements the third provider. AIchemist-UI is the ACP **client**; the agent runs as a subprocess over stdio configured via `ProjectConfig.acp_agent` (`{ command, args?, env?, cwd?, authMethodId? }`).
+`electron/agent/acp.ts` implements the third provider. AIchemist-UI is the ACP **client**; the agent runs as a subprocess over stdio configured via `ProjectConfig.acp_agent` (`{ command, args?, env?, cwd?, auth_method_id? }`).
 
 - **Connection lifecycle:** one subprocess per `(projectPath, agentConfigFingerprint)` keyed in an in-process `connections` map. Multiple AIchemist sessions for the same project+agent share the connection; each gets its own ACP session id from `session/new`.
 - **Event mapping:** `handleSessionUpdate` (exported, unit-tested in `acp.test.ts`) translates ACP `session/update` notifications into the same IPC events Claude/Copilot use — `agent_message_chunk` → `SESSION_DELTA`, `tool_call` → `saveToolCall` + `SESSION_TOOL_CALL`, `tool_call_update` → `updateToolCallStatus` + `SESSION_TOOL_RESULT`. ACP `ToolCallStatus` maps via `mapAcpStatus` (`pending → pending_approval`, `in_progress → approved`, `completed → complete`, `failed → error`).
 - **Approval gate:** ACP `session/request_permission` flows through a new option-based path (`requestPermissionChoice` in `electron/agent/approval.ts`); the renderer's `ApprovalGate` renders one button per option when `permissionOptions` is present in the `PendingApproval`. `fs/write_text_file` is treated as a synthetic `fs_write` tool call and gated through `requiresApproval()` like a native Write/Edit.
 - **Filesystem boundary:** `fs/read_text_file` is constrained to the project root via `realpathSync`. Both fs tools reject non-absolute paths.
-- **Auth:** `initialize` response's `authMethods` is captured on the connection. If `session/new` fails with an auth-required error, the runner surfaces it with the agent's method list — set `acp_agent.authMethodId` manually (no auth flow UI in v1).
+- **Auth:** `initialize` response's `authMethods` is captured on the connection. If `session/new` fails with an auth-required error, the runner surfaces it with the agent's method list — set `acp_agent.auth_method_id` manually (no auth flow UI in v1).
 - **Out of scope (v1):** `session/load` resume, terminal capability, image/resource content blocks in prompts, plan UI, traces, skills/MCP injection, agent picker, cancel button.
 - **Right-panel guards:** `SkillsPanel`, `MemoryPanel`, and `McpServersPanel` show "not available for ACP" placeholders when `useActiveSessionProvider() === "acp"`.
 

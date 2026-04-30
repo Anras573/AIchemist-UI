@@ -38,9 +38,10 @@ const pendingChoiceApprovals = new Map<
  * Called by the IPC handler for `agent:approve-tool-call` to unblock a
  * waiting tool, regardless of which provider initiated the request.
  *
- * Resolves boolean-flavor approvals as well as option-flavor approvals
- * (the latter map `approved=true` → first allow option, `false` → first reject option;
- * for ACP callers prefer `resolvePermissionChoice` instead).
+ * Only resolves boolean-flavor approvals. Option-flavor approvals (ACP) MUST
+ * be resolved through `resolvePermissionChoice` with a real optionId; this
+ * function intentionally refuses to synthesize one because passing an unknown
+ * optionId to an ACP agent would silently misbehave.
  */
 export function resolveApproval(approvalId: string, approved: boolean): void {
   const pending = pendingApprovals.get(approvalId);
@@ -50,12 +51,13 @@ export function resolveApproval(approvalId: string, approved: boolean): void {
     pendingApprovals.delete(approvalId);
     return;
   }
-  // Fallback for any stale ACP-flavor approval that arrived through the legacy path.
-  const choice = pendingChoiceApprovals.get(approvalId);
-  if (choice) {
-    clearTimeout(choice.timer);
-    choice.resolve(approved ? "__legacy_allow__" : null);
-    pendingChoiceApprovals.delete(approvalId);
+  // If the approval is actually option-flavor (ACP), do NOT fabricate an
+  // optionId. Log and drop — the caller should be using resolvePermissionChoice.
+  if (pendingChoiceApprovals.has(approvalId)) {
+    console.warn(
+      `[approval] resolveApproval called for an option-based approval ${approvalId}; ` +
+      `this is a bug — use resolvePermissionChoice with a real optionId. Dropping.`
+    );
   }
 }
 

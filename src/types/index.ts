@@ -21,7 +21,7 @@ export interface AcpAgentConfig {
   /** Working directory for the subprocess. Defaults to the project path. */
   cwd?: string;
   /** Selected ACP authMethod id, populated after the user picks one in the config UI. */
-  authMethodId?: string;
+  auth_method_id?: string;
 }
 
 // ─── Tool ────────────────────────────────────────────────────────────────────
