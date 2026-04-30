@@ -198,57 +198,7 @@ export function SkillsPanel() {
   return (
     <>
       <div className="flex flex-col h-full overflow-y-auto">
-        <div className="flex items-center justify-end px-2 pt-1.5 pb-0.5">
-          <WithTooltip
-            label={
-              <div className="flex flex-col gap-1 max-w-[280px] text-[11px]">
-                <span className="font-medium">Skills are loaded from:</span>
-                <ul className="space-y-0.5">
-                  <li>
-                    <span className="text-blue-300">project</span> ·{" "}
-                    <code>&lt;project&gt;/.agents/skills/</code>
-                  </li>
-                  {provider === "copilot" ? (
-                    <>
-                      <li>
-                        <span className="text-purple-300">global</span> ·{" "}
-                        <code>~/.agents/skills/</code>
-                      </li>
-                      <li>
-                        <span className="text-amber-300">plugin</span> ·
-                        installed Copilot CLI plugins
-                      </li>
-                    </>
-                  ) : (
-                    <>
-                      <li>
-                        <span className="text-purple-300">global</span> ·{" "}
-                        <code>~/.claude/skills/</code>
-                      </li>
-                      <li>
-                        <span className="text-amber-300">plugin</span> ·
-                        installed Claude Code plugins
-                      </li>
-                    </>
-                  )}
-                </ul>
-                <span className="text-muted-foreground">
-                  Higher-priority sources override same-named skills below.
-                </span>
-              </div>
-            }
-            side="left"
-          >
-            <button
-              type="button"
-              aria-label="About skills sources"
-              className="flex items-center justify-center h-5 w-5 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            >
-              <Info className="h-3 w-3" />
-            </button>
-          </WithTooltip>
-        </div>
-        <div className="px-2 pb-1">
+        <div className="px-2 pt-2 pb-1">
           <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
             <Input
@@ -363,5 +313,62 @@ export function SkillsPanel() {
         />
       )}
     </>
+  );
+}
+
+// ── SkillsHeaderInfo ──────────────────────────────────────────────────────────
+// Rendered in the right-panel header bar (next to the "SKILLS" title) so the
+// info tooltip lives with the panel name rather than inside the body.
+export function SkillsHeaderInfo() {
+  const provider = useActiveSessionProvider();
+  return (
+    <WithTooltip
+      label={
+        <div className="flex flex-col gap-1 max-w-[280px] text-[11px]">
+          <span className="font-medium">Skills are loaded from:</span>
+          <ul className="space-y-0.5">
+            <li>
+              <span className="text-blue-300">project</span> ·{" "}
+              <code>&lt;project&gt;/.agents/skills/</code>
+            </li>
+            {provider === "copilot" ? (
+              <>
+                <li>
+                  <span className="text-purple-300">global</span> ·{" "}
+                  <code>~/.agents/skills/</code>
+                </li>
+                <li>
+                  <span className="text-amber-300">plugin</span> ·
+                  installed Copilot CLI plugins
+                </li>
+              </>
+            ) : (
+              <>
+                <li>
+                  <span className="text-purple-300">global</span> ·{" "}
+                  <code>~/.claude/skills/</code>
+                </li>
+                <li>
+                  <span className="text-amber-300">plugin</span> ·
+                  installed Claude Code plugins
+                </li>
+              </>
+            )}
+          </ul>
+          <span className="text-muted-foreground">
+            Higher-priority sources override same-named skills below.
+          </span>
+        </div>
+      }
+      side="left"
+    >
+      <button
+        type="button"
+        aria-label="About skills sources"
+        className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+      >
+        <Info className="h-3.5 w-3.5" />
+      </button>
+    </WithTooltip>
   );
 }

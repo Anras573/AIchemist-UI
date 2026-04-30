@@ -9,7 +9,7 @@ import {
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { FileViewer } from "./FileViewer";
-import { SkillsPanel } from "./SkillsPanel";
+import { SkillsPanel, SkillsHeaderInfo } from "./SkillsPanel";
 import { TracesPanel } from "./TracesPanel";
 import { ChangesPanel } from "./ChangesPanel";
 import { InteractiveTerminal } from "./InteractiveTerminal";
@@ -236,6 +236,9 @@ export function ContextPanel({
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide flex-1 truncate">
           {headerLabel}
         </span>
+        {activeTab === "skills" && !isViewingFile && !isViewingMemory && (
+          <SkillsHeaderInfo />
+        )}
         <WithTooltip label="Close panel">
           <button
             onClick={onClose}
