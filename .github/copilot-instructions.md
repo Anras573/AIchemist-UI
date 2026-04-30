@@ -109,10 +109,16 @@ VS Code-style dropdown in the input bar. Loads agents lazily via `ipc.getClaudeA
 
 ### Skills panel (`SkillsPanel`)
 
-Lists skills from `.agents/skills/` and `~/.claude/skills/`. Each card:
+Lists skills from `.agents/skills/` and `~/.claude/skills/` (or `~/.agents/skills/` for Copilot) plus installed plugins. Each card:
 - **Click** — toggles the skill on/off for the session
 - **Eye icon** (hover) — opens `SkillEditorModal` with `readOnly=true`
-- **Pencil icon** (hover) — opens `SkillEditorModal` in edit mode
+- **Pencil icon** (hover) — opens `SkillEditorModal` in edit mode (user skills only; plugin skills are read-only)
+
+Above the list:
+- **Search input** — case-insensitive substring match against `name`, `description`, and `plugin`
+- **Source filter chips** (`project` / `global` / `plugin`) — toggleable, with per-source counts. All on by default. Composes (AND) with search.
+
+The (i) info tooltip describing discovery paths is rendered in the right-panel header beam by `ContextPanel.tsx` via the exported `SkillsHeaderInfo` component, not inside the panel body.
 
 ### readOnly viewer pattern
 

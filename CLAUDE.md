@@ -234,6 +234,16 @@ Each card supports three interactions:
 
 A **New Skill** button at the bottom opens `SkillEditorModal` with `skill=null` (create mode).
 
+### Filtering & search
+
+Above the skill list, the panel exposes:
+
+- A **search input** that case-insensitively matches against the skill's `name`, `description`, and `plugin` fields.
+- A row of **source filter chips** (`project` / `global` / `plugin`), each toggleable with a count of skills in that source. All sources are enabled by default. Both filters compose (search AND chip filter).
+- The empty state distinguishes between "no skills installed", "no skills match the filters", and `No skills match "<query>"`.
+
+The info (i) tooltip describing skill discovery paths lives on the right-panel header beam (next to the SKILLS title), exported from `SkillsPanel.tsx` as `SkillsHeaderInfo` and rendered by `ContextPanel.tsx`.
+
 ### Skill discovery implementation
 
 `scanSkillsDir()` in `electron/main.ts` reads skill descriptions from `SKILL.md` frontmatter first (falls back to `README.md`). `scanPluginSkills()` reads `~/.claude/plugins/installed_plugins.json`, picks the most-recently-updated install per plugin, and walks `<installPath>/skills/*/SKILL.md`. `scanCopilotPluginSkills()` walks `~/.copilot/installed-plugins/<scope>/<plugin>/skills/*/SKILL.md` directly (no manifest file).
