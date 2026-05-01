@@ -54,6 +54,9 @@ export const MCP_WRITE_CONFIG       = "mcp:write-config";
 export const MCP_DELETE_SERVER      = "mcp:delete-server";
 export const MCP_PROBE_MANAGED      = "mcp:probe-managed";
 
+// ── Provider availability probes ──────────────────────────────────────────────
+export const PROBE_PROVIDERS        = "providers:probe";
+
 // ── Agent / Skill file management ────────────────────────────────────────────
 export const WRITE_AGENT_FILE   = "agents:write-file";
 export const DELETE_AGENT_FILE  = "agents:delete-file";

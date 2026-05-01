@@ -57,6 +57,10 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     listSkills: vi.fn().mockResolvedValue([]),
     listMcpServers: vi.fn().mockResolvedValue([]),
     mcpProbeManaged: vi.fn().mockResolvedValue([]),
+    probeProviders: vi.fn().mockResolvedValue({
+      anthropic: { ok: true },
+      copilot: { ok: true },
+    }),
     updateSessionDisabledMcp: vi.fn().mockResolvedValue([]),
     mcpReadConfig: vi.fn().mockResolvedValue({}),
     mcpWriteConfig: vi.fn().mockResolvedValue(undefined),

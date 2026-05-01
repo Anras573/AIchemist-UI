@@ -5,6 +5,21 @@
 
 export type Provider = "anthropic" | "copilot" | "acp" | string;
 
+// ─── Provider availability ───────────────────────────────────────────────────
+
+export interface ProviderProbeResult {
+  ok: boolean;
+  reason?: string;
+  durationMs?: number;
+}
+
+export interface ProviderProbes {
+  anthropic: ProviderProbeResult;
+  copilot: ProviderProbeResult;
+  /** Per-project — only present when the IPC call passed a projectId. */
+  acp?: ProviderProbeResult;
+}
+
 // ─── ACP Agent ───────────────────────────────────────────────────────────────
 
 /**

@@ -64,6 +64,8 @@ export const ipc = {
     window.electronAPI.listSkills(projectPath, provider),
   listMcpServers: () => window.electronAPI.listMcpServers(),
   mcpProbeManaged: () => window.electronAPI.mcpProbeManaged(),
+  probeProviders: (args?: { projectId?: string; force?: boolean }) =>
+    window.electronAPI.probeProviders(args),
   mcpReadConfig: (args: Parameters<typeof window.electronAPI.mcpReadConfig>[0]) =>
     window.electronAPI.mcpReadConfig(args),
   mcpWriteConfig: (args: Parameters<typeof window.electronAPI.mcpWriteConfig>[0]) =>

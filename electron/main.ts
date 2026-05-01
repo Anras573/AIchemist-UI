@@ -37,6 +37,7 @@ import type { ProjectConfig } from "../src/types/index";
 import { parseMcpListOutput, readCopilotMcpServers, readAichemistMcpServers, mergeMcpServers } from "./mcp-utils";
 import { loadManagedMcpServers } from "./agent/mcp-managed";
 import { probeManagedServers } from "./agent/mcp-probe";
+import { probeAll } from "./agent/provider-probe";
 import {
   readMcpServers as readMcpServersConfig,
   writeMcpServers as writeMcpServersConfig,
@@ -792,6 +793,18 @@ function registerHandlers(): void {  // ── Terminal ────────
     }
 
     return mergeMcpServers(claudeServers, copilotServers, aichemistServers);
+  });
+  handle(CH.PROBE_PROVIDERS, async (_event, args?: { projectId?: string; force?: boolean }) => {
+    let project: { path: string; config: ProjectConfig } | undefined;
+    if (args?.projectId) {
+      const all = listProjects(db);
+      const p = all.find((x) => x.id === args.projectId);
+      if (p) {
+        const cfg = getProjectConfig(db, p.id) ?? {};
+        project = { path: p.path, config: cfg };
+      }
+    }
+    return probeAll(project, { force: args?.force });
   });
   handle(CH.MCP_PROBE_MANAGED, async () => {
     // Force a fresh probe (bypasses the 30s cache). Returns the fully merged

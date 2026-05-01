@@ -4,6 +4,7 @@ import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useS
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { Message as MessageRecord, CompactionEvent, SkillInfo } from "@/types";
 import { cn } from "@/lib/utils";
+import { useProviderProbes } from "@/lib/hooks/useProviderProbes";
 import { MessageResponse, Message, MessageContent } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
@@ -251,17 +252,73 @@ interface TimelinePanelProps {
 export function EmptyStateNewSession({
   defaultProvider,
   onNewSession,
+  probes,
 }: {
   defaultProvider: string | null;
   onNewSession: (providerOverride?: string) => void;
+  probes?: import("@/types").ProviderProbes | null;
 }) {
-  const initial =
+  const isAvailable = (p: "anthropic" | "copilot" | "acp"): boolean => {
+    if (!probes) return true; // still checking — keep enabled
+    const probe = p === "acp" ? probes.acp : probes[p];
+    return !probe || probe.ok;
+  };
+  const reasonFor = (p: "anthropic" | "copilot" | "acp"): string | undefined => {
+    if (!probes) return undefined;
+    const probe = p === "acp" ? probes.acp : probes[p];
+    return probe?.ok ? undefined : probe?.reason;
+  };
+  // Pick a default that isn't disabled.
+  const preferred =
     defaultProvider === "copilot"
       ? "copilot"
       : defaultProvider === "acp"
         ? "acp"
         : "anthropic";
+  const initial: "anthropic" | "copilot" | "acp" = isAvailable(preferred as "anthropic" | "copilot" | "acp")
+    ? (preferred as "anthropic" | "copilot" | "acp")
+    : (["anthropic", "copilot", "acp"] as const).find(isAvailable) ?? "anthropic";
   const [selected, setSelected] = useState<"anthropic" | "copilot" | "acp">(initial);
+
+  const renderRadio = (
+    p: "anthropic" | "copilot" | "acp",
+    label: string,
+    icon: React.ReactNode,
+  ) => {
+    const available = isAvailable(p);
+    const reason = reasonFor(p);
+    return (
+      <label
+        className={cn(
+          "flex items-center gap-1.5 text-sm",
+          available ? "cursor-pointer" : "cursor-not-allowed opacity-50",
+        )}
+        title={available ? undefined : `Unavailable: ${reason ?? "unknown"}`}
+      >
+        <input
+          type="radio"
+          name="new-session-provider"
+          value={p}
+          checked={selected === p}
+          onChange={() => setSelected(p)}
+          disabled={!available}
+          className="accent-primary"
+        />
+        {icon}
+        <span>
+          {label}
+          {defaultProvider === p && (
+            <span className="ml-1 text-[10px] text-muted-foreground">(default)</span>
+          )}
+          {!available && (
+            <span className="ml-1 text-[10px] text-muted-foreground">(unavailable)</span>
+          )}
+        </span>
+      </label>
+    );
+  };
+
+  const selectedAvailable = isAvailable(selected);
 
   return (
     <div className="flex flex-col items-center gap-3">
@@ -270,52 +327,14 @@ export function EmptyStateNewSession({
         aria-label="Session provider"
         className="flex items-center gap-4"
       >
-        <label className="flex items-center gap-1.5 cursor-pointer text-sm">
-          <input
-            type="radio"
-            name="new-session-provider"
-            value="anthropic"
-            checked={selected === "anthropic"}
-            onChange={() => setSelected("anthropic")}
-            className="accent-primary"
-          />
-          <ModelSelectorLogo provider="anthropic" className="size-3.5" />
-          <span>Use Claude{defaultProvider === "anthropic" && (
-            <span className="ml-1 text-[10px] text-muted-foreground">(default)</span>
-          )}</span>
-        </label>
-        <label className="flex items-center gap-1.5 cursor-pointer text-sm">
-          <input
-            type="radio"
-            name="new-session-provider"
-            value="copilot"
-            checked={selected === "copilot"}
-            onChange={() => setSelected("copilot")}
-            className="accent-primary"
-          />
-          <ModelSelectorLogo provider="github-copilot" className="size-3.5" />
-          <span>Use Copilot{defaultProvider === "copilot" && (
-            <span className="ml-1 text-[10px] text-muted-foreground">(default)</span>
-          )}</span>
-        </label>
-        <label className="flex items-center gap-1.5 cursor-pointer text-sm">
-          <input
-            type="radio"
-            name="new-session-provider"
-            value="acp"
-            checked={selected === "acp"}
-            onChange={() => setSelected("acp")}
-            className="accent-primary"
-          />
-          <Cable className="size-3.5" />
-          <span>Use ACP{defaultProvider === "acp" && (
-            <span className="ml-1 text-[10px] text-muted-foreground">(default)</span>
-          )}</span>
-        </label>
+        {renderRadio("anthropic", "Use Claude", <ModelSelectorLogo provider="anthropic" className="size-3.5" />)}
+        {renderRadio("copilot", "Use Copilot", <ModelSelectorLogo provider="github-copilot" className="size-3.5" />)}
+        {renderRadio("acp", "Use ACP", <Cable className="size-3.5" />)}
       </div>
       <button
         onClick={() => onNewSession(selected)}
-        className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+        disabled={!selectedAvailable}
+        className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         Create a new session
       </button>
@@ -328,6 +347,7 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
   const { activeProjectId, projects } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
   const defaultProvider = activeProject?.config.provider ?? null;
+  const { probes } = useProviderProbes(activeProjectId ?? undefined);
   const session = activeSessionId ? sessions[activeSessionId] : null;
   const streaming = activeSessionId ? (streamingText[activeSessionId] ?? "") : "";
   const toolCalls = activeSessionId ? (liveToolCalls[activeSessionId] ?? []) : [];
@@ -361,6 +381,7 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
                 <EmptyStateNewSession
                   defaultProvider={defaultProvider}
                   onNewSession={onNewSession}
+                  probes={probes}
                 />
               )}
             </ConversationEmptyState>

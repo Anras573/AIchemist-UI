@@ -3,6 +3,7 @@ import { Bot, Cable, ChevronDown, Plus } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
+import { useProviderProbes } from "@/lib/hooks/useProviderProbes";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { WithTooltip } from "@/components/ui/with-tooltip";
@@ -25,6 +26,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
   const { sessions, activeSessionId, sessionAgents, mergeSessions, setActiveSession, addSession, removeSession } =
     useSessionStore();
   const projects = useProjectStore((s) => s.projects);
+  const { probes } = useProviderProbes(projectId);
   const defaultProvider = projects.find((p) => p.id === projectId)?.config.provider ?? null;
   const defaultProviderLabel =
     defaultProvider === "anthropic"
@@ -189,30 +191,67 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
             </DropdownMenuTrigger>
           </WithTooltip>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => handleNewSession("anthropic")}>
-              <ModelSelectorLogo provider="anthropic" className="size-3.5" />
-              <span>New Claude Session</span>
-              {defaultProvider === "anthropic" && (
-                <span className="ml-auto text-[10px] text-muted-foreground">default</span>
-              )}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleNewSession("copilot")}>
-              <ModelSelectorLogo provider="github-copilot" className="size-3.5" />
-              <span>New Copilot Session</span>
-              {defaultProvider === "copilot" && (
-                <span className="ml-auto text-[10px] text-muted-foreground">default</span>
-              )}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleNewSession("acp")}>
-              <Cable className="size-3.5" />
-              <span>New ACP Session</span>
-              {defaultProvider === "acp" && (
-                <span className="ml-auto text-[10px] text-muted-foreground">default</span>
-              )}
-            </DropdownMenuItem>
+            <ProviderMenuItem
+              provider="anthropic"
+              probe={probes?.anthropic}
+              onSelect={() => handleNewSession("anthropic")}
+              isDefault={defaultProvider === "anthropic"}
+              label="New Claude Session"
+              icon={<ModelSelectorLogo provider="anthropic" className="size-3.5" />}
+            />
+            <ProviderMenuItem
+              provider="copilot"
+              probe={probes?.copilot}
+              onSelect={() => handleNewSession("copilot")}
+              isDefault={defaultProvider === "copilot"}
+              label="New Copilot Session"
+              icon={<ModelSelectorLogo provider="github-copilot" className="size-3.5" />}
+            />
+            <ProviderMenuItem
+              provider="acp"
+              probe={probes?.acp}
+              onSelect={() => handleNewSession("acp")}
+              isDefault={defaultProvider === "acp"}
+              label="New ACP Session"
+              icon={<Cable className="size-3.5" />}
+            />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
     </div>
+  );
+}
+
+function ProviderMenuItem({
+  probe,
+  onSelect,
+  isDefault,
+  label,
+  icon,
+}: {
+  provider: "anthropic" | "copilot" | "acp";
+  probe: import("@/types").ProviderProbeResult | undefined;
+  onSelect: () => void;
+  isDefault: boolean;
+  label: string;
+  icon: React.ReactNode;
+}) {
+  // probe === undefined means "still checking" — leave the item enabled.
+  const disabled = probe ? !probe.ok : false;
+  return (
+    <DropdownMenuItem
+      disabled={disabled}
+      onClick={() => { if (!disabled) onSelect(); }}
+      title={disabled ? `Unavailable: ${probe?.reason ?? "unknown"}` : undefined}
+    >
+      {icon}
+      <span className={cn(disabled && "text-muted-foreground")}>{label}</span>
+      {disabled && (
+        <span className="ml-1 text-[10px] text-muted-foreground">(unavailable)</span>
+      )}
+      {isDefault && (
+        <span className="ml-auto text-[10px] text-muted-foreground">default</span>
+      )}
+    </DropdownMenuItem>
   );
 }

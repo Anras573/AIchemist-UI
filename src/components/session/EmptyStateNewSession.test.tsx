@@ -65,4 +65,45 @@ describe("EmptyStateNewSession", () => {
 
     expect(onNewSession).toHaveBeenCalledWith("copilot");
   });
+
+  it("disables an unavailable radio and skips it when picking the initial selection", async () => {
+    const onNewSession = vi.fn();
+    renderWithProviders(
+      <EmptyStateNewSession
+        defaultProvider="anthropic"
+        onNewSession={onNewSession}
+        probes={{
+          anthropic: { ok: false, reason: "no key" },
+          copilot: { ok: true },
+        }}
+      />,
+    );
+
+    const claude = screen.getByRole("radio", { name: /use claude/i }) as HTMLInputElement;
+    const copilot = screen.getByRole("radio", { name: /use copilot/i }) as HTMLInputElement;
+    expect(claude.disabled).toBe(true);
+    expect(claude.checked).toBe(false);
+    // Initial selection skipped over disabled Claude → Copilot
+    expect(copilot.checked).toBe(true);
+
+    await userEvent.click(screen.getByRole("button", { name: /create a new session/i }));
+    expect(onNewSession).toHaveBeenCalledWith("copilot");
+  });
+
+  it("disables the create button when the selected provider is unavailable", () => {
+    renderWithProviders(
+      <EmptyStateNewSession
+        defaultProvider="copilot"
+        onNewSession={vi.fn()}
+        probes={{
+          anthropic: { ok: false, reason: "no key" },
+          copilot: { ok: false, reason: "no token" },
+          acp: { ok: false, reason: "not configured" },
+        }}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: /create a new session/i }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
 });

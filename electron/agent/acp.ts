@@ -274,6 +274,36 @@ async function getOrCreateConnection(
 }
 
 /**
+ * Liveness probe — used by the renderer to decide whether to enable the ACP
+ * provider option in the new-session UI. Reuses `getOrCreateConnection` so the
+ * subprocess stays warm for the real session that follows; the only failure
+ * modes are "command not configured", spawn ENOENT, or `initialize` rejecting
+ * within `timeoutMs`.
+ */
+export async function acpProbe(
+  projectPath: string,
+  cfg: AcpAgentConfig,
+  timeoutMs: number,
+): Promise<{ ok: boolean; reason?: string }> {
+  if (!cfg.command) {
+    return { ok: false, reason: "ACP agent not configured (acp_agent.command is empty)" };
+  }
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const handle = await new Promise<AcpConnectionHandle>((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`ACP probe timed out after ${timeoutMs} ms`)), timeoutMs);
+      getOrCreateConnection(projectPath, cfg).then(resolve, reject);
+    });
+    if (handle.closed) return { ok: false, reason: "ACP subprocess exited during initialize" };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * Removes any cached ACP sessionIds (and their runtime contexts) that were
  * issued by the subprocess at `connectionKey`. Called on subprocess exit/error
  * so a stale id is not reused with a freshly-spawned subprocess.

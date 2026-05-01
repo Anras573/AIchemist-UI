@@ -60,6 +60,7 @@ export interface ElectronAPI {
   listSkills: (projectPath: string, provider?: string) => Promise<Array<import("../src/types").SkillInfo>>;
   listMcpServers: () => Promise<Array<import("../src/types").McpServerInfo>>;
   mcpProbeManaged: () => Promise<Array<import("../src/types").McpServerInfo>>;
+  probeProviders: (args?: { projectId?: string; force?: boolean }) => Promise<import("../src/types").ProviderProbes>;
   mcpReadConfig: (args: { scope: import("./mcp-config").McpScope; projectPath?: string }) =>
     Promise<import("./mcp-config").McpServersMap>;
   mcpWriteConfig: (args: { scope: import("./mcp-config").McpScope; servers: import("./mcp-config").McpServersMap; projectPath?: string }) =>
@@ -147,6 +148,8 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(CH.LIST_SKILLS, { projectPath, provider }),
   listMcpServers: () => ipcRenderer.invoke(CH.LIST_MCP_SERVERS),
   mcpProbeManaged: () => ipcRenderer.invoke(CH.MCP_PROBE_MANAGED),
+  probeProviders: (args?: { projectId?: string; force?: boolean }) =>
+    ipcRenderer.invoke(CH.PROBE_PROVIDERS, args),
   mcpReadConfig: (args) => ipcRenderer.invoke(CH.MCP_READ_CONFIG, args),
   mcpWriteConfig: (args) => ipcRenderer.invoke(CH.MCP_WRITE_CONFIG, args),
   mcpDeleteServer: (args) => ipcRenderer.invoke(CH.MCP_DELETE_SERVER, args),
