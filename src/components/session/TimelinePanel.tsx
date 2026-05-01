@@ -27,6 +27,7 @@ import {
   ReasoningContent,
 } from "@/components/ai-elements/reasoning";
 import { Button } from "@/components/ui/button";
+import { WithTooltip } from "@/components/ui/with-tooltip";
 import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
 import { AgentPickerButton } from "./AgentPickerButton";
 import { ModelPickerButton } from "./ModelPickerButton";
@@ -280,6 +281,19 @@ export function EmptyStateNewSession({
     : (["anthropic", "copilot", "acp"] as const).find(isAvailable) ?? "anthropic";
   const [selected, setSelected] = useState<"anthropic" | "copilot" | "acp">(initial);
 
+  // Probes arrive asynchronously after mount. If the initial pick (or a later
+  // pick that has since gone unavailable) is no longer available, switch to
+  // the first available provider so the Create button doesn't stay stuck
+  // disabled with no visible re-selection.
+  useEffect(() => {
+    if (!probes) return;
+    if (isAvailable(selected)) return;
+    const fallback = (["anthropic", "copilot", "acp"] as const).find(isAvailable);
+    if (fallback && fallback !== selected) setSelected(fallback);
+    // isAvailable is derived from `probes` which is in deps; selected is read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [probes, selected]);
+
   const renderRadio = (
     p: "anthropic" | "copilot" | "acp",
     label: string,
@@ -287,13 +301,12 @@ export function EmptyStateNewSession({
   ) => {
     const available = isAvailable(p);
     const reason = reasonFor(p);
-    return (
+    const radio = (
       <label
         className={cn(
           "flex items-center gap-1.5 text-sm",
           available ? "cursor-pointer" : "cursor-not-allowed opacity-50",
         )}
-        title={available ? undefined : `Unavailable: ${reason ?? "unknown"}`}
       >
         <input
           type="radio"
@@ -316,6 +329,10 @@ export function EmptyStateNewSession({
         </span>
       </label>
     );
+    if (!available) {
+      return <WithTooltip label={`Unavailable: ${reason ?? "unknown"}`}>{radio}</WithTooltip>;
+    }
+    return radio;
   };
 
   const selectedAvailable = isAvailable(selected);

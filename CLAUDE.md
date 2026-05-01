@@ -352,7 +352,7 @@ The right-side context panels (Skills, MCP, Memory) filter their content to the 
 
 | Provider | Probe |
 |---|---|
-| **anthropic** | env presence (`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`) → `GET ${ANTHROPIC_BASE_URL ?? "https://api.anthropic.com"}/v1/models` with `x-api-key` + `anthropic-version: 2023-06-01`, 5 s timeout. 401/403 = "invalid key", non-200 = HTTP status, network error = error message. |
+| **anthropic** | `POST ${ANTHROPIC_BASE_URL ?? "https://api.anthropic.com"}/v1/messages` with `max_tokens: 1` and `anthropic-version: 2023-06-01`, 5 s timeout. This is the endpoint the SDK actually uses, so the probe also works behind enterprise proxies that only forward `/v1/messages`. Auth: tries `x-api-key` (`ANTHROPIC_API_KEY`) first; on 401 falls back to `Authorization: Bearer ${ANTHROPIC_AUTH_TOKEN}` if set. If no env vars are set but `~/.claude/.credentials.json` exists (Pro/Max OAuth login), reports ok. Status mapping: `400/406/429` = ok (auth processed); `401/403` = "invalid key"; `404` = "check ANTHROPIC_BASE_URL"; `5xx` = HTTP status; network error = error message. |
 | **copilot** | `GITHUB_TOKEN` set → wraps `copilotProvider.listModels()` with a 5 s timeout. Empty array or throw = not ok. |
 | **acp** | Per-project. Requires `projectConfig.acp_agent.command`. Reuses `getOrCreateConnection()` (`acpProbe()` in `electron/agent/acp.ts`) with a 3 s timeout — the warm subprocess is shared with the real session. |
 
