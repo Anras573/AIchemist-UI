@@ -136,6 +136,54 @@ function connectionKey(projectPath: string, cfg: AcpAgentConfig): string {
 
 // ── Subprocess + connection lifecycle ────────────────────────────────────────
 
+/**
+ * Allow-listed env vars passed to the ACP agent subprocess. Anything not on
+ * this list (including credentials in `process.env` such as ANTHROPIC_API_KEY,
+ * GITHUB_TOKEN, OPENAI_API_KEY, AWS_*, SSH_AUTH_SOCK, etc.) is intentionally
+ * withheld so a third-party ACP agent cannot exfiltrate them on startup.
+ *
+ * Agents that need credentials must opt in explicitly via `cfg.env` per agent.
+ */
+const AGENT_ENV_ALLOWLIST: readonly string[] = [
+  // POSIX
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TZ",
+  "TERM",
+  "TMPDIR",
+  // Windows
+  "SYSTEMROOT",
+  "SYSTEMDRIVE",
+  "WINDIR",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PROGRAMDATA",
+  "PROGRAMFILES",
+  "PROGRAMFILES(X86)",
+  "USERPROFILE",
+  "USERNAME",
+  "TEMP",
+  "TMP",
+  "COMSPEC",
+  "PATHEXT",
+];
+
+/** Returns the filtered process env to pass to a spawned ACP agent. Excludes secrets. */
+function buildAgentEnv(): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const key of AGENT_ENV_ALLOWLIST) {
+    const val = process.env[key];
+    if (val !== undefined) out[key] = val;
+  }
+  return out;
+}
+
 async function spawnConnection(
   projectPath: string,
   cfg: AcpAgentConfig
@@ -144,7 +192,7 @@ async function spawnConnection(
   const key = connectionKey(projectPath, cfg);
 
   const cwd = cfg.cwd ?? projectPath;
-  const env = { ...process.env, ...(cfg.env ?? {}) };
+  const env = { ...buildAgentEnv(), ...(cfg.env ?? {}) };
   const proc = spawn(cfg.command, cfg.args ?? [], {
     cwd,
     env,
@@ -509,14 +557,15 @@ async function handleAcpReadFile(
   if (!path.isAbsolute(params.path)) {
     throw new Error(`fs/read_text_file requires an absolute path; got "${params.path}"`);
   }
-  // Constrain to project root.
+  // Constrain to project root. Use async fs to avoid blocking the Electron
+  // main thread on multi-MB reads.
   const resolved = path.resolve(params.path);
-  const realResolved = fs.realpathSync(resolved);
-  const projectReal = fs.realpathSync(ctx.projectPath);
+  const realResolved = await fs.promises.realpath(resolved);
+  const projectReal = await getProjectRealpath(ctx.projectPath);
   if (!realResolved.startsWith(projectReal + path.sep) && realResolved !== projectReal) {
     throw new Error(`fs/read_text_file path "${params.path}" is outside the project root`);
   }
-  const content = fs.readFileSync(realResolved, "utf8");
+  const content = await fs.promises.readFile(realResolved, "utf8");
   // Apply line/limit if provided.
   if (params.line != null || params.limit != null) {
     const lines = content.split("\n");
@@ -525,6 +574,16 @@ async function handleAcpReadFile(
     return { content: lines.slice(start, end).join("\n") };
   }
   return { content };
+}
+
+/** Per-projectPath cache of `fs.realpath(projectPath)` to avoid re-resolving on every read. */
+const projectRealpathCache = new Map<string, string>();
+async function getProjectRealpath(projectPath: string): Promise<string> {
+  const cached = projectRealpathCache.get(projectPath);
+  if (cached) return cached;
+  const real = await fs.promises.realpath(projectPath);
+  projectRealpathCache.set(projectPath, real);
+  return real;
 }
 
 // ── Provider entrypoint ──────────────────────────────────────────────────────
@@ -637,5 +696,6 @@ export function _resetAcpStateForTests(): void {
   acpSessionIds.clear();
   acpSessionsByConnection.clear();
   activeRuntimes.clear();
+  projectRealpathCache.clear();
   sdkPromise = null;
 }
