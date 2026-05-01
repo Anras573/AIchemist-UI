@@ -113,6 +113,7 @@ function GeneralTab({
           options={[
             { value: "anthropic", label: "Anthropic (Claude)" },
             { value: "copilot", label: "GitHub Copilot" },
+            { value: "acp", label: "ACP agent (subprocess)" },
           ]}
           onChange={(v) => onChange({ provider: v })}
         />
@@ -127,6 +128,106 @@ function GeneralTab({
           className="font-mono text-sm"
         />
       </FieldRow>
+      {config.provider === "acp" && <AcpAgentFields config={config} onChange={onChange} />}
+    </div>
+  );
+}
+
+// ── ACP agent subsection (visible when provider is "acp") ────────────────────
+
+function AcpAgentFields({
+  config,
+  onChange,
+}: {
+  config: ProjectConfig;
+  onChange: (patch: Partial<ProjectConfig>) => void;
+}) {
+  const acp = config.acp_agent ?? { command: "" };
+  const update = (patch: Partial<NonNullable<ProjectConfig["acp_agent"]>>) =>
+    onChange({ acp_agent: { ...acp, ...patch } });
+
+  const argsString = (acp.args ?? []).join(" ");
+  const envString = Object.entries(acp.env ?? {})
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+
+  return (
+    <div className="flex flex-col gap-4 rounded-md border p-3">
+      <p className="text-xs text-muted-foreground">
+        ACP launches your agent as a subprocess and talks JSON-RPC over stdio.
+      </p>
+      <FieldRow>
+        <FieldLabel htmlFor="ps-acp-command">Command</FieldLabel>
+        <Input
+          id="ps-acp-command"
+          value={acp.command}
+          onChange={(e) => update({ command: e.target.value })}
+          placeholder="e.g. /usr/local/bin/my-agent or npx"
+          className="font-mono text-sm"
+        />
+      </FieldRow>
+      <FieldRow>
+        <FieldLabel htmlFor="ps-acp-args">Arguments (space-separated)</FieldLabel>
+        <Input
+          id="ps-acp-args"
+          value={argsString}
+          onChange={(e) => {
+            const trimmed = e.target.value.trim();
+            update({ args: trimmed ? trimmed.split(/\s+/) : [] });
+          }}
+          placeholder="e.g. --stdio"
+          className="font-mono text-sm"
+        />
+      </FieldRow>
+      <FieldRow>
+        <FieldLabel htmlFor="ps-acp-cwd">Working directory (optional)</FieldLabel>
+        <Input
+          id="ps-acp-cwd"
+          value={acp.cwd ?? ""}
+          onChange={(e) => update({ cwd: e.target.value || undefined })}
+          placeholder="Defaults to project path"
+          className="font-mono text-sm"
+        />
+      </FieldRow>
+      <FieldRow>
+        <FieldLabel htmlFor="ps-acp-env">Environment (KEY=value per line)</FieldLabel>
+        <textarea
+          id="ps-acp-env"
+          value={envString}
+          onChange={(e) => {
+            const env: Record<string, string> = {};
+            for (const line of e.target.value.split("\n")) {
+              const idx = line.indexOf("=");
+              if (idx > 0) env[line.slice(0, idx).trim()] = line.slice(idx + 1);
+            }
+            update({ env: Object.keys(env).length > 0 ? env : undefined });
+          }}
+          rows={3}
+          className={cn(
+            "w-full rounded-md border bg-transparent px-3 py-1.5 text-sm font-mono",
+            "ring-offset-background placeholder:text-muted-foreground",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+          placeholder="API_TOKEN=xyz"
+        />
+      </FieldRow>
+      <FieldRow>
+        <FieldLabel htmlFor="ps-acp-auth">Auth method id (optional)</FieldLabel>
+        <Input
+          id="ps-acp-auth"
+          value={acp.auth_method_id ?? ""}
+          onChange={(e) => update({ auth_method_id: e.target.value || undefined })}
+          placeholder="Set this if the agent reports authMethods"
+          className="font-mono text-sm"
+        />
+      </FieldRow>
+      <div className="flex items-center gap-1.5 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+        <span>
+          Terminal capability is not supported in v1; agents that rely on shell access
+          may be limited.
+        </span>
+      </div>
     </div>
   );
 }

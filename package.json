@@ -11,9 +11,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "acp:mock": "bun run scripts/mock-acp-agent.ts"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "0.21.0",
     "@base-ui/react": "^1.2.0",
     "@fontsource-variable/geist": "^5.2.8",
     "@radix-ui/react-use-controllable-state": "^1.2.2",

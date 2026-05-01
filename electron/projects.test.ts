@@ -124,4 +124,38 @@ describe("getProjectConfig", () => {
     const config = getProjectConfig(makeDbForPath(tmpDir), "proj-1") as unknown as Record<string, unknown>;
     expect(config["unknownField"]).toBeUndefined();
   });
+
+  it("preserves acp_agent config across save/load (regression: #4)", () => {
+    writeConfig(tmpDir, {
+      ...defaultConfig(),
+      provider: "acp",
+      acp_agent: {
+        command: "bun",
+        args: ["run", "/path/to/mock-acp-agent.ts"],
+        env: { CLAUDE_CODE_USE_BEDROCK: "1" },
+        cwd: "/some/path",
+        auth_method_id: "method-1",
+      },
+    });
+
+    const config = getProjectConfig(makeDbForPath(tmpDir), "proj-1");
+    expect(config.acp_agent).toEqual({
+      command: "bun",
+      args: ["run", "/path/to/mock-acp-agent.ts"],
+      env: { CLAUDE_CODE_USE_BEDROCK: "1" },
+      cwd: "/some/path",
+      auth_method_id: "method-1",
+    });
+  });
+
+  it("accepts acp_agent with only the required command field", () => {
+    writeConfig(tmpDir, {
+      ...defaultConfig(),
+      provider: "acp",
+      acp_agent: { command: "my-agent" },
+    });
+
+    const config = getProjectConfig(makeDbForPath(tmpDir), "proj-1");
+    expect(config.acp_agent).toEqual({ command: "my-agent" });
+  });
 });

@@ -117,17 +117,30 @@ SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `me
 | `copilot_session_agent TEXT` | Agent active when the Copilot SDK session was created — used to detect agent changes across restarts and force a fresh session |
 | `copilot_session_mcp_fp TEXT` | Fingerprint of the AIchemist-managed MCP server map active when the Copilot SDK session was created — change forces a fresh session |
 | `disabled_mcp_servers TEXT` | JSON array of AIchemist-managed MCP server names disabled for this session. Filtered out by `loadManagedMcpServers({ excludeNames })` before injection. |
+| `acp_session_id TEXT` | ACP session id (returned by `session/new`). Persisted for diagnostics; v1 always creates a fresh ACP session per AIchemist session rather than calling `session/load`. |
 
 Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
 
 ### Session provider lock
 
-Each session is locked to a single provider (`"anthropic"` or `"copilot"`) at creation. Switching providers mid-session loses context because each SDK has its own session id (`sdk_session_id` vs `copilot_session_id`) and cannot resume the other's state.
+Each session is locked to a single provider (`"anthropic"`, `"copilot"`, or `"acp"`) at creation. Switching providers mid-session loses context because each provider has its own session id and cannot resume the other's state.
 
-- **Creation:** `SessionTabBar` shows a split button — the main `+` creates with the project default (the default provider's logo is rendered next to the plus so the user knows which SDK they're about to use), and the chevron opens a menu to explicitly pick Claude or Copilot (the default option is marked "default"). The renderer calls `ipc.createSession(projectId, providerOverride?)`; `CREATE_SESSION` handler accepts either a bare `projectId` string (back-compat) or `{ projectId, providerOverride }`, and seeds a sensible default model when the override differs from the project default.
-- **Empty state:** When a project has no sessions, `TimelinePanel` renders `EmptyStateNewSession` — two radio buttons ("Use Claude" / "Use Copilot", the project default preselected and marked "(default)") plus a single primary "Create a new session" button. Radios and button are visually distinct so it's clear the button is the only action.
-- **In-session:** `ModelPickerButton` filters its groups to the session's provider — you cannot switch SDK from the model picker. Only models within the locked SDK are listed. Copilot models are fetched lazily only when the session is Copilot-locked.
-- **Runtime:** `AGENT_SEND` already resolves `session.provider ?? project.config.provider` before dispatching, so no runner changes were needed.
+- **Creation:** `SessionTabBar` shows a split button — the main `+` creates with the project default, and the chevron opens a menu to explicitly pick Claude, Copilot, or ACP. The renderer calls `ipc.createSession(projectId, providerOverride?)`.
+- **Empty state:** When a project has no sessions, `TimelinePanel` renders `EmptyStateNewSession` with three radio buttons (Claude / Copilot / ACP) plus a primary "Create a new session" button.
+- **In-session:** `ModelPickerButton` filters its groups to the session's provider. ACP sessions are not multi-model — the agent is the model.
+- **Runtime:** `AGENT_SEND` resolves `session.provider ?? project.config.provider` before dispatching to the matching runner in `electron/agent/runner.ts`.
+
+### ACP (Agent Client Protocol) provider
+
+`electron/agent/acp.ts` implements the third provider. AIchemist-UI is the ACP **client**; the agent runs as a subprocess over stdio configured via `ProjectConfig.acp_agent` (`{ command, args?, env?, cwd?, auth_method_id? }`).
+
+- **Connection lifecycle:** one subprocess per `(projectPath, agentConfigFingerprint)` keyed in an in-process `connections` map. Multiple AIchemist sessions for the same project+agent share the connection; each gets its own ACP session id from `session/new`.
+- **Event mapping:** `handleSessionUpdate` (exported, unit-tested in `acp.test.ts`) translates ACP `session/update` notifications into the same IPC events Claude/Copilot use — `agent_message_chunk` → `SESSION_DELTA`, `tool_call` → `saveToolCall` + `SESSION_TOOL_CALL`, `tool_call_update` → `updateToolCallStatus` + `SESSION_TOOL_RESULT`. ACP `ToolCallStatus` maps via `mapAcpStatus` (`pending → pending_approval`, `in_progress → approved`, `completed → complete`, `failed → error`).
+- **Approval gate:** ACP `session/request_permission` flows through a new option-based path (`requestPermissionChoice` in `electron/agent/approval.ts`); the renderer's `ApprovalGate` renders one button per option when `permissionOptions` is present in the `PendingApproval`. `fs/write_text_file` is treated as a synthetic `fs_write` tool call and gated through `requiresApproval()` like a native Write/Edit.
+- **Filesystem boundary:** `fs/read_text_file` is constrained to the project root via `realpathSync`. Both fs tools reject non-absolute paths.
+- **Auth:** `initialize` response's `authMethods` is captured on the connection. If `session/new` fails with an auth-required error, the runner surfaces it with the agent's method list — set `acp_agent.auth_method_id` manually (no auth flow UI in v1).
+- **Out of scope (v1):** `session/load` resume, terminal capability, image/resource content blocks in prompts, plan UI, traces, skills/MCP injection, agent picker, cancel button.
+- **Right-panel guards:** `SkillsPanel`, `MemoryPanel`, and `McpServersPanel` show "not available for ACP" placeholders when `useActiveSessionProvider() === "acp"`.
 
 ---
 

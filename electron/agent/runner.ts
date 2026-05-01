@@ -5,6 +5,7 @@ import * as CH from "../ipc-channels";
 import { createPlaceholderMessage, updateMessageContent, loadToolCallsForMessage, updateSessionStatus } from "../sessions";
 import { claudeProvider } from "./claude";
 import { copilotProvider } from "./copilot";
+import { acpProvider } from "./acp";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 
 // ── Provider registry ─────────────────────────────────────────────────────────
@@ -12,6 +13,7 @@ import type { AgentProvider, AgentProviderParams } from "./provider";
 const PROVIDERS: Record<string, AgentProvider> = {
   anthropic: claudeProvider,
   copilot: copilotProvider,
+  acp: acpProvider,
 };
 
 /** Look up a provider by name. Throws for unknown providers. */

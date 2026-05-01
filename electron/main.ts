@@ -13,7 +13,7 @@ import { createSession, listSessions, getSession, deleteSession, saveMessage, up
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
 import type { SettingsMap } from "./settings";
-import { resolveApproval, getPendingApprovalData, addToSessionAllowlist, computeFingerprint, cancelSessionApprovals } from "./agent/approval";
+import { resolveApproval, resolvePermissionChoice, getPendingApprovalData, addToSessionAllowlist, computeFingerprint, cancelSessionApprovals } from "./agent/approval";
 import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
 import { runAgentTurn, getProvider } from "./agent/runner";
 import { cleanupCopilotSession } from "./agent/copilot";
@@ -851,6 +851,8 @@ function registerHandlers(): void {  // ── Terminal ────────
       approved: boolean;
       scope?: "once" | "session" | "project";
       projectId?: string;
+      /** ACP option id when resolving an option-based (choice) approval. null = cancelled. */
+      optionId?: string | null;
     }) => {
       if (args.approved && args.scope && args.scope !== "once") {
         const data = getPendingApprovalData(args.approvalId);
@@ -874,7 +876,12 @@ function registerHandlers(): void {  // ── Terminal ────────
           }
         }
       }
-      resolveApproval(args.approvalId, args.approved);
+      // ACP option-based path (UI passes optionId, possibly null for cancel).
+      if (args.optionId !== undefined) {
+        resolvePermissionChoice(args.approvalId, args.optionId);
+      } else {
+        resolveApproval(args.approvalId, args.approved);
+      }
     }
   );
 

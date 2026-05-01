@@ -11,6 +11,8 @@ import {
   isProjectAllowed,
   requiresApproval,
   getPendingApprovalData,
+  requestPermissionChoice,
+  resolvePermissionChoice,
 } from "./approval";
 import type { ProjectConfig } from "../../src/types/index";
 
@@ -405,5 +407,70 @@ describe("cancelSessionApprovals", () => {
 
   it("is a no-op when there are no pending approvals for the session", () => {
     expect(() => cancelSessionApprovals("sess-nonexistent")).not.toThrow();
+  });
+});
+
+// ── Option-based approvals (ACP) ─────────────────────────────────────────────
+
+describe("requestPermissionChoice / resolvePermissionChoice", () => {
+  it("emits SESSION_APPROVAL_REQUIRED with permission_options and resolves with chosen optionId", async () => {
+    const wc = makeWebContents();
+    const promise = requestPermissionChoice(wc, "sess-1", "tc-1", "fs_write", { path: "/x" }, [
+      { id: "opt-allow", name: "Allow", kind: "allow_once" },
+      { id: "opt-deny", name: "Deny", kind: "reject_once" },
+    ]);
+    expect(wc.send).toHaveBeenCalledTimes(1);
+    const [, payload] = (wc.send as any).mock.calls[0];
+    expect(payload.permission_options).toHaveLength(2);
+    expect(payload.tool_call_id).toBe("tc-1");
+    resolvePermissionChoice(payload.approval_id, "opt-allow");
+    await expect(promise).resolves.toBe("opt-allow");
+  });
+
+  it("resolves with null when cancelled", async () => {
+    const wc = makeWebContents();
+    const promise = requestPermissionChoice(wc, "sess-2", "tc", "fs_write", {}, [
+      { id: "x", name: "X", kind: "allow_once" },
+    ]);
+    const id = (wc.send as any).mock.calls[0][1].approval_id;
+    resolvePermissionChoice(id, null);
+    await expect(promise).resolves.toBeNull();
+  });
+
+  it("resolveApproval refuses to fabricate optionId for option-based approvals", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const wc = makeWebContents();
+    const promise = requestPermissionChoice(wc, "sess-3", "tc", "fs_write", {}, [
+      { id: "x", name: "X", kind: "allow_once" },
+    ]);
+    const id = (wc.send as any).mock.calls[0][1].approval_id;
+    // Misuse: caller hits boolean resolveApproval on an option-based id.
+    resolveApproval(id, true);
+    expect(warn).toHaveBeenCalled();
+    expect(warn.mock.calls[0][0]).toMatch(/option-based/);
+    // Promise must NOT resolve — eventually cleaned up via cancelSessionApprovals.
+    cancelSessionApprovals("sess-3");
+    await expect(promise).resolves.toBeNull();
+    warn.mockRestore();
+  });
+
+  it("cancelSessionApprovals cancels pending choice approvals for the session", async () => {
+    const wc = makeWebContents();
+    const promise = requestPermissionChoice(wc, "sess-4", "tc", "fs_write", {}, [
+      { id: "x", name: "X", kind: "allow_once" },
+    ]);
+    cancelSessionApprovals("sess-4");
+    await expect(promise).resolves.toBeNull();
+  });
+
+  it("getPendingApprovalData finds option-based approvals too", () => {
+    const wc = makeWebContents();
+    requestPermissionChoice(wc, "sess-5", "tc-z", "fs_write", { path: "/y" }, [
+      { id: "a", name: "A", kind: "allow_once" },
+    ]);
+    const id = (wc.send as any).mock.calls[0][1].approval_id;
+    const data = getPendingApprovalData(id);
+    expect(data).toEqual({ sessionId: "sess-5", toolName: "fs_write", args: { path: "/y" } });
+    cancelSessionApprovals("sess-5");
   });
 });

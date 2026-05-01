@@ -45,6 +45,14 @@ const ToolDefinitionSchema = z.object({
   parameters: z.record(z.string(), z.unknown()).optional(),
 });
 
+const AcpAgentConfigSchema = z.object({
+  command: z.string(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  cwd: z.string().optional(),
+  auth_method_id: z.string().optional(),
+});
+
 const ProjectConfigSchema = z.object({
   provider: z.string().default("anthropic"),
   model: z.string().default("claude-sonnet-4-5"),
@@ -52,6 +60,7 @@ const ProjectConfigSchema = z.object({
   approval_rules: z.array(ApprovalRuleSchema).default([]),
   custom_tools: z.array(ToolDefinitionSchema).default([]),
   allowed_tools: z.array(AllowedToolSchema).default([]),
+  acp_agent: AcpAgentConfigSchema.optional(),
 });
 
 /**
