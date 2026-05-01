@@ -65,4 +65,77 @@ describe("EmptyStateNewSession", () => {
 
     expect(onNewSession).toHaveBeenCalledWith("copilot");
   });
+
+  it("disables an unavailable radio and skips it when picking the initial selection", async () => {
+    const onNewSession = vi.fn();
+    renderWithProviders(
+      <EmptyStateNewSession
+        defaultProvider="anthropic"
+        onNewSession={onNewSession}
+        probes={{
+          anthropic: { ok: false, reason: "no key" },
+          copilot: { ok: true },
+        }}
+      />,
+    );
+
+    const claude = screen.getByRole("radio", { name: /use claude/i }) as HTMLInputElement;
+    const copilot = screen.getByRole("radio", { name: /use copilot/i }) as HTMLInputElement;
+    expect(claude.disabled).toBe(true);
+    expect(claude.checked).toBe(false);
+    // Initial selection skipped over disabled Claude → Copilot
+    expect(copilot.checked).toBe(true);
+
+    await userEvent.click(screen.getByRole("button", { name: /create a new session/i }));
+    expect(onNewSession).toHaveBeenCalledWith("copilot");
+  });
+
+  it("disables the create button when the selected provider is unavailable", () => {
+    renderWithProviders(
+      <EmptyStateNewSession
+        defaultProvider="copilot"
+        onNewSession={vi.fn()}
+        probes={{
+          anthropic: { ok: false, reason: "no key" },
+          copilot: { ok: false, reason: "no token" },
+          acp: { ok: false, reason: "not configured" },
+        }}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: /create a new session/i }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it("auto-reselects when probes arrive showing the current pick is unavailable", async () => {
+    // Probes start as null (initial mount): pick the default. Then probes
+    // arrive with the default disabled — selection must shift to the first
+    // available provider so the Create button isn't stuck disabled.
+    const onNewSession = vi.fn();
+    const { rerender } = renderWithProviders(
+      <EmptyStateNewSession defaultProvider="anthropic" onNewSession={onNewSession} />,
+    );
+
+    const claude = screen.getByRole("radio", { name: /use claude/i }) as HTMLInputElement;
+    expect(claude.checked).toBe(true);
+
+    rerender(
+      <EmptyStateNewSession
+        defaultProvider="anthropic"
+        onNewSession={onNewSession}
+        probes={{
+          anthropic: { ok: false, reason: "no key" },
+          copilot: { ok: true },
+        }}
+      />,
+    );
+
+    const copilotAfter = screen.getByRole("radio", { name: /use copilot/i }) as HTMLInputElement;
+    const claudeAfter = screen.getByRole("radio", { name: /use claude/i }) as HTMLInputElement;
+    expect(copilotAfter.checked).toBe(true);
+    expect(claudeAfter.checked).toBe(false);
+
+    await userEvent.click(screen.getByRole("button", { name: /create a new session/i }));
+    expect(onNewSession).toHaveBeenCalledWith("copilot");
+  });
 });

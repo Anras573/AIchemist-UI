@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { X, Check, AlertCircle } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
+import { useProviderProbes } from "@/lib/hooks/useProviderProbes";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,7 +51,7 @@ function SelectField({
 }: {
   id?: string;
   value: string;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; disabled?: boolean; title?: string }[];
   onChange: (v: string) => void;
 }) {
   return (
@@ -61,7 +62,7 @@ function SelectField({
       className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
     >
       {options.map((o) => (
-        <option key={o.value} value={o.value}>
+        <option key={o.value} value={o.value} disabled={o.disabled} title={o.title}>
           {o.label}
         </option>
       ))}
@@ -99,10 +100,31 @@ function SaveRow({ status, error, onSave }: { status: SaveStatus; error: string;
 function GeneralTab({
   config,
   onChange,
+  probes,
 }: {
   config: ProjectConfig;
   onChange: (patch: Partial<ProjectConfig>) => void;
+  probes: import("@/types").ProviderProbes | null;
 }) {
+  const probeFor = (
+    p: "anthropic" | "copilot" | "acp",
+  ): import("@/types").ProviderProbeResult | undefined => {
+    if (!probes) return undefined;
+    return p === "acp" ? probes.acp : probes[p];
+  };
+  const opt = (
+    value: "anthropic" | "copilot" | "acp",
+    baseLabel: string,
+  ) => {
+    const probe = probeFor(value);
+    const unavailable = probe ? !probe.ok : false;
+    return {
+      value,
+      label: unavailable ? `${baseLabel} — unavailable` : baseLabel,
+      disabled: unavailable && config.provider !== value,
+      title: unavailable ? probe?.reason : undefined,
+    };
+  };
   return (
     <div className="flex flex-col gap-5">
       <FieldRow>
@@ -111,12 +133,24 @@ function GeneralTab({
           id="ps-provider"
           value={config.provider}
           options={[
-            { value: "anthropic", label: "Anthropic (Claude)" },
-            { value: "copilot", label: "GitHub Copilot" },
-            { value: "acp", label: "ACP agent (subprocess)" },
+            opt("anthropic", "Anthropic (Claude)"),
+            opt("copilot", "GitHub Copilot"),
+            opt("acp", "ACP agent (subprocess)"),
           ]}
           onChange={(v) => onChange({ provider: v })}
         />
+        {probes && (() => {
+          const probe = probeFor(config.provider as "anthropic" | "copilot" | "acp");
+          if (probe && !probe.ok) {
+            return (
+              <p className="text-xs text-destructive flex items-start gap-1">
+                <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                <span>{probe.reason}</span>
+              </p>
+            );
+          }
+          return null;
+        })()}
       </FieldRow>
       <FieldRow>
         <FieldLabel htmlFor="ps-model">Model</FieldLabel>
@@ -308,6 +342,7 @@ export function ProjectSettingsSheet({ projectId, onClose }: ProjectSettingsShee
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState("");
+  const { probes } = useProviderProbes(projectId);
 
   // Load config on mount
   useEffect(() => {
@@ -412,7 +447,7 @@ export function ProjectSettingsSheet({ projectId, onClose }: ProjectSettingsShee
           ) : (
             <div className="flex flex-col gap-6">
               {tab === "general" && (
-                <GeneralTab config={config} onChange={patchConfig} />
+                <GeneralTab config={config} onChange={patchConfig} probes={probes} />
               )}
               {tab === "approval" && (
                 <ApprovalTab config={config} onChange={patchConfig} />

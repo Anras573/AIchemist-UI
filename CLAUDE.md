@@ -346,6 +346,31 @@ The right-side context panels (Skills, MCP, Memory) filter their content to the 
 
 ---
 
+## Provider availability probes
+
+`electron/agent/provider-probe.ts` ships lightweight liveness checks per provider so the new-session UI can grey out providers that aren't usable on this machine (missing key, ACP subprocess broken, etc.) before the user picks them.
+
+| Provider | Probe |
+|---|---|
+| **anthropic** | `POST ${ANTHROPIC_BASE_URL ?? "https://api.anthropic.com"}/v1/messages` with `max_tokens: 1` and `anthropic-version: 2023-06-01`, 5 s timeout. This is the endpoint the SDK actually uses, so the probe also works behind enterprise proxies that only forward `/v1/messages`. Auth: tries `x-api-key` (`ANTHROPIC_API_KEY`) first; on 401 falls back to `Authorization: Bearer ${ANTHROPIC_AUTH_TOKEN}` if set. If no env vars are set but `~/.claude/.credentials.json` exists (Pro/Max OAuth login), reports ok. Status mapping: `400/406/429` = ok (auth processed); `401/403` = "invalid key"; `404` = "check ANTHROPIC_BASE_URL"; `5xx` = HTTP status; network error = error message. |
+| **copilot** | `GITHUB_TOKEN` set → wraps `copilotProvider.listModels()` with a 5 s timeout. Empty array or throw = not ok. |
+| **acp** | Per-project. Requires `projectConfig.acp_agent.command`. Reuses `getOrCreateConnection()` (`acpProbe()` in `electron/agent/acp.ts`) with a 3 s timeout — the warm subprocess is shared with the real session. |
+
+**Caching** mirrors `mcp-probe.ts`: 30 s in-memory, keyed by `"anthropic" | "copilot" | "acp:<projectPath>:<acp_agent fingerprint>"`. `force: true` bypasses. The hook re-probes on Electron `BrowserWindow.focus`; the cache absorbs spurious focus events.
+
+**Test seams:** `_setFetch`, `_setCopilotListModels`, `_setAcpProbe`, `_resetProviderProbeCache`. Tests in `electron/agent/provider-probe.test.ts`.
+
+**IPC:** `PROBE_PROVIDERS` channel, handler in `electron/main.ts`, exposed as `ipc.probeProviders({ projectId?, force? })`. Renderer hook `useProviderProbes(projectId?)` fetches on mount + on window focus and exposes `{ probes, checking, refresh }`.
+
+**UX surfaces:**
+- `SessionTabBar` chevron menu — disabled items show `(unavailable)` and a `title` tooltip with the reason.
+- `EmptyStateNewSession` — radios for unavailable providers are disabled; initial selection skips disabled providers; "Create" button disabled when the selection isn't available.
+- `ProjectSettingsSheet` Provider dropdown — unavailable options annotated `— unavailable`, disabled (unless currently selected so the user can keep editing), with an inline `<AlertCircle>` reason underneath.
+
+`ModelPickerButton` is intentionally NOT gated — sessions are provider-locked at creation, so disabling models post-hoc would just orphan the user.
+
+---
+
 ## AIchemist-managed MCP servers
 
 VS Code-style editor-owned MCP config. AIchemist maintains its own MCP server list at `~/.aichemist/mcp.json` and injects it per-session into both Claude and Copilot SDK runs — without writing to the SDKs' own global config files (`~/.claude.json`, `~/.copilot/mcp-config.json`).
