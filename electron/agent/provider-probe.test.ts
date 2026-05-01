@@ -262,5 +262,41 @@ describe("provider-probe", () => {
       );
       expect(r.acp?.ok).toBe(true);
     });
+
+    it("treats user-disabled providers as not ok without invoking the underlying probe", async () => {
+      const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      _setFetch(fetchSpy as unknown as typeof fetch);
+      const copilotSpy = vi.fn(async () => [{ id: "x", name: "x" }]);
+      _setCopilotListModels(copilotSpy);
+      const acpSpy = vi.fn(async () => ({ ok: true }));
+      _setAcpProbe(acpSpy);
+      process.env.ANTHROPIC_API_KEY = "sk";
+      process.env.GITHUB_TOKEN = "gh";
+
+      const r = await probeAll(
+        {
+          path: "/proj",
+          config: {
+            provider: "acp",
+            model: "",
+            approval_policy: "manual",
+            approval_rules: [],
+            acp_agent: { command: "/x" },
+          } as unknown as import("../../src/types/index").ProjectConfig,
+        },
+        { force: true, disabled: new Set(["anthropic", "acp"]) },
+      );
+
+      expect(r.anthropic.ok).toBe(false);
+      expect(r.anthropic.reason).toBe("Disabled in settings");
+      expect(r.copilot.ok).toBe(true);
+      expect(r.acp?.ok).toBe(false);
+      expect(r.acp?.reason).toBe("Disabled in settings");
+
+      // The disabled providers were short-circuited — only Copilot's probe ran.
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(acpSpy).not.toHaveBeenCalled();
+      expect(copilotSpy).toHaveBeenCalled();
+    });
   });
 });
