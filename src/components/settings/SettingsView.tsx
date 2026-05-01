@@ -8,6 +8,13 @@ import { WithTooltip } from "@/components/ui/with-tooltip";
 import { X, Eye, EyeOff, Check, AlertCircle } from "lucide-react";
 import { useTheme } from "@/lib/hooks/useTheme";
 import type { Theme } from "@/lib/hooks/useTheme";
+import {
+  type ProviderId,
+  PROVIDER_IDS,
+  PROVIDER_LABELS,
+  parseDisabledProviders,
+  serializeDisabledProviders,
+} from "../../../electron/providers";
 
 interface SettingsViewProps {
   onClose: () => void;
@@ -93,26 +100,6 @@ function SaveRow({
 }
 
 // ── Providers section ─────────────────────────────────────────────────────────
-type ProviderId = "anthropic" | "copilot" | "acp";
-const PROVIDER_LABELS: Record<ProviderId, string> = {
-  anthropic: "Anthropic (Claude)",
-  copilot: "GitHub Copilot",
-  acp: "ACP",
-};
-
-function parseDisabled(raw: string): Set<ProviderId> {
-  const out = new Set<ProviderId>();
-  for (const part of raw.split(",")) {
-    const v = part.trim().toLowerCase();
-    if (v === "anthropic" || v === "copilot" || v === "acp") out.add(v);
-  }
-  return out;
-}
-
-function serializeDisabled(set: Set<ProviderId>): string {
-  return (["anthropic", "copilot", "acp"] as const).filter((p) => set.has(p)).join(",");
-}
-
 function ProvidersSection({
   value,
   onChange,
@@ -124,14 +111,14 @@ function ProvidersSection({
   status: SaveStatus;
   onSave: () => void;
 }) {
-  const disabled = parseDisabled(value);
-  const allDisabled = disabled.size === 3;
+  const disabled = parseDisabledProviders(value);
+  const allDisabled = disabled.size === PROVIDER_IDS.length;
 
   const toggle = (p: ProviderId) => {
     const next = new Set(disabled);
     if (next.has(p)) next.delete(p);
     else next.add(p);
-    onChange(serializeDisabled(next));
+    onChange(serializeDisabledProviders(next));
   };
 
   return (
@@ -144,7 +131,7 @@ function ProvidersSection({
       </p>
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium leading-none mb-3">Enabled providers</legend>
-        {(["anthropic", "copilot", "acp"] as const).map((p) => {
+        {PROVIDER_IDS.map((p) => {
           const enabled = !disabled.has(p);
           return (
             <label

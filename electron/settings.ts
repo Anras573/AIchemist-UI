@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+export { parseDisabledProviders } from "./providers";
 
 export interface SettingsMap {
   ANTHROPIC_API_KEY: string;
@@ -68,17 +69,6 @@ export function readSettings(): SettingsMap {
     AICHEMIST_THEME:                 env["AICHEMIST_THEME"] ?? "system",
     AICHEMIST_DISABLED_PROVIDERS:    env["AICHEMIST_DISABLED_PROVIDERS"] ?? "",
   };
-}
-
-/** Parse the comma-separated `AICHEMIST_DISABLED_PROVIDERS` value into a Set. */
-export function parseDisabledProviders(raw: string | undefined): Set<"anthropic" | "copilot" | "acp"> {
-  const out = new Set<"anthropic" | "copilot" | "acp">();
-  if (!raw) return out;
-  for (const part of raw.split(",")) {
-    const v = part.trim().toLowerCase();
-    if (v === "anthropic" || v === "copilot" || v === "acp") out.add(v);
-  }
-  return out;
 }
 
 export function writeSettings(updates: Partial<SettingsMap>): void {
