@@ -29,25 +29,74 @@ describe("provider-probe", () => {
   // ── Anthropic ──────────────────────────────────────────────────────────────
 
   describe("probeAnthropic", () => {
-    it("reports missing key when neither env var is set", async () => {
-      const result = await probeAnthropic({ force: true });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toMatch(/ANTHROPIC_API_KEY/);
+    it("reports missing credential when no env var and no OAuth file", async () => {
+      // Make oauth detection return false by pointing HOME at a temp dir.
+      const origHome = process.env.HOME;
+      process.env.HOME = "/tmp/__nonexistent_home_for_probe_test__";
+      try {
+        const result = await probeAnthropic({ force: true });
+        expect(result.ok).toBe(false);
+        expect(result.reason).toMatch(/No Anthropic credential/);
+      } finally {
+        if (origHome !== undefined) process.env.HOME = origHome;
+        else delete process.env.HOME;
+      }
     });
 
-    it("returns ok when /v1/models responds 200", async () => {
+    it("returns ok when /v1/messages responds 200", async () => {
       process.env.ANTHROPIC_API_KEY = "sk-test";
       _setFetch(vi.fn().mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch);
       const result = await probeAnthropic({ force: true });
       expect(result.ok).toBe(true);
     });
 
-    it("flags 401 as invalid key", async () => {
+    it("treats HTTP 400 as ok (auth + URL work, request body just bad)", async () => {
+      process.env.ANTHROPIC_API_KEY = "sk-test";
+      _setFetch(vi.fn().mockResolvedValue({ ok: false, status: 400 }) as unknown as typeof fetch);
+      const result = await probeAnthropic({ force: true });
+      expect(result.ok).toBe(true);
+    });
+
+    it("flags 401 as auth rejected", async () => {
       process.env.ANTHROPIC_API_KEY = "sk-bad";
       _setFetch(vi.fn().mockResolvedValue({ ok: false, status: 401 }) as unknown as typeof fetch);
       const result = await probeAnthropic({ force: true });
       expect(result.ok).toBe(false);
-      expect(result.reason).toMatch(/Invalid/);
+      expect(result.reason).toMatch(/auth rejected/);
+    });
+
+    it("flags 404 as wrong base URL (e.g., proxy doesn't route /v1/messages)", async () => {
+      process.env.ANTHROPIC_API_KEY = "sk-test";
+      _setFetch(vi.fn().mockResolvedValue({ ok: false, status: 404 }) as unknown as typeof fetch);
+      const result = await probeAnthropic({ force: true });
+      expect(result.ok).toBe(false);
+      expect(result.reason).toMatch(/ANTHROPIC_BASE_URL/);
+    });
+
+    it("uses Authorization: Bearer when only ANTHROPIC_AUTH_TOKEN is set", async () => {
+      process.env.ANTHROPIC_AUTH_TOKEN = "oauth-token";
+      const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      _setFetch(fetchSpy as unknown as typeof fetch);
+      await probeAnthropic({ force: true });
+      const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+      const headers = init.headers as Record<string, string>;
+      expect(headers["Authorization"]).toBe("Bearer oauth-token");
+      expect(headers["x-api-key"]).toBeUndefined();
+    });
+
+    it("falls back to Authorization: Bearer when x-api-key returns 401 and ANTHROPIC_AUTH_TOKEN is set", async () => {
+      process.env.ANTHROPIC_API_KEY = "sk-test";
+      process.env.ANTHROPIC_AUTH_TOKEN = "oauth-token";
+      const fetchSpy = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, status: 401 })
+        .mockResolvedValueOnce({ ok: false, status: 406 });
+      _setFetch(fetchSpy as unknown as typeof fetch);
+      const result = await probeAnthropic({ force: true });
+      expect(result.ok).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const second = fetchSpy.mock.calls[1]![1] as RequestInit;
+      expect((second.headers as Record<string, string>)["Authorization"]).toBe("Bearer oauth-token");
     });
 
     it("returns network errors as not-ok", async () => {
@@ -77,14 +126,14 @@ describe("provider-probe", () => {
       expect(fetchSpy).toHaveBeenCalledTimes(2);
     });
 
-    it("respects ANTHROPIC_BASE_URL override", async () => {
+    it("respects ANTHROPIC_BASE_URL override and probes /v1/messages", async () => {
       process.env.ANTHROPIC_API_KEY = "sk-test";
       process.env.ANTHROPIC_BASE_URL = "https://proxy.example.com/";
       const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
       _setFetch(fetchSpy as unknown as typeof fetch);
       await probeAnthropic({ force: true });
       const calledUrl = fetchSpy.mock.calls[0]![0] as string;
-      expect(calledUrl).toBe("https://proxy.example.com/v1/models");
+      expect(calledUrl).toBe("https://proxy.example.com/v1/messages");
     });
   });
 

@@ -17,10 +17,13 @@
  * session that follows.
  */
 
-import { getApiKey } from "../config";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { copilotProvider } from "./copilot";
 import { acpProbe } from "./acp";
 import type { AcpAgentConfig, ProjectConfig } from "../../src/types/index";
+import { getApiKey } from "../config";
 
 export interface ProviderProbeResult {
   /** True when the provider responded successfully within the timeout. */
@@ -116,60 +119,121 @@ export async function probeAnthropic(opts?: { force?: boolean }): Promise<Provid
   const cached = cacheGet("anthropic", opts?.force);
   if (cached) return cached;
 
-  const key = getApiKey("anthropic");
-  if (!key) {
+  // Resolution order mirrors what the Claude SDK does:
+  //   1. ANTHROPIC_API_KEY  → sent as `x-api-key`
+  //   2. ANTHROPIC_AUTH_TOKEN → sent as `Authorization: Bearer …` (OAuth-style)
+  //   3. Stored OAuth credential at `~/.claude/.credentials.json` (set up via `claude login`)
+  // If none of those is present, the SDK has nothing to authenticate with.
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim() || null;
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN?.trim() || null;
+  const hasStoredOauth = oauthCredentialExists();
+
+  if (!apiKey && !authToken && !hasStoredOauth) {
     const result: ProviderProbeResult = {
       ok: false,
-      reason: "ANTHROPIC_API_KEY not set in ~/.aichemist/.env",
+      reason: "No Anthropic credential — set ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN in ~/.aichemist/.env or run `claude login`",
     };
     cacheSet("anthropic", result);
     return result;
   }
 
+  // OAuth credentials are stored as opaque blobs the SDK refreshes on its own.
+  // We can't validate them with a simple HTTP probe, so just trust their
+  // presence — the worst case is a stale token surfaces at first turn instead
+  // of in the new-session UI.
+  if (!apiKey && !authToken && hasStoredOauth) {
+    const result: ProviderProbeResult = { ok: true };
+    cacheSet("anthropic", result);
+    return result;
+  }
+
   const baseUrl = process.env.ANTHROPIC_BASE_URL?.replace(/\/$/, "") ?? "https://api.anthropic.com";
+
+  // Try ANTHROPIC_API_KEY first; fall back to ANTHROPIC_AUTH_TOKEN if the
+  // first attempt returns 401. Some proxies (e.g., enterprise gateways) only
+  // accept one or the other even when both env vars are configured.
+  const attempts: Array<{ header: "x-api-key" | "Authorization"; value: string }> = [];
+  if (apiKey) attempts.push({ header: "x-api-key", value: apiKey });
+  if (authToken) attempts.push({ header: "Authorization", value: `Bearer ${authToken}` });
+
   const start = Date.now();
-  try {
-    const res = await withTimeout(
-      fetchImpl(`${baseUrl}/v1/models`, {
-        method: "GET",
-        headers: {
-          "x-api-key": key,
-          "anthropic-version": "2023-06-01",
-        },
-      }),
-      ANTHROPIC_TIMEOUT_MS,
-      "anthropic probe",
-    );
-    const durationMs = Date.now() - start;
-    if (res.ok) {
+  let lastResult: ProviderProbeResult | null = null;
+  for (const attempt of attempts) {
+    const headers: Record<string, string> = {
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    };
+    headers[attempt.header] = attempt.value;
+    try {
+      const res = await withTimeout(
+        fetchImpl(`${baseUrl}/v1/messages`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: "claude-haiku-4-5",
+            max_tokens: 1,
+            messages: [{ role: "user", content: "ping" }],
+          }),
+        }),
+        ANTHROPIC_TIMEOUT_MS,
+        "anthropic probe",
+      );
+      const durationMs = Date.now() - start;
+      if (res.status === 401 || res.status === 403) {
+        lastResult = {
+          ok: false,
+          reason: `Anthropic auth rejected (HTTP ${res.status})`,
+          durationMs,
+        };
+        continue; // try the next auth header if any
+      }
+      if (res.status === 404) {
+        const result: ProviderProbeResult = {
+          ok: false,
+          reason: `Anthropic endpoint not found at ${baseUrl}/v1/messages (HTTP 404 — check ANTHROPIC_BASE_URL)`,
+          durationMs,
+        };
+        cacheSet("anthropic", result);
+        return result;
+      }
+      if (res.status >= 500) {
+        const result: ProviderProbeResult = {
+          ok: false,
+          reason: `Anthropic API returned HTTP ${res.status}`,
+          durationMs,
+        };
+        cacheSet("anthropic", result);
+        return result;
+      }
+      // 200, 400, 406, 429, etc. — server processed our auth. Good enough.
       const result: ProviderProbeResult = { ok: true, durationMs };
       cacheSet("anthropic", result);
       return result;
-    }
-    if (res.status === 401 || res.status === 403) {
-      const result: ProviderProbeResult = {
+    } catch (err) {
+      lastResult = {
         ok: false,
-        reason: "Invalid Anthropic API key",
-        durationMs,
+        reason: errMessage(err),
+        durationMs: Date.now() - start,
       };
-      cacheSet("anthropic", result);
-      return result;
     }
-    const result: ProviderProbeResult = {
-      ok: false,
-      reason: `Anthropic API returned HTTP ${res.status}`,
-      durationMs,
-    };
-    cacheSet("anthropic", result);
-    return result;
-  } catch (err) {
-    const result: ProviderProbeResult = {
-      ok: false,
-      reason: errMessage(err),
-      durationMs: Date.now() - start,
-    };
-    cacheSet("anthropic", result);
-    return result;
+  }
+  const finalResult = lastResult ?? { ok: false, reason: "Anthropic probe failed" };
+  cacheSet("anthropic", finalResult);
+  return finalResult;
+}
+
+/**
+ * Returns true when a Claude Code OAuth credential file is present on disk.
+ * Used to recognise users who logged in via `claude login` (Pro/Max plans)
+ * and so don't have an env-based API key. Defensively returns false on any
+ * filesystem error.
+ */
+function oauthCredentialExists(): boolean {
+  try {
+    const credFile = path.join(os.homedir(), ".claude", ".credentials.json");
+    return fs.existsSync(credFile);
+  } catch {
+    return false;
   }
 }
 
