@@ -8,17 +8,25 @@ import { WithTooltip } from "@/components/ui/with-tooltip";
 import { X, Eye, EyeOff, Check, AlertCircle } from "lucide-react";
 import { useTheme } from "@/lib/hooks/useTheme";
 import type { Theme } from "@/lib/hooks/useTheme";
+import {
+  type ProviderId,
+  PROVIDER_IDS,
+  PROVIDER_LABELS,
+  parseDisabledProviders,
+  serializeDisabledProviders,
+} from "../../../electron/providers";
 
 interface SettingsViewProps {
   onClose: () => void;
 }
 
-type Section = "api-keys" | "model-overrides" | "defaults" | "appearance";
+type Section = "api-keys" | "model-overrides" | "defaults" | "providers" | "appearance";
 
 const NAV: { id: Section; label: string }[] = [
   { id: "api-keys", label: "API Keys" },
   { id: "model-overrides", label: "Model Overrides" },
   { id: "defaults", label: "Defaults" },
+  { id: "providers", label: "Providers" },
   { id: "appearance", label: "Appearance" },
 ];
 
@@ -91,6 +99,88 @@ function SaveRow({
   );
 }
 
+// ── Providers section ─────────────────────────────────────────────────────────
+function ProvidersSection({
+  value,
+  onChange,
+  status,
+  onSave,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  status: SaveStatus;
+  onSave: () => void;
+}) {
+  const disabled = parseDisabledProviders(value);
+  const allDisabled = disabled.size === PROVIDER_IDS.length;
+
+  const toggle = (p: ProviderId) => {
+    const next = new Set(disabled);
+    if (next.has(p)) next.delete(p);
+    else next.add(p);
+    onChange(serializeDisabledProviders(next));
+  };
+
+  return (
+    <>
+      <p className="text-sm text-muted-foreground">
+        Hide providers you don&apos;t want to use. Disabled providers are greyed out
+        in the new-session picker, the project provider dropdown, and the session
+        tab&apos;s split-button menu. Existing sessions keep working — sessions are
+        provider-locked at creation.
+      </p>
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium leading-none mb-3">Enabled providers</legend>
+        {PROVIDER_IDS.map((p) => {
+          const enabled = !disabled.has(p);
+          return (
+            <label
+              key={p}
+              className={cn(
+                "flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors",
+                enabled ? "border-primary bg-primary/5" : "border-border hover:bg-accent/50",
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={() => toggle(p)}
+                className="accent-primary"
+                aria-label={PROVIDER_LABELS[p]}
+              />
+              <span className="text-sm font-medium">{PROVIDER_LABELS[p]}</span>
+            </label>
+          );
+        })}
+      </fieldset>
+      {allDisabled && (
+        <p className="flex items-start gap-1.5 text-xs text-destructive">
+          <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+          <span>
+            All providers are disabled — you won&apos;t be able to create new sessions.
+            Enable at least one before saving.
+          </span>
+        </p>
+      )}
+      <div className="flex items-center gap-3 pt-2">
+        <Button onClick={onSave} disabled={status === "saving" || allDisabled} size="sm">
+          {status === "saving" ? "Saving…" : "Save"}
+        </Button>
+        {status === "saved" && (
+          <span className="flex items-center gap-1 text-sm text-green-600">
+            <Check className="h-4 w-4" /> Saved
+          </span>
+        )}
+        {status === "error" && (
+          <span className="flex items-center gap-1 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4" /> Save failed
+          </span>
+        )}
+      </div>
+    </>
+  );
+}
+
 // ── Main view ─────────────────────────────────────────────────────────────────
 export function SettingsView({ onClose }: SettingsViewProps) {
   const ipc = useIpc();
@@ -101,6 +191,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     "api-keys": "idle",
     "model-overrides": "idle",
     defaults: "idle",
+    providers: "idle",
     appearance: "idle",
   });
 
@@ -131,6 +222,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
           "ANTHROPIC_DEFAULT_OPUS_MODEL",
         ],
         defaults: ["AICHEMIST_DEFAULT_PROVIDER", "AICHEMIST_DEFAULT_APPROVAL_MODE"],
+        providers: ["AICHEMIST_DISABLED_PROVIDERS"],
         appearance: [], // theme is auto-saved via useTheme, no batch save needed
       };
 
@@ -322,6 +414,15 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                 onSave={() => saveSection("defaults")}
               />
             </>
+          )}
+          {/* ── Providers ── */}
+          {activeSection === "providers" && (
+            <ProvidersSection
+              value={draft.AICHEMIST_DISABLED_PROVIDERS ?? ""}
+              onChange={(v) => set("AICHEMIST_DISABLED_PROVIDERS", v)}
+              status={saveStatus["providers"]}
+              onSave={() => saveSection("providers")}
+            />
           )}
           {/* ── Appearance ── */}
           {activeSection === "appearance" && (

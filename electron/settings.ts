@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+export { parseDisabledProviders } from "./providers";
 
 export interface SettingsMap {
   ANTHROPIC_API_KEY: string;
@@ -13,6 +14,14 @@ export interface SettingsMap {
   AICHEMIST_DEFAULT_PROVIDER: string;
   AICHEMIST_DEFAULT_APPROVAL_MODE: string;
   AICHEMIST_THEME: string;
+  /**
+   * Comma-separated list of providers the user has explicitly disabled
+   * app-wide. Values: any of "anthropic", "copilot", "acp". Empty string
+   * means none disabled. The probe handler treats these as
+   * `{ ok: false, reason: "Disabled in settings" }` without running the
+   * actual probe, so the new-session UI greys them out everywhere.
+   */
+  AICHEMIST_DISABLED_PROVIDERS: string;
 }
 
 const KNOWN_KEYS = new Set<string>([
@@ -21,6 +30,7 @@ const KNOWN_KEYS = new Set<string>([
   "GITHUB_TOKEN",
   "AICHEMIST_DEFAULT_PROVIDER", "AICHEMIST_DEFAULT_APPROVAL_MODE",
   "AICHEMIST_THEME",
+  "AICHEMIST_DISABLED_PROVIDERS",
 ]);
 
 function envPath(): string {
@@ -57,6 +67,7 @@ export function readSettings(): SettingsMap {
     AICHEMIST_DEFAULT_PROVIDER:      env["AICHEMIST_DEFAULT_PROVIDER"] ?? "anthropic",
     AICHEMIST_DEFAULT_APPROVAL_MODE: env["AICHEMIST_DEFAULT_APPROVAL_MODE"] ?? "custom",
     AICHEMIST_THEME:                 env["AICHEMIST_THEME"] ?? "system",
+    AICHEMIST_DISABLED_PROVIDERS:    env["AICHEMIST_DISABLED_PROVIDERS"] ?? "",
   };
 }
 

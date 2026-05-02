@@ -362,6 +362,8 @@ The right-side context panels (Skills, MCP, Memory) filter their content to the 
 
 **IPC:** `PROBE_PROVIDERS` channel, handler in `electron/main.ts`, exposed as `ipc.probeProviders({ projectId?, force? })`. Renderer hook `useProviderProbes(projectId?)` fetches on mount + on window focus and exposes `{ probes, checking, refresh }`.
 
+**User-disabled providers:** the `AICHEMIST_DISABLED_PROVIDERS` setting (comma-separated list of `anthropic` / `copilot` / `acp`, edited in **Settings → Providers**) lets the user hide providers app-wide. The IPC handler reads it via `parseDisabledProviders(...)` and passes a `Set` to `probeAll(..., { disabled })`, which short-circuits the underlying probe and returns `{ ok: false, reason: "Disabled in settings" }`. All three gating UI surfaces pick it up automatically. Existing sessions keep working — sessions are provider-locked at creation, so disabling a provider only hides it from the new-session pickers.
+
 **UX surfaces:**
 - `SessionTabBar` chevron menu — disabled items show `(unavailable)` and a `title` tooltip with the reason.
 - `EmptyStateNewSession` — radios for unavailable providers are disabled; initial selection skips disabled providers; "Create" button disabled when the selection isn't available.

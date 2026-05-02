@@ -313,21 +313,32 @@ export async function probeAcpForProject(
 /** Probe all providers in parallel; ACP is included only when `project` is supplied. */
 export async function probeAll(
   project?: { path: string; config: ProjectConfig },
-  opts?: { force?: boolean },
+  opts?: { force?: boolean; disabled?: ReadonlySet<"anthropic" | "copilot" | "acp"> },
 ): Promise<ProviderProbes> {
-  const tasks: Array<Promise<unknown>> = [
-    probeAnthropic(opts),
-    probeCopilot(opts),
-  ];
-  if (project) {
-    tasks.push(probeAcpForProject(project.path, project.config, opts));
+  const disabled = opts?.disabled ?? new Set<"anthropic" | "copilot" | "acp">();
+  const userDisabled = (): ProviderProbeResult => ({
+    ok: false,
+    reason: "Disabled in settings",
+    durationMs: 0,
+  });
+
+  const anthropicTask: Promise<ProviderProbeResult> = disabled.has("anthropic")
+    ? Promise.resolve(userDisabled())
+    : probeAnthropic(opts);
+  const copilotTask: Promise<ProviderProbeResult> = disabled.has("copilot")
+    ? Promise.resolve(userDisabled())
+    : probeCopilot(opts);
+
+  if (!project) {
+    const [anthropic, copilot] = await Promise.all([anthropicTask, copilotTask]);
+    return { anthropic, copilot };
   }
-  const [anthropic, copilot, acp] = await Promise.all(tasks) as [
-    ProviderProbeResult,
-    ProviderProbeResult,
-    ProviderProbeResult | undefined,
-  ];
-  return project ? { anthropic, copilot, acp } : { anthropic, copilot };
+
+  const acpTask: Promise<ProviderProbeResult> = disabled.has("acp")
+    ? Promise.resolve(userDisabled())
+    : probeAcpForProject(project.path, project.config, opts);
+  const [anthropic, copilot, acp] = await Promise.all([anthropicTask, copilotTask, acpTask]);
+  return { anthropic, copilot, acp };
 }
 
 // ── Internals ─────────────────────────────────────────────────────────────────

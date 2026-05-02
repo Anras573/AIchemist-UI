@@ -12,6 +12,7 @@ import { addProject, listProjects, removeProject, getProjectConfig, saveProjectC
 import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent, updateSessionSkills, setDisabledMcpServers, getDisabledMcpServers, recoverStaleSessionStatuses } from "./sessions";
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
+import { parseDisabledProviders } from "./providers";
 import type { SettingsMap } from "./settings";
 import { resolveApproval, resolvePermissionChoice, getPendingApprovalData, addToSessionAllowlist, computeFingerprint, cancelSessionApprovals } from "./agent/approval";
 import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
@@ -804,7 +805,8 @@ function registerHandlers(): void {  // ── Terminal ────────
         project = { path: p.path, config: cfg };
       }
     }
-    return probeAll(project, { force: args?.force });
+    const disabled = parseDisabledProviders(process.env.AICHEMIST_DISABLED_PROVIDERS);
+    return probeAll(project, { force: args?.force, disabled });
   });
   handle(CH.MCP_PROBE_MANAGED, async () => {
     // Force a fresh probe (bypasses the 30s cache). Returns the fully merged
