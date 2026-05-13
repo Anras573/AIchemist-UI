@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import { X, ChevronLeft } from "lucide-react";
+import { cjk } from "@streamdown/cjk";
+import { code } from "@streamdown/code";
+import { math } from "@streamdown/math";
+import { mermaid } from "@streamdown/mermaid";
+import { Streamdown } from "streamdown";
 import { useIpc } from "@/lib/ipc";
 import {
   FileTree,
@@ -159,6 +164,55 @@ function FileTreeView({ projectPath, onFileOpen }: FileTreeViewProps) {
   );
 }
 
+// ── MemoryFileViewer — renders a memory .md file as markdown ─────────────────
+
+const streamdownPlugins = { cjk, code, math, mermaid };
+
+function MemoryFileViewer({ filePath }: { filePath: string }) {
+  const ipc = useIpc();
+  const [content, setContent] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setContent(null);
+    setError(null);
+    ipc.readFile(filePath).then((result) => {
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      setContent(result.content);
+    });
+  }, [filePath]);
+
+  if (error) {
+    return (
+      <div className="h-full flex items-center justify-center p-4">
+        <p className="text-sm text-muted-foreground text-center">{error}</p>
+      </div>
+    );
+  }
+
+  if (content === null) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <p className="text-xs text-muted-foreground">Loading…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-auto px-4 py-3">
+      <Streamdown
+        plugins={streamdownPlugins}
+        className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:overflow-x-auto [&_table]:overflow-x-auto [&_table]:block"
+      >
+        {content}
+      </Streamdown>
+    </div>
+  );
+}
+
 // ── ContextPanel ──────────────────────────────────────────────────────────────
 
 export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes" | "mcp" | "memory";
@@ -279,7 +333,7 @@ export function ContextPanel({
               Memory is not yet supported for Copilot sessions.
             </div>
           ) : isViewingMemory ? (
-            <FileViewer filePath={viewingMemoryFile!} />
+            <MemoryFileViewer filePath={viewingMemoryFile!} />
           ) : (
             <MemoryPanel
               projectPath={activeProject.path}
