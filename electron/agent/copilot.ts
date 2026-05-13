@@ -60,7 +60,7 @@ async function getClient(): Promise<CopilotClientType> {
   if (clientInstance) return clientInstance;
   const { CopilotClient } = await import("@github/copilot-sdk");
   const githubToken = getApiKey("github") ?? undefined;
-  const client = new CopilotClient({ githubToken });
+  const client = new CopilotClient({ gitHubToken: githubToken });
   await client.start();
   clientInstance = client;
   return client;
@@ -416,15 +416,15 @@ export async function runCopilotAgentTurn(params: {
         break;
       case "custom-tool":
         // Custom defineTool handlers manage their own approval gate
-        return { kind: "approved" };
+        return { kind: "approve-once" };
     }
 
-    if (category === null) return { kind: "approved" };
+    if (category === null) return { kind: "approve-once" };
 
     // Shell operations and others depend on project config and allowlists
     const shouldGate = requiresApproval(sessionId, projectConfig, category, request.kind, request);
 
-    if (!shouldGate) return { kind: "approved" };
+    if (!shouldGate) return { kind: "approve-once" };
 
     const approved = await requestApproval(
       webContents,
@@ -434,8 +434,8 @@ export async function runCopilotAgentTurn(params: {
     );
 
     return approved
-      ? { kind: "approved" }
-      : { kind: "denied-interactively-by-user" };
+      ? { kind: "approve-once" }
+      : { kind: "reject" };
   };
 
   // ── Create or resume session ────────────────────────────────────────────────
