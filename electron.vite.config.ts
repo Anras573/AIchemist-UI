@@ -1,12 +1,12 @@
-import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
     build: {
+      externalizeDeps: true,
       outDir: "dist/main",
       lib: {
         entry: path.resolve(__dirname, "electron/main.ts"),
@@ -19,8 +19,8 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
     build: {
+      externalizeDeps: true,
       outDir: "dist/preload",
       rollupOptions: {
         input: path.resolve(__dirname, "electron/preload.ts"),
