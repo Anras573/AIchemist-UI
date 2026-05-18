@@ -181,13 +181,37 @@ function scanSkillsDir(
   }
 }
 
+// Cache for plugin skills scanning (30s TTL)
+interface PluginSkillsCache {
+  timestamp: number;
+  mtime: number; // mtime of installed_plugins.json
+  results: Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }>;
+}
+let pluginSkillsCache: PluginSkillsCache | null = null;
+const PLUGIN_SKILLS_CACHE_TTL_MS = 30_000;
+
 /**
  * Scans Claude Code's installed plugin cache for skills (plugins that ship
  * a `skills/<name>/SKILL.md` layout). Returns read-only skill entries.
+ * Results are cached for 30s keyed by the mtime of installed_plugins.json.
  */
 function scanPluginSkills(): Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> {
   const pluginsFile = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json");
+
   try {
+    const stats = fs.statSync(pluginsFile);
+    const mtime = stats.mtimeMs;
+    const now = Date.now();
+
+    // Return cached results if valid
+    if (
+      pluginSkillsCache !== null &&
+      pluginSkillsCache.mtime === mtime &&
+      now - pluginSkillsCache.timestamp < PLUGIN_SKILLS_CACHE_TTL_MS
+    ) {
+      return pluginSkillsCache.results;
+    }
+
     const data = JSON.parse(fs.readFileSync(pluginsFile, "utf-8")) as {
       plugins: Record<string, Array<{ installPath: string; lastUpdated?: string }>>;
     };
@@ -235,18 +259,47 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
       }
     }
 
+    // Cache the results
+    pluginSkillsCache = { timestamp: now, mtime, results };
     return results;
   } catch {
     return [];
   }
 }
 
+// Cache for Copilot plugin skills scanning (30s TTL)
+interface CopilotPluginSkillsCache {
+  timestamp: number;
+  mtime: number; // mtime of installed-plugins directory
+  results: Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }>;
+}
+let copilotPluginSkillsCache: CopilotPluginSkillsCache | null = null;
+
 /**
  * Scans Copilot CLI's installed plugins for skills under
  * `~/.copilot/installed-plugins/<scope>/<plugin>/skills/<name>/SKILL.md`.
+ * Results are cached for 30s keyed by the mtime of the installed-plugins directory.
  */
 function scanCopilotPluginSkills(): Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> {
   const root = path.join(os.homedir(), ".copilot", "installed-plugins");
+
+  try {
+    const stats = fs.statSync(root);
+    const mtime = stats.mtimeMs;
+    const now = Date.now();
+
+    // Return cached results if valid
+    if (
+      copilotPluginSkillsCache !== null &&
+      copilotPluginSkillsCache.mtime === mtime &&
+      now - copilotPluginSkillsCache.timestamp < PLUGIN_SKILLS_CACHE_TTL_MS
+    ) {
+      return copilotPluginSkillsCache.results;
+    }
+  } catch {
+    return [];
+  }
+
   let scopes: fs.Dirent[];
   try {
     scopes = fs.readdirSync(root, { withFileTypes: true });
@@ -298,6 +351,56 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
     }
   }
 
+  // Cache the results
+  const now = Date.now();
+  try {
+    const stats = fs.statSync(root);
+    copilotPluginSkillsCache = { timestamp: now, mtime: stats.mtimeMs, results };
+  } catch {
+    // If statSync failed, cache without mtime validation
+    copilotPluginSkillsCache = { timestamp: now, mtime: 0, results };
+  }
+
+  return results;
+}
+
+// Cache for claude mcp list output (30s TTL)
+interface ClaudeServersCache {
+  timestamp: number;
+  results: McpServerInfo[];
+}
+let claudeServersCache: ClaudeServersCache | null = null;
+const CLAUDE_SERVERS_CACHE_TTL_MS = 30_000;
+
+/**
+ * Runs `claude mcp list` and caches the result for 30s to avoid repeatedly
+ * spawning the subprocess. The cache is time-based only (no file mtime check)
+ * since the Claude CLI reads ~/.claude.json internally.
+ */
+async function getCachedClaudeServers(claudePath: string, force = false): Promise<McpServerInfo[]> {
+  const now = Date.now();
+
+  // Return cached results if valid (unless force=true)
+  if (
+    !force &&
+    claudeServersCache !== null &&
+    now - claudeServersCache.timestamp < CLAUDE_SERVERS_CACHE_TTL_MS
+  ) {
+    return claudeServersCache.results;
+  }
+
+  // Spawn the subprocess
+  const results = await new Promise<McpServerInfo[]>((resolve) => {
+    childProcess.execFile(
+      claudePath,
+      ["mcp", "list"],
+      { encoding: "utf-8", timeout: 15_000 },
+      (_err, stdout) => resolve(parseMcpListOutput(stdout ?? "")),
+    );
+  });
+
+  // Cache the results
+  claudeServersCache = { timestamp: now, results };
   return results;
 }
 
@@ -759,14 +862,8 @@ function registerHandlers(): void {  // ── Terminal ────────
     const claudePath = resolveClaudePath() ?? "claude";
 
     // Run `claude mcp list` async to avoid blocking the main process.
-    const claudeServers = await new Promise<McpServerInfo[]>((resolve) => {
-      childProcess.execFile(
-        claudePath,
-        ["mcp", "list"],
-        { encoding: "utf-8", timeout: 15_000 },
-        (_err, stdout) => resolve(parseMcpListOutput(stdout ?? "")),
-      );
-    });
+    // Cache the result for 30s to avoid re-spawning the subprocess on every panel mount.
+    const claudeServers = await getCachedClaudeServers(claudePath);
 
     const copilotServers = readCopilotMcpServers();
     let aichemistServers = readAichemistMcpServers();
@@ -813,14 +910,7 @@ function registerHandlers(): void {  // ── Terminal ────────
     // server list — same shape as LIST_MCP_SERVERS — so the renderer can drop
     // it straight into state.
     const claudePath = resolveClaudePath() ?? "claude";
-    const claudeServers = await new Promise<McpServerInfo[]>((resolve) => {
-      childProcess.execFile(
-        claudePath,
-        ["mcp", "list"],
-        { encoding: "utf-8", timeout: 15_000 },
-        (_err, stdout) => resolve(parseMcpListOutput(stdout ?? "")),
-      );
-    });
+    const claudeServers = await getCachedClaudeServers(claudePath, true);
     const copilotServers = readCopilotMcpServers();
     let aichemistServers = readAichemistMcpServers();
     if (aichemistServers.length > 0) {
