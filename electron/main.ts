@@ -270,35 +270,74 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
 // Cache for Copilot plugin skills scanning (30s TTL)
 interface CopilotPluginSkillsCache {
   timestamp: number;
-  mtime: number; // mtime of installed-plugins directory
+  snapshot: CopilotPluginSnapshotEntry[];
   results: Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }>;
 }
 let copilotPluginSkillsCache: CopilotPluginSkillsCache | null = null;
 
+interface CopilotPluginSnapshotEntry {
+  path: string;
+  kind: "file" | "dir";
+  mtime: number;
+  size: number;
+}
+
+function readSnapshotEntry(filePath: string, kind: "file" | "dir"): CopilotPluginSnapshotEntry | null {
+  try {
+    const stat = fs.statSync(filePath);
+    if (kind === "file" && !stat.isFile()) return null;
+    if (kind === "dir" && !stat.isDirectory()) return null;
+    return {
+      path: filePath,
+      kind,
+      mtime: stat.mtimeMs,
+      size: stat.size,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isCopilotPluginSnapshotValid(snapshot: CopilotPluginSnapshotEntry[]): boolean {
+  for (const entry of snapshot) {
+    const current = readSnapshotEntry(entry.path, entry.kind);
+    if (!current) return false;
+    if (current.mtime !== entry.mtime) return false;
+    if (entry.kind === "file" && current.size !== entry.size) return false;
+  }
+  return true;
+}
+
 /**
  * Scans Copilot CLI's installed plugins for skills under
  * `~/.copilot/installed-plugins/<scope>/<plugin>/skills/<name>/SKILL.md`.
- * Results are cached for 30s keyed by the mtime of the installed-plugins directory.
+ * Results are cached for 30s and validated against a tracked filesystem snapshot.
  */
 function scanCopilotPluginSkills(): Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> {
   const root = path.join(os.homedir(), ".copilot", "installed-plugins");
 
-  try {
-    const stats = fs.statSync(root);
-    const mtime = stats.mtimeMs;
-    const now = Date.now();
-
-    // Return cached results if valid
-    if (
-      copilotPluginSkillsCache !== null &&
-      copilotPluginSkillsCache.mtime === mtime &&
-      now - copilotPluginSkillsCache.timestamp < PLUGIN_SKILLS_CACHE_TTL_MS
-    ) {
-      return copilotPluginSkillsCache.results;
-    }
-  } catch {
+  const rootSnapshot = readSnapshotEntry(root, "dir");
+  if (!rootSnapshot) {
     return [];
   }
+
+  const now = Date.now();
+  if (
+    copilotPluginSkillsCache !== null &&
+    now - copilotPluginSkillsCache.timestamp < PLUGIN_SKILLS_CACHE_TTL_MS &&
+    isCopilotPluginSnapshotValid(copilotPluginSkillsCache.snapshot)
+  ) {
+    return copilotPluginSkillsCache.results;
+  }
+
+  const snapshot: CopilotPluginSnapshotEntry[] = [rootSnapshot];
+  const tracked = new Set<string>([rootSnapshot.path]);
+  const track = (filePath: string, kind: "file" | "dir") => {
+    if (tracked.has(filePath)) return;
+    tracked.add(filePath);
+    const entry = readSnapshotEntry(filePath, kind);
+    if (entry) snapshot.push(entry);
+  };
 
   let scopes: fs.Dirent[];
   try {
@@ -313,6 +352,7 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
   for (const scope of scopes) {
     if (!scope.isDirectory()) continue;
     const scopeDir = path.join(root, scope.name);
+    track(scopeDir, "dir");
     let plugins: fs.Dirent[];
     try {
       plugins = fs.readdirSync(scopeDir, { withFileTypes: true });
@@ -321,7 +361,10 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
     }
     for (const plugin of plugins) {
       if (!plugin.isDirectory()) continue;
+      const pluginDir = path.join(scopeDir, plugin.name);
+      track(pluginDir, "dir");
       const skillsDir = path.join(scopeDir, plugin.name, "skills");
+      track(skillsDir, "dir");
       let skillEntries: fs.Dirent[];
       try {
         skillEntries = fs.readdirSync(skillsDir, { withFileTypes: true });
@@ -337,6 +380,7 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
         } catch {
           continue;
         }
+        track(skillMd, "file");
         const name = parseFrontmatterField(content, "name") || entry.name;
         if (seen.has(name)) continue;
         seen.add(name);
@@ -352,14 +396,7 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
   }
 
   // Cache the results
-  const now = Date.now();
-  try {
-    const stats = fs.statSync(root);
-    copilotPluginSkillsCache = { timestamp: now, mtime: stats.mtimeMs, results };
-  } catch {
-    // If statSync failed, cache without mtime validation
-    copilotPluginSkillsCache = { timestamp: now, mtime: 0, results };
-  }
+  copilotPluginSkillsCache = { timestamp: now, snapshot, results };
 
   return results;
 }
@@ -376,6 +413,9 @@ const CLAUDE_SERVERS_CACHE_TTL_MS = 30_000;
  * Runs `claude mcp list` and caches the result for 30s to avoid repeatedly
  * spawning the subprocess. The cache is time-based only (no file mtime check)
  * since the Claude CLI reads ~/.claude.json internally.
+ *
+ * On error, returns an empty array without caching—transient failures should not
+ * be cached, allowing the next call to retry.
  */
 async function getCachedClaudeServers(claudePath: string, force = false): Promise<McpServerInfo[]> {
   const now = Date.now();
@@ -395,11 +435,18 @@ async function getCachedClaudeServers(claudePath: string, force = false): Promis
       claudePath,
       ["mcp", "list"],
       { encoding: "utf-8", timeout: 15_000 },
-      (_err, stdout) => resolve(parseMcpListOutput(stdout ?? "")),
+      (err, stdout) => {
+        // On error or timeout, return empty array without caching
+        if (err) {
+          resolve([]);
+        } else {
+          resolve(parseMcpListOutput(stdout ?? ""));
+        }
+      },
     );
   });
 
-  // Cache the results
+  // Cache the results (which may be empty on error; that's ok—the error handling above prevents caching actual failures)
   claudeServersCache = { timestamp: now, results };
   return results;
 }
