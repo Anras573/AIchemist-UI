@@ -79,16 +79,13 @@ This guide provides instructions for manually testing the caching improvements m
 1. Open the Skills panel
 2. Note the list of skills
 3. Install a new plugin that has skills (or modify `installed_plugins.json` mtime)
-4. Wait 1 second (cache should still be valid based on time)
+4. Wait 1 second
 5. Close and reopen the Skills panel
-   - Expected: Still shows cached results (mtime check should invalidate though)
-6. Wait 30 seconds
-7. Open the panel again
-   - Expected: New plugin skills appear
+   - Expected: New plugin skills appear immediately (cache invalidates on manifest/snapshot change)
 
 **Success Criteria:**
-- New skills appear after cache expiry
-- Modifying plugin files updates the cache on next load
+- New skills appear immediately after install/remove (no 30s wait required)
+- In-place edits to already-installed plugin skill content are visible after TTL expiry (Claude) or immediately (Copilot snapshot detects file changes)
 
 ### Test 5: Performance Measurement (Optional)
 

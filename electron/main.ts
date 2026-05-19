@@ -190,6 +190,12 @@ interface PluginSkillsCache {
 let pluginSkillsCache: PluginSkillsCache | null = null;
 const PLUGIN_SKILLS_CACHE_TTL_MS = 30_000;
 
+function isMissingPathError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
 /**
  * Scans Claude Code's installed plugin cache for skills (plugins that ship
  * a `skills/<name>/SKILL.md` layout). Returns read-only skill entries.
@@ -218,6 +224,7 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
 
     const results: Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> = [];
     const seen = new Set<string>();
+    let hadPartialReadError = false;
 
     for (const [pluginKey, entries] of Object.entries(data.plugins)) {
       // Pick the most recently updated install of this plugin
@@ -231,7 +238,10 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
       let dirEntries: fs.Dirent[];
       try {
         dirEntries = fs.readdirSync(skillsDir, { withFileTypes: true });
-      } catch {
+      } catch (error) {
+        if (!isMissingPathError(error)) {
+          hadPartialReadError = true;
+        }
         continue;
       }
 
@@ -241,7 +251,10 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
         let content: string;
         try {
           content = fs.readFileSync(skillMd, "utf-8");
-        } catch {
+        } catch (error) {
+          if (!isMissingPathError(error)) {
+            hadPartialReadError = true;
+          }
           continue;
         }
 
@@ -259,8 +272,10 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
       }
     }
 
-    // Cache the results
-    pluginSkillsCache = { timestamp: now, mtime, results };
+    // Avoid caching partial scans caused by transient read errors.
+    if (!hadPartialReadError) {
+      pluginSkillsCache = { timestamp: now, mtime, results };
+    }
     return results;
   } catch {
     return [];
@@ -348,6 +363,7 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
 
   const results: Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> = [];
   const seen = new Set<string>();
+  let hadPartialReadError = false;
 
   for (const scope of scopes) {
     if (!scope.isDirectory()) continue;
@@ -357,6 +373,7 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
     try {
       plugins = fs.readdirSync(scopeDir, { withFileTypes: true });
     } catch {
+      hadPartialReadError = true;
       continue;
     }
     for (const plugin of plugins) {
@@ -364,11 +381,19 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
       const pluginDir = path.join(scopeDir, plugin.name);
       track(pluginDir, "dir");
       const skillsDir = path.join(scopeDir, plugin.name, "skills");
-      track(skillsDir, "dir");
+      const skillsDirEntry = readSnapshotEntry(skillsDir, "dir");
+      if (!skillsDirEntry) {
+        continue;
+      }
+      if (!tracked.has(skillsDirEntry.path)) {
+        tracked.add(skillsDirEntry.path);
+        snapshot.push(skillsDirEntry);
+      }
       let skillEntries: fs.Dirent[];
       try {
         skillEntries = fs.readdirSync(skillsDir, { withFileTypes: true });
       } catch {
+        hadPartialReadError = true;
         continue;
       }
       for (const entry of skillEntries) {
@@ -377,7 +402,10 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
         let content: string;
         try {
           content = fs.readFileSync(skillMd, "utf-8");
-        } catch {
+        } catch (error) {
+          if (!isMissingPathError(error)) {
+            hadPartialReadError = true;
+          }
           continue;
         }
         track(skillMd, "file");
@@ -395,8 +423,10 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
     }
   }
 
-  // Cache the results
-  copilotPluginSkillsCache = { timestamp: now, snapshot, results };
+  // Avoid caching partial scans caused by transient read errors.
+  if (!hadPartialReadError) {
+    copilotPluginSkillsCache = { timestamp: now, snapshot, results };
+  }
 
   return results;
 }

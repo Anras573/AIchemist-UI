@@ -94,13 +94,15 @@ With 5 Claude plugins and 3 Copilot plugins:
 
 ### Cache Staleness
 - Users may see stale results for up to 30 seconds after:
-  - Installing/removing plugins
-  - Modifying MCP server configuration
+  - Modifying MCP server configuration (until manual refresh or TTL)
+  - Editing skill content inside an already-installed Claude plugin (manifest mtime unchanged)
+  - Partial plugin-scan read failures (results are returned, but intentionally not cached)
 
 **Mitigation:**
 - 30s is short enough that users rarely notice
 - Manual refresh button bypasses cache
-- Cache automatically invalidates on file modifications
+- Plugin install/remove invalidates skill caches immediately
+- Copilot plugin skill edits invalidate immediately via filesystem snapshot checks
 
 ### Memory Usage
 - Negligible: Caches store only metadata (names, descriptions, paths)
@@ -112,7 +114,7 @@ With 5 Claude plugins and 3 Copilot plugins:
    - Open Skills panel → close → reopen quickly → should be instant
 
 2. **Verify cache invalidation:**
-   - Install a plugin → wait 30s → open panel → should see new plugin
+   - Install/remove a plugin → reopen panel immediately → should see updated skills
 
 3. **Verify manual refresh:**
    - Open MCP Servers panel → click refresh → should bypass cache
