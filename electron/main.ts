@@ -181,19 +181,50 @@ function scanSkillsDir(
   }
 }
 
+// Cache for plugin skills scanning (30s TTL)
+interface PluginSkillsCache {
+  timestamp: number;
+  mtime: number; // mtime of installed_plugins.json
+  results: Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }>;
+}
+let pluginSkillsCache: PluginSkillsCache | null = null;
+const PLUGIN_SKILLS_CACHE_TTL_MS = 30_000;
+
+function isMissingPathError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
 /**
  * Scans Claude Code's installed plugin cache for skills (plugins that ship
  * a `skills/<name>/SKILL.md` layout). Returns read-only skill entries.
+ * Results are cached for 30s keyed by the mtime of installed_plugins.json.
  */
 function scanPluginSkills(): Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> {
   const pluginsFile = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json");
+
   try {
+    const stats = fs.statSync(pluginsFile);
+    const mtime = stats.mtimeMs;
+    const now = Date.now();
+
+    // Return cached results if valid
+    if (
+      pluginSkillsCache !== null &&
+      pluginSkillsCache.mtime === mtime &&
+      now - pluginSkillsCache.timestamp < PLUGIN_SKILLS_CACHE_TTL_MS
+    ) {
+      return pluginSkillsCache.results;
+    }
+
     const data = JSON.parse(fs.readFileSync(pluginsFile, "utf-8")) as {
       plugins: Record<string, Array<{ installPath: string; lastUpdated?: string }>>;
     };
 
     const results: Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> = [];
     const seen = new Set<string>();
+    let hadPartialReadError = false;
 
     for (const [pluginKey, entries] of Object.entries(data.plugins)) {
       // Pick the most recently updated install of this plugin
@@ -207,7 +238,10 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
       let dirEntries: fs.Dirent[];
       try {
         dirEntries = fs.readdirSync(skillsDir, { withFileTypes: true });
-      } catch {
+      } catch (error) {
+        if (!isMissingPathError(error)) {
+          hadPartialReadError = true;
+        }
         continue;
       }
 
@@ -217,7 +251,10 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
         let content: string;
         try {
           content = fs.readFileSync(skillMd, "utf-8");
-        } catch {
+        } catch (error) {
+          if (!isMissingPathError(error)) {
+            hadPartialReadError = true;
+          }
           continue;
         }
 
@@ -235,18 +272,88 @@ function scanPluginSkills(): Array<{ name: string; description: string; path: st
       }
     }
 
+    // Avoid caching partial scans caused by transient read errors.
+    if (!hadPartialReadError) {
+      pluginSkillsCache = { timestamp: now, mtime, results };
+    }
     return results;
   } catch {
     return [];
   }
 }
 
+// Cache for Copilot plugin skills scanning (30s TTL)
+interface CopilotPluginSkillsCache {
+  timestamp: number;
+  snapshot: CopilotPluginSnapshotEntry[];
+  results: Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }>;
+}
+let copilotPluginSkillsCache: CopilotPluginSkillsCache | null = null;
+
+interface CopilotPluginSnapshotEntry {
+  path: string;
+  kind: "file" | "dir";
+  mtime: number;
+  size: number;
+}
+
+function readSnapshotEntry(filePath: string, kind: "file" | "dir"): CopilotPluginSnapshotEntry | null {
+  try {
+    const stat = fs.statSync(filePath);
+    if (kind === "file" && !stat.isFile()) return null;
+    if (kind === "dir" && !stat.isDirectory()) return null;
+    return {
+      path: filePath,
+      kind,
+      mtime: stat.mtimeMs,
+      size: stat.size,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isCopilotPluginSnapshotValid(snapshot: CopilotPluginSnapshotEntry[]): boolean {
+  for (const entry of snapshot) {
+    const current = readSnapshotEntry(entry.path, entry.kind);
+    if (!current) return false;
+    if (current.mtime !== entry.mtime) return false;
+    if (entry.kind === "file" && current.size !== entry.size) return false;
+  }
+  return true;
+}
+
 /**
  * Scans Copilot CLI's installed plugins for skills under
  * `~/.copilot/installed-plugins/<scope>/<plugin>/skills/<name>/SKILL.md`.
+ * Results are cached for 30s and validated against a tracked filesystem snapshot.
  */
 function scanCopilotPluginSkills(): Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> {
   const root = path.join(os.homedir(), ".copilot", "installed-plugins");
+
+  const rootSnapshot = readSnapshotEntry(root, "dir");
+  if (!rootSnapshot) {
+    return [];
+  }
+
+  const now = Date.now();
+  if (
+    copilotPluginSkillsCache !== null &&
+    now - copilotPluginSkillsCache.timestamp < PLUGIN_SKILLS_CACHE_TTL_MS &&
+    isCopilotPluginSnapshotValid(copilotPluginSkillsCache.snapshot)
+  ) {
+    return copilotPluginSkillsCache.results;
+  }
+
+  const snapshot: CopilotPluginSnapshotEntry[] = [rootSnapshot];
+  const tracked = new Set<string>([rootSnapshot.path]);
+  const track = (filePath: string, kind: "file" | "dir") => {
+    if (tracked.has(filePath)) return;
+    tracked.add(filePath);
+    const entry = readSnapshotEntry(filePath, kind);
+    if (entry) snapshot.push(entry);
+  };
+
   let scopes: fs.Dirent[];
   try {
     scopes = fs.readdirSync(root, { withFileTypes: true });
@@ -256,23 +363,37 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
 
   const results: Array<{ name: string; description: string; path: string; source: "plugin"; plugin: string }> = [];
   const seen = new Set<string>();
+  let hadPartialReadError = false;
 
   for (const scope of scopes) {
     if (!scope.isDirectory()) continue;
     const scopeDir = path.join(root, scope.name);
+    track(scopeDir, "dir");
     let plugins: fs.Dirent[];
     try {
       plugins = fs.readdirSync(scopeDir, { withFileTypes: true });
     } catch {
+      hadPartialReadError = true;
       continue;
     }
     for (const plugin of plugins) {
       if (!plugin.isDirectory()) continue;
+      const pluginDir = path.join(scopeDir, plugin.name);
+      track(pluginDir, "dir");
       const skillsDir = path.join(scopeDir, plugin.name, "skills");
+      const skillsDirEntry = readSnapshotEntry(skillsDir, "dir");
+      if (!skillsDirEntry) {
+        continue;
+      }
+      if (!tracked.has(skillsDirEntry.path)) {
+        tracked.add(skillsDirEntry.path);
+        snapshot.push(skillsDirEntry);
+      }
       let skillEntries: fs.Dirent[];
       try {
         skillEntries = fs.readdirSync(skillsDir, { withFileTypes: true });
       } catch {
+        hadPartialReadError = true;
         continue;
       }
       for (const entry of skillEntries) {
@@ -281,9 +402,13 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
         let content: string;
         try {
           content = fs.readFileSync(skillMd, "utf-8");
-        } catch {
+        } catch (error) {
+          if (!isMissingPathError(error)) {
+            hadPartialReadError = true;
+          }
           continue;
         }
+        track(skillMd, "file");
         const name = parseFrontmatterField(content, "name") || entry.name;
         if (seen.has(name)) continue;
         seen.add(name);
@@ -298,6 +423,62 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
     }
   }
 
+  // Avoid caching partial scans caused by transient read errors.
+  if (!hadPartialReadError) {
+    copilotPluginSkillsCache = { timestamp: now, snapshot, results };
+  }
+
+  return results;
+}
+
+// Cache for claude mcp list output (30s TTL), keyed by claudePath so a path
+// change (e.g. user updates CLAUDE_CODE_PATH in settings) always hits fresh.
+interface ClaudeServersCache {
+  timestamp: number;
+  results: McpServerInfo[];
+}
+const claudeServersCacheByPath = new Map<string, ClaudeServersCache>();
+const CLAUDE_SERVERS_CACHE_TTL_MS = 30_000;
+
+/**
+ * Runs `claude mcp list` and caches the result for 30s to avoid repeatedly
+ * spawning the subprocess. The cache is keyed by `claudePath` and is
+ * time-based only (no file mtime check) since the Claude CLI reads
+ * ~/.claude.json internally.
+ *
+ * Transient failures (non-zero exit, timeout) are NOT cached so the next
+ * call retries immediately once the CLI is available again.
+ */
+async function getCachedClaudeServers(claudePath: string, force = false): Promise<McpServerInfo[]> {
+  const now = Date.now();
+  const cached = claudeServersCacheByPath.get(claudePath);
+
+  // Return cached results if valid (unless force=true)
+  if (!force && cached !== undefined && now - cached.timestamp < CLAUDE_SERVERS_CACHE_TTL_MS) {
+    return cached.results;
+  }
+
+  // Spawn the subprocess
+  const { results, ok } = await new Promise<{ results: McpServerInfo[]; ok: boolean }>((resolve) => {
+    childProcess.execFile(
+      claudePath,
+      ["mcp", "list"],
+      { encoding: "utf-8", timeout: 15_000 },
+      (err, stdout) => {
+        if (err) {
+          resolve({ results: [], ok: false });
+        } else {
+          resolve({ results: parseMcpListOutput(stdout ?? ""), ok: true });
+        }
+      },
+    );
+  });
+
+  // Only cache successful results — transient failures should not suppress
+  // all Claude MCP servers for the next 30s.
+  if (ok) {
+    claudeServersCacheByPath.set(claudePath, { timestamp: now, results });
+  }
   return results;
 }
 
@@ -759,14 +940,8 @@ function registerHandlers(): void {  // ── Terminal ────────
     const claudePath = resolveClaudePath() ?? "claude";
 
     // Run `claude mcp list` async to avoid blocking the main process.
-    const claudeServers = await new Promise<McpServerInfo[]>((resolve) => {
-      childProcess.execFile(
-        claudePath,
-        ["mcp", "list"],
-        { encoding: "utf-8", timeout: 15_000 },
-        (_err, stdout) => resolve(parseMcpListOutput(stdout ?? "")),
-      );
-    });
+    // Cache the result for 30s to avoid re-spawning the subprocess on every panel mount.
+    const claudeServers = await getCachedClaudeServers(claudePath);
 
     const copilotServers = readCopilotMcpServers();
     let aichemistServers = readAichemistMcpServers();
@@ -813,14 +988,7 @@ function registerHandlers(): void {  // ── Terminal ────────
     // server list — same shape as LIST_MCP_SERVERS — so the renderer can drop
     // it straight into state.
     const claudePath = resolveClaudePath() ?? "claude";
-    const claudeServers = await new Promise<McpServerInfo[]>((resolve) => {
-      childProcess.execFile(
-        claudePath,
-        ["mcp", "list"],
-        { encoding: "utf-8", timeout: 15_000 },
-        (_err, stdout) => resolve(parseMcpListOutput(stdout ?? "")),
-      );
-    });
+    const claudeServers = await getCachedClaudeServers(claudePath, true);
     const copilotServers = readCopilotMcpServers();
     let aichemistServers = readAichemistMcpServers();
     if (aichemistServers.length > 0) {
