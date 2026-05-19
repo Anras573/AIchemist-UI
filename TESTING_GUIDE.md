@@ -95,43 +95,28 @@ This guide provides instructions for manually testing the caching improvements m
 **Objective:** Measure actual performance improvement.
 
 **Steps:**
-1. Open browser DevTools console
-2. Add timing code to `src/components/session/SkillsPanel.tsx`:
-   ```typescript
-   const loadSkills = useCallback(() => {
-     if (!projectPath) return;
-     setSkills(null);
-     const start = performance.now();
-     ipc
-       .listSkills(projectPath, provider ?? undefined)
-       .then((skills) => {
-         const elapsed = performance.now() - start;
-         console.log(`Skills loaded in ${elapsed.toFixed(2)}ms`);
-         setSkills(skills);
-       })
-       .catch(() => setSkills([]));
-   }, [projectPath, provider, ipc]);
-   ```
-3. Open the Skills panel and check console for timing
-4. Close and immediately reopen - check timing again
-5. Compare the two measurements
+1. Open browser DevTools (View → Toggle Developer Tools in the app menu)
+2. Switch to the **Performance** tab (or **Network** tab for IPC timing)
+3. Open the Skills panel, then close and immediately reopen it
+4. Compare IPC round-trip times between the first and second open:
+   - First open: full scan (slower)
+   - Second open within 30s: cache hit (much faster)
 
 **Success Criteria:**
-- Second load is 10-100x faster than first load
-- Example: 200ms → 2ms
+- Second load is noticeably faster (10-100x) than first load
 
-## Performance Benchmarks
+## Illustrative Performance Estimates
 
-Expected performance improvements (approximate):
+These numbers are rough estimates to illustrate the expected improvement — actual results vary by machine, disk speed, and number of plugins installed. **They have not been measured against a specific environment.**
 
-| Scenario | Before | After (cached) | Improvement |
+| Scenario | Before (estimated) | After cached (estimated) | Expected gain |
 |----------|--------|----------------|-------------|
-| 5 plugins, first load | 200ms | 200ms | 0% (cache miss) |
-| 5 plugins, second load | 200ms | 2ms | 99% (cache hit) |
-| 10 plugins, first load | 500ms | 500ms | 0% (cache miss) |
-| 10 plugins, second load | 500ms | 3ms | 99.4% (cache hit) |
-| MCP list, first load | 150ms | 150ms | 0% (cache miss) |
-| MCP list, second load | 150ms | 1ms | 99.3% (cache hit) |
+| 5 plugins, first load | ~200ms | ~200ms | none (cache miss) |
+| 5 plugins, second load | ~200ms | ~2ms | ~100× |
+| 10 plugins, first load | ~500ms | ~500ms | none (cache miss) |
+| 10 plugins, second load | ~500ms | ~3ms | ~170× |
+| MCP list, first load | ~150ms | ~150ms | none (cache miss) |
+| MCP list, second load | ~150ms | ~1ms | ~150× |
 
 ## Troubleshooting
 

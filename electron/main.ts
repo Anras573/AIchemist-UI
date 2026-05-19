@@ -401,53 +401,54 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
   return results;
 }
 
-// Cache for claude mcp list output (30s TTL)
+// Cache for claude mcp list output (30s TTL), keyed by claudePath so a path
+// change (e.g. user updates CLAUDE_CODE_PATH in settings) always hits fresh.
 interface ClaudeServersCache {
   timestamp: number;
   results: McpServerInfo[];
 }
-let claudeServersCache: ClaudeServersCache | null = null;
+const claudeServersCacheByPath = new Map<string, ClaudeServersCache>();
 const CLAUDE_SERVERS_CACHE_TTL_MS = 30_000;
 
 /**
  * Runs `claude mcp list` and caches the result for 30s to avoid repeatedly
- * spawning the subprocess. The cache is time-based only (no file mtime check)
- * since the Claude CLI reads ~/.claude.json internally.
+ * spawning the subprocess. The cache is keyed by `claudePath` and is
+ * time-based only (no file mtime check) since the Claude CLI reads
+ * ~/.claude.json internally.
  *
- * On error, returns an empty array without caching—transient failures should not
- * be cached, allowing the next call to retry.
+ * Transient failures (non-zero exit, timeout) are NOT cached so the next
+ * call retries immediately once the CLI is available again.
  */
 async function getCachedClaudeServers(claudePath: string, force = false): Promise<McpServerInfo[]> {
   const now = Date.now();
+  const cached = claudeServersCacheByPath.get(claudePath);
 
   // Return cached results if valid (unless force=true)
-  if (
-    !force &&
-    claudeServersCache !== null &&
-    now - claudeServersCache.timestamp < CLAUDE_SERVERS_CACHE_TTL_MS
-  ) {
-    return claudeServersCache.results;
+  if (!force && cached !== undefined && now - cached.timestamp < CLAUDE_SERVERS_CACHE_TTL_MS) {
+    return cached.results;
   }
 
   // Spawn the subprocess
-  const results = await new Promise<McpServerInfo[]>((resolve) => {
+  const { results, ok } = await new Promise<{ results: McpServerInfo[]; ok: boolean }>((resolve) => {
     childProcess.execFile(
       claudePath,
       ["mcp", "list"],
       { encoding: "utf-8", timeout: 15_000 },
       (err, stdout) => {
-        // On error or timeout, return empty array without caching
         if (err) {
-          resolve([]);
+          resolve({ results: [], ok: false });
         } else {
-          resolve(parseMcpListOutput(stdout ?? ""));
+          resolve({ results: parseMcpListOutput(stdout ?? ""), ok: true });
         }
       },
     );
   });
 
-  // Cache the results (which may be empty on error; that's ok—the error handling above prevents caching actual failures)
-  claudeServersCache = { timestamp: now, results };
+  // Only cache successful results — transient failures should not suppress
+  // all Claude MCP servers for the next 30s.
+  if (ok) {
+    claudeServersCacheByPath.set(claudePath, { timestamp: now, results });
+  }
   return results;
 }
 

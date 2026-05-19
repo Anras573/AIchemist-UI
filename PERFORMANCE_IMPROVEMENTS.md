@@ -41,13 +41,13 @@ interface PluginSkillsCache {
 
 **Cache invalidation strategy:**
 - **Time-based**: 30-second TTL ensures fresh results without excessive re-scanning
-- **Modification-based**: For Claude plugins, keyed by `installed_plugins.json` mtime
-- **Modification-based**: For Copilot plugins, keyed by `installed-plugins/` directory mtime
+- **Modification-based (Claude)**: keyed by `installed_plugins.json` mtime — invalidates on plugin install/remove. Note: editing a SKILL.md inside an already-installed plugin does not update the manifest, so changes will only be visible after the 30s TTL expires.
+- **Snapshot-based (Copilot)**: tracks mtime+size of each scope dir, plugin dir, skills dir, and every SKILL.md file read during the scan — so installs, removes, *and* in-place edits all invalidate the cache immediately.
 
 **Benefits:**
 - First call: Same as before (full scan)
 - Subsequent calls within 30s: Instant (cached results)
-- Automatic cache invalidation when plugins are installed/removed
+- Cache invalidation on plugin install/remove; Copilot also invalidates on content edits
 
 ### 2. Claude MCP List Caching (30s TTL)
 
