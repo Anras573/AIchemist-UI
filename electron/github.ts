@@ -69,9 +69,13 @@ export function parseGitHubRemoteUrl(remoteUrl: string): GitHubRemoteInfo | null
 }
 
 async function resolveOriginRemoteUrl(projectPath: string): Promise<string> {
+  const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
+  const env = { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` };
   const { stdout } = await execFileAsync("git", ["remote", "get-url", "origin"], {
     cwd: projectPath,
     encoding: "utf8",
+    timeout: 5_000,
+    env,
   });
   return stdout.trim();
 }

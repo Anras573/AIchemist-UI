@@ -6,9 +6,15 @@ import { vi } from "vitest";
  * methods via vi.mocked(window.electronAPI.<method>).mockResolvedValue(...).
  */
 export function createElectronAPIMock(): Window["electronAPI"] {
+  const getApiKey = vi.fn().mockResolvedValue(null);
+  const githubStubResponse = async () =>
+    (await getApiKey("github"))
+      ? { error: "not implemented" as const }
+      : { error: "GITHUB_TOKEN not configured" as const };
+
   return {
     // Config
-    getApiKey: vi.fn().mockResolvedValue(null),
+    getApiKey,
     getAnthropicConfig: vi.fn().mockResolvedValue({
       api_key: null,
       base_url: null,
@@ -54,10 +60,10 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     getCopilotModels: vi.fn().mockResolvedValue([]),
     getClaudeAgents: vi.fn().mockResolvedValue([]),
     getCopilotAgents: vi.fn().mockResolvedValue([]),
-    githubCreatePr: vi.fn().mockResolvedValue({ error: "not implemented" }),
-    githubListPrs: vi.fn().mockResolvedValue({ error: "not implemented" }),
-    githubListIssues: vi.fn().mockResolvedValue({ error: "not implemented" }),
-    githubGetCiStatus: vi.fn().mockResolvedValue({ error: "not implemented" }),
+    githubCreatePr: vi.fn().mockImplementation(githubStubResponse),
+    githubListPrs: vi.fn().mockImplementation(githubStubResponse),
+    githubListIssues: vi.fn().mockImplementation(githubStubResponse),
+    githubGetCiStatus: vi.fn().mockImplementation(githubStubResponse),
     listSkills: vi.fn().mockResolvedValue([]),
     listMcpServers: vi.fn().mockResolvedValue([]),
     mcpProbeManaged: vi.fn().mockResolvedValue([]),
