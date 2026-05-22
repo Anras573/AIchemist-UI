@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { getRemoteInfo, parseGitHubRemoteUrl } from "./github";
+import { buildGitPath, getRemoteInfo, parseGitHubRemoteUrl } from "./github";
 
 describe("parseGitHubRemoteUrl", () => {
   it("parses HTTPS remotes with .git suffix", () => {
@@ -66,5 +66,19 @@ describe("getRemoteInfo", () => {
     );
 
     expect(result).toBeNull();
+  });
+});
+
+describe("buildGitPath", () => {
+  it("uses Unix delimiter when provided", () => {
+    expect(buildGitPath("/bin:/usr/bin", ":")).toBe(
+      "/usr/bin:/usr/local/bin:/opt/homebrew/bin:/bin:/usr/bin"
+    );
+  });
+
+  it("uses Windows delimiter when provided", () => {
+    expect(buildGitPath("C:\\Windows\\System32;C:\\Program Files\\Git\\cmd", ";")).toBe(
+      "/usr/bin;/usr/local/bin;/opt/homebrew/bin;C:\\Windows\\System32;C:\\Program Files\\Git\\cmd"
+    );
   });
 });

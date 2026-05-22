@@ -1,4 +1,5 @@
 import { execFile } from "child_process";
+import { delimiter } from "path";
 import { promisify } from "util";
 import { Octokit } from "@octokit/rest";
 import { getApiKey } from "./config";
@@ -8,6 +9,14 @@ const execFileAsync = promisify(execFile);
 export interface GitHubRemoteInfo {
   owner: string;
   repo: string;
+}
+
+export function buildGitPath(
+  currentPath: string | undefined = process.env.PATH,
+  pathDelimiter: string = delimiter
+): string {
+  const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"];
+  return [...extraPaths, currentPath ?? ""].filter(Boolean).join(pathDelimiter);
 }
 
 /**
@@ -69,8 +78,10 @@ export function parseGitHubRemoteUrl(remoteUrl: string): GitHubRemoteInfo | null
 }
 
 async function resolveOriginRemoteUrl(projectPath: string): Promise<string> {
-  const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
-  const env = { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` };
+  const env = {
+    ...process.env,
+    PATH: buildGitPath(process.env.PATH, delimiter),
+  };
   const { stdout } = await execFileAsync("git", ["remote", "get-url", "origin"], {
     cwd: projectPath,
     encoding: "utf8",
