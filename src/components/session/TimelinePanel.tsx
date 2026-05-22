@@ -1,5 +1,5 @@
 import { Cable } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { Message as MessageRecord, CompactionEvent, SkillInfo } from "@/types";
@@ -51,7 +51,7 @@ import { useIpc } from "@/lib/ipc";
 
 // ─── Individual message bubble ────────────────────────────────────────────────
 
-function MessageBubble({ message }: { message: MessageRecord }) {
+const MessageBubble = memo(function MessageBubble({ message }: { message: MessageRecord }) {
   const isUser = message.role === "user";
   return (
     <Message from={message.role as "user" | "assistant"}>
@@ -69,7 +69,7 @@ function MessageBubble({ message }: { message: MessageRecord }) {
       </MessageContent>
     </Message>
   );
-}
+});
 
 // ─── Streaming indicator ──────────────────────────────────────────────────────
 
@@ -89,7 +89,7 @@ function StreamingBubble({ text }: { text: string }) {
 
 // ─── Tool call block ─────────────────────────────────────────────────────────
 
-function ToolCallBlock({ call }: { call: LiveToolCall }) {
+const ToolCallBlock = memo(function ToolCallBlock({ call }: { call: LiveToolCall }) {
   const isPending = call.result === undefined && call.error === undefined;
   const [open, setOpen] = useState(!isPending);
 
@@ -118,7 +118,7 @@ function ToolCallBlock({ call }: { call: LiveToolCall }) {
       </div>
     </div>
   );
-}
+});
 
 // ─── Approval gate ────────────────────────────────────────────────────────────
 
@@ -224,7 +224,7 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
 
 // ─── Compaction marker ────────────────────────────────────────────────────────
 
-function CompactionMarker({ event }: { event: CompactionEvent }) {
+const CompactionMarker = memo(function CompactionMarker({ event }: { event: CompactionEvent }) {
   const tokens = event.pre_tokens > 0
     ? `${Math.round(event.pre_tokens / 1000)}k tokens summarised`
     : "context summarised";
@@ -238,7 +238,7 @@ function CompactionMarker({ event }: { event: CompactionEvent }) {
       <div className="flex-1 h-px bg-border" />
     </div>
   );
-}
+});
 
 
 
@@ -416,14 +416,16 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
     | { kind: "message"; data: MessageRecord }
     | { kind: "compaction"; data: CompactionEvent };
 
-  const timelineItems: TimelineItem[] = [
-    ...messages.map((m): TimelineItem => ({ kind: "message", data: m })),
-    ...compactions.map((c): TimelineItem => ({ kind: "compaction", data: c })),
-  ].sort((a, b) => {
-    const ta = a.kind === "message" ? a.data.created_at : a.data.timestamp;
-    const tb = b.kind === "message" ? b.data.created_at : b.data.timestamp;
-    return ta.localeCompare(tb);
-  });
+  const timelineItems: TimelineItem[] = useMemo(() => {
+    return [
+      ...messages.map((m): TimelineItem => ({ kind: "message", data: m })),
+      ...compactions.map((c): TimelineItem => ({ kind: "compaction", data: c })),
+    ].sort((a, b) => {
+      const ta = a.kind === "message" ? a.data.created_at : a.data.timestamp;
+      const tb = b.kind === "message" ? b.data.created_at : b.data.timestamp;
+      return ta.localeCompare(tb);
+    });
+  }, [messages, compactions]);
 
   return (
     <div className="flex flex-col h-full">
@@ -561,7 +563,10 @@ function InputBarInner({
     }
   }, [textValue, ensureSkillsLoaded]);
 
-  const filteredItems = buildSlashItems(slashQuery, skills ?? []);
+  const filteredItems = useMemo(
+    () => buildSlashItems(slashQuery, skills ?? []),
+    [slashQuery, skills]
+  );
 
   // Select an item from the popover
   const handleSelect = useCallback(
