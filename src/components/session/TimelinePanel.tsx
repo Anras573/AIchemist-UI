@@ -49,6 +49,8 @@ import {
 import { QuestionCard } from "./QuestionCard";
 import { useIpc } from "@/lib/ipc";
 
+const EMPTY_COMPACTIONS: CompactionEvent[] = [];
+
 // ─── Individual message bubble ────────────────────────────────────────────────
 
 const MessageBubble = memo(function MessageBubble({ message }: { message: MessageRecord }) {
@@ -370,7 +372,9 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
   const toolCalls = activeSessionId ? (liveToolCalls[activeSessionId] ?? []) : [];
   const approvals = activeSessionId ? (pendingApprovals[activeSessionId] ?? []) : [];
   const questions = activeSessionId ? (pendingQuestions[activeSessionId] ?? []) : [];
-  const compactions = activeSessionId ? (sessionCompactions[activeSessionId] ?? []) : [];
+  const compactions = activeSessionId
+    ? (sessionCompactions[activeSessionId] ?? EMPTY_COMPACTIONS)
+    : EMPTY_COMPACTIONS;
   const thinkingText = activeSessionId ? (sessionThinking[activeSessionId] ?? "") : "";
   const isThinking = activeSessionId ? (sessionIsThinking[activeSessionId] ?? false) : false;
   const isRunning = session?.status === "running" || session?.status === "waiting_approval";
