@@ -20,6 +20,39 @@ export interface ProviderProbes {
   acp?: ProviderProbeResult;
 }
 
+// ─── GitHub integration ────────────────────────────────────────────────────────
+
+export interface GitHubPR {
+  id: number;
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+  draft?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  head_ref?: string;
+  base_ref?: string;
+}
+
+export interface GitHubIssue {
+  id: number;
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CIStatus {
+  state: string;
+  sha?: string;
+  target_url?: string;
+  description?: string;
+  context?: string;
+}
+
 // ─── ACP Agent ───────────────────────────────────────────────────────────────
 
 /**
