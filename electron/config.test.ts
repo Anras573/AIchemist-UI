@@ -23,13 +23,16 @@ describe("buildChildProcessPath", () => {
     );
   });
 
-  it("defaults to colon delimiter and process.env.PATH", () => {
+  it("defaults to platform delimiter and process.env.PATH", () => {
     const originalPath = process.env.PATH;
     process.env.PATH = "/some/path";
     try {
       const result = buildChildProcessPath();
       expect(result).toContain("/opt/homebrew/bin");
       expect(result).toContain("/some/path");
+      // Verify delimiter is platform-appropriate
+      const expectedDelimiter = process.platform === "win32" ? ";" : ":";
+      expect(result).toContain(expectedDelimiter);
     } finally {
       process.env.PATH = originalPath;
     }

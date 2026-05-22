@@ -70,7 +70,7 @@ const EXTRA_PATHS = [
  */
 export function buildChildProcessPath(
   currentPath: string | undefined = process.env.PATH,
-  delimiter: string = ":"
+  delimiter: string = path.delimiter
 ): string {
   const pathList = [...EXTRA_PATHS, currentPath ?? ""].filter(Boolean);
   return pathList.join(delimiter);
@@ -79,11 +79,11 @@ export function buildChildProcessPath(
 /** Augment process.env.PATH with common macOS binary dirs if missing. */
 function augmentPath(): void {
   const current = process.env.PATH ?? "";
-  const parts = current.split(":");
+  const parts = current.split(path.delimiter);
   for (const dir of EXTRA_PATHS) {
     if (!parts.includes(dir)) parts.unshift(dir);
   }
-  process.env.PATH = parts.join(":");
+  process.env.PATH = parts.join(path.delimiter);
 }
 
 /**
