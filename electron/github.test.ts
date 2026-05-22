@@ -42,27 +42,27 @@ describe("parseGitHubRemoteUrl", () => {
 });
 
 describe("getRemoteInfo", () => {
-  it("returns parsed owner/repo from origin remote", () => {
-    const result = getRemoteInfo(
+  it("returns parsed owner/repo from origin remote", async () => {
+    const result = await getRemoteInfo(
       "/tmp/project",
-      () => "git@github.com:octo-org/example-repo.git"
+      async () => "git@github.com:octo-org/example-repo.git"
     );
 
     expect(result).toEqual({ owner: "octo-org", repo: "example-repo" });
   });
 
-  it("returns null when origin remote lookup fails", () => {
-    const result = getRemoteInfo("/tmp/project", () => {
+  it("returns null when origin remote lookup fails", async () => {
+    const result = await getRemoteInfo("/tmp/project", async () => {
       throw new Error("origin not found");
     });
 
     expect(result).toBeNull();
   });
 
-  it("returns null when origin remote is not GitHub", () => {
-    const result = getRemoteInfo(
+  it("returns null when origin remote is not GitHub", async () => {
+    const result = await getRemoteInfo(
       "/tmp/project",
-      () => "https://gitlab.com/octo-org/example-repo.git"
+      async () => "https://gitlab.com/octo-org/example-repo.git"
     );
 
     expect(result).toBeNull();

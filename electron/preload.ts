@@ -57,14 +57,14 @@ export interface ElectronAPI {
   getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
   getClaudeAgents: (projectPath: string) => Promise<Array<{ name: string; description: string; model?: string }>>;
   getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
-  githubCreatePr: (args: Record<string, unknown>) =>
-    Promise<{ pr: import("../src/types").GitHubPR } | { error: string }>;
-  githubListPrs: (args: Record<string, unknown>) =>
-    Promise<{ prs: import("../src/types").GitHubPR[] } | { error: string }>;
-  githubListIssues: (args: Record<string, unknown>) =>
-    Promise<{ issues: import("../src/types").GitHubIssue[] } | { error: string }>;
-  githubGetCiStatus: (args: Record<string, unknown>) =>
-    Promise<{ status: import("../src/types").CIStatus } | { error: string }>;
+  githubCreatePr: (args: import("../src/types").GitHubCreatePrArgs) =>
+    Promise<import("../src/types").GitHubCreatePrResult>;
+  githubListPrs: (args: import("../src/types").GitHubListPrsArgs) =>
+    Promise<import("../src/types").GitHubListPrsResult>;
+  githubListIssues: (args: import("../src/types").GitHubListIssuesArgs) =>
+    Promise<import("../src/types").GitHubListIssuesResult>;
+  githubGetCiStatus: (args: import("../src/types").GitHubGetCiStatusArgs) =>
+    Promise<import("../src/types").GitHubGetCiStatusResult>;
   listSkills: (projectPath: string, provider?: string) => Promise<Array<import("../src/types").SkillInfo>>;
   listMcpServers: () => Promise<Array<import("../src/types").McpServerInfo>>;
   mcpProbeManaged: () => Promise<Array<import("../src/types").McpServerInfo>>;

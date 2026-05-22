@@ -53,6 +53,41 @@ export interface CIStatus {
   context?: string;
 }
 
+export interface GitHubCreatePrArgs {
+  projectPath: string;
+  title: string;
+  body?: string;
+  base?: string;
+  head?: string;
+  draft?: boolean;
+}
+
+export interface GitHubListPrsArgs {
+  projectPath: string;
+  state?: "open" | "closed" | "all";
+  base?: string;
+  head?: string;
+  limit?: number;
+}
+
+export interface GitHubListIssuesArgs {
+  projectPath: string;
+  state?: "open" | "closed" | "all";
+  labels?: string[];
+  limit?: number;
+}
+
+export interface GitHubGetCiStatusArgs {
+  projectPath: string;
+  ref?: string;
+  prNumber?: number;
+}
+
+export type GitHubCreatePrResult = { pr: GitHubPR } | { error: string };
+export type GitHubListPrsResult = { prs: GitHubPR[] } | { error: string };
+export type GitHubListIssuesResult = { issues: GitHubIssue[] } | { error: string };
+export type GitHubGetCiStatusResult = { status: CIStatus } | { error: string };
+
 // ─── ACP Agent ───────────────────────────────────────────────────────────────
 
 /**

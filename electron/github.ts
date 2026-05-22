@@ -1,6 +1,9 @@
-import { execFileSync } from "child_process";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { Octokit } from "@octokit/rest";
 import { getApiKey } from "./config";
+
+const execFileAsync = promisify(execFile);
 
 export interface GitHubRemoteInfo {
   owner: string;
@@ -65,23 +68,24 @@ export function parseGitHubRemoteUrl(remoteUrl: string): GitHubRemoteInfo | null
   return { owner, repo };
 }
 
-function resolveOriginRemoteUrl(projectPath: string): string {
-  return execFileSync("git", ["remote", "get-url", "origin"], {
+async function resolveOriginRemoteUrl(projectPath: string): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["remote", "get-url", "origin"], {
     cwd: projectPath,
     encoding: "utf8",
-  }).trim();
+  });
+  return stdout.trim();
 }
 
 /**
  * Resolve { owner, repo } from `git remote get-url origin`.
  * Returns null when the origin is missing, malformed, or non-GitHub.
  */
-export function getRemoteInfo(
+export async function getRemoteInfo(
   projectPath: string,
-  readOriginRemoteUrl: (projectPath: string) => string = resolveOriginRemoteUrl
-): GitHubRemoteInfo | null {
+  readOriginRemoteUrl: (projectPath: string) => Promise<string> = resolveOriginRemoteUrl
+): Promise<GitHubRemoteInfo | null> {
   try {
-    const remoteUrl = readOriginRemoteUrl(projectPath);
+    const remoteUrl = await readOriginRemoteUrl(projectPath);
     return parseGitHubRemoteUrl(remoteUrl);
   } catch {
     return null;

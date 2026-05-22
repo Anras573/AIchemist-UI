@@ -1,5 +1,11 @@
 import React from "react";
-import type { ProjectConfig } from "@/types";
+import type {
+  GitHubCreatePrArgs,
+  GitHubGetCiStatusArgs,
+  GitHubListIssuesArgs,
+  GitHubListPrsArgs,
+  ProjectConfig,
+} from "@/types";
 
 // ── Typed wrapper over window.electronAPI ─────────────────────────────────────
 
@@ -60,10 +66,10 @@ export const ipc = {
   getCopilotModels: () => window.electronAPI.getCopilotModels(),
   getClaudeAgents: (projectPath: string) => window.electronAPI.getClaudeAgents(projectPath),
   getCopilotAgents: (projectPath: string) => window.electronAPI.getCopilotAgents(projectPath),
-  githubCreatePr: (args: Record<string, unknown>) => window.electronAPI.githubCreatePr(args),
-  githubListPrs: (args: Record<string, unknown>) => window.electronAPI.githubListPrs(args),
-  githubListIssues: (args: Record<string, unknown>) => window.electronAPI.githubListIssues(args),
-  githubGetCiStatus: (args: Record<string, unknown>) => window.electronAPI.githubGetCiStatus(args),
+  githubCreatePr: (args: GitHubCreatePrArgs) => window.electronAPI.githubCreatePr(args),
+  githubListPrs: (args: GitHubListPrsArgs) => window.electronAPI.githubListPrs(args),
+  githubListIssues: (args: GitHubListIssuesArgs) => window.electronAPI.githubListIssues(args),
+  githubGetCiStatus: (args: GitHubGetCiStatusArgs) => window.electronAPI.githubGetCiStatus(args),
   listSkills: (projectPath: string, provider?: string) =>
     window.electronAPI.listSkills(projectPath, provider),
   listMcpServers: () => window.electronAPI.listMcpServers(),
