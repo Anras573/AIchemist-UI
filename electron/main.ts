@@ -6,7 +6,7 @@ import * as childProcess from "child_process";
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import * as CH from "./ipc-channels";
-import { loadEnv, getApiKey, getAnthropicConfig, checkApiKeys, resolveClaudePath } from "./config";
+import { loadEnv, getApiKey, getAnthropicConfig, checkApiKeys, resolveClaudePath, buildChildProcessPath } from "./config";
 import { openDb } from "./db";
 import { addProject, listProjects, removeProject, getProjectConfig, saveProjectConfig } from "./projects";
 import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent, updateSessionSkills, setDisabledMcpServers, getDisabledMcpServers, recoverStaleSessionStatuses } from "./sessions";
@@ -491,10 +491,7 @@ function registerHandlers(): void {  // ── Terminal ────────
       : (process.env.SHELL ?? "/bin/bash");
     const env = isWindows
       ? ({ ...process.env } as Record<string, string>)
-      : (() => {
-          const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
-          return { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` } as Record<string, string>;
-        })();
+      : ({ ...process.env, PATH: buildChildProcessPath(process.env.PATH) } as Record<string, string>);
 
     const term = pty.spawn(shell, [], {
       name: "xterm-256color",
@@ -660,8 +657,7 @@ function registerHandlers(): void {  // ── Terminal ────────
   });
 
   handle(CH.GET_GIT_BRANCH, (_event, projectPath: string) => {
-    const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
-    const env = { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` };
+    const env = { ...process.env, PATH: buildChildProcessPath(process.env.PATH) };
     try {
       return childProcess
         .execSync("git branch --show-current", { cwd: projectPath, encoding: "utf8", timeout: 5_000, env })
@@ -673,8 +669,7 @@ function registerHandlers(): void {  // ── Terminal ────────
 
   handle(CH.GET_GIT_DIFF, (_event, projectPath: string) => {
     // Add common git locations to PATH — Electron on macOS doesn't inherit the shell PATH.
-    const extraPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"].join(":");
-    const env = { ...process.env, PATH: `${extraPaths}:${process.env.PATH ?? ""}` };
+    const env = { ...process.env, PATH: buildChildProcessPath(process.env.PATH) };
 
     const run = (cmd: string) =>
       childProcess.execSync(cmd, { cwd: projectPath, encoding: "utf8", timeout: 10_000, env });

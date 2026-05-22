@@ -1,6 +1,40 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { checkApiKeys } from "./config";
+import { checkApiKeys, buildChildProcessPath } from "./config";
+
+// ─── buildChildProcessPath ────────────────────────────────────────────────────
+
+describe("buildChildProcessPath", () => {
+  it("uses Unix delimiter when provided", () => {
+    expect(buildChildProcessPath("/bin:/usr/bin", ":")).toBe(
+      "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/bin"
+    );
+  });
+
+  it("uses Windows delimiter when provided", () => {
+    expect(buildChildProcessPath("C:\\Windows\\System32;C:\\Program Files\\Git\\cmd", ";")).toBe(
+      "/opt/homebrew/bin;/opt/homebrew/sbin;/usr/local/bin;/usr/bin;C:\\Windows\\System32;C:\\Program Files\\Git\\cmd"
+    );
+  });
+
+  it("filters empty paths", () => {
+    expect(buildChildProcessPath("", ":")).toBe(
+      "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin"
+    );
+  });
+
+  it("defaults to colon delimiter and process.env.PATH", () => {
+    const originalPath = process.env.PATH;
+    process.env.PATH = "/some/path";
+    try {
+      const result = buildChildProcessPath();
+      expect(result).toContain("/opt/homebrew/bin");
+      expect(result).toContain("/some/path");
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+});
 
 // ─── checkApiKeys ─────────────────────────────────────────────────────────────
 
