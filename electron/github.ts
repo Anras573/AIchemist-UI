@@ -131,7 +131,7 @@ export interface GitHubTestDeps {
 
 /**
  * Maps common Octokit HTTP errors to human-readable strings.
- * Returns `null` for unknown/non-HTTP errors (caller should re-throw those).
+ * Returns `null` for unknown/non-HTTP errors; callers fall back to `String(err)`.
  */
 function httpError(err: unknown): string | null {
   if (typeof err !== "object" || err === null) return null;
