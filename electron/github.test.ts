@@ -68,6 +68,13 @@ describe("parseGitHubRemoteUrl", () => {
     });
   });
 
+  it("parses HTTPS remotes on www.github.com", () => {
+    expect(parseGitHubRemoteUrl("https://www.github.com/octo-org/example-repo.git")).toEqual({
+      owner: "octo-org",
+      repo: "example-repo",
+    });
+  });
+
   it("parses SSH remotes", () => {
     expect(parseGitHubRemoteUrl("git@github.com:octo-org/example-repo.git")).toEqual({
       owner: "octo-org",

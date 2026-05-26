@@ -52,7 +52,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
 
     // Dialog
     openFolderDialog: vi.fn().mockResolvedValue(null),
-    openExternalUrl: vi.fn().mockResolvedValue(undefined),
+    openGitHubUrl: vi.fn().mockResolvedValue(undefined),
 
     // Agent
     agentSend: vi.fn().mockResolvedValue(undefined),

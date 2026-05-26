@@ -51,7 +51,7 @@ export const ipc = {
 
   // Dialog
   openFolderDialog: () => window.electronAPI.openFolderDialog(),
-  openExternalUrl: (url: string) => window.electronAPI.openExternalUrl(url),
+  openGitHubUrl: (url: string) => window.electronAPI.openGitHubUrl(url),
 
   // Settings
   settingsRead: () => window.electronAPI.settingsRead(),

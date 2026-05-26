@@ -179,7 +179,7 @@ describe("ChangesPanel Open PR flow", () => {
         html_url: "https://github.com/acme/repo/pull/12",
       },
     });
-    window.electronAPI.openExternalUrl = vi.fn().mockResolvedValue(undefined);
+    window.electronAPI.openGitHubUrl = vi.fn().mockResolvedValue(undefined);
   });
 
   it("hides Open PR when GitHub token is missing", async () => {
@@ -192,6 +192,8 @@ describe("ChangesPanel Open PR flow", () => {
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: /open pr form/i })).not.toBeInTheDocument();
     });
+    expect(window.electronAPI.githubGetPrContext).not.toHaveBeenCalled();
+    expect(window.electronAPI.getGitBranch).not.toHaveBeenCalled();
   });
 
   it("hides Open PR when project has no GitHub remote", async () => {
@@ -248,7 +250,7 @@ describe("ChangesPanel Open PR flow", () => {
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "Open" }));
-    expect(window.electronAPI.openExternalUrl).toHaveBeenCalledWith(
+    expect(window.electronAPI.openGitHubUrl).toHaveBeenCalledWith(
       "https://github.com/acme/repo/pull/12"
     );
   });

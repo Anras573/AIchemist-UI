@@ -40,6 +40,7 @@ export async function createGitHubClient(
  * Parse a GitHub remote URL into owner/repo.
  * Supports:
  * - https://github.com/owner/repo(.git)
+ * - https://www.github.com/owner/repo(.git)
  * - git@github.com:owner/repo(.git)
  * - ssh://git@github.com/owner/repo(.git)
  */
@@ -64,7 +65,8 @@ export function parseGitHubRemoteUrl(remoteUrl: string): GitHubRemoteInfo | null
     return null;
   }
 
-  if (parsed.hostname.toLowerCase() !== "github.com") return null;
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname !== "github.com" && hostname !== "www.github.com") return null;
 
   const parts = parsed.pathname
     .replace(/^\/+|\/+$/g, "")

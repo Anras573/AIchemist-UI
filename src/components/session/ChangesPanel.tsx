@@ -278,28 +278,38 @@ function OpenPrSection({
     let cancelled = false;
     setIsChecking(true);
 
-    void Promise.all([
-      ipc.getApiKey("github"),
-      ipc.githubGetPrContext({ projectPath }),
-      ipc.getGitBranch(projectPath),
-    ])
-      .then(([token, context, currentBranch]) => {
+    void (async () => {
+      try {
+        const token = await ipc.getApiKey("github");
         if (cancelled) return;
-        setHasGitHubToken(Boolean(token));
+        const hasToken = Boolean(token);
+        setHasGitHubToken(hasToken);
+
+        if (!hasToken) {
+          setHasGitHubRemote(false);
+          setDefaultBaseBranch(null);
+          setDefaultHeadBranch(null);
+          return;
+        }
+
+        const [context, currentBranch] = await Promise.all([
+          ipc.githubGetPrContext({ projectPath }),
+          ipc.getGitBranch(projectPath),
+        ]);
+        if (cancelled) return;
         setHasGitHubRemote(context.hasRemote);
         setDefaultBaseBranch(context.defaultBase);
         setDefaultHeadBranch(currentBranch);
-      })
-      .catch(() => {
+      } catch {
         if (cancelled) return;
         setHasGitHubToken(false);
         setHasGitHubRemote(false);
         setDefaultBaseBranch(null);
         setDefaultHeadBranch(null);
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setIsChecking(false);
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;
@@ -365,7 +375,7 @@ function OpenPrSection({
   const openCreatedPr = async () => {
     if (!createdPrUrl) return;
     try {
-      await ipc.openExternalUrl(createdPrUrl);
+      await ipc.openGitHubUrl(createdPrUrl);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

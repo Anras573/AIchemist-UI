@@ -39,7 +39,7 @@ export const READ_FILE              = "fs:read-file";
 
 // ── Dialog ───────────────────────────────────────────────────────────────────
 export const OPEN_FOLDER_DIALOG     = "dialog:open-folder";
-export const OPEN_EXTERNAL_URL      = "shell:open-external-url";
+export const OPEN_GITHUB_URL        = "shell:open-github-url";
 
 // ── Agent ────────────────────────────────────────────────────────────────────
 export const AGENT_SEND             = "agent:send";

@@ -49,7 +49,7 @@ export interface ElectronAPI {
 
   // ── Dialog ────────────────────────────────────────────────────────────────
   openFolderDialog: () => Promise<string | null>;
-  openExternalUrl: (url: string) => Promise<void>;
+  openGitHubUrl: (url: string) => Promise<void>;
 
   // ── Agent ─────────────────────────────────────────────────────────────────
   agentSend: (args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[] }) => Promise<void>;
@@ -146,7 +146,7 @@ const api: ElectronAPI = {
   settingsWrite: (updates) => ipcRenderer.invoke(CH.SETTINGS_WRITE, updates),
 
   openFolderDialog: () => ipcRenderer.invoke(CH.OPEN_FOLDER_DIALOG),
-  openExternalUrl: (url) => ipcRenderer.invoke(CH.OPEN_EXTERNAL_URL, url),
+  openGitHubUrl: (url) => ipcRenderer.invoke(CH.OPEN_GITHUB_URL, url),
 
   agentSend: (args) => ipcRenderer.invoke(CH.AGENT_SEND, args),
   approveToolCall: (sessionId, approvalId, approved, options) =>

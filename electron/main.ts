@@ -866,7 +866,7 @@ function registerHandlers(): void {  // ── Terminal ────────
 
   // ── Dialog ────────────────────────────────────────────────────────────────────
   handle(CH.OPEN_FOLDER_DIALOG, () => openFolderDialog());
-  handle(CH.OPEN_EXTERNAL_URL, async (_event, rawUrl: string) => {
+  handle(CH.OPEN_GITHUB_URL, async (_event, rawUrl: string) => {
     let url: URL;
     try {
       url = new URL(rawUrl);
