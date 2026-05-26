@@ -229,7 +229,7 @@ describe("listPullRequests", () => {
     };
 
     const client = makeOctokitMock({
-      pulls: { list: async () => ({ data: [rawPr] }) } as OctokitClient["pulls"],
+      pulls: { list: async () => ({ data: [rawPr] }) } as unknown as OctokitClient["pulls"],
     });
     const result = await listPullRequests({ projectPath: PROJECT_PATH }, { remoteInfo: REMOTE, client });
 
@@ -259,7 +259,7 @@ describe("listPullRequests", () => {
           capturedArgs = args;
           return { data: [] };
         },
-      } as OctokitClient["pulls"],
+      } as unknown as OctokitClient["pulls"],
     });
 
     await listPullRequests({ projectPath: PROJECT_PATH, state: "closed" }, { remoteInfo: REMOTE, client });
@@ -270,7 +270,7 @@ describe("listPullRequests", () => {
     const client = makeOctokitMock({
       pulls: {
         list: async () => { throw makeHttpError(401); },
-      } as OctokitClient["pulls"],
+      } as unknown as OctokitClient["pulls"],
     });
     const result = await listPullRequests({ projectPath: PROJECT_PATH }, { remoteInfo: REMOTE, client });
     expect(result).toEqual({ error: "GitHub token is invalid or expired" });
@@ -278,7 +278,7 @@ describe("listPullRequests", () => {
 
   it("returns typed error on 403", async () => {
     const client = makeOctokitMock({
-      pulls: { list: async () => { throw makeHttpError(403); } } as OctokitClient["pulls"],
+      pulls: { list: async () => { throw makeHttpError(403); } } as unknown as OctokitClient["pulls"],
     });
     const result = await listPullRequests({ projectPath: PROJECT_PATH }, { remoteInfo: REMOTE, client });
     expect((result as { error: string }).error).toMatch(/scope/i);
@@ -286,7 +286,7 @@ describe("listPullRequests", () => {
 
   it("returns typed error on 404", async () => {
     const client = makeOctokitMock({
-      pulls: { list: async () => { throw makeHttpError(404); } } as OctokitClient["pulls"],
+      pulls: { list: async () => { throw makeHttpError(404); } } as unknown as OctokitClient["pulls"],
     });
     const result = await listPullRequests({ projectPath: PROJECT_PATH }, { remoteInfo: REMOTE, client });
     expect((result as { error: string }).error).toMatch(/not found/i);
@@ -300,7 +300,7 @@ describe("listPullRequests", () => {
           capturedPerPage = args.per_page;
           return { data: [] };
         },
-      } as OctokitClient["pulls"],
+      } as unknown as OctokitClient["pulls"],
     });
     await listPullRequests({ projectPath: PROJECT_PATH, limit: 200 }, { remoteInfo: REMOTE, client });
     expect(capturedPerPage).toBe(100);
@@ -333,7 +333,7 @@ describe("listIssues", () => {
     ];
 
     const client = makeOctokitMock({
-      issues: { listForRepo: async () => ({ data: items }) } as OctokitClient["issues"],
+      issues: { listForRepo: async () => ({ data: items }) } as unknown as OctokitClient["issues"],
     });
     const result = await listIssues({ projectPath: PROJECT_PATH }, { remoteInfo: REMOTE, client });
 
@@ -352,7 +352,7 @@ describe("listIssues", () => {
       updated_at: "2024-02-02T00:00:00Z",
     };
     const client = makeOctokitMock({
-      issues: { listForRepo: async () => ({ data: [rawIssue] }) } as OctokitClient["issues"],
+      issues: { listForRepo: async () => ({ data: [rawIssue] }) } as unknown as OctokitClient["issues"],
     });
     const result = await listIssues({ projectPath: PROJECT_PATH }, { remoteInfo: REMOTE, client });
 
@@ -373,7 +373,7 @@ describe("listIssues", () => {
 
   it("returns typed error on 401", async () => {
     const client = makeOctokitMock({
-      issues: { listForRepo: async () => { throw makeHttpError(401); } } as OctokitClient["issues"],
+      issues: { listForRepo: async () => { throw makeHttpError(401); } } as unknown as OctokitClient["issues"],
     });
     const result = await listIssues({ projectPath: PROJECT_PATH }, { remoteInfo: REMOTE, client });
     expect(result).toEqual({ error: "GitHub token is invalid or expired" });
@@ -413,7 +413,7 @@ describe("createPullRequest", () => {
       base: { ref: "main" },
     };
     const client = makeOctokitMock({
-      pulls: { create: async () => ({ data: createdPr }) } as OctokitClient["pulls"],
+      pulls: { create: async () => ({ data: createdPr }) } as unknown as OctokitClient["pulls"],
     });
     const result = await createPullRequest(
       { projectPath: PROJECT_PATH, title: "My PR", head: "feature", base: "main" },
@@ -437,7 +437,7 @@ describe("createPullRequest", () => {
             },
           };
         },
-      } as OctokitClient["pulls"],
+      } as unknown as OctokitClient["pulls"],
     });
 
     await createPullRequest(
@@ -458,7 +458,7 @@ describe("createPullRequest", () => {
 
   it("returns typed error on 422", async () => {
     const client = makeOctokitMock({
-      pulls: { create: async () => { throw makeHttpError(422, "head is not a valid ref"); } } as OctokitClient["pulls"],
+      pulls: { create: async () => { throw makeHttpError(422, "head is not a valid ref"); } } as unknown as OctokitClient["pulls"],
     });
     const result = await createPullRequest(
       { projectPath: PROJECT_PATH, title: "My PR", head: "feature", base: "main" },
@@ -469,7 +469,7 @@ describe("createPullRequest", () => {
 
   it("returns typed error on 401", async () => {
     const client = makeOctokitMock({
-      pulls: { create: async () => { throw makeHttpError(401); } } as OctokitClient["pulls"],
+      pulls: { create: async () => { throw makeHttpError(401); } } as unknown as OctokitClient["pulls"],
     });
     const result = await createPullRequest(
       { projectPath: PROJECT_PATH, title: "T", head: "feature", base: "main" },
@@ -483,7 +483,7 @@ describe("createPullRequest", () => {
     const client = makeOctokitMock({
       repos: {
         get: async () => ({ data: { default_branch: "trunk" } }),
-      } as OctokitClient["repos"],
+      } as unknown as OctokitClient["repos"],
       pulls: {
         create: async (args: { base?: string }) => {
           capturedBase = args.base;
@@ -495,7 +495,7 @@ describe("createPullRequest", () => {
             },
           };
         },
-      } as OctokitClient["pulls"],
+      } as unknown as OctokitClient["pulls"],
     });
 
     await createPullRequest(
@@ -519,7 +519,7 @@ describe("createPullRequest", () => {
             },
           };
         },
-      } as OctokitClient["pulls"],
+      } as unknown as OctokitClient["pulls"],
     });
 
     await createPullRequest(
@@ -581,7 +581,7 @@ describe("getCiStatus", () => {
             ],
           },
         }),
-      } as OctokitClient["checks"],
+      } as unknown as OctokitClient["checks"],
     });
 
     const result = await getCiStatus(
@@ -602,7 +602,7 @@ describe("getCiStatus", () => {
             ],
           },
         }),
-      } as OctokitClient["checks"],
+      } as unknown as OctokitClient["checks"],
     });
 
     const result = await getCiStatus(
@@ -618,7 +618,7 @@ describe("getCiStatus", () => {
         listForRef: async () => ({
           data: { check_runs: [{ status: "in_progress", conclusion: null }] },
         }),
-      } as OctokitClient["checks"],
+      } as unknown as OctokitClient["checks"],
     });
 
     const result = await getCiStatus(
@@ -638,13 +638,13 @@ describe("getCiStatus", () => {
             base: { ref: "main" },
           },
         }),
-      } as OctokitClient["pulls"],
+      } as unknown as OctokitClient["pulls"],
       checks: {
         listForRef: async (args: { ref: string }) => {
           checkRefCalled = args.ref;
           return { data: { check_runs: [] } };
         },
-      } as OctokitClient["checks"],
+      } as unknown as OctokitClient["checks"],
     });
 
     await getCiStatus({ projectPath: PROJECT_PATH, prNumber: 42 }, { remoteInfo: REMOTE, client });
@@ -655,7 +655,7 @@ describe("getCiStatus", () => {
     const client = makeOctokitMock({
       pulls: {
         get: async () => { throw makeHttpError(404); },
-      } as OctokitClient["pulls"],
+      } as unknown as OctokitClient["pulls"],
     });
     const result = await getCiStatus(
       { projectPath: PROJECT_PATH, prNumber: 999 },
@@ -668,7 +668,7 @@ describe("getCiStatus", () => {
     const client = makeOctokitMock({
       checks: {
         listForRef: async () => { throw makeHttpError(401); },
-      } as OctokitClient["checks"],
+      } as unknown as OctokitClient["checks"],
     });
     const result = await getCiStatus(
       { projectPath: PROJECT_PATH, ref: "abc123" },
