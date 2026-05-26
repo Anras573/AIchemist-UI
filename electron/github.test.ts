@@ -504,6 +504,38 @@ describe("createPullRequest", () => {
     );
     expect(capturedBase).toBe("trunk");
   });
+
+  it("uses injected currentBranch when head is omitted", async () => {
+    let capturedHead: string | undefined;
+    const client = makeOctokitMock({
+      pulls: {
+        create: async (args: { head?: string }) => {
+          capturedHead = args.head;
+          return {
+            data: {
+              id: 1, number: 1, title: "T", state: "open", html_url: "u",
+              draft: false, created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
+              head: { ref: "auto-branch", sha: "s" }, base: { ref: "main" },
+            },
+          };
+        },
+      } as OctokitClient["pulls"],
+    });
+
+    await createPullRequest(
+      { projectPath: PROJECT_PATH, title: "T", base: "main" },
+      { remoteInfo: REMOTE, client, currentBranch: "auto-branch" }
+    );
+    expect(capturedHead).toBe("auto-branch");
+  });
+
+  it("returns error when head is omitted and currentBranch is null", async () => {
+    const result = await createPullRequest(
+      { projectPath: PROJECT_PATH, title: "T", base: "main" },
+      { remoteInfo: REMOTE, client: makeOctokitMock(), currentBranch: null }
+    );
+    expect((result as { error: string }).error).toMatch(/head branch/i);
+  });
 });
 
 // ─── getCiStatus ──────────────────────────────────────────────────────────────

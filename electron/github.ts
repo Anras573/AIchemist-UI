@@ -125,6 +125,8 @@ export interface GitHubTestDeps {
   remoteInfo?: GitHubRemoteInfo | null;
   /** Pre-built Octokit client; `null` simulates a missing token. */
   client?: OctokitClient | null;
+  /** Override current branch detection; `null` simulates detached HEAD or git failure. */
+  currentBranch?: string | null;
 }
 
 /**
@@ -311,7 +313,11 @@ export async function createPullRequest(
   if ("error" in ctx) return ctx;
   const { client, owner, repo } = ctx;
 
-  const head = args.head ?? (await resolveCurrentBranch(args.projectPath));
+  const head =
+    args.head ??
+    (_deps?.currentBranch !== undefined
+      ? _deps.currentBranch
+      : await resolveCurrentBranch(args.projectPath));
   if (!head) return { error: "Could not determine head branch — provide args.head explicitly" };
 
   let base = args.base;
@@ -367,7 +373,7 @@ export async function getCiStatus(
       owner,
       repo,
       ref: resolvedRef,
-      per_page: 100,
+      per_page: 100, // fetches first page only; repos with >100 check runs may return incomplete status
     });
     const state = aggregateCiStatus(
       response.data.check_runs.map((r) => ({
