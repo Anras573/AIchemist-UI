@@ -18,6 +18,13 @@ import { resolveApproval, resolvePermissionChoice, getPendingApprovalData, addTo
 import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
 import { runAgentTurn, getProvider } from "./agent/runner";
 import { cleanupCopilotSession } from "./agent/copilot";
+import { listPullRequests, listIssues, createPullRequest, getCiStatus } from "./github";
+import type {
+  GitHubCreatePrArgs,
+  GitHubListPrsArgs,
+  GitHubListIssuesArgs,
+  GitHubGetCiStatusArgs,
+} from "../src/types/index";
 import type { TraceSpan } from "../src/types/index";
 import {
   findTranscriptFile,
@@ -907,15 +914,10 @@ function registerHandlers(): void {  // ── Terminal ────────
   handle(CH.GET_COPILOT_AGENTS, async (_event, projectPath: string) => {
     return getProvider("copilot").listAgents?.(projectPath);
   });
-  const githubNotImplemented = { error: "not implemented" } as const;
-  const githubTokenMissing = { error: "GITHUB_TOKEN not configured" } as const;
-  const githubStubResponse = () =>
-    getApiKey("github") ? githubNotImplemented : githubTokenMissing;
-
-  handle(CH.GITHUB_CREATE_PR, () => githubStubResponse());
-  handle(CH.GITHUB_LIST_PRS, () => githubStubResponse());
-  handle(CH.GITHUB_LIST_ISSUES, () => githubStubResponse());
-  handle(CH.GITHUB_GET_CI_STATUS, () => githubStubResponse());
+  handle(CH.GITHUB_LIST_PRS, (_event, args: GitHubListPrsArgs) => listPullRequests(args));
+  handle(CH.GITHUB_LIST_ISSUES, (_event, args: GitHubListIssuesArgs) => listIssues(args));
+  handle(CH.GITHUB_CREATE_PR, (_event, args: GitHubCreatePrArgs) => createPullRequest(args));
+  handle(CH.GITHUB_GET_CI_STATUS, (_event, args: GitHubGetCiStatusArgs) => getCiStatus(args));
 
   handle(CH.LIST_SKILLS, (_event, args: string | { projectPath: string; provider?: string }) => {
     // Back-compat: bare string is the legacy signature (treated as Claude).
