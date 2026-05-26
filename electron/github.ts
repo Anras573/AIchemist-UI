@@ -7,6 +7,8 @@ import type {
   GitHubCreatePrResult,
   GitHubGetCiStatusArgs,
   GitHubGetCiStatusResult,
+  GitHubGetPrContextArgs,
+  GitHubGetPrContextResult,
   GitHubIssue,
   GitHubListIssuesArgs,
   GitHubListIssuesResult,
@@ -304,6 +306,28 @@ export async function listIssues(
     return { issues };
   } catch (err) {
     return { error: httpError(err) ?? String(err) };
+  }
+}
+
+export async function getPullRequestContext(
+  args: GitHubGetPrContextArgs,
+  _deps?: Pick<GitHubTestDeps, "remoteInfo" | "client">
+): Promise<GitHubGetPrContextResult> {
+  const remoteInfo =
+    _deps?.remoteInfo !== undefined ? _deps.remoteInfo : await getRemoteInfo(args.projectPath);
+  if (!remoteInfo) return { hasRemote: false, defaultBase: null };
+
+  const client =
+    _deps?.client !== undefined
+      ? _deps.client
+      : await createGitHubClient(getApiKey("github"));
+  if (!client) return { hasRemote: true, defaultBase: null };
+
+  try {
+    const repoInfo = await client.repos.get({ owner: remoteInfo.owner, repo: remoteInfo.repo });
+    return { hasRemote: true, defaultBase: repoInfo.data.default_branch ?? null };
+  } catch {
+    return { hasRemote: true, defaultBase: null };
   }
 }
 

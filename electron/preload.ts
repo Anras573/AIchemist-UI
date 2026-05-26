@@ -49,6 +49,7 @@ export interface ElectronAPI {
 
   // ── Dialog ────────────────────────────────────────────────────────────────
   openFolderDialog: () => Promise<string | null>;
+  openExternalUrl: (url: string) => Promise<void>;
 
   // ── Agent ─────────────────────────────────────────────────────────────────
   agentSend: (args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[] }) => Promise<void>;
@@ -65,6 +66,8 @@ export interface ElectronAPI {
     Promise<import("../src/types").GitHubListIssuesResult>;
   githubGetCiStatus: (args: import("../src/types").GitHubGetCiStatusArgs) =>
     Promise<import("../src/types").GitHubGetCiStatusResult>;
+  githubGetPrContext: (args: import("../src/types").GitHubGetPrContextArgs) =>
+    Promise<import("../src/types").GitHubGetPrContextResult>;
   listSkills: (projectPath: string, provider?: string) => Promise<Array<import("../src/types").SkillInfo>>;
   listMcpServers: () => Promise<Array<import("../src/types").McpServerInfo>>;
   mcpProbeManaged: () => Promise<Array<import("../src/types").McpServerInfo>>;
@@ -143,6 +146,7 @@ const api: ElectronAPI = {
   settingsWrite: (updates) => ipcRenderer.invoke(CH.SETTINGS_WRITE, updates),
 
   openFolderDialog: () => ipcRenderer.invoke(CH.OPEN_FOLDER_DIALOG),
+  openExternalUrl: (url) => ipcRenderer.invoke(CH.OPEN_EXTERNAL_URL, url),
 
   agentSend: (args) => ipcRenderer.invoke(CH.AGENT_SEND, args),
   approveToolCall: (sessionId, approvalId, approved, options) =>
@@ -156,6 +160,7 @@ const api: ElectronAPI = {
   githubListPrs: (args) => ipcRenderer.invoke(CH.GITHUB_LIST_PRS, args),
   githubListIssues: (args) => ipcRenderer.invoke(CH.GITHUB_LIST_ISSUES, args),
   githubGetCiStatus: (args) => ipcRenderer.invoke(CH.GITHUB_GET_CI_STATUS, args),
+  githubGetPrContext: (args) => ipcRenderer.invoke(CH.GITHUB_GET_PR_CONTEXT, args),
   listSkills: (projectPath, provider) =>
     ipcRenderer.invoke(CH.LIST_SKILLS, { projectPath, provider }),
   listMcpServers: () => ipcRenderer.invoke(CH.LIST_MCP_SERVERS),

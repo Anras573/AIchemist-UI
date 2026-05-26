@@ -2,6 +2,7 @@ import React from "react";
 import type {
   GitHubCreatePrArgs,
   GitHubGetCiStatusArgs,
+  GitHubGetPrContextArgs,
   GitHubListIssuesArgs,
   GitHubListPrsArgs,
   ProjectConfig,
@@ -50,6 +51,7 @@ export const ipc = {
 
   // Dialog
   openFolderDialog: () => window.electronAPI.openFolderDialog(),
+  openExternalUrl: (url: string) => window.electronAPI.openExternalUrl(url),
 
   // Settings
   settingsRead: () => window.electronAPI.settingsRead(),
@@ -70,6 +72,7 @@ export const ipc = {
   githubListPrs: (args: GitHubListPrsArgs) => window.electronAPI.githubListPrs(args),
   githubListIssues: (args: GitHubListIssuesArgs) => window.electronAPI.githubListIssues(args),
   githubGetCiStatus: (args: GitHubGetCiStatusArgs) => window.electronAPI.githubGetCiStatus(args),
+  githubGetPrContext: (args: GitHubGetPrContextArgs) => window.electronAPI.githubGetPrContext(args),
   listSkills: (projectPath: string, provider?: string) =>
     window.electronAPI.listSkills(projectPath, provider),
   listMcpServers: () => window.electronAPI.listMcpServers(),
