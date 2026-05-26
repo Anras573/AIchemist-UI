@@ -72,6 +72,7 @@ export function buildChildProcessPath(
   currentPath: string | undefined = process.env.PATH,
   delimiter: string = path.delimiter
 ): string {
+  if (delimiter === ";") return currentPath ?? "";
   const pathList = [...EXTRA_PATHS, currentPath ?? ""].filter(Boolean);
   return pathList.join(delimiter);
 }

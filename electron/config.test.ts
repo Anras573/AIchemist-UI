@@ -13,7 +13,7 @@ describe("buildChildProcessPath", () => {
 
   it("uses Windows delimiter when provided", () => {
     expect(buildChildProcessPath("C:\\Windows\\System32;C:\\Program Files\\Git\\cmd", ";")).toBe(
-      "/opt/homebrew/bin;/opt/homebrew/sbin;/usr/local/bin;/usr/bin;C:\\Windows\\System32;C:\\Program Files\\Git\\cmd"
+      "C:\\Windows\\System32;C:\\Program Files\\Git\\cmd"
     );
   });
 
@@ -28,11 +28,13 @@ describe("buildChildProcessPath", () => {
     process.env.PATH = "/some/path";
     try {
       const result = buildChildProcessPath();
-      expect(result).toContain("/opt/homebrew/bin");
-      expect(result).toContain("/some/path");
-      // Verify delimiter is platform-appropriate
-      const expectedDelimiter = process.platform === "win32" ? ";" : ":";
-      expect(result).toContain(expectedDelimiter);
+      if (process.platform === "win32") {
+        expect(result).toBe("/some/path");
+      } else {
+        expect(result).toContain("/opt/homebrew/bin");
+        expect(result).toContain("/some/path");
+        expect(result).toContain(":");
+      }
     } finally {
       process.env.PATH = originalPath;
     }
