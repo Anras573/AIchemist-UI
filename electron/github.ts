@@ -2,6 +2,18 @@ import { execFile } from "child_process";
 import { delimiter } from "path";
 import { promisify } from "util";
 import { getApiKey, buildChildProcessPath } from "./config";
+import type {
+  GitHubCreatePrArgs,
+  GitHubCreatePrResult,
+  GitHubGetCiStatusArgs,
+  GitHubGetCiStatusResult,
+  GitHubIssue,
+  GitHubListIssuesArgs,
+  GitHubListIssuesResult,
+  GitHubListPrsArgs,
+  GitHubListPrsResult,
+  GitHubPR,
+} from "../src/types/index";
 
 const execFileAsync = promisify(execFile);
 
@@ -96,5 +108,285 @@ export async function getRemoteInfo(
     return parseGitHubRemoteUrl(remoteUrl);
   } catch {
     return null;
+  }
+}
+
+// ── GitHub REST operation helpers ─────────────────────────────────────────────
+
+/** Opaque type for an authenticated Octokit client. */
+export type OctokitClient = NonNullable<Awaited<ReturnType<typeof createGitHubClient>>>;
+
+/**
+ * Injectable test seams for the GitHub operation functions.
+ * Pass these in unit tests to avoid spawning git or hitting the network.
+ */
+export interface GitHubTestDeps {
+  /** Pre-resolved remote info; `null` simulates a non-GitHub remote. */
+  remoteInfo?: GitHubRemoteInfo | null;
+  /** Pre-built Octokit client; `null` simulates a missing token. */
+  client?: OctokitClient | null;
+  /** Override current branch detection; `null` simulates detached HEAD or git failure. */
+  currentBranch?: string | null;
+}
+
+/**
+ * Maps common Octokit HTTP errors to human-readable strings.
+ * Returns `null` for unknown/non-HTTP errors; callers fall back to `String(err)`.
+ */
+function httpError(err: unknown): string | null {
+  if (typeof err !== "object" || err === null) return null;
+  const status = (err as Record<string, unknown>).status;
+  if (typeof status !== "number") return null;
+  const msg = (err as Record<string, unknown>).message;
+  const detail = typeof msg === "string" ? msg : "";
+  switch (status) {
+    case 401:
+      return "GitHub token is invalid or expired";
+    case 403:
+      return detail
+        ? `Forbidden: ${detail}`
+        : "Insufficient GitHub token scope — needs 'repo' for private or 'public_repo' for public repositories";
+    case 404:
+      return "Repository not found or private without 'repo' scope";
+    case 422:
+      return detail ? `Validation failed: ${detail}` : "Validation failed";
+    default:
+      return detail || `GitHub API error (HTTP ${status})`;
+  }
+}
+
+/**
+ * Aggregates check-run results into a single CI status string.
+ * Order of precedence: pending > failure > success > unknown.
+ */
+export function aggregateCiStatus(
+  checkRuns: Array<{ status: string; conclusion: string | null }>
+): "success" | "failure" | "pending" | "unknown" {
+  if (checkRuns.length === 0) return "unknown";
+
+  if (checkRuns.some((r) => r.status === "in_progress" || r.status === "queued" || r.status === "waiting" || r.status === "requested" || r.status === "pending")) {
+    return "pending";
+  }
+
+  const failConclusions = new Set(["failure", "timed_out", "cancelled", "action_required"]);
+  if (checkRuns.some((r) => r.conclusion !== null && failConclusions.has(r.conclusion))) {
+    return "failure";
+  }
+
+  const successConclusions = new Set(["success", "neutral", "skipped"]);
+  if (
+    checkRuns.every(
+      (r) =>
+        r.status === "completed" &&
+        r.conclusion !== null &&
+        successConclusions.has(r.conclusion)
+    )
+  ) {
+    return "success";
+  }
+
+  return "unknown";
+}
+
+async function resolveContext(
+  projectPath: string,
+  deps: GitHubTestDeps | undefined
+): Promise<{ error: string } | { client: OctokitClient; owner: string; repo: string }> {
+  const remoteInfo =
+    deps?.remoteInfo !== undefined ? deps.remoteInfo : await getRemoteInfo(projectPath);
+  if (!remoteInfo) return { error: "no-github-remote" };
+
+  const client =
+    deps?.client !== undefined
+      ? deps.client
+      : await createGitHubClient(getApiKey("github"));
+  if (!client) return { error: "GITHUB_TOKEN not configured" };
+
+  return { client, owner: remoteInfo.owner, repo: remoteInfo.repo };
+}
+
+async function resolveCurrentBranch(projectPath: string): Promise<string | null> {
+  const env = {
+    ...process.env,
+    PATH: buildChildProcessPath(process.env.PATH, delimiter),
+  };
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-parse", "--abbrev-ref", "HEAD"],
+      { cwd: projectPath, encoding: "utf8", timeout: 5_000, env }
+    );
+    const branch = stdout.trim();
+    return branch && branch !== "HEAD" ? branch : null;
+  } catch {
+    return null;
+  }
+}
+
+function mapPr(pr: {
+  id: number;
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+  draft?: boolean;
+  created_at: string;
+  updated_at: string;
+  head: { ref: string };
+  base: { ref: string };
+}): GitHubPR {
+  return {
+    id: pr.id,
+    number: pr.number,
+    title: pr.title,
+    state: pr.state,
+    html_url: pr.html_url,
+    draft: pr.draft,
+    created_at: pr.created_at,
+    updated_at: pr.updated_at,
+    head_ref: pr.head.ref,
+    base_ref: pr.base.ref,
+  };
+}
+
+// ── Exported operation functions ──────────────────────────────────────────────
+
+export async function listPullRequests(
+  args: GitHubListPrsArgs,
+  _deps?: GitHubTestDeps
+): Promise<GitHubListPrsResult> {
+  const ctx = await resolveContext(args.projectPath, _deps);
+  if ("error" in ctx) return ctx;
+  const { client, owner, repo } = ctx;
+
+  try {
+    const response = await client.pulls.list({
+      owner,
+      repo,
+      state: args.state ?? "open",
+      base: args.base,
+      head: args.head,
+      per_page: typeof args.limit === "number" && args.limit > 0 ? Math.max(1, Math.min(Math.trunc(args.limit), 100)) : 30,
+    });
+    return { prs: response.data.map(mapPr) };
+  } catch (err) {
+    return { error: httpError(err) ?? String(err) };
+  }
+}
+
+export async function listIssues(
+  args: GitHubListIssuesArgs,
+  _deps?: GitHubTestDeps
+): Promise<GitHubListIssuesResult> {
+  const ctx = await resolveContext(args.projectPath, _deps);
+  if ("error" in ctx) return ctx;
+  const { client, owner, repo } = ctx;
+
+  try {
+    const response = await client.issues.listForRepo({
+      owner,
+      repo,
+      state: args.state ?? "open",
+      labels: args.labels?.length ? args.labels.join(",") : undefined,
+      per_page: typeof args.limit === "number" && args.limit > 0 ? Math.max(1, Math.min(Math.trunc(args.limit), 100)) : 30,
+    });
+    const issues: GitHubIssue[] = response.data
+      .filter((issue) => !("pull_request" in issue && issue.pull_request))
+      .map((issue) => ({
+        id: issue.id,
+        number: issue.number,
+        title: issue.title,
+        state: issue.state,
+        html_url: issue.html_url,
+        created_at: issue.created_at,
+        updated_at: issue.updated_at,
+      }));
+    return { issues };
+  } catch (err) {
+    return { error: httpError(err) ?? String(err) };
+  }
+}
+
+export async function createPullRequest(
+  args: GitHubCreatePrArgs,
+  _deps?: GitHubTestDeps
+): Promise<GitHubCreatePrResult> {
+  const ctx = await resolveContext(args.projectPath, _deps);
+  if ("error" in ctx) return ctx;
+  const { client, owner, repo } = ctx;
+
+  const head =
+    args.head ??
+    (_deps?.currentBranch !== undefined
+      ? _deps.currentBranch
+      : await resolveCurrentBranch(args.projectPath));
+  if (!head) return { error: "Could not determine head branch — provide args.head explicitly" };
+
+  let base = args.base;
+  if (!base) {
+    try {
+      const repoInfo = await client.repos.get({ owner, repo });
+      base = repoInfo.data.default_branch;
+    } catch {
+      base = "main";
+    }
+  }
+
+  try {
+    const response = await client.pulls.create({
+      owner,
+      repo,
+      title: args.title,
+      body: args.body,
+      head,
+      base,
+      draft: args.draft,
+    });
+    return { pr: mapPr(response.data) };
+  } catch (err) {
+    return { error: httpError(err) ?? String(err) };
+  }
+}
+
+export async function getCiStatus(
+  args: GitHubGetCiStatusArgs,
+  _deps?: GitHubTestDeps
+): Promise<GitHubGetCiStatusResult> {
+  const ctx = await resolveContext(args.projectPath, _deps);
+  if ("error" in ctx) return ctx;
+  const { client, owner, repo } = ctx;
+
+  let resolvedRef: string;
+  let refIsConfirmedSha = false;
+  if (args.prNumber !== undefined) {
+    try {
+      const pr = await client.pulls.get({ owner, repo, pull_number: args.prNumber });
+      resolvedRef = pr.data.head.sha;
+      refIsConfirmedSha = true;
+    } catch (err) {
+      return { error: httpError(err) ?? String(err) };
+    }
+  } else if (args.ref) {
+    resolvedRef = args.ref;
+  } else {
+    return { error: "ref or prNumber is required to check CI status" };
+  }
+
+  try {
+    const response = await client.checks.listForRef({
+      owner,
+      repo,
+      ref: resolvedRef,
+      per_page: 100, // fetches first page only; repos with >100 check runs may return incomplete status
+    });
+    const state = aggregateCiStatus(
+      response.data.check_runs.map((r) => ({
+        status: r.status,
+        conclusion: r.conclusion ?? null,
+      }))
+    );
+    return { status: { state, ...(refIsConfirmedSha ? { sha: resolvedRef } : {}) } };
+  } catch (err) {
+    return { error: httpError(err) ?? String(err) };
   }
 }
