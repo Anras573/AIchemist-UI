@@ -143,7 +143,9 @@ function httpError(err: unknown): string | null {
     case 401:
       return "GitHub token is invalid or expired";
     case 403:
-      return "Insufficient GitHub token scope — needs 'repo' for private or 'public_repo' for public repositories";
+      return detail
+        ? `Forbidden: ${detail}`
+        : "Insufficient GitHub token scope — needs 'repo' for private or 'public_repo' for public repositories";
     case 404:
       return "Repository not found or private without 'repo' scope";
     case 422:
@@ -264,7 +266,7 @@ export async function listPullRequests(
       state: args.state ?? "open",
       base: args.base,
       head: args.head,
-      per_page: Math.min(args.limit ?? 30, 100),
+      per_page: Number.isFinite(args.limit) && args.limit > 0 ? Math.min(Math.trunc(args.limit), 100) : 30,
     });
     return { prs: response.data.map(mapPr) };
   } catch (err) {
@@ -285,8 +287,8 @@ export async function listIssues(
       owner,
       repo,
       state: args.state ?? "open",
-      labels: args.labels?.join(","),
-      per_page: Math.min(args.limit ?? 30, 100),
+      labels: args.labels?.length ? args.labels.join(",") : undefined,
+      per_page: Number.isFinite(args.limit) && args.limit > 0 ? Math.min(Math.trunc(args.limit), 100) : 30,
     });
     const issues: GitHubIssue[] = response.data
       .filter((issue) => !("pull_request" in issue && issue.pull_request))
@@ -355,10 +357,12 @@ export async function getCiStatus(
   const { client, owner, repo } = ctx;
 
   let resolvedRef: string;
+  let refIsConfirmedSha = false;
   if (args.prNumber !== undefined) {
     try {
       const pr = await client.pulls.get({ owner, repo, pull_number: args.prNumber });
       resolvedRef = pr.data.head.sha;
+      refIsConfirmedSha = true;
     } catch (err) {
       return { error: httpError(err) ?? String(err) };
     }
@@ -381,7 +385,7 @@ export async function getCiStatus(
         conclusion: r.conclusion ?? null,
       }))
     );
-    return { status: { state, sha: resolvedRef } };
+    return { status: { state, ...(refIsConfirmedSha ? { sha: resolvedRef } : {}) } };
   } catch (err) {
     return { error: httpError(err) ?? String(err) };
   }

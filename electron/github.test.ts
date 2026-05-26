@@ -281,7 +281,7 @@ describe("listPullRequests", () => {
       pulls: { list: async () => { throw makeHttpError(403); } } as unknown as OctokitClient["pulls"],
     });
     const result = await listPullRequests({ projectPath: PROJECT_PATH }, { remoteInfo: REMOTE, client });
-    expect((result as { error: string }).error).toMatch(/scope/i);
+    expect((result as { error: string }).error).toMatch(/Forbidden: error/i);
   });
 
   it("returns typed error on 404", async () => {
@@ -567,7 +567,7 @@ describe("getCiStatus", () => {
       { projectPath: PROJECT_PATH, ref: "abc123" },
       happyDeps()
     );
-    expect(result).toEqual({ status: { state: "unknown", sha: "abc123" } });
+    expect(result).toEqual({ status: { state: "unknown" } });
   });
 
   it("aggregates success when all runs pass", async () => {
@@ -588,7 +588,7 @@ describe("getCiStatus", () => {
       { projectPath: PROJECT_PATH, ref: "sha-success" },
       { remoteInfo: REMOTE, client }
     );
-    expect(result).toEqual({ status: { state: "success", sha: "sha-success" } });
+    expect(result).toEqual({ status: { state: "success" } });
   });
 
   it("aggregates failure when a run fails", async () => {
@@ -609,7 +609,7 @@ describe("getCiStatus", () => {
       { projectPath: PROJECT_PATH, ref: "sha-fail" },
       { remoteInfo: REMOTE, client }
     );
-    expect(result).toEqual({ status: { state: "failure", sha: "sha-fail" } });
+    expect(result).toEqual({ status: { state: "failure" } });
   });
 
   it("aggregates pending when a run is in_progress", async () => {
@@ -625,7 +625,7 @@ describe("getCiStatus", () => {
       { projectPath: PROJECT_PATH, ref: "sha-pending" },
       { remoteInfo: REMOTE, client }
     );
-    expect(result).toEqual({ status: { state: "pending", sha: "sha-pending" } });
+    expect(result).toEqual({ status: { state: "pending" } });
   });
 
   it("resolves SHA from prNumber", async () => {
