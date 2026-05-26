@@ -266,7 +266,7 @@ export async function listPullRequests(
       state: args.state ?? "open",
       base: args.base,
       head: args.head,
-      per_page: typeof args.limit === "number" && args.limit > 0 ? Math.min(Math.trunc(args.limit), 100) : 30,
+      per_page: typeof args.limit === "number" && args.limit > 0 ? Math.max(1, Math.min(Math.trunc(args.limit), 100)) : 30,
     });
     return { prs: response.data.map(mapPr) };
   } catch (err) {
@@ -288,7 +288,7 @@ export async function listIssues(
       repo,
       state: args.state ?? "open",
       labels: args.labels?.length ? args.labels.join(",") : undefined,
-      per_page: typeof args.limit === "number" && args.limit > 0 ? Math.min(Math.trunc(args.limit), 100) : 30,
+      per_page: typeof args.limit === "number" && args.limit > 0 ? Math.max(1, Math.min(Math.trunc(args.limit), 100)) : 30,
     });
     const issues: GitHubIssue[] = response.data
       .filter((issue) => !("pull_request" in issue && issue.pull_request))
