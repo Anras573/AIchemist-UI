@@ -79,6 +79,8 @@ export function buildChildProcessPath(
 
 /** Augment process.env.PATH with common macOS binary dirs if missing. */
 function augmentPath(): void {
+  if (path.delimiter === ";") return;
+
   const current = process.env.PATH ?? "";
   const parts = current.split(path.delimiter);
   for (const dir of EXTRA_PATHS) {
