@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, type FormEvent } from "react";
+import { useState, useCallback, useEffect, useId, type FormEvent } from "react";
 import {
   RefreshCw,
   ChevronDown,
@@ -257,6 +257,11 @@ function OpenPrSection({
   sessionTitle: string | null;
 }) {
   const ipc = useIpc();
+  const formId = useId();
+  const titleInputId = `${formId}-pr-title`;
+  const baseInputId = `${formId}-pr-base`;
+  const headInputId = `${formId}-pr-head`;
+  const descriptionInputId = `${formId}-pr-description`;
 
   const [isChecking, setIsChecking] = useState(true);
   const [hasGitHubToken, setHasGitHubToken] = useState(false);
@@ -403,28 +408,48 @@ function OpenPrSection({
       ) : (
         <form className="flex flex-col gap-2 border rounded-md p-3 bg-muted/20" onSubmit={submit}>
           <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Title</span>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="PR title" />
+            <label htmlFor={titleInputId} className="text-xs text-muted-foreground">
+              Title
+            </label>
+            <Input
+              id={titleInputId}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="PR title"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">Base branch</span>
+              <label htmlFor={baseInputId} className="text-xs text-muted-foreground">
+                Base branch
+              </label>
               <Input
+                id={baseInputId}
                 value={base}
                 onChange={(e) => setBase(e.target.value)}
                 placeholder="Auto-detect if empty"
               />
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">Head branch</span>
-              <Input value={head} onChange={(e) => setHead(e.target.value)} placeholder="feature-branch" />
+              <label htmlFor={headInputId} className="text-xs text-muted-foreground">
+                Head branch
+              </label>
+              <Input
+                id={headInputId}
+                value={head}
+                onChange={(e) => setHead(e.target.value)}
+                placeholder="feature-branch"
+              />
             </div>
           </div>
 
           <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Description</span>
+            <label htmlFor={descriptionInputId} className="text-xs text-muted-foreground">
+              Description
+            </label>
             <Textarea
+              id={descriptionInputId}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Optional PR description"
@@ -527,6 +552,7 @@ export function ChangesPanel() {
         <>
           <div className="border-t" />
           <OpenPrSection
+            key={activeProject.path}
             projectPath={activeProject.path}
             sessionTitle={activeSessionTitle}
           />
