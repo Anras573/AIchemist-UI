@@ -20,6 +20,74 @@ export interface ProviderProbes {
   acp?: ProviderProbeResult;
 }
 
+// ─── GitHub integration ────────────────────────────────────────────────────────
+
+export interface GitHubPR {
+  id: number;
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+  draft?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  head_ref?: string;
+  base_ref?: string;
+}
+
+export interface GitHubIssue {
+  id: number;
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CIStatus {
+  state: string;
+  sha?: string;
+  target_url?: string;
+  description?: string;
+  context?: string;
+}
+
+export interface GitHubCreatePrArgs {
+  projectPath: string;
+  title: string;
+  body?: string;
+  base?: string;
+  head?: string;
+  draft?: boolean;
+}
+
+export interface GitHubListPrsArgs {
+  projectPath: string;
+  state?: "open" | "closed" | "all";
+  base?: string;
+  head?: string;
+  limit?: number;
+}
+
+export interface GitHubListIssuesArgs {
+  projectPath: string;
+  state?: "open" | "closed" | "all";
+  labels?: string[];
+  limit?: number;
+}
+
+export interface GitHubGetCiStatusArgs {
+  projectPath: string;
+  ref?: string;
+  prNumber?: number;
+}
+
+export type GitHubCreatePrResult = { pr: GitHubPR } | { error: string };
+export type GitHubListPrsResult = { prs: GitHubPR[] } | { error: string };
+export type GitHubListIssuesResult = { issues: GitHubIssue[] } | { error: string };
+export type GitHubGetCiStatusResult = { status: CIStatus } | { error: string };
+
 // ─── ACP Agent ───────────────────────────────────────────────────────────────
 
 /**

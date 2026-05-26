@@ -47,6 +47,10 @@ export const GET_COPILOT_MODELS     = "agent:get-copilot-models";
 export const GET_CLAUDE_AGENTS      = "agent:get-claude-agents";
 export const GET_COPILOT_AGENTS     = "agent:get-copilot-agents";
 export const LIST_SKILLS            = "agent:list-skills";
+export const GITHUB_CREATE_PR       = "github:create-pr";
+export const GITHUB_LIST_PRS        = "github:list-prs";
+export const GITHUB_LIST_ISSUES     = "github:list-issues";
+export const GITHUB_GET_CI_STATUS   = "github:get-ci-status";
 // ── MCP servers ───────────────────────────────────────────────────────────────
 export const LIST_MCP_SERVERS       = "agent:list-mcp-servers";
 export const MCP_READ_CONFIG        = "mcp:read-config";

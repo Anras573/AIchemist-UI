@@ -57,6 +57,14 @@ export interface ElectronAPI {
   getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
   getClaudeAgents: (projectPath: string) => Promise<Array<{ name: string; description: string; model?: string }>>;
   getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
+  githubCreatePr: (args: import("../src/types").GitHubCreatePrArgs) =>
+    Promise<import("../src/types").GitHubCreatePrResult>;
+  githubListPrs: (args: import("../src/types").GitHubListPrsArgs) =>
+    Promise<import("../src/types").GitHubListPrsResult>;
+  githubListIssues: (args: import("../src/types").GitHubListIssuesArgs) =>
+    Promise<import("../src/types").GitHubListIssuesResult>;
+  githubGetCiStatus: (args: import("../src/types").GitHubGetCiStatusArgs) =>
+    Promise<import("../src/types").GitHubGetCiStatusResult>;
   listSkills: (projectPath: string, provider?: string) => Promise<Array<import("../src/types").SkillInfo>>;
   listMcpServers: () => Promise<Array<import("../src/types").McpServerInfo>>;
   mcpProbeManaged: () => Promise<Array<import("../src/types").McpServerInfo>>;
@@ -144,6 +152,10 @@ const api: ElectronAPI = {
   getCopilotModels: () => ipcRenderer.invoke(CH.GET_COPILOT_MODELS),
   getClaudeAgents: (projectPath) => ipcRenderer.invoke(CH.GET_CLAUDE_AGENTS, projectPath),
   getCopilotAgents: (projectPath) => ipcRenderer.invoke(CH.GET_COPILOT_AGENTS, projectPath),
+  githubCreatePr: (args) => ipcRenderer.invoke(CH.GITHUB_CREATE_PR, args),
+  githubListPrs: (args) => ipcRenderer.invoke(CH.GITHUB_LIST_PRS, args),
+  githubListIssues: (args) => ipcRenderer.invoke(CH.GITHUB_LIST_ISSUES, args),
+  githubGetCiStatus: (args) => ipcRenderer.invoke(CH.GITHUB_GET_CI_STATUS, args),
   listSkills: (projectPath, provider) =>
     ipcRenderer.invoke(CH.LIST_SKILLS, { projectPath, provider }),
   listMcpServers: () => ipcRenderer.invoke(CH.LIST_MCP_SERVERS),

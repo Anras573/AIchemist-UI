@@ -48,19 +48,45 @@ export function resolveClaudePath(): string | null {
   }
 }
 
+/**
+ * Extra paths for common macOS binary directories where git, make, and other tools are often installed.
+ * Used for augmenting process.env.PATH when spawning child processes in Electron.
+ */
+const EXTRA_PATHS = [
+  "/opt/homebrew/bin",
+  "/opt/homebrew/sbin",
+  "/usr/local/bin",
+  "/usr/bin",
+];
+
+/**
+ * Build a PATH string with extra binary directories prepended.
+ * Used when spawning child_process commands (git, make, etc.) in Electron on macOS,
+ * which doesn't inherit the user shell's PATH.
+ *
+ * @param currentPath - The current PATH value (defaults to process.env.PATH)
+ * @param delimiter - The PATH delimiter (e.g. ":" for Unix, ";" for Windows)
+ * @returns A new PATH string with extra directories prepended
+ */
+export function buildChildProcessPath(
+  currentPath: string | undefined = process.env.PATH,
+  delimiter: string = path.delimiter
+): string {
+  if (delimiter === ";") return currentPath ?? "";
+  const pathList = [...EXTRA_PATHS, currentPath ?? ""].filter(Boolean);
+  return pathList.join(delimiter);
+}
+
 /** Augment process.env.PATH with common macOS binary dirs if missing. */
 function augmentPath(): void {
-  const extras = [
-    "/opt/homebrew/bin",
-    "/opt/homebrew/sbin",
-    "/usr/local/bin",
-  ];
+  if (path.delimiter === ";") return;
+
   const current = process.env.PATH ?? "";
-  const parts = current.split(":");
-  for (const dir of extras) {
+  const parts = current.split(path.delimiter);
+  for (const dir of EXTRA_PATHS) {
     if (!parts.includes(dir)) parts.unshift(dir);
   }
-  process.env.PATH = parts.join(":");
+  process.env.PATH = parts.join(path.delimiter);
 }
 
 /**

@@ -1,0 +1,100 @@
+import { execFile } from "child_process";
+import { delimiter } from "path";
+import { promisify } from "util";
+import { getApiKey, buildChildProcessPath } from "./config";
+
+const execFileAsync = promisify(execFile);
+
+export interface GitHubRemoteInfo {
+  owner: string;
+  repo: string;
+}
+
+/**
+ * Returns an authenticated Octokit client when GITHUB_TOKEN is configured.
+ * Returns null when no token is available.
+ */
+export async function createGitHubClient(
+  token: string | null = getApiKey("github")
+) {
+  if (!token) return null;
+  const { Octokit } = await import("@octokit/rest");
+  return new Octokit({ auth: token });
+}
+
+/**
+ * Parse a GitHub remote URL into owner/repo.
+ * Supports:
+ * - https://github.com/owner/repo(.git)
+ * - git@github.com:owner/repo(.git)
+ * - ssh://git@github.com/owner/repo(.git)
+ */
+export function parseGitHubRemoteUrl(remoteUrl: string): GitHubRemoteInfo | null {
+  const normalized = remoteUrl.trim();
+  if (!normalized) return null;
+
+  const sshMatch = normalized.match(
+    /^(?:git@github\.com:|ssh:\/\/git@github\.com\/)([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i
+  );
+  if (sshMatch) {
+    const owner = sshMatch[1]?.trim();
+    const repo = sshMatch[2]?.trim();
+    if (!owner || !repo) return null;
+    return { owner, repo };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    return null;
+  }
+
+  if (parsed.hostname.toLowerCase() !== "github.com") return null;
+
+  const parts = parsed.pathname
+    .replace(/^\/+|\/+$/g, "")
+    .split("/")
+    .filter(Boolean);
+
+  if (parts.length !== 2) return null;
+
+  const owner = parts[0];
+  const repoRaw = parts[1];
+  if (!owner || !repoRaw) return null;
+
+  const repo = repoRaw.endsWith(".git") ? repoRaw.slice(0, -4) : repoRaw;
+  if (!repo) return null;
+
+  return { owner, repo };
+}
+
+async function resolveOriginRemoteUrl(projectPath: string): Promise<string> {
+  const env = {
+    ...process.env,
+    PATH: buildChildProcessPath(process.env.PATH, delimiter),
+  };
+  const { stdout } = await execFileAsync("git", ["remote", "get-url", "origin"], {
+    cwd: projectPath,
+    encoding: "utf8",
+    timeout: 5_000,
+    env,
+  });
+  return stdout.trim();
+}
+
+/**
+ * Resolve { owner, repo } from `git remote get-url origin`.
+ * Returns null when the origin is missing, malformed, or non-GitHub.
+ */
+export async function getRemoteInfo(
+  projectPath: string,
+  readOriginRemoteUrl: (projectPath: string) => Promise<string> = resolveOriginRemoteUrl
+): Promise<GitHubRemoteInfo | null> {
+  try {
+    const remoteUrl = await readOriginRemoteUrl(projectPath);
+    return parseGitHubRemoteUrl(remoteUrl);
+  } catch {
+    return null;
+  }
+}
