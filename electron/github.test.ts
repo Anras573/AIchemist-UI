@@ -30,6 +30,9 @@ function makeOctokitMock(overrides?: Partial<OctokitClient>): OctokitClient {
     checks: {
       listForRef: async () => ({ data: { check_runs: [] } }),
     },
+    repos: {
+      get: async () => ({ data: { default_branch: "main" } }),
+    },
   } as unknown as OctokitClient;
 
   return overrides ? { ...base, ...overrides } as OctokitClient : base;
@@ -165,6 +168,14 @@ describe("aggregateCiStatus", () => {
     expect(aggregateCiStatus([{ status: "queued", conclusion: null }])).toBe("pending");
   });
 
+  it("returns pending when any run is waiting (environment protection)", () => {
+    expect(aggregateCiStatus([{ status: "waiting", conclusion: null }])).toBe("pending");
+  });
+
+  it("returns pending when any run is requested", () => {
+    expect(aggregateCiStatus([{ status: "requested", conclusion: null }])).toBe("pending");
+  });
+
   it("pending takes precedence over failure", () => {
     expect(
       aggregateCiStatus([
@@ -279,6 +290,20 @@ describe("listPullRequests", () => {
     });
     const result = await listPullRequests({ projectPath: PROJECT_PATH }, { remoteInfo: REMOTE, client });
     expect((result as { error: string }).error).toMatch(/not found/i);
+  });
+
+  it("caps per_page at 100 even when limit exceeds it", async () => {
+    let capturedPerPage: number | undefined;
+    const client = makeOctokitMock({
+      pulls: {
+        list: async (args: { per_page?: number }) => {
+          capturedPerPage = args.per_page;
+          return { data: [] };
+        },
+      } as OctokitClient["pulls"],
+    });
+    await listPullRequests({ projectPath: PROJECT_PATH, limit: 200 }, { remoteInfo: REMOTE, client });
+    expect(capturedPerPage).toBe(100);
   });
 });
 
@@ -451,6 +476,33 @@ describe("createPullRequest", () => {
       { remoteInfo: REMOTE, client }
     );
     expect(result).toEqual({ error: "GitHub token is invalid or expired" });
+  });
+
+  it("fetches repo default branch when base is omitted", async () => {
+    let capturedBase: string | undefined;
+    const client = makeOctokitMock({
+      repos: {
+        get: async () => ({ data: { default_branch: "trunk" } }),
+      } as OctokitClient["repos"],
+      pulls: {
+        create: async (args: { base?: string }) => {
+          capturedBase = args.base;
+          return {
+            data: {
+              id: 1, number: 1, title: "T", state: "open", html_url: "u",
+              draft: false, created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z",
+              head: { ref: "feat", sha: "s" }, base: { ref: "trunk" },
+            },
+          };
+        },
+      } as OctokitClient["pulls"],
+    });
+
+    await createPullRequest(
+      { projectPath: PROJECT_PATH, title: "T", head: "feat" },
+      { remoteInfo: REMOTE, client }
+    );
+    expect(capturedBase).toBe("trunk");
   });
 });
 

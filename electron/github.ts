@@ -160,7 +160,7 @@ export function aggregateCiStatus(
 ): "success" | "failure" | "pending" | "unknown" {
   if (checkRuns.length === 0) return "unknown";
 
-  if (checkRuns.some((r) => r.status === "in_progress" || r.status === "queued")) {
+  if (checkRuns.some((r) => r.status === "in_progress" || r.status === "queued" || r.status === "waiting" || r.status === "requested" || r.status === "pending")) {
     return "pending";
   }
 
@@ -212,7 +212,8 @@ async function resolveCurrentBranch(projectPath: string): Promise<string | null>
       ["rev-parse", "--abbrev-ref", "HEAD"],
       { cwd: projectPath, encoding: "utf8", timeout: 5_000, env }
     );
-    return stdout.trim() || null;
+    const branch = stdout.trim();
+    return branch && branch !== "HEAD" ? branch : null;
   } catch {
     return null;
   }
@@ -261,7 +262,7 @@ export async function listPullRequests(
       state: args.state ?? "open",
       base: args.base,
       head: args.head,
-      per_page: args.limit ?? 30,
+      per_page: Math.min(args.limit ?? 30, 100),
     });
     return { prs: response.data.map(mapPr) };
   } catch (err) {
@@ -283,7 +284,7 @@ export async function listIssues(
       repo,
       state: args.state ?? "open",
       labels: args.labels?.join(","),
-      per_page: args.limit ?? 30,
+      per_page: Math.min(args.limit ?? 30, 100),
     });
     const issues: GitHubIssue[] = response.data
       .filter((issue) => !("pull_request" in issue && issue.pull_request))
@@ -313,6 +314,16 @@ export async function createPullRequest(
   const head = args.head ?? (await resolveCurrentBranch(args.projectPath));
   if (!head) return { error: "Could not determine head branch — provide args.head explicitly" };
 
+  let base = args.base;
+  if (!base) {
+    try {
+      const repoInfo = await client.repos.get({ owner, repo });
+      base = repoInfo.data.default_branch;
+    } catch {
+      base = "main";
+    }
+  }
+
   try {
     const response = await client.pulls.create({
       owner,
@@ -320,7 +331,7 @@ export async function createPullRequest(
       title: args.title,
       body: args.body,
       head,
-      base: args.base ?? "main",
+      base,
       draft: args.draft,
     });
     return { pr: mapPr(response.data) };
