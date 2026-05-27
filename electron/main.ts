@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -18,9 +18,10 @@ import { resolveApproval, resolvePermissionChoice, getPendingApprovalData, addTo
 import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
 import { runAgentTurn, getProvider } from "./agent/runner";
 import { cleanupCopilotSession } from "./agent/copilot";
-import { listPullRequests, listIssues, createPullRequest, getCiStatus } from "./github";
+import { listPullRequests, listIssues, createPullRequest, getCiStatus, getPullRequestContext } from "./github";
 import type {
   GitHubCreatePrArgs,
+  GitHubGetPrContextArgs,
   GitHubListPrsArgs,
   GitHubListIssuesArgs,
   GitHubGetCiStatusArgs,
@@ -865,6 +866,19 @@ function registerHandlers(): void {  // ── Terminal ────────
 
   // ── Dialog ────────────────────────────────────────────────────────────────────
   handle(CH.OPEN_FOLDER_DIALOG, () => openFolderDialog());
+  handle(CH.OPEN_GITHUB_URL, async (_event, rawUrl: string) => {
+    let url: URL;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      throw new Error("Invalid URL");
+    }
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== "https:" || (host !== "github.com" && host !== "www.github.com")) {
+      throw new Error("Only GitHub HTTPS URLs can be opened");
+    }
+    await shell.openExternal(url.toString());
+  });
 
   // ── Agent ─────────────────────────────────────────────────────────────────────
   handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[] }) => {
@@ -918,6 +932,7 @@ function registerHandlers(): void {  // ── Terminal ────────
   handle(CH.GITHUB_LIST_ISSUES, (_event, args: GitHubListIssuesArgs) => listIssues(args));
   handle(CH.GITHUB_CREATE_PR, (_event, args: GitHubCreatePrArgs) => createPullRequest(args));
   handle(CH.GITHUB_GET_CI_STATUS, (_event, args: GitHubGetCiStatusArgs) => getCiStatus(args));
+  handle(CH.GITHUB_GET_PR_CONTEXT, (_event, args: GitHubGetPrContextArgs) => getPullRequestContext(args));
 
   handle(CH.LIST_SKILLS, (_event, args: string | { projectPath: string; provider?: string }) => {
     // Back-compat: bare string is the legacy signature (treated as Claude).

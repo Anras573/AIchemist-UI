@@ -52,6 +52,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
 
     // Dialog
     openFolderDialog: vi.fn().mockResolvedValue(null),
+    openGitHubUrl: vi.fn().mockResolvedValue(undefined),
 
     // Agent
     agentSend: vi.fn().mockResolvedValue(undefined),
@@ -64,6 +65,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     githubListPrs: vi.fn().mockImplementation(githubStubResponse),
     githubListIssues: vi.fn().mockImplementation(githubStubResponse),
     githubGetCiStatus: vi.fn().mockImplementation(githubStubResponse),
+    githubGetPrContext: vi.fn().mockResolvedValue({ hasRemote: false, defaultBase: null }),
     listSkills: vi.fn().mockResolvedValue([]),
     listMcpServers: vi.fn().mockResolvedValue([]),
     mcpProbeManaged: vi.fn().mockResolvedValue([]),

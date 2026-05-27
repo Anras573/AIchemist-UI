@@ -6,6 +6,7 @@ import {
   aggregateCiStatus,
   listPullRequests,
   listIssues,
+  getPullRequestContext,
   createPullRequest,
   getCiStatus,
 } from "./github";
@@ -62,6 +63,13 @@ describe("parseGitHubRemoteUrl", () => {
 
   it("parses HTTPS remotes without .git suffix", () => {
     expect(parseGitHubRemoteUrl("https://github.com/octo-org/example-repo")).toEqual({
+      owner: "octo-org",
+      repo: "example-repo",
+    });
+  });
+
+  it("parses HTTPS remotes on www.github.com", () => {
+    expect(parseGitHubRemoteUrl("https://www.github.com/octo-org/example-repo.git")).toEqual({
       owner: "octo-org",
       repo: "example-repo",
     });
@@ -377,6 +385,50 @@ describe("listIssues", () => {
     });
     const result = await listIssues({ projectPath: PROJECT_PATH }, { remoteInfo: REMOTE, client });
     expect(result).toEqual({ error: "GitHub token is invalid or expired" });
+  });
+});
+
+// ─── getPullRequestContext ─────────────────────────────────────────────────────
+
+describe("getPullRequestContext", () => {
+  it("returns hasRemote=false when no GitHub remote exists", async () => {
+    const result = await getPullRequestContext(
+      { projectPath: PROJECT_PATH },
+      { remoteInfo: null, client: makeOctokitMock() }
+    );
+    expect(result).toEqual({ hasRemote: false, defaultBase: null });
+  });
+
+  it("returns hasRemote=true with null defaultBase when token/client is unavailable", async () => {
+    const result = await getPullRequestContext(
+      { projectPath: PROJECT_PATH },
+      { remoteInfo: REMOTE, client: null }
+    );
+    expect(result).toEqual({ hasRemote: true, defaultBase: null });
+  });
+
+  it("returns defaultBase when repo lookup succeeds", async () => {
+    const client = makeOctokitMock({
+      repos: {
+        get: async () => ({ data: { default_branch: "trunk" } }),
+      } as unknown as OctokitClient["repos"],
+    });
+    const result = await getPullRequestContext(
+      { projectPath: PROJECT_PATH },
+      { remoteInfo: REMOTE, client }
+    );
+    expect(result).toEqual({ hasRemote: true, defaultBase: "trunk" });
+  });
+
+  it("keeps hasRemote=true when default branch lookup fails", async () => {
+    const client = makeOctokitMock({
+      repos: { get: async () => { throw makeHttpError(404); } } as unknown as OctokitClient["repos"],
+    });
+    const result = await getPullRequestContext(
+      { projectPath: PROJECT_PATH },
+      { remoteInfo: REMOTE, client }
+    );
+    expect(result).toEqual({ hasRemote: true, defaultBase: null });
   });
 });
 

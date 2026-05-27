@@ -83,10 +83,20 @@ export interface GitHubGetCiStatusArgs {
   prNumber?: number;
 }
 
+export interface GitHubGetPrContextArgs {
+  projectPath: string;
+}
+
+export interface GitHubPrContext {
+  hasRemote: boolean;
+  defaultBase: string | null;
+}
+
 export type GitHubCreatePrResult = { pr: GitHubPR } | { error: string };
 export type GitHubListPrsResult = { prs: GitHubPR[] } | { error: string };
 export type GitHubListIssuesResult = { issues: GitHubIssue[] } | { error: string };
 export type GitHubGetCiStatusResult = { status: CIStatus } | { error: string };
+export type GitHubGetPrContextResult = GitHubPrContext;
 
 // ─── ACP Agent ───────────────────────────────────────────────────────────────
 

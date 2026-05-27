@@ -39,6 +39,7 @@ export const READ_FILE              = "fs:read-file";
 
 // ── Dialog ───────────────────────────────────────────────────────────────────
 export const OPEN_FOLDER_DIALOG     = "dialog:open-folder";
+export const OPEN_GITHUB_URL        = "shell:open-github-url";
 
 // ── Agent ────────────────────────────────────────────────────────────────────
 export const AGENT_SEND             = "agent:send";
@@ -51,6 +52,7 @@ export const GITHUB_CREATE_PR       = "github:create-pr";
 export const GITHUB_LIST_PRS        = "github:list-prs";
 export const GITHUB_LIST_ISSUES     = "github:list-issues";
 export const GITHUB_GET_CI_STATUS   = "github:get-ci-status";
+export const GITHUB_GET_PR_CONTEXT  = "github:get-pr-context";
 // ── MCP servers ───────────────────────────────────────────────────────────────
 export const LIST_MCP_SERVERS       = "agent:list-mcp-servers";
 export const MCP_READ_CONFIG        = "mcp:read-config";

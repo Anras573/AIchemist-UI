@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { ChangesPanel } from "./ChangesPanel";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { useSessionStore } from "@/lib/store/useSessionStore";
-import type { FileChange, Session } from "@/types";
+import { useProjectStore } from "@/lib/store/useProjectStore";
+import type { FileChange, Project, Session } from "@/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -37,6 +38,24 @@ function makeSession(id: string, overrides: Partial<Session> = {}): Session {
     model: "claude-sonnet-4-6",
     agent: null,
     skills: null,
+    ...overrides,
+  };
+}
+
+function makeProject(overrides: Partial<Project> = {}): Project {
+  return {
+    id: "proj-1",
+    name: "My Project",
+    path: "/project",
+    created_at: "2024-01-01T00:00:00Z",
+    config: {
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      approval_mode: "custom",
+      approval_rules: [],
+      custom_tools: [],
+      allowed_tools: [],
+    },
     ...overrides,
   };
 }
@@ -140,5 +159,114 @@ describe("ChangesPanel empty states", () => {
     expect(
       screen.getByText(/no project path available for git diff/i)
     ).toBeInTheDocument();
+  });
+});
+
+describe("ChangesPanel Open PR flow", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ activeSessionId: null, sessions: {}, sessionFileChanges: {} });
+    useProjectStore.setState({ projects: [], activeProjectId: null });
+    window.electronAPI.getGitBranch = vi.fn().mockResolvedValue("feature/open-pr");
+    window.electronAPI.githubGetPrContext = vi
+      .fn()
+      .mockResolvedValue({ hasRemote: true, defaultBase: "main" });
+    window.electronAPI.githubCreatePr = vi.fn().mockResolvedValue({
+      pr: {
+        id: 10,
+        number: 12,
+        title: "Session title",
+        state: "open",
+        html_url: "https://github.com/acme/repo/pull/12",
+      },
+    });
+    window.electronAPI.openGitHubUrl = vi.fn().mockResolvedValue(undefined);
+  });
+
+  it("hides Open PR when GitHub token is missing", async () => {
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue(null);
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /open pr form/i })).not.toBeInTheDocument();
+    });
+    expect(window.electronAPI.githubGetPrContext).not.toHaveBeenCalled();
+    expect(window.electronAPI.getGitBranch).not.toHaveBeenCalled();
+  });
+
+  it("hides Open PR when project has no GitHub remote", async () => {
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    window.electronAPI.githubGetPrContext = vi
+      .fn()
+      .mockResolvedValue({ hasRemote: false, defaultBase: null });
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /open pr form/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it("prefills title/base/head when opening the PR form", async () => {
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", { title: "Session title" }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+
+    expect(screen.getByPlaceholderText("PR title")).toHaveValue("Session title");
+    expect(screen.getByPlaceholderText("Auto-detect if empty")).toHaveValue("main");
+    expect(screen.getByPlaceholderText("feature-branch")).toHaveValue("feature/open-pr");
+    expect(screen.getByPlaceholderText("Optional PR description")).toHaveValue("");
+  });
+
+  it("submits create PR payload and opens created URL", async () => {
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", { title: "Session title" }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Create PR" }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.githubCreatePr).toHaveBeenCalledWith({
+        projectPath: "/project",
+        title: "Session title",
+        body: undefined,
+        head: "feature/open-pr",
+        base: "main",
+      });
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    expect(window.electronAPI.openGitHubUrl).toHaveBeenCalledWith(
+      "https://github.com/acme/repo/pull/12"
+    );
+  });
+
+  it("renders inline error when create PR fails", async () => {
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    window.electronAPI.githubCreatePr = vi.fn().mockResolvedValue({ error: "Validation failed" });
+    useSessionStore.getState().addSession(makeSession("sess-pr", { title: "Session title" }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Create PR" }));
+
+    expect(await screen.findByText("Validation failed")).toBeInTheDocument();
   });
 });

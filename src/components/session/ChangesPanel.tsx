@@ -1,11 +1,22 @@
-import { useState, useCallback } from "react";
-import { RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
+import { useState, useCallback, useEffect, useId, type FormEvent } from "react";
+import {
+  RefreshCw,
+  ChevronDown,
+  ChevronRight,
+  GitPullRequest,
+  Loader2,
+  ExternalLink,
+  CheckCircle2,
+} from "lucide-react";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import type { FileChange } from "@/types";
 import { CodeBlock } from "@/components/ai-elements/code-block";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 // ── countDiffStats ────────────────────────────────────────────────────────────
 
@@ -238,6 +249,267 @@ function GitDiffSection({ projectPath }: { projectPath: string }) {
   );
 }
 
+function OpenPrSection({
+  projectPath,
+  sessionTitle,
+}: {
+  projectPath: string;
+  sessionTitle: string | null;
+}) {
+  const ipc = useIpc();
+  const formId = useId();
+  const titleInputId = `${formId}-pr-title`;
+  const baseInputId = `${formId}-pr-base`;
+  const headInputId = `${formId}-pr-head`;
+  const descriptionInputId = `${formId}-pr-description`;
+
+  const [isChecking, setIsChecking] = useState(true);
+  const [hasGitHubToken, setHasGitHubToken] = useState(false);
+  const [hasGitHubRemote, setHasGitHubRemote] = useState(false);
+  const [defaultBaseBranch, setDefaultBaseBranch] = useState<string | null>(null);
+  const [defaultHeadBranch, setDefaultHeadBranch] = useState<string | null>(null);
+
+  const [isOpen, setIsOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [base, setBase] = useState("");
+  const [head, setHead] = useState("");
+  const [description, setDescription] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [createdPrUrl, setCreatedPrUrl] = useState<string | null>(null);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsChecking(true);
+
+    void (async () => {
+      try {
+        const token = await ipc.getApiKey("github");
+        if (cancelled) return;
+        const hasToken = Boolean(token);
+        setHasGitHubToken(hasToken);
+
+        if (!hasToken) {
+          setHasGitHubRemote(false);
+          setDefaultBaseBranch(null);
+          setDefaultHeadBranch(null);
+          return;
+        }
+
+        const context = await ipc.githubGetPrContext({ projectPath });
+        if (cancelled) return;
+        setHasGitHubRemote(context.hasRemote);
+        setDefaultBaseBranch(context.defaultBase);
+
+        if (context.hasRemote) {
+          const currentBranch = await ipc.getGitBranch(projectPath);
+          if (cancelled) return;
+          setDefaultHeadBranch(currentBranch);
+        } else {
+          setDefaultHeadBranch(null);
+        }
+      } catch {
+        if (cancelled) return;
+        setHasGitHubToken(false);
+        setHasGitHubRemote(false);
+        setDefaultBaseBranch(null);
+        setDefaultHeadBranch(null);
+      } finally {
+        if (!cancelled) setIsChecking(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ipc, projectPath]);
+
+  useEffect(() => {
+    if (!successToast) return;
+    const timeout = window.setTimeout(() => setSuccessToast(null), 3500);
+    return () => window.clearTimeout(timeout);
+  }, [successToast]);
+
+  const visible = !isChecking && hasGitHubToken && hasGitHubRemote;
+  if (!visible) return null;
+
+  const openForm = () => {
+    setTitle(sessionTitle ?? "");
+    setBase(defaultBaseBranch ?? "");
+    setHead(defaultHeadBranch ?? "");
+    setDescription("");
+    setError(null);
+    setCreatedPrUrl(null);
+    setIsOpen(true);
+  };
+
+  const closeForm = () => {
+    setIsOpen(false);
+    setIsSubmitting(false);
+  };
+
+  const canSubmit = title.trim().length > 0 && head.trim().length > 0 && !isSubmitting;
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!canSubmit) return;
+    setError(null);
+    setCreatedPrUrl(null);
+    setIsSubmitting(true);
+
+    try {
+      const result = await ipc.githubCreatePr({
+        projectPath,
+        title: title.trim(),
+        body: description.trim() ? description.trim() : undefined,
+        head: head.trim(),
+        base: base.trim() ? base.trim() : undefined,
+      });
+
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+
+      setCreatedPrUrl(result.pr.html_url);
+      setSuccessToast(`Pull request #${result.pr.number} created`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const openCreatedPr = async () => {
+    if (!createdPrUrl) return;
+    try {
+      await ipc.openGitHubUrl(createdPrUrl);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          Pull Request
+        </span>
+      </div>
+
+      {!isOpen ? (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={openForm}
+          className="self-start"
+          aria-label="Open PR form"
+        >
+          <GitPullRequest className="h-3.5 w-3.5" />
+          Open PR
+        </Button>
+      ) : (
+        <form className="flex flex-col gap-2 border rounded-md p-3 bg-muted/20" onSubmit={submit}>
+          <div className="flex flex-col gap-1">
+            <label htmlFor={titleInputId} className="text-xs text-muted-foreground">
+              Title
+            </label>
+            <Input
+              id={titleInputId}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="PR title"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <label htmlFor={baseInputId} className="text-xs text-muted-foreground">
+                Base branch
+              </label>
+              <Input
+                id={baseInputId}
+                value={base}
+                onChange={(e) => setBase(e.target.value)}
+                placeholder="Auto-detect if empty"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor={headInputId} className="text-xs text-muted-foreground">
+                Head branch
+              </label>
+              <Input
+                id={headInputId}
+                value={head}
+                onChange={(e) => setHead(e.target.value)}
+                placeholder="feature-branch"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label htmlFor={descriptionInputId} className="text-xs text-muted-foreground">
+              Description
+            </label>
+            <Textarea
+              id={descriptionInputId}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional PR description"
+            />
+          </div>
+
+          {!head.trim() && (
+            <p className="text-xs text-amber-300">
+              Could not detect the current branch. Enter the head branch to continue.
+            </p>
+          )}
+
+          {error && <p className="text-xs text-red-400 bg-red-950/30 rounded px-2 py-1">{error}</p>}
+
+          {createdPrUrl && (
+            <div className="text-xs rounded border border-emerald-800/60 bg-emerald-950/25 px-2 py-1.5 flex items-center justify-between gap-2">
+              <span className="truncate text-emerald-300">{createdPrUrl}</span>
+              <button
+                type="button"
+                onClick={openCreatedPr}
+                className="inline-flex items-center gap-1 text-emerald-200 hover:text-emerald-100 underline underline-offset-2"
+              >
+                Open
+                <ExternalLink className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <Button type="submit" size="sm" disabled={!canSubmit}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Creating…
+                </>
+              ) : (
+                "Create PR"
+              )}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={closeForm}>
+              Close
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {successToast && (
+        <div className="fixed right-4 bottom-4 z-50 px-3 py-2 text-xs rounded-md bg-emerald-950 text-emerald-100 border border-emerald-800 shadow-lg flex items-center gap-2">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          {successToast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ChangesPanel ──────────────────────────────────────────────────────────────
 
 export function ChangesPanel() {
@@ -245,13 +517,14 @@ export function ChangesPanel() {
   const { activeProjectId, projects } = useProjectStore();
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = projects.find((p) => p.id === activeProjectId);
+  const activeSessionTitle = activeSession?.title ?? null;
 
   const changes: FileChange[] = activeSessionId
     ? (sessionFileChanges[activeSessionId] ?? [])
     : [];
 
   return (
-    <div className="flex flex-col gap-4 p-3 overflow-y-auto h-full text-sm">
+    <div className="relative flex flex-col gap-4 p-3 overflow-y-auto h-full text-sm">
       {/* Session writes */}
       <div className="flex flex-col gap-2">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -278,6 +551,17 @@ export function ChangesPanel() {
       ) : (
         <p className="text-xs text-muted-foreground italic">No project path available for git diff.</p>
       )}
+
+      {activeProject?.path ? (
+        <>
+          <div className="border-t" />
+          <OpenPrSection
+            key={activeProject.path}
+            projectPath={activeProject.path}
+            sessionTitle={activeSessionTitle}
+          />
+        </>
+      ) : null}
     </div>
   );
 }
