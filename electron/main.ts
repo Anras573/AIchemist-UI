@@ -736,7 +736,7 @@ function registerHandlers(): void {  // ── Terminal ────────
   );
 
   // ── Sessions ─────────────────────────────────────────────────────────────────
-  handle(CH.CREATE_SESSION, (_event, payload: string | { projectId: string; providerOverride?: string }) => {
+  handle(CH.CREATE_SESSION, async (_event, payload: string | { projectId: string; providerOverride?: string }) => {
     // Backward-compat: older callers pass projectId as a string; newer ones
     // pass { projectId, providerOverride } to explicitly lock the session's
     // provider at creation time (e.g. from the split-button new-session menu).
@@ -748,15 +748,18 @@ function registerHandlers(): void {  // ── Terminal ────────
 
     // When the user explicitly picks a provider different from the project
     // default, we can't reuse project.config.model (it belongs to the other
-    // SDK). Anthropic/Ollama use known defaults; Copilot models are dynamic
-    // so we leave model null and let the runner fall back to the SDK default.
+    // SDK). Anthropic gets a known default; Copilot models are dynamic so we
+    // leave model null and let the runner fall back to the SDK default.
     let model: string | null;
     if (providerOverride && providerOverride !== project?.config.provider) {
-      model = provider === "anthropic"
-        ? "claude-sonnet-4-6"
-        : provider === "ollama"
-          ? "llama3.2"
-          : null;
+      if (provider === "anthropic") {
+        model = "claude-sonnet-4-6";
+      } else if (provider === "ollama") {
+        const models = await getProvider("ollama").listModels?.();
+        model = models?.[0]?.id ?? null;
+      } else {
+        model = null;
+      }
     } else {
       model = project?.config.model ?? null;
     }

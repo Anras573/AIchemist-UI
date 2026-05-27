@@ -72,7 +72,7 @@ function loadHistory(db: Database, sessionId: string, placeholderMessageId: stri
 async function runOllamaAgentTurn(params: AgentProviderParams): Promise<string> {
   const client = await loadClient();
   const history = loadHistory(params.db, params.sessionId, params.messageId);
-  const model = params.projectConfig.model?.trim() || "llama3.2";
+  const model = await resolveModel(client, params.projectConfig.model);
 
   const response = await client.chat({
     model,
@@ -104,8 +104,7 @@ async function runOllamaAgentTurn(params: AgentProviderParams): Promise<string> 
   return text;
 }
 
-export async function getOllamaModels(): Promise<Array<{ id: string; name: string }>> {
-  const client = await loadClient();
+async function listModels(client: OllamaClientLike): Promise<Array<{ id: string; name: string }>> {
   const list = await client.list();
   return (list.models ?? [])
     .map((m) => {
@@ -114,6 +113,20 @@ export async function getOllamaModels(): Promise<Array<{ id: string; name: strin
       return id ? { id, name } : null;
     })
     .filter((m): m is { id: string; name: string } => m !== null);
+}
+
+async function resolveModel(client: OllamaClientLike, configuredModel?: string): Promise<string> {
+  const explicit = configuredModel?.trim();
+  if (explicit) return explicit;
+  const discovered = await listModels(client);
+  const fallback = discovered[0]?.id;
+  if (fallback) return fallback;
+  throw new Error("No Ollama model configured or installed. Set a model in Project Settings or run `ollama pull <model>`.");
+}
+
+export async function getOllamaModels(): Promise<Array<{ id: string; name: string }>> {
+  const client = await loadClient();
+  return listModels(client);
 }
 
 export const ollamaProvider: AgentProvider = {

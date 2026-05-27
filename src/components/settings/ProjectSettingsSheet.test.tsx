@@ -59,6 +59,18 @@ describe("ProjectSettingsSheet", () => {
       await waitFor(() => expect(screen.getByDisplayValue("claude-opus-4-5")).toBeDefined());
       expect(screen.getByDisplayValue("Anthropic (Claude)")).toBeDefined();
     });
+
+    it("clears model when provider is changed", async () => {
+      vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(makeConfig({ model: "claude-sonnet-4-5" }));
+      renderSheet();
+      await screen.findByDisplayValue("claude-sonnet-4-5");
+
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "ollama" } });
+
+      await waitFor(() => {
+        expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("");
+      });
+    });
   });
 
   describe("Approval tab", () => {
@@ -162,4 +174,3 @@ describe("ProjectSettingsSheet", () => {
     });
   });
 });
-
