@@ -138,13 +138,13 @@ function GeneralTab({
             opt("ollama", "Ollama"),
             opt("acp", "ACP agent (subprocess)"),
           ]}
-          onChange={(v) =>
-            onChange(
-              v === config.provider
-                ? { provider: v }
-                : { provider: v, model: "" }
-            )
-          }
+          onChange={(v) => {
+            if (v !== config.provider) {
+              onChange({ provider: v, model: "" });
+              return;
+            }
+            onChange({ provider: v });
+          }}
         />
         {probes && (() => {
           const probe = probeFor(config.provider as "anthropic" | "copilot" | "acp" | "ollama");

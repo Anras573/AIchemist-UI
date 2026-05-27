@@ -18,6 +18,7 @@ import { resolveApproval, resolvePermissionChoice, getPendingApprovalData, addTo
 import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
 import { runAgentTurn, getProvider } from "./agent/runner";
 import { cleanupCopilotSession } from "./agent/copilot";
+import { OLLAMA_NO_MODELS_ERROR } from "./agent/ollama";
 import { listPullRequests, listIssues, createPullRequest, getCiStatus, getPullRequestContext } from "./github";
 import type {
   GitHubCreatePrArgs,
@@ -757,6 +758,9 @@ function registerHandlers(): void {  // ── Terminal ────────
       } else if (provider === "ollama") {
         const models = await getProvider("ollama").listModels?.();
         model = models?.[0]?.id ?? null;
+        if (!model) {
+          throw new Error(OLLAMA_NO_MODELS_ERROR);
+        }
       } else {
         model = null;
       }

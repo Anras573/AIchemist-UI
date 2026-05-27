@@ -31,6 +31,9 @@ interface OllamaClientLike {
   }): Promise<AsyncIterable<OllamaChatChunk> | { message?: { content?: string } }>;
 }
 
+export const OLLAMA_NO_MODELS_ERROR =
+  "No Ollama models found. Install a model with `ollama pull <model>` or configure one in Project Settings.";
+
 function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
   return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
 }
@@ -104,7 +107,7 @@ async function runOllamaAgentTurn(params: AgentProviderParams): Promise<string> 
   return text;
 }
 
-async function listModels(client: OllamaClientLike): Promise<Array<{ id: string; name: string }>> {
+async function listInstalledModels(client: OllamaClientLike): Promise<Array<{ id: string; name: string }>> {
   const list = await client.list();
   return (list.models ?? [])
     .map((m) => {
@@ -118,15 +121,15 @@ async function listModels(client: OllamaClientLike): Promise<Array<{ id: string;
 async function resolveModel(client: OllamaClientLike, configuredModel?: string): Promise<string> {
   const explicit = configuredModel?.trim();
   if (explicit) return explicit;
-  const discovered = await listModels(client);
+  const discovered = await listInstalledModels(client);
   const fallback = discovered[0]?.id;
   if (fallback) return fallback;
-  throw new Error("No Ollama model configured or installed. Set a model in Project Settings or run `ollama pull <model>`.");
+  throw new Error(OLLAMA_NO_MODELS_ERROR);
 }
 
 export async function getOllamaModels(): Promise<Array<{ id: string; name: string }>> {
   const client = await loadClient();
-  return listModels(client);
+  return listInstalledModels(client);
 }
 
 export const ollamaProvider: AgentProvider = {
