@@ -72,7 +72,7 @@ function loadHistory(db: Database, sessionId: string, placeholderMessageId: stri
     }));
 }
 
-async function runOllamaAgentTurn(params: AgentProviderParams): Promise<string> {
+export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<string> {
   const client = await loadClient();
   const history = loadHistory(params.db, params.sessionId, params.messageId);
   const model = await resolveModel(client, params.projectConfig.model);
@@ -130,6 +130,10 @@ async function resolveModel(client: OllamaClientLike, configuredModel?: string):
 export async function getOllamaModels(): Promise<Array<{ id: string; name: string }>> {
   const client = await loadClient();
   return listInstalledModels(client);
+}
+
+export function _resetOllamaClientForTests(): void {
+  clientPromise = null;
 }
 
 export const ollamaProvider: AgentProvider = {
