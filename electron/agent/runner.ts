@@ -6,6 +6,7 @@ import { createPlaceholderMessage, updateMessageContent, loadToolCallsForMessage
 import { claudeProvider } from "./claude";
 import { copilotProvider } from "./copilot";
 import { acpProvider } from "./acp";
+import { ollamaProvider } from "./ollama";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 
 // ── Provider registry ─────────────────────────────────────────────────────────
@@ -14,6 +15,7 @@ const PROVIDERS: Record<string, AgentProvider> = {
   anthropic: claudeProvider,
   copilot: copilotProvider,
   acp: acpProvider,
+  ollama: ollamaProvider,
 };
 
 /** Look up a provider by name. Throws for unknown providers. */

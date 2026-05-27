@@ -28,6 +28,7 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
   const { updateSessionModel } = useSessionStore();
   const [open, setOpen] = useState(false);
   const [copilotModels, setCopilotModels] = useState<ModelOption[]>([]);
+  const [ollamaModels, setOllamaModels] = useState<ModelOption[]>([]);
 
   // Provider is locked at session creation time. Only load Copilot models if
   // this session is a Copilot session — saves an IPC round trip for Claude
@@ -48,10 +49,27 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
       .catch(() => {/* Copilot not configured — silently hide the group */});
   }, [open, provider, copilotModels.length]);
 
+  useEffect(() => {
+    if (!open || provider !== "ollama" || ollamaModels.length > 0) return;
+    ipc.getOllamaModels()
+      .then((models) => {
+        setOllamaModels(
+          models.map((m) => ({
+            provider: "ollama",
+            model: m.id,
+            label: m.name,
+            logoProvider: "ollama",
+          }))
+        );
+      })
+      .catch(() => {/* Ollama not configured — silently hide the group */});
+  }, [open, provider, ollamaModels.length]);
+
   // Only show the group matching the session's locked provider.
   const visibleAnthropic = provider === "anthropic" ? ANTHROPIC_MODELS : [];
   const visibleCopilot = provider === "copilot" ? copilotModels : [];
-  const allModels = [...visibleAnthropic, ...visibleCopilot];
+  const visibleOllama = provider === "ollama" ? ollamaModels : [];
+  const allModels = [...visibleAnthropic, ...visibleCopilot, ...visibleOllama];
 
   const current =
     allModels.find((m) => m.provider === provider && m.model === model) ??
@@ -121,6 +139,25 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
           {visibleCopilot.length > 0 && (
             <ModelSelectorGroup heading="GitHub Copilot">
               {visibleCopilot.map((option) => {
+                const isActive = option.provider === provider && option.model === model;
+                return (
+                  <ModelSelectorItem
+                    key={option.model}
+                    value={`${option.label} ${option.provider}`}
+                    onSelect={() => handleSelect(option)}
+                  >
+                    <ModelSelectorLogo provider={option.logoProvider} />
+                    <ModelSelectorName>{option.label}</ModelSelectorName>
+                    {isActive && <span className="text-xs text-primary">✓</span>}
+                  </ModelSelectorItem>
+                );
+              })}
+            </ModelSelectorGroup>
+          )}
+
+          {visibleOllama.length > 0 && (
+            <ModelSelectorGroup heading="Ollama">
+              {visibleOllama.map((option) => {
                 const isActive = option.provider === provider && option.model === model;
                 return (
                   <ModelSelectorItem

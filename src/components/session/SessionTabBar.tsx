@@ -33,6 +33,8 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
       ? "Claude"
       : defaultProvider === "copilot"
         ? "Copilot"
+        : defaultProvider === "ollama"
+          ? "Ollama"
         : defaultProvider === "acp"
           ? "ACP"
           : null;
@@ -41,6 +43,8 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
       ? "anthropic"
       : defaultProvider === "copilot"
         ? "github-copilot"
+        : defaultProvider === "ollama"
+          ? "ollama"
         : null;
 
   const projectSessions = Object.values(sessions)
@@ -208,6 +212,14 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
               icon={<ModelSelectorLogo provider="github-copilot" className="size-3.5" />}
             />
             <ProviderMenuItem
+              provider="ollama"
+              probe={probes?.ollama}
+              onSelect={() => handleNewSession("ollama")}
+              isDefault={defaultProvider === "ollama"}
+              label="New Ollama Session"
+              icon={<ModelSelectorLogo provider="ollama" className="size-3.5" />}
+            />
+            <ProviderMenuItem
               provider="acp"
               probe={probes?.acp}
               onSelect={() => handleNewSession("acp")}
@@ -229,7 +241,7 @@ function ProviderMenuItem({
   label,
   icon,
 }: {
-  provider: "anthropic" | "copilot" | "acp";
+  provider: "anthropic" | "copilot" | "acp" | "ollama";
   probe: import("@/types").ProviderProbeResult | undefined;
   onSelect: () => void;
   isDefault: boolean;

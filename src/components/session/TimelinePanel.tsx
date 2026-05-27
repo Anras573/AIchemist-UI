@@ -247,7 +247,7 @@ const CompactionMarker = memo(function CompactionMarker({ event }: { event: Comp
 interface TimelinePanelProps {
   /** Called by Phase 4 when the user submits a message. */
   onSendMessage?: (text: string, oneshotSkills?: string[]) => void;
-  /** Called when the user clicks "Create new session" from the empty state. Optional provider override locks the new session to Claude or Copilot. */
+  /** Called when the user clicks "Create new session" from the empty state. Optional provider override locks the new session provider. */
   onNewSession?: (providerOverride?: string) => void;
 }
 
@@ -261,12 +261,12 @@ export function EmptyStateNewSession({
   onNewSession: (providerOverride?: string) => void;
   probes?: import("@/types").ProviderProbes | null;
 }) {
-  const isAvailable = (p: "anthropic" | "copilot" | "acp"): boolean => {
+  const isAvailable = (p: "anthropic" | "copilot" | "acp" | "ollama"): boolean => {
     if (!probes) return true; // still checking — keep enabled
     const probe = p === "acp" ? probes.acp : probes[p];
     return !probe || probe.ok;
   };
-  const reasonFor = (p: "anthropic" | "copilot" | "acp"): string | undefined => {
+  const reasonFor = (p: "anthropic" | "copilot" | "acp" | "ollama"): string | undefined => {
     if (!probes) return undefined;
     const probe = p === "acp" ? probes.acp : probes[p];
     return probe?.ok ? undefined : probe?.reason;
@@ -275,13 +275,15 @@ export function EmptyStateNewSession({
   const preferred =
     defaultProvider === "copilot"
       ? "copilot"
+      : defaultProvider === "ollama"
+        ? "ollama"
       : defaultProvider === "acp"
         ? "acp"
         : "anthropic";
-  const initial: "anthropic" | "copilot" | "acp" = isAvailable(preferred as "anthropic" | "copilot" | "acp")
-    ? (preferred as "anthropic" | "copilot" | "acp")
-    : (["anthropic", "copilot", "acp"] as const).find(isAvailable) ?? "anthropic";
-  const [selected, setSelected] = useState<"anthropic" | "copilot" | "acp">(initial);
+  const initial: "anthropic" | "copilot" | "acp" | "ollama" = isAvailable(preferred as "anthropic" | "copilot" | "acp" | "ollama")
+    ? (preferred as "anthropic" | "copilot" | "acp" | "ollama")
+    : (["anthropic", "copilot", "ollama", "acp"] as const).find(isAvailable) ?? "anthropic";
+  const [selected, setSelected] = useState<"anthropic" | "copilot" | "acp" | "ollama">(initial);
 
   // Probes arrive asynchronously after mount. If the initial pick (or a later
   // pick that has since gone unavailable) is no longer available, switch to
@@ -290,14 +292,14 @@ export function EmptyStateNewSession({
   useEffect(() => {
     if (!probes) return;
     if (isAvailable(selected)) return;
-    const fallback = (["anthropic", "copilot", "acp"] as const).find(isAvailable);
+    const fallback = (["anthropic", "copilot", "ollama", "acp"] as const).find(isAvailable);
     if (fallback && fallback !== selected) setSelected(fallback);
     // isAvailable is derived from `probes` which is in deps; selected is read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [probes, selected]);
 
   const renderRadio = (
-    p: "anthropic" | "copilot" | "acp",
+    p: "anthropic" | "copilot" | "acp" | "ollama",
     label: string,
     icon: React.ReactNode,
   ) => {
@@ -348,6 +350,7 @@ export function EmptyStateNewSession({
       >
         {renderRadio("anthropic", "Use Claude", <ModelSelectorLogo provider="anthropic" className="size-3.5" />)}
         {renderRadio("copilot", "Use Copilot", <ModelSelectorLogo provider="github-copilot" className="size-3.5" />)}
+        {renderRadio("ollama", "Use Ollama", <ModelSelectorLogo provider="ollama" className="size-3.5" />)}
         {renderRadio("acp", "Use ACP", <Cable className="size-3.5" />)}
       </div>
       <button

@@ -66,6 +66,7 @@ export const ipc = {
   answerQuestion: (questionId: string, answer: string) =>
     window.electronAPI.answerQuestion(questionId, answer),
   getCopilotModels: () => window.electronAPI.getCopilotModels(),
+  getOllamaModels: () => window.electronAPI.getOllamaModels(),
   getClaudeAgents: (projectPath: string) => window.electronAPI.getClaudeAgents(projectPath),
   getCopilotAgents: (projectPath: string) => window.electronAPI.getCopilotAgents(projectPath),
   githubCreatePr: (args: GitHubCreatePrArgs) => window.electronAPI.githubCreatePr(args),

@@ -107,13 +107,13 @@ function GeneralTab({
   probes: import("@/types").ProviderProbes | null;
 }) {
   const probeFor = (
-    p: "anthropic" | "copilot" | "acp",
+    p: "anthropic" | "copilot" | "acp" | "ollama",
   ): import("@/types").ProviderProbeResult | undefined => {
     if (!probes) return undefined;
     return p === "acp" ? probes.acp : probes[p];
   };
   const opt = (
-    value: "anthropic" | "copilot" | "acp",
+    value: "anthropic" | "copilot" | "acp" | "ollama",
     baseLabel: string,
   ) => {
     const probe = probeFor(value);
@@ -135,12 +135,13 @@ function GeneralTab({
           options={[
             opt("anthropic", "Anthropic (Claude)"),
             opt("copilot", "GitHub Copilot"),
+            opt("ollama", "Ollama"),
             opt("acp", "ACP agent (subprocess)"),
           ]}
           onChange={(v) => onChange({ provider: v })}
         />
         {probes && (() => {
-          const probe = probeFor(config.provider as "anthropic" | "copilot" | "acp");
+          const probe = probeFor(config.provider as "anthropic" | "copilot" | "acp" | "ollama");
           if (probe && !probe.ok) {
             return (
               <p className="text-xs text-destructive flex items-start gap-1">

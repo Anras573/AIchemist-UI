@@ -45,6 +45,7 @@ export const OPEN_GITHUB_URL        = "shell:open-github-url";
 export const AGENT_SEND             = "agent:send";
 export const APPROVE_TOOL_CALL      = "agent:approve-tool-call";
 export const GET_COPILOT_MODELS     = "agent:get-copilot-models";
+export const GET_OLLAMA_MODELS      = "agent:get-ollama-models";
 export const GET_CLAUDE_AGENTS      = "agent:get-claude-agents";
 export const GET_COPILOT_AGENTS     = "agent:get-copilot-agents";
 export const LIST_SKILLS            = "agent:list-skills";

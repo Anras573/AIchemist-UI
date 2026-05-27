@@ -1,8 +1,8 @@
 /**
  * Provider availability probes.
  *
- * Lightweight liveness checks for the three agent providers (Anthropic,
- * Copilot, ACP) so the renderer can disable provider options that are not
+ * Lightweight liveness checks for the agent providers (Anthropic,
+ * Copilot, Ollama, ACP) so the renderer can disable provider options that are not
  * usable on this machine (missing key, broken ACP subprocess, etc.) before
  * the user picks them.
  *
@@ -21,6 +21,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { copilotProvider } from "./copilot";
+import { ollamaProvider } from "./ollama";
 import { acpProbe } from "./acp";
 import type { AcpAgentConfig, ProjectConfig } from "../../src/types/index";
 import { getApiKey } from "../config";
@@ -37,6 +38,7 @@ export interface ProviderProbeResult {
 export interface ProviderProbes {
   anthropic: ProviderProbeResult;
   copilot: ProviderProbeResult;
+  ollama: ProviderProbeResult;
   /** Only present when a projectId / projectConfig was supplied to probeAll(). */
   acp?: ProviderProbeResult;
 }
@@ -44,6 +46,7 @@ export interface ProviderProbes {
 const CACHE_TTL_MS = 30_000;
 const ANTHROPIC_TIMEOUT_MS = 5_000;
 const COPILOT_TIMEOUT_MS = 5_000;
+const OLLAMA_TIMEOUT_MS = 5_000;
 const ACP_TIMEOUT_MS = 3_000;
 
 interface CacheEntry {
@@ -68,6 +71,15 @@ export function _setCopilotListModels(
   fn: (() => Promise<Array<{ id: string; name: string }>>) | null,
 ): void {
   copilotListModels = fn ?? (async () => (await copilotProvider.listModels?.()) ?? []);
+}
+
+/** Override Ollama listModels (defaults to ollamaProvider.listModels). */
+let ollamaListModels: () => Promise<Array<{ id: string; name: string }>> = async () =>
+  (await ollamaProvider.listModels?.()) ?? [];
+export function _setOllamaListModels(
+  fn: (() => Promise<Array<{ id: string; name: string }>>) | null,
+): void {
+  ollamaListModels = fn ?? (async () => (await ollamaProvider.listModels?.()) ?? []);
 }
 
 /** Override the ACP probe (defaults to `acpProbe` re-exported from acp.ts). */
@@ -278,6 +290,37 @@ export async function probeCopilot(opts?: { force?: boolean }): Promise<Provider
   }
 }
 
+export async function probeOllama(opts?: { force?: boolean }): Promise<ProviderProbeResult> {
+  const cached = cacheGet("ollama", opts?.force);
+  if (cached) return cached;
+
+  const start = Date.now();
+  try {
+    const models = await withTimeout(ollamaListModels(), OLLAMA_TIMEOUT_MS, "ollama probe");
+    const durationMs = Date.now() - start;
+    if (!models || models.length === 0) {
+      const result: ProviderProbeResult = {
+        ok: false,
+        reason: "Ollama returned no models (run `ollama pull <model>` first)",
+        durationMs,
+      };
+      cacheSet("ollama", result);
+      return result;
+    }
+    const result: ProviderProbeResult = { ok: true, durationMs };
+    cacheSet("ollama", result);
+    return result;
+  } catch (err) {
+    const result: ProviderProbeResult = {
+      ok: false,
+      reason: errMessage(err),
+      durationMs: Date.now() - start,
+    };
+    cacheSet("ollama", result);
+    return result;
+  }
+}
+
 export async function probeAcpForProject(
   projectPath: string,
   config: ProjectConfig,
@@ -313,9 +356,9 @@ export async function probeAcpForProject(
 /** Probe all providers in parallel; ACP is included only when `project` is supplied. */
 export async function probeAll(
   project?: { path: string; config: ProjectConfig },
-  opts?: { force?: boolean; disabled?: ReadonlySet<"anthropic" | "copilot" | "acp"> },
+  opts?: { force?: boolean; disabled?: ReadonlySet<"anthropic" | "copilot" | "acp" | "ollama"> },
 ): Promise<ProviderProbes> {
-  const disabled = opts?.disabled ?? new Set<"anthropic" | "copilot" | "acp">();
+  const disabled = opts?.disabled ?? new Set<"anthropic" | "copilot" | "acp" | "ollama">();
   const userDisabled = (): ProviderProbeResult => ({
     ok: false,
     reason: "Disabled in settings",
@@ -328,17 +371,20 @@ export async function probeAll(
   const copilotTask: Promise<ProviderProbeResult> = disabled.has("copilot")
     ? Promise.resolve(userDisabled())
     : probeCopilot(opts);
+  const ollamaTask: Promise<ProviderProbeResult> = disabled.has("ollama")
+    ? Promise.resolve(userDisabled())
+    : probeOllama(opts);
 
   if (!project) {
-    const [anthropic, copilot] = await Promise.all([anthropicTask, copilotTask]);
-    return { anthropic, copilot };
+    const [anthropic, copilot, ollama] = await Promise.all([anthropicTask, copilotTask, ollamaTask]);
+    return { anthropic, copilot, ollama };
   }
 
   const acpTask: Promise<ProviderProbeResult> = disabled.has("acp")
     ? Promise.resolve(userDisabled())
     : probeAcpForProject(project.path, project.config, opts);
-  const [anthropic, copilot, acp] = await Promise.all([anthropicTask, copilotTask, acpTask]);
-  return { anthropic, copilot, acp };
+  const [anthropic, copilot, ollama, acp] = await Promise.all([anthropicTask, copilotTask, ollamaTask, acpTask]);
+  return { anthropic, copilot, ollama, acp };
 }
 
 // ── Internals ─────────────────────────────────────────────────────────────────

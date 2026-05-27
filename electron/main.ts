@@ -748,11 +748,15 @@ function registerHandlers(): void {  // ── Terminal ────────
 
     // When the user explicitly picks a provider different from the project
     // default, we can't reuse project.config.model (it belongs to the other
-    // SDK). Anthropic has a known default list; Copilot models are dynamic
+    // SDK). Anthropic/Ollama use known defaults; Copilot models are dynamic
     // so we leave model null and let the runner fall back to the SDK default.
     let model: string | null;
     if (providerOverride && providerOverride !== project?.config.provider) {
-      model = provider === "anthropic" ? "claude-sonnet-4-6" : null;
+      model = provider === "anthropic"
+        ? "claude-sonnet-4-6"
+        : provider === "ollama"
+          ? "llama3.2"
+          : null;
     } else {
       model = project?.config.model ?? null;
     }
@@ -922,6 +926,7 @@ function registerHandlers(): void {  // ── Terminal ────────
     }
   });
   handle(CH.GET_COPILOT_MODELS, () => getProvider("copilot").listModels?.());
+  handle(CH.GET_OLLAMA_MODELS, () => getProvider("ollama").listModels?.());
   handle(CH.GET_CLAUDE_AGENTS, async (_event, projectPath: string) => {
     return getProvider("anthropic").listAgents?.(projectPath);
   });

@@ -13,7 +13,7 @@ Built with **Electron**, **React 19**, and **TypeScript**.
 | Build tool | electron-vite |
 | Backend (main process) | Node.js / TypeScript |
 | Database | SQLite via better-sqlite3 |
-| AI | Anthropic Claude, GitHub Copilot |
+| AI | Anthropic Claude, GitHub Copilot, Ollama |
 | Package manager | bun |
 
 ## Project Structure
@@ -76,6 +76,7 @@ Place API keys in `~/.aichemist/.env` — loaded at startup:
 | `ANTHROPIC_DEFAULT_OPUS_MODEL` | Override any model ID containing `"opus"` |
 | `OPENAI_API_KEY` | OpenAI key |
 | `GITHUB_TOKEN` | GitHub Copilot key |
+| `OLLAMA_HOST` | Ollama server URL (defaults to local daemon) |
 | `CLAUDE_CODE_PATH` | Explicit path to the `claude` CLI binary |
 
 ## Recommended IDE Setup

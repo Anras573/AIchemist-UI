@@ -393,6 +393,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                   >
                     <option value="anthropic">Anthropic (Claude)</option>
                     <option value="copilot">GitHub Copilot</option>
+                    <option value="ollama">Ollama</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
