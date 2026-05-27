@@ -306,7 +306,14 @@ export async function listIssues(
         html_url: issue.html_url,
         created_at: issue.created_at,
         updated_at: issue.updated_at,
-        labels: issue.labels?.map((label) => typeof label === "string" ? label : label.name),
+        labels: (issue.labels || [])
+          .map((label) => {
+            if (typeof label === "string") return label;
+            if (typeof label?.name === "string") return label.name;
+            return null;
+          })
+          .filter((l) => l !== null)
+          .slice(0, 20),
       }));
     return { issues };
   } catch (err) {
