@@ -110,7 +110,7 @@ export async function getOllamaModels(): Promise<Array<{ id: string; name: strin
   return (list.models ?? [])
     .map((m) => {
       const id = (m.model ?? m.name ?? "").trim();
-      const name = (m.name ?? m.model ?? "").trim() || id;
+      const name = id;
       return id ? { id, name } : null;
     })
     .filter((m): m is { id: string; name: string } => m !== null);

@@ -301,7 +301,7 @@ export async function probeOllama(opts?: { force?: boolean }): Promise<ProviderP
     if (!models || models.length === 0) {
       const result: ProviderProbeResult = {
         ok: false,
-        reason: "Ollama returned no models (run `ollama pull <model>` first)",
+        reason: "Ollama returned no models (ensure at least one model is available)",
         durationMs,
       };
       cacheSet("ollama", result);
