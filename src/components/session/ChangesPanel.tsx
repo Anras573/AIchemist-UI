@@ -297,14 +297,18 @@ function OpenPrSection({
           return;
         }
 
-        const [context, currentBranch] = await Promise.all([
-          ipc.githubGetPrContext({ projectPath }),
-          ipc.getGitBranch(projectPath),
-        ]);
+        const context = await ipc.githubGetPrContext({ projectPath });
         if (cancelled) return;
         setHasGitHubRemote(context.hasRemote);
         setDefaultBaseBranch(context.defaultBase);
-        setDefaultHeadBranch(currentBranch);
+
+        if (context.hasRemote) {
+          const currentBranch = await ipc.getGitBranch(projectPath);
+          if (cancelled) return;
+          setDefaultHeadBranch(currentBranch);
+        } else {
+          setDefaultHeadBranch(null);
+        }
       } catch {
         if (cancelled) return;
         setHasGitHubToken(false);
