@@ -6,7 +6,7 @@ import type { ProjectConfig } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 
 function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return {

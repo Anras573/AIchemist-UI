@@ -11,7 +11,7 @@ import type { ProjectConfig, ApprovalRule, ApprovalPolicy, ToolCategory } from "
 
 type Tab = "general" | "approval";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
-const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "General" },

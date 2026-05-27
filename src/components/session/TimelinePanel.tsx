@@ -48,6 +48,7 @@ import {
 } from "@/components/session/SlashCommandPopover";
 import { QuestionCard } from "./QuestionCard";
 import { useIpc } from "@/lib/ipc";
+import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 
 const EMPTY_COMPACTIONS: CompactionEvent[] = [];
 
@@ -529,7 +530,8 @@ function InputBarInner({
   const { projects, activeProjectId } = useProjectStore();
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
-  const skillsSupported = activeSession?.provider !== "acp" && activeSession?.provider !== "ollama";
+  const effectiveProvider = useActiveSessionProvider();
+  const skillsSupported = effectiveProvider !== "acp" && effectiveProvider !== "ollama";
 
   const [gitBranch, setGitBranch] = useState<string | null>(null);
 
