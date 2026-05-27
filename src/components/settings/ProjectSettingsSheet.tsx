@@ -11,6 +11,7 @@ import type { ProjectConfig, ApprovalRule, ApprovalPolicy, ToolCategory } from "
 
 type Tab = "general" | "approval";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "General" },
@@ -140,7 +141,10 @@ function GeneralTab({
           ]}
           onChange={(v) => {
             if (v !== config.provider) {
-              onChange({ provider: v, model: "" });
+              onChange({
+                provider: v,
+                model: v === "anthropic" ? DEFAULT_ANTHROPIC_MODEL : "",
+              });
               return;
             }
             onChange({ provider: v });
@@ -378,7 +382,15 @@ export function ProjectSettingsSheet({ projectId, onClose }: ProjectSettingsShee
     setSaveStatus("saving");
     setSaveError("");
     try {
-      await ipc.saveProjectConfig(projectId, config);
+      const normalizedConfig =
+        config.provider === "anthropic" && !config.model.trim()
+          ? { ...config, model: DEFAULT_ANTHROPIC_MODEL }
+          : config;
+      if (config.provider === "anthropic" && !config.model.trim()) {
+        setConfig(normalizedConfig);
+      }
+
+      await ipc.saveProjectConfig(projectId, normalizedConfig);
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2500);
     } catch (e) {
