@@ -146,6 +146,21 @@ describe("SkillsPanel", () => {
     });
   });
 
+  it("shows an unavailable message for Ollama sessions without loading skills", async () => {
+    setupStores();
+    useSessionStore.getState().addSession(makeSession({
+      id: "sess-ollama",
+      provider: "ollama",
+      model: "llama3.2",
+    }));
+    useSessionStore.getState().setActiveSession("sess-ollama");
+
+    renderWithProviders(<SkillsPanel />);
+
+    expect(await screen.findByText(/skills are not available for ollama sessions/i)).toBeInTheDocument();
+    expect(window.electronAPI.listSkills).not.toHaveBeenCalled();
+  });
+
   it("filters skills by source when a filter chip is toggled off", async () => {
     const user = userEvent.setup();
     setupStores();

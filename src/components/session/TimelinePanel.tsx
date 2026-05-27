@@ -529,6 +529,7 @@ function InputBarInner({
   const { projects, activeProjectId } = useProjectStore();
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
+  const skillsSupported = activeSession?.provider !== "acp" && activeSession?.provider !== "ollama";
 
   const [gitBranch, setGitBranch] = useState<string | null>(null);
 
@@ -547,13 +548,21 @@ function InputBarInner({
 
   // Load skills lazily when the user first types "/"
   const ensureSkillsLoaded = useCallback(() => {
-    if (skills !== null || loadingSkills || !activeProject?.path) return;
+    if (skills !== null || loadingSkills || !activeProject?.path || !skillsSupported) return;
     setLoadingSkills(true);
     ipc.listSkills(activeProject.path)
       .then(setSkills)
       .catch(() => setSkills([]))
       .finally(() => setLoadingSkills(false));
-  }, [skills, loadingSkills, activeProject?.path]);
+  }, [skills, loadingSkills, activeProject?.path, ipc, skillsSupported]);
+
+  useEffect(() => {
+    if (!skillsSupported) {
+      setSkills([]);
+      setSlashBadges([]);
+      setLoadingSkills(false);
+    }
+  }, [skillsSupported]);
 
   // Watch textarea value for slash trigger
   const textValue = controller.textInput.value;
@@ -571,8 +580,8 @@ function InputBarInner({
   }, [textValue, ensureSkillsLoaded]);
 
   const filteredItems = useMemo(
-    () => buildSlashItems(slashQuery, skills ?? []),
-    [slashQuery, skills]
+    () => buildSlashItems(slashQuery, skillsSupported ? (skills ?? []) : []),
+    [slashQuery, skills, skillsSupported]
   );
 
   // Select an item from the popover
@@ -586,6 +595,7 @@ function InputBarInner({
       controller.textInput.setInput(stripped);
 
       if (item.type === "skill") {
+        if (!skillsSupported) return;
         setSlashBadges((prev) =>
           prev.some((b) => b.name === item.skill.name) ? prev : [...prev, item.skill]
         );
@@ -615,7 +625,7 @@ function InputBarInner({
         }
       }
     },
-    [controller, onNewSession, activeSessionId, clearSessionMessages, skills]
+    [controller, onNewSession, activeSessionId, clearSessionMessages, skills, skillsSupported]
   );
 
   // Keyboard navigation while popover is open (capture phase so we beat the textarea)
