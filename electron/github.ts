@@ -238,6 +238,7 @@ function mapPr(pr: {
   updated_at: string;
   head: { ref: string };
   base: { ref: string };
+  user?: { login: string };
 }): GitHubPR {
   return {
     id: pr.id,
@@ -250,6 +251,7 @@ function mapPr(pr: {
     updated_at: pr.updated_at,
     head_ref: pr.head.ref,
     base_ref: pr.base.ref,
+    author: pr.user?.login,
   };
 }
 
@@ -304,6 +306,7 @@ export async function listIssues(
         html_url: issue.html_url,
         created_at: issue.created_at,
         updated_at: issue.updated_at,
+        labels: issue.labels?.map((label) => typeof label === "string" ? label : label.name),
       }));
     return { issues };
   } catch (err) {
