@@ -499,3 +499,17 @@ The `LIST_DIRECTORY` IPC handler in `main.ts` applies two safeguards before retu
 2. **`MAX_DIR_ENTRIES = 500`** — if more than 500 entries remain after filtering, the list is truncated and `{ entries, truncated: true }` is returned. The caller (agent tool) should surface this to the model so it doesn't assume the listing is complete.
 
 Always check the `truncated` flag in any code that consumes `LIST_DIRECTORY` results.
+
+## Code Review Lessons
+
+> Extracted from PR #23 (Add Ollama as a native chat-only provider)
+
+- When adding a provider to `ProjectSettingsSheet`, reset `model` to a provider-appropriate default whenever the provider field changes — never preserve the previous provider's model string in the new provider's config.
+- Never hardcode an Ollama model name (e.g. `llama3.2`) — always resolve from `listModels()` at session/config creation time; no Ollama model is guaranteed to be installed.
+- Chat-only providers (Ollama) must gate skills, agents, and slash commands via `effectiveProvider` (`session.provider ?? project.config.provider`), not just `session.provider` — legacy `null`-provider sessions inherit the project provider and must be caught.
+- Apply chat-only gating on both sides of the IPC boundary — the `AGENT_SEND` handler in `main.ts` must strip `skills`/`agent` for Ollama, not just the renderer hooks.
+- Use `null` as the "not yet loaded" sentinel for the `skills` array; `[]` means "empty list" and blocks `ensureSkillsLoaded` from re-fetching after switching back to a supported provider.
+- `defaultProjectConfig` and `ProjectConfigSchema.model` must stay in sync — Zod defaults are provider-agnostic, so apply provider-aware defaults post-parse in `parseProjectConfig`.
+- When wiring a new provider into global settings (`AICHEMIST_DEFAULT_PROVIDER`), also wire it through to `defaultProjectConfig` and `addProject` in the same commit.
+- Local error/loading state (`createError`, model caches, skills cache) must be cleared when its scoping context changes — add a `useEffect` keyed on `projectId`/`activeProjectId`/`sessionId` at the same time the state is introduced.
+- New provider runtimes need focused unit tests for the full turn execution path (history, streaming deltas, model fallback, client construction) — probe/availability tests alone are not sufficient.

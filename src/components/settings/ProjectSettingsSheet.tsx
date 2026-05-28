@@ -11,6 +11,7 @@ import type { ProjectConfig, ApprovalRule, ApprovalPolicy, ToolCategory } from "
 
 type Tab = "general" | "approval";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "General" },
@@ -107,13 +108,13 @@ function GeneralTab({
   probes: import("@/types").ProviderProbes | null;
 }) {
   const probeFor = (
-    p: "anthropic" | "copilot" | "acp",
+    p: "anthropic" | "copilot" | "acp" | "ollama",
   ): import("@/types").ProviderProbeResult | undefined => {
     if (!probes) return undefined;
     return p === "acp" ? probes.acp : probes[p];
   };
   const opt = (
-    value: "anthropic" | "copilot" | "acp",
+    value: "anthropic" | "copilot" | "acp" | "ollama",
     baseLabel: string,
   ) => {
     const probe = probeFor(value);
@@ -135,12 +136,22 @@ function GeneralTab({
           options={[
             opt("anthropic", "Anthropic (Claude)"),
             opt("copilot", "GitHub Copilot"),
+            opt("ollama", "Ollama (chat only)"),
             opt("acp", "ACP agent (subprocess)"),
           ]}
-          onChange={(v) => onChange({ provider: v })}
+          onChange={(v) => {
+            if (v !== config.provider) {
+              onChange({
+                provider: v,
+                model: v === "anthropic" ? DEFAULT_ANTHROPIC_MODEL : "",
+              });
+              return;
+            }
+            onChange({ provider: v });
+          }}
         />
         {probes && (() => {
-          const probe = probeFor(config.provider as "anthropic" | "copilot" | "acp");
+          const probe = probeFor(config.provider as "anthropic" | "copilot" | "acp" | "ollama");
           if (probe && !probe.ok) {
             return (
               <p className="text-xs text-destructive flex items-start gap-1">
@@ -158,9 +169,14 @@ function GeneralTab({
           id="ps-model"
           value={config.model}
           onChange={(e) => onChange({ model: e.target.value })}
-          placeholder="e.g. claude-sonnet-4-5"
+          placeholder="e.g. claude-sonnet-4-6"
           className="font-mono text-sm"
         />
+        {config.provider === "ollama" && (
+          <p className="text-xs text-muted-foreground">
+            Ollama sessions are currently chat-only in AIchemist. Skills, MCP servers, and approval-gated tools are unavailable.
+          </p>
+        )}
       </FieldRow>
       {config.provider === "acp" && <AcpAgentFields config={config} onChange={onChange} />}
     </div>
@@ -287,6 +303,17 @@ function ApprovalTab({
     onChange({ approval_rules: rules });
   }
 
+  if (config.provider === "ollama") {
+    return (
+      <div className="flex flex-col gap-3 rounded-md border border-dashed px-4 py-3 text-sm">
+        <p className="font-medium">Approval rules do not apply to Ollama sessions yet.</p>
+        <p className="text-xs text-muted-foreground">
+          AIchemist currently uses Ollama in chat-only mode, so tool approvals and MCP-backed tools are unavailable for this provider.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-5">
       <FieldRow>
@@ -371,7 +398,15 @@ export function ProjectSettingsSheet({ projectId, onClose }: ProjectSettingsShee
     setSaveStatus("saving");
     setSaveError("");
     try {
-      await ipc.saveProjectConfig(projectId, config);
+      const normalizedConfig =
+        config.provider === "anthropic" && !config.model.trim()
+          ? { ...config, model: DEFAULT_ANTHROPIC_MODEL }
+          : config;
+      if (config.provider === "anthropic" && !config.model.trim()) {
+        setConfig(normalizedConfig);
+      }
+
+      await ipc.saveProjectConfig(projectId, normalizedConfig);
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2500);
     } catch (e) {

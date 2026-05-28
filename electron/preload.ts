@@ -56,6 +56,7 @@ export interface ElectronAPI {
   approveToolCall: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string; optionId?: string | null }) => Promise<void>;
   answerQuestion: (questionId: string, answer: string) => Promise<void>;
   getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
+  getOllamaModels: () => Promise<Array<{ id: string; name: string }>>;
   getClaudeAgents: (projectPath: string) => Promise<Array<{ name: string; description: string; model?: string }>>;
   getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
   githubCreatePr: (args: import("../src/types").GitHubCreatePrArgs) =>
@@ -154,6 +155,7 @@ const api: ElectronAPI = {
   answerQuestion: (questionId, answer) =>
     ipcRenderer.invoke(CH.ANSWER_QUESTION, { questionId, answer }),
   getCopilotModels: () => ipcRenderer.invoke(CH.GET_COPILOT_MODELS),
+  getOllamaModels: () => ipcRenderer.invoke(CH.GET_OLLAMA_MODELS),
   getClaudeAgents: (projectPath) => ipcRenderer.invoke(CH.GET_CLAUDE_AGENTS, projectPath),
   getCopilotAgents: (projectPath) => ipcRenderer.invoke(CH.GET_COPILOT_AGENTS, projectPath),
   githubCreatePr: (args) => ipcRenderer.invoke(CH.GITHUB_CREATE_PR, args),

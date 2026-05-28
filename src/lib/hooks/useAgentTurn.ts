@@ -61,9 +61,17 @@ export function useAgentTurn() {
       clearLiveToolCalls(activeSessionId);
       const sessionIdAtStart = activeSessionId;
       const activeAgent = sessionAgents[activeSessionId] ?? undefined;
+      const effectiveProvider = session.provider ?? project.config.provider;
+      const supportsOneShotSkills = effectiveProvider !== "acp" && effectiveProvider !== "ollama";
+      const supportsAgent = effectiveProvider !== "acp" && effectiveProvider !== "ollama";
 
       try {
-        await ipc.agentSend({ sessionId: activeSessionId, prompt: text, agent: activeAgent, oneshotSkills });
+        await ipc.agentSend({
+          sessionId: activeSessionId,
+          prompt: text,
+          agent: supportsAgent ? activeAgent : undefined,
+          oneshotSkills: supportsOneShotSkills ? oneshotSkills : undefined,
+        });
         clearLiveToolCalls(sessionIdAtStart);
         clearPendingApprovals(sessionIdAtStart);
         // Status is updated via session:status push event from runner
@@ -92,4 +100,3 @@ export function useAgentTurn() {
 
   return { sendMessage };
 }
-

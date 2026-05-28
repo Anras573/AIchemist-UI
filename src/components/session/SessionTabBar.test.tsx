@@ -119,6 +119,20 @@ describe("SessionTabBar", () => {
     expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "copilot");
   });
 
+  it("calls ipc.createSession with 'ollama' when New Ollama Session is picked", async () => {
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([]);
+    vi.mocked(window.electronAPI.createSession).mockResolvedValue(
+      makeSession({ id: "sess-new", title: "New session" })
+    );
+
+    renderWithProviders(<SessionTabBar projectId="proj-1" />);
+
+    await userEvent.click(screen.getByLabelText("New session with specific provider"));
+    await userEvent.click(await screen.findByText("New Ollama Session"));
+
+    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "ollama");
+  });
+
   it("reflects session status via StatusDot aria-label", async () => {
     vi.mocked(window.electronAPI.listSessions).mockResolvedValue([
       makeSession({ id: "sess-1", title: "Running session", status: "running" }),

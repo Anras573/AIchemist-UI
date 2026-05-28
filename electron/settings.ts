@@ -16,7 +16,7 @@ export interface SettingsMap {
   AICHEMIST_THEME: string;
   /**
    * Comma-separated list of providers the user has explicitly disabled
-   * app-wide. Values: any of "anthropic", "copilot", "acp". Empty string
+   * app-wide. Values: any of "anthropic", "copilot", "acp", "ollama". Empty string
    * means none disabled. The probe handler treats these as
    * `{ ok: false, reason: "Disabled in settings" }` without running the
    * actual probe, so the new-session UI greys them out everywhere.

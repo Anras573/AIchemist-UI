@@ -59,6 +59,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     approveToolCall: vi.fn().mockResolvedValue(undefined),
     answerQuestion: vi.fn().mockResolvedValue(undefined),
     getCopilotModels: vi.fn().mockResolvedValue([]),
+    getOllamaModels: vi.fn().mockResolvedValue([]),
     getClaudeAgents: vi.fn().mockResolvedValue([]),
     getCopilotAgents: vi.fn().mockResolvedValue([]),
     githubCreatePr: vi.fn().mockImplementation(githubStubResponse),
@@ -72,6 +73,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     probeProviders: vi.fn().mockResolvedValue({
       anthropic: { ok: true },
       copilot: { ok: true },
+      ollama: { ok: true },
     }),
     updateSessionDisabledMcp: vi.fn().mockResolvedValue([]),
     mcpReadConfig: vi.fn().mockResolvedValue({}),

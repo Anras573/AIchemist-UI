@@ -3,7 +3,7 @@
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
-export type Provider = "anthropic" | "copilot" | "acp" | string;
+export type Provider = "anthropic" | "copilot" | "acp" | "ollama" | string;
 
 // ─── Provider availability ───────────────────────────────────────────────────
 
@@ -16,6 +16,7 @@ export interface ProviderProbeResult {
 export interface ProviderProbes {
   anthropic: ProviderProbeResult;
   copilot: ProviderProbeResult;
+  ollama: ProviderProbeResult;
   /** Per-project — only present when the IPC call passed a projectId. */
   acp?: ProviderProbeResult;
 }
