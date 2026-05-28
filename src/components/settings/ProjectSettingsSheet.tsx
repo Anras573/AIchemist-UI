@@ -169,7 +169,7 @@ function GeneralTab({
           id="ps-model"
           value={config.model}
           onChange={(e) => onChange({ model: e.target.value })}
-          placeholder="e.g. claude-sonnet-4-5"
+          placeholder="e.g. claude-sonnet-4-6"
           className="font-mono text-sm"
         />
         {config.provider === "ollama" && (
