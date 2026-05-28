@@ -766,6 +766,16 @@ function registerHandlers(): void {  // ── Terminal ────────
       }
     } else {
       model = project?.config.model ?? null;
+      // If the effective provider is Ollama and no model is set (e.g. the
+      // project was saved with Ollama as default but model was left blank),
+      // resolve to an installed model or surface a clear error immediately.
+      if (provider === "ollama" && !model) {
+        const models = await getProvider("ollama").listModels?.();
+        model = models?.[0]?.id ?? null;
+        if (!model) {
+          throw new Error(OLLAMA_NO_MODELS_ERROR);
+        }
+      }
     }
 
     return createSession(db, projectId, provider, model);
