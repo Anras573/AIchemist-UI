@@ -5,6 +5,7 @@ import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { WithTooltip } from "@/components/ui/with-tooltip";
+import { Badge } from "@/components/ui/badge";
 import type { GitHubPR, GitHubIssue } from "@/types";
 
 interface GitHubPanelProps {}
@@ -12,6 +13,66 @@ interface GitHubPanelProps {}
 interface GitHubData {
   prs: GitHubPR[];
   issues: GitHubIssue[];
+}
+
+type CiBadgeState = "success" | "failure" | "pending" | "unknown";
+
+interface CiBadgeEntry {
+  state: CiBadgeState;
+  error?: string;
+}
+
+const CI_BADGE_META: Record<
+  CiBadgeState,
+  { label: string; symbol: string; className: string }
+> = {
+  success: {
+    label: "passing",
+    symbol: "✓",
+    className:
+      "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
+  failure: {
+    label: "failing",
+    symbol: "✗",
+    className:
+      "border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400",
+  },
+  pending: {
+    label: "pending",
+    symbol: "●",
+    className:
+      "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  unknown: {
+    label: "unknown",
+    symbol: "—",
+    className:
+      "border-border bg-muted text-muted-foreground",
+  },
+};
+
+function isGitHubProvider(
+  provider: string | null
+): provider is "anthropic" | "copilot" | null {
+  return provider === null || provider === "anthropic" || provider === "copilot";
+}
+
+function normalizeCiState(rawState: string | undefined): CiBadgeState {
+  switch (rawState) {
+    case "success":
+    case "failure":
+    case "pending":
+    case "unknown":
+      return rawState;
+    default:
+      return "unknown";
+  }
+}
+
+function getCiCacheKey(pr: Pick<GitHubPR, "head_sha" | "number">): string {
+  const headSha = pr.head_sha?.trim();
+  return headSha ? headSha : `pr:${pr.number}`;
 }
 
 function mapGitHubError(rawError: unknown): string {
@@ -53,18 +114,95 @@ export function GitHubPanel({}: GitHubPanelProps) {
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const provider = useActiveSessionProvider();
+  const githubAvailable = isGitHubProvider(provider);
   const [data, setData] = useState<GitHubData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ciByKey, setCiByKey] = useState<Record<string, CiBadgeEntry>>({});
+  const [ciLoadingByKey, setCiLoadingByKey] = useState<Record<string, boolean>>({});
   const requestIdRef = useRef(0);
+  const ciGenerationRef = useRef(0);
+  const ciRequestIdRef = useRef(0);
+  const ciLatestRequestByKeyRef = useRef<Record<string, number>>({});
+
+  const resetCiState = useCallback(() => {
+    ciGenerationRef.current += 1;
+    ciLatestRequestByKeyRef.current = {};
+    setCiByKey({});
+    setCiLoadingByKey({});
+  }, []);
+
+  const fetchCiStatus = useCallback(
+    async (pr: GitHubPR, options?: { force?: boolean }) => {
+      if (!activeProject || !githubAvailable) return;
+
+      const key = getCiCacheKey(pr);
+      if (!options?.force && (ciByKey[key] || ciLoadingByKey[key])) return;
+
+      const generation = ciGenerationRef.current;
+      const requestId = ++ciRequestIdRef.current;
+      ciLatestRequestByKeyRef.current[key] = requestId;
+      setCiLoadingByKey((prev) => ({ ...prev, [key]: true }));
+
+      try {
+        const result = await ipc.githubGetCiStatus(
+          pr.head_sha
+            ? { projectPath: activeProject.path, ref: pr.head_sha }
+            : { projectPath: activeProject.path, prNumber: pr.number }
+        );
+
+        if (
+          generation !== ciGenerationRef.current ||
+          ciLatestRequestByKeyRef.current[key] !== requestId
+        ) {
+          return;
+        }
+
+        const nextEntry: CiBadgeEntry =
+          "status" in result
+            ? { state: normalizeCiState(result.status.state) }
+            : { state: "unknown", error: mapGitHubError(result.error) };
+        setCiByKey((prev) => ({ ...prev, [key]: nextEntry }));
+      } catch (err) {
+        if (
+          generation !== ciGenerationRef.current ||
+          ciLatestRequestByKeyRef.current[key] !== requestId
+        ) {
+          return;
+        }
+
+        setCiByKey((prev) => ({
+          ...prev,
+          [key]: { state: "unknown", error: mapGitHubError(err) },
+        }));
+      } finally {
+        if (
+          generation !== ciGenerationRef.current ||
+          ciLatestRequestByKeyRef.current[key] !== requestId
+        ) {
+          return;
+        }
+
+        setCiLoadingByKey((prev) => {
+          if (!(key in prev)) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
+    },
+    [activeProject, ciByKey, ciLoadingByKey, githubAvailable, ipc]
+  );
 
   const fetchData = useCallback(async () => {
     const requestId = ++requestIdRef.current;
     if (!activeProject) return;
-    if (provider && provider !== "anthropic" && provider !== "copilot") return;
+    if (!githubAvailable) return;
 
+    setData(null);
     setIsLoading(true);
     setError(null);
+    resetCiState();
 
     try {
       const [prsResult, issuesResult] = await Promise.all([
@@ -95,7 +233,7 @@ export function GitHubPanel({}: GitHubPanelProps) {
       if (requestId !== requestIdRef.current) return;
       setIsLoading(false);
     }
-  }, [activeProject, ipc, provider]);
+  }, [activeProject, githubAvailable, ipc, resetCiState]);
 
   const openGitHubUrl = useCallback(
     async (url: string) => {
@@ -112,7 +250,24 @@ export function GitHubPanel({}: GitHubPanelProps) {
     fetchData();
   }, [fetchData]);
 
-  if (provider && provider !== "anthropic" && provider !== "copilot") {
+  useEffect(() => {
+    if (!data?.prs.length || !githubAvailable) return;
+
+    data.prs.forEach((pr) => {
+      const key = getCiCacheKey(pr);
+      if (ciByKey[key] || ciLoadingByKey[key]) return;
+      void fetchCiStatus(pr);
+    });
+  }, [ciByKey, ciLoadingByKey, data?.prs, fetchCiStatus, githubAvailable]);
+
+  useEffect(() => {
+    return () => {
+      requestIdRef.current += 1;
+      ciGenerationRef.current += 1;
+    };
+  }, []);
+
+  if (!githubAvailable) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs px-3 text-center">
         <GitBranch className="h-8 w-8 opacity-30" />
@@ -199,39 +354,79 @@ export function GitHubPanel({}: GitHubPanelProps) {
         </div>
         {hasPRs ? (
           <div className="space-y-2">
-            {data.prs.map((pr) => (
-              <button
-                key={pr.id}
-                type="button"
-                onClick={() => {
-                  void openGitHubUrl(pr.html_url);
-                }}
-                className="w-full text-left p-2.5 rounded-sm border border-transparent hover:border-border hover:bg-muted/50 transition-all group"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate group-hover:underline">
-                      {pr.title}
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-wrap mt-1 text-xs text-muted-foreground">
-                      {pr.author && (
-                        <span>by {pr.author}</span>
-                      )}
-                      {pr.head_ref && (
-                        <span className="inline-flex items-center gap-0.5">
-                          <GitBranch className="h-3 w-3" />
-                          {pr.head_ref}
-                        </span>
-                      )}
-                      <span className="px-1.5 py-0.5 rounded bg-muted text-xs font-mono">
-                        #{pr.number}
-                      </span>
+            {data.prs.map((pr) => {
+              const ciKey = getCiCacheKey(pr);
+              const ciEntry = ciByKey[ciKey] ?? { state: "unknown" as const };
+              const ciMeta = CI_BADGE_META[ciEntry.state];
+              const ciLoading = ciLoadingByKey[ciKey] ?? false;
+              const ciLabel = ciEntry.error
+                ? `CI ${ciMeta.label}: ${ciEntry.error}`
+                : `CI ${ciMeta.label}`;
+
+              return (
+                <div
+                  key={pr.id}
+                  className="w-full p-2.5 rounded-sm border border-transparent hover:border-border hover:bg-muted/50 transition-all group"
+                >
+                  <div className="flex items-start gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void openGitHubUrl(pr.html_url);
+                      }}
+                      className="min-w-0 flex-1 text-left"
+                      aria-label={`Open pull request #${pr.number}: ${pr.title}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate group-hover:underline">
+                            {pr.title}
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-wrap mt-1 text-xs text-muted-foreground">
+                            {pr.author && (
+                              <span>by {pr.author}</span>
+                            )}
+                            {pr.head_ref && (
+                              <span className="inline-flex items-center gap-0.5">
+                                <GitBranch className="h-3 w-3" />
+                                {pr.head_ref}
+                              </span>
+                            )}
+                            <span className="px-1.5 py-0.5 rounded bg-muted text-xs font-mono">
+                              #{pr.number}
+                            </span>
+                          </div>
+                        </div>
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity mt-1" />
+                      </div>
+                    </button>
+                    <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
+                      <Badge
+                        variant="outline"
+                        className={cn("capitalize", ciMeta.className)}
+                        aria-label={ciLabel}
+                      >
+                        <span aria-hidden="true">{ciMeta.symbol}</span>
+                        <span>{ciMeta.label}</span>
+                      </Badge>
+                      <WithTooltip label={`Refresh CI status for PR #${pr.number}`}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void fetchCiStatus(pr, { force: true });
+                          }}
+                          disabled={ciLoading}
+                          className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                          aria-label={`Refresh CI status for PR #${pr.number}`}
+                        >
+                          <RefreshCw className={cn("h-3.5 w-3.5", ciLoading && "animate-spin")} />
+                        </button>
+                      </WithTooltip>
                     </div>
                   </div>
-                  <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity mt-1" />
                 </div>
-              </button>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-xs text-muted-foreground py-2">No open pull requests</div>
