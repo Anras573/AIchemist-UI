@@ -3,6 +3,7 @@ import { RefreshCw, GitBranch, Tag, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
+import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 import { Badge } from "@/components/ui/badge";
@@ -112,7 +113,10 @@ function mapGitHubError(rawError: unknown): string {
 export function GitHubPanel({}: GitHubPanelProps) {
   const ipc = useIpc();
   const { projects, activeProjectId } = useProjectStore();
+  const { sessions, activeSessionId } = useSessionStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
+  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+  const projectPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
   const provider = useActiveSessionProvider();
   const githubAvailable = isGitHubProvider(provider);
   const [data, setData] = useState<GitHubData | null>(null);
@@ -134,7 +138,7 @@ export function GitHubPanel({}: GitHubPanelProps) {
 
   const fetchCiStatus = useCallback(
     async (pr: GitHubPR, options?: { force?: boolean }) => {
-      if (!activeProject || !githubAvailable) return;
+      if (!projectPath || !githubAvailable) return;
 
       const key = getCiCacheKey(pr);
       if (!options?.force && (ciByKey[key] || ciLoadingByKey[key])) return;
@@ -147,8 +151,8 @@ export function GitHubPanel({}: GitHubPanelProps) {
       try {
         const result = await ipc.githubGetCiStatus(
           pr.head_sha
-            ? { projectPath: activeProject.path, ref: pr.head_sha }
-            : { projectPath: activeProject.path, prNumber: pr.number }
+            ? { projectPath, ref: pr.head_sha }
+            : { projectPath, prNumber: pr.number }
         );
 
         if (
@@ -191,12 +195,12 @@ export function GitHubPanel({}: GitHubPanelProps) {
         });
       }
     },
-    [activeProject, ciByKey, ciLoadingByKey, githubAvailable, ipc]
+    [projectPath, ciByKey, ciLoadingByKey, githubAvailable, ipc]
   );
 
   const fetchData = useCallback(async () => {
     const requestId = ++requestIdRef.current;
-    if (!activeProject) return;
+    if (!projectPath) return;
     if (!githubAvailable) return;
 
     setData(null);
@@ -206,8 +210,8 @@ export function GitHubPanel({}: GitHubPanelProps) {
 
     try {
       const [prsResult, issuesResult] = await Promise.all([
-        ipc.githubListPrs({ projectPath: activeProject.path, state: "open" }),
-        ipc.githubListIssues({ projectPath: activeProject.path, state: "open" }),
+        ipc.githubListPrs({ projectPath, state: "open" }),
+        ipc.githubListIssues({ projectPath, state: "open" }),
       ]);
 
       if (requestId !== requestIdRef.current) return;
@@ -233,7 +237,7 @@ export function GitHubPanel({}: GitHubPanelProps) {
       if (requestId !== requestIdRef.current) return;
       setIsLoading(false);
     }
-  }, [activeProject, githubAvailable, ipc, resetCiState]);
+  }, [projectPath, githubAvailable, ipc, resetCiState]);
 
   const openGitHubUrl = useCallback(
     async (url: string) => {

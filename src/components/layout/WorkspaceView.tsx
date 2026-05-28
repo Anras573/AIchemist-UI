@@ -12,8 +12,9 @@ import { ToolStrip } from "@/components/session/ToolStrip";
 export function WorkspaceView() {
   const ipc = useIpc();
   const { activeProjectId, projects } = useProjectStore();
-  const { tabSwitchRequest, clearTabSwitchRequest, addSession, setActiveSession } = useSessionStore();
+  const { tabSwitchRequest, clearTabSwitchRequest, addSession, setActiveSession, sessions, activeSessionId } = useSessionStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
+  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const { sendMessage } = useAgentTurn();
 
   // null = panel closed; a tab value = panel open on that tab
@@ -44,7 +45,7 @@ export function WorkspaceView() {
       return;
     }
 
-    void ipc.githubGetPrContext({ projectPath: activeProject.path })
+    void ipc.githubGetPrContext({ projectPath: activeSession?.workspace_path ?? activeProject.path })
       .then((context) => {
         if (cancelled) return;
         setShowGitHubTab(context.hasRemote);
@@ -57,7 +58,7 @@ export function WorkspaceView() {
     return () => {
       cancelled = true;
     };
-  }, [ipc, activeProject?.path]);
+  }, [ipc, activeProject?.path, activeSession?.workspace_path]);
 
   useEffect(() => {
     if (!showGitHubTab && activeTab === "github") {

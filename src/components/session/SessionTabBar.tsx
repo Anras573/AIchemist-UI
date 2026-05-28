@@ -1,5 +1,5 @@
-import { useEffect, useCallback } from "react";
-import { Bot, Cable, ChevronDown, Plus } from "lucide-react";
+import { useEffect, useCallback, useState } from "react";
+import { Bot, Cable, ChevronDown, GitBranch, Plus } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -10,6 +10,8 @@ import { WithTooltip } from "@/components/ui/with-tooltip";
 import { StatusDot } from "@/components/session/StatusDot";
 import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
 import { getModelLabel, getLogoProvider } from "@/lib/models";
+import { SessionDeleteDialog } from "@/components/session/SessionDeleteDialog";
+import type { Session } from "@/types";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -27,6 +29,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
     useSessionStore();
   const projects = useProjectStore((s) => s.projects);
   const { probes } = useProviderProbes(projectId);
+  const project = projects.find((p) => p.id === projectId);
   const defaultProvider = projects.find((p) => p.id === projectId)?.config.provider ?? null;
   const defaultProviderLabel =
     defaultProvider === "anthropic"
@@ -46,6 +49,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
   const projectSessions = Object.values(sessions)
     .filter((s) => s.project_id === projectId)
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const [deleteDialogSession, setDeleteDialogSession] = useState<Session | null>(null);
 
   // Load sessions for this project on mount and when projectId changes
   useEffect(() => {
@@ -77,12 +81,23 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
   }, [projectId, addSession, setActiveSession]);
 
   const handleDeleteSession = useCallback(
-    async (e: React.MouseEvent, sessionId: string) => {
+    (e: React.MouseEvent, sessionId: string) => {
       e.stopPropagation();
-      await ipc.deleteSession(sessionId).catch(console.error);
-      removeSession(sessionId);
+      const session = sessions[sessionId];
+      if (!session) return;
+      setDeleteDialogSession(session);
     },
-    [removeSession]
+    [sessions]
+  );
+
+  const confirmDeleteSession = useCallback(
+    async (cleanupWorktree: boolean) => {
+      if (!deleteDialogSession) return;
+      await ipc.deleteSession(deleteDialogSession.id, { cleanupWorktree });
+      removeSession(deleteDialogSession.id);
+      setDeleteDialogSession(null);
+    },
+    [deleteDialogSession, ipc, removeSession]
   );
 
   return (
@@ -133,11 +148,22 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
                     <span className="max-w-[80px] truncate">{sessionAgent}</span>
                   </span>
                 )}
+                {session.branch && (
+                  <span className={cn(
+                    "flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-normal",
+                    active
+                      ? "text-muted-foreground bg-muted/60 border border-border/50"
+                      : "text-muted-foreground bg-muted/60 border border-border/50"
+                  )}>
+                    <GitBranch className="size-2.5 shrink-0" />
+                    <span className="max-w-[110px] truncate">{session.branch}</span>
+                  </span>
+                )}
                 {/* Close button — visible on hover */}
-                <WithTooltip label="Close session">
+                <WithTooltip label="Delete session">
                   <span
                     role="button"
-                    aria-label="Close session"
+                    aria-label="Delete session"
                     tabIndex={0}
                     onClick={(e) => handleDeleteSession(e, session.id)}
                     onKeyDown={(e) => e.key === "Enter" && handleDeleteSession(e as unknown as React.MouseEvent, session.id)}
@@ -218,6 +244,14 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <SessionDeleteDialog
+        open={deleteDialogSession !== null}
+        session={deleteDialogSession}
+        projectPath={project?.path ?? ""}
+        onOpenChange={(open) => !open && setDeleteDialogSession(null)}
+        onConfirm={confirmDeleteSession}
+      />
     </div>
   );
 }

@@ -30,7 +30,7 @@ export interface ElectronAPI {
   createSession: (projectId: string, providerOverride?: string) => Promise<import("../src/types").Session>;
   listSessions: (projectId: string) => Promise<import("../src/types").Session[]>;
   getSession: (sessionId: string) => Promise<import("../src/types").Session>;
-  deleteSession: (sessionId: string) => Promise<void>;
+  deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) => Promise<void>;
   saveMessage: (args: { sessionId: string; role: string; content: string }) => Promise<import("../src/types").Message>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   updateSessionModel: (sessionId: string, provider: string, model: string) => Promise<void>;

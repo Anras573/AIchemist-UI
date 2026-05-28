@@ -23,6 +23,7 @@ function defaultProjectConfig(): ProjectConfig {
     ],
     custom_tools: [],
     allowed_tools: [],
+    create_worktree_per_session: false,
   };
 }
 
@@ -60,6 +61,8 @@ const ProjectConfigSchema = z.object({
   approval_rules: z.array(ApprovalRuleSchema).default([]),
   custom_tools: z.array(ToolDefinitionSchema).default([]),
   allowed_tools: z.array(AllowedToolSchema).default([]),
+  create_worktree_per_session: z.boolean().default(false),
+  worktree_root_path: z.string().optional(),
   acp_agent: AcpAgentConfigSchema.optional(),
 });
 

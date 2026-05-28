@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import * as fs from "fs";
 import * as os from "os";
@@ -14,6 +15,7 @@ import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
 import { parseDisabledProviders } from "./providers";
 import type { SettingsMap } from "./settings";
+import { cleanupManagedWorktree, createManagedWorktree, isGitRepo, resolveManagedWorktreeRoot } from "./worktree";
 import { resolveApproval, resolvePermissionChoice, getPendingApprovalData, addToSessionAllowlist, computeFingerprint, cancelSessionApprovals } from "./agent/approval";
 import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
 import { runAgentTurn, getProvider } from "./agent/runner";
@@ -566,17 +568,17 @@ function registerHandlers(): void {  // ── Terminal ────────
       .prepare(
         `SELECT s.sdk_session_id AS sdkSessionId,
                 s.copilot_session_id AS copilotSessionId,
-                p.path AS projectPath
+               COALESCE(s.workspace_path, p.path) AS workspacePath
          FROM sessions s
          JOIN projects p ON p.id = s.project_id
          WHERE s.id = ?`
       )
       .get(sessionId) as
-      | { sdkSessionId: string | null; copilotSessionId: string | null; projectPath: string }
+      | { sdkSessionId: string | null; copilotSessionId: string | null; workspacePath: string }
       | undefined;
     if (!row) return null;
     if (row.sdkSessionId) {
-      return { kind: "claude", projectPath: row.projectPath, sdkSessionId: row.sdkSessionId };
+      return { kind: "claude", projectPath: row.workspacePath, sdkSessionId: row.sdkSessionId };
     }
     if (row.copilotSessionId) {
       return { kind: "copilot", copilotSessionId: row.copilotSessionId };
@@ -757,7 +759,45 @@ function registerHandlers(): void {  // ── Terminal ────────
       model = project?.config.model ?? null;
     }
 
-    return createSession(db, projectId, provider, model);
+    if (!project) {
+      throw new Error(`Project not found: ${projectId}`);
+    }
+
+    const sessionId = crypto.randomUUID();
+    let branch: string | null = null;
+    let workspacePath = project.path;
+
+    if (project.config.create_worktree_per_session) {
+      if (isGitRepo(project.path)) {
+        const { managedRoot, warning } = resolveManagedWorktreeRoot(project.path, project.config.worktree_root_path);
+        if (warning) {
+          console.warn(`[worktree] ${warning}`);
+          getMainWindow()?.webContents.send(CH.CONFIG_WARNING, { message: warning, missing: [] });
+        }
+
+        const worktree = createManagedWorktree(project.path, sessionId, managedRoot);
+        if (worktree.created) {
+          branch = worktree.branch;
+          workspacePath = worktree.workspacePath;
+        } else if (worktree.warning) {
+          console.warn(`[worktree] ${worktree.warning}`);
+          getMainWindow()?.webContents.send(CH.CONFIG_WARNING, {
+            message: `Session worktree creation failed; falling back to the main checkout.\n${worktree.warning}`,
+            missing: [],
+          });
+        }
+      } else {
+        const warning = `Project is not git-backed; creating the session in the main checkout instead.`;
+        console.warn(`[worktree] ${warning}`);
+        getMainWindow()?.webContents.send(CH.CONFIG_WARNING, { message: warning, missing: [] });
+      }
+    }
+
+    return createSession(db, projectId, provider, model, {
+      id: sessionId,
+      branch,
+      workspacePath,
+    });
   });
   handle(CH.LIST_SESSIONS, (_event, projectId: string) =>
     listSessions(db, projectId)
@@ -765,7 +805,24 @@ function registerHandlers(): void {  // ── Terminal ────────
   handle(CH.GET_SESSION, (_event, sessionId: string) =>
     getSession(db, sessionId)
   );
-  handle(CH.DELETE_SESSION, (_event, sessionId: string) => {
+  handle(CH.DELETE_SESSION, (_event, sessionId: string, options?: { cleanupWorktree?: boolean }) => {
+    const session = getSession(db, sessionId);
+    const project = listProjects(db).find((p) => p.id === session.project_id);
+    if (!project) throw new Error(`Project not found for session ${sessionId}`);
+
+    const ownsManagedWorktree =
+      Boolean(session.branch) &&
+      Boolean(session.workspace_path) &&
+      session.workspace_path !== project.path;
+
+    if (options?.cleanupWorktree && ownsManagedWorktree) {
+      cleanupManagedWorktree({
+        repoRoot: project.path,
+        workspacePath: session.workspace_path ?? project.path,
+        branch: session.branch ?? "",
+      });
+    }
+
     cancelSessionApprovals(sessionId);
     cancelSessionQuestions(sessionId);
     cleanupCopilotSession(sessionId);
@@ -911,7 +968,7 @@ function registerHandlers(): void {  // ── Terminal ────────
         db,
         sessionId: args.sessionId,
         prompt: args.prompt,
-        projectPath: project.path,
+        projectPath: session.workspace_path ?? project.path,
         projectConfig: effectiveConfig,
         webContents: win.webContents,
         agent,

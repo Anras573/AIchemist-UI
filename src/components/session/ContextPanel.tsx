@@ -236,6 +236,7 @@ export function ContextPanel({
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
+  const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
   const [viewingFile, setViewingFile] = useState<string | null>(null);
   const [viewingMemoryFile, setViewingMemoryFile] = useState<string | null>(null);
 
@@ -317,7 +318,7 @@ export function ContextPanel({
             <FileViewer filePath={viewingFile!} />
           ) : (
             <FileTreeView
-              projectPath={activeProject.path}
+              projectPath={sessionPath}
               onFileOpen={setViewingFile}
             />
           )
@@ -338,7 +339,7 @@ export function ContextPanel({
             <MemoryFileViewer filePath={viewingMemoryFile!} />
           ) : (
             <MemoryPanel
-              projectPath={activeProject.path}
+              projectPath={sessionPath}
               onFileOpen={setViewingMemoryFile}
             />
           )
@@ -346,7 +347,7 @@ export function ContextPanel({
           <GitHubPanel />
         ) : activeTab === "terminal" ? (
           activeProject ? (
-            <InteractiveTerminal projectPath={activeProject.path} />
+            <InteractiveTerminal projectPath={sessionPath} />
           ) : (
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
               No project open

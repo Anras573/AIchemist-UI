@@ -18,6 +18,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
       approval_rules: [],
       custom_tools: [],
       allowed_tools: [],
+      create_worktree_per_session: false,
     },
     ...overrides,
   };
@@ -65,6 +66,7 @@ describe("GitHubPanel", () => {
         approval_rules: [],
         custom_tools: [],
         allowed_tools: [],
+        create_worktree_per_session: false,
       },
     }));
     useProjectStore.getState().setActiveProject("proj-acp");

@@ -34,6 +34,8 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     messages: [],
     provider: "anthropic",
     model: "claude-sonnet-4-6",
+    branch: null,
+    workspace_path: null,
     agent: null,
     skills: null,
     ...overrides,
@@ -53,6 +55,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
       approval_rules: [],
       custom_tools: [],
       allowed_tools: [],
+      create_worktree_per_session: false,
     },
     ...overrides,
   };

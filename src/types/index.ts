@@ -178,6 +178,10 @@ export interface ProjectConfig {
   approval_rules: ApprovalRule[];
   custom_tools: ToolDefinition[];
   allowed_tools: AllowedTool[];
+  /** When enabled, create a branch/worktree per session for git-backed projects. */
+  create_worktree_per_session: boolean;
+  /** Optional override for the base directory that holds managed session worktrees. */
+  worktree_root_path?: string;
   /** Configured ACP agent for this project. Required when `provider === "acp"`. */
   acp_agent?: AcpAgentConfig;
 }
@@ -222,6 +226,10 @@ export interface Session {
   provider: string | null;
   /** The model ID used for this session. Null for legacy sessions — runner falls back to project config. */
   model: string | null;
+  /** Branch created for the session when worktree-backed sessions are enabled. Null for fallback/main-checkout sessions. */
+  branch: string | null;
+  /** Working directory for the session runtime. Null for legacy sessions. */
+  workspace_path: string | null;
   /** The selected sub-agent name for this session. Null means the default agent. */
   agent: string | null;
   /** The active skills for this session (array of skill names). Null means no skills toggled. */

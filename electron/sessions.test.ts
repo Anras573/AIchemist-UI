@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Database } from "better-sqlite3";
 import {
+  createSession,
   updateSessionStatus,
   recoverStaleSessionStatuses,
 } from "./sessions";
@@ -70,6 +71,33 @@ describe("recoverStaleSessionStatuses", () => {
   it("returns 0 when no sessions were running", () => {
     const { db } = makeDb({ changes: 0 });
     expect(recoverStaleSessionStatuses(db)).toBe(0);
+  });
+});
+
+// ─── createSession ─────────────────────────────────────────────────────────────
+
+describe("createSession", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("persists branch and workspace path when provided", () => {
+    const { db, mockRun } = makeDb();
+    const session = createSession(db, "proj-1", "anthropic", "claude-sonnet-4-6", {
+      id: "sess-1",
+      branch: "aichemist/sess-1",
+      workspacePath: "/tmp/aichemist-sess-1",
+    });
+
+    expect(session.branch).toBe("aichemist/sess-1");
+    expect(session.workspace_path).toBe("/tmp/aichemist-sess-1");
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess-1",
+      "proj-1",
+      expect.any(String),
+      "anthropic",
+      "claude-sonnet-4-6",
+      "aichemist/sess-1",
+      "/tmp/aichemist-sess-1"
+    );
   });
 });
 

@@ -30,7 +30,8 @@ export const ipc = {
     window.electronAPI.createSession(projectId, providerOverride),
   listSessions: (projectId: string) => window.electronAPI.listSessions(projectId),
   getSession: (sessionId: string) => window.electronAPI.getSession(sessionId),
-  deleteSession: (sessionId: string) => window.electronAPI.deleteSession(sessionId),
+  deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) =>
+    window.electronAPI.deleteSession(sessionId, options),
   saveMessage: (args: { sessionId: string; role: string; content: string }) =>
     window.electronAPI.saveMessage(args),
   updateSessionTitle: (sessionId: string, title: string) =>

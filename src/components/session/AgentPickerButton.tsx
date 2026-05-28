@@ -57,9 +57,10 @@ export function AgentPickerButton() {
   const { activeSessionId, sessions, sessionAgents, setSessionAgent } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
+  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
 
   const provider = activeProject?.config.provider;
-  const projectPath = activeProject?.path ?? "";
+  const projectPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
 
   const [open, setOpen] = useState(false);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -90,7 +91,7 @@ export function AgentPickerButton() {
       .then(setAgents)
       .catch(() => {/* Silently hide agent list on error */})
       .finally(() => setLoadingAgents(false));
-  }, [projectPath, provider]);
+  }, [projectPath, provider, ipc]);
 
   // Lazy-load agents the first time the dropdown opens
   useEffect(() => {
