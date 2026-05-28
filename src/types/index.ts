@@ -31,6 +31,7 @@ export interface GitHubPR {
   draft?: boolean;
   created_at?: string;
   updated_at?: string;
+  head_sha?: string;
   head_ref?: string;
   base_ref?: string;
   author?: string;
