@@ -55,7 +55,7 @@ const AcpAgentConfigSchema = z.object({
 
 const ProjectConfigSchema = z.object({
   provider: z.string().default("anthropic"),
-  model: z.string().default("claude-sonnet-4-5"),
+  model: z.string().default("claude-sonnet-4-6"),
   approval_mode: z.enum(["all", "none", "custom"]).default("custom"),
   approval_rules: z.array(ApprovalRuleSchema).default([]),
   custom_tools: z.array(ToolDefinitionSchema).default([]),

@@ -250,6 +250,8 @@ interface TimelinePanelProps {
   onSendMessage?: (text: string, oneshotSkills?: string[]) => void;
   /** Called when the user clicks "Create new session" from the empty state. Optional provider override locks the new session provider. */
   onNewSession?: (providerOverride?: string) => void;
+  /** Error message from a failed session creation attempt, to surface in the empty state. */
+  createSessionError?: string | null;
 }
 
 /** Empty-state chooser: radio buttons pick provider, button creates session. */
@@ -257,10 +259,12 @@ export function EmptyStateNewSession({
   defaultProvider,
   onNewSession,
   probes,
+  error,
 }: {
   defaultProvider: string | null;
   onNewSession: (providerOverride?: string) => void;
   probes?: import("@/types").ProviderProbes | null;
+  error?: string | null;
 }) {
   const isAvailable = (p: "anthropic" | "copilot" | "acp" | "ollama"): boolean => {
     if (!probes) return true; // still checking — keep enabled
@@ -361,11 +365,14 @@ export function EmptyStateNewSession({
       >
         Create a new session
       </button>
+      {error && (
+        <p className="text-xs text-destructive text-center max-w-xs">{error}</p>
+      )}
     </div>
   );
 }
 
-export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProps) {
+export function TimelinePanel({ onSendMessage, onNewSession, createSessionError }: TimelinePanelProps) {
   const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking } = useSessionStore();
   const { activeProjectId, projects } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
@@ -407,6 +414,7 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
                   defaultProvider={defaultProvider}
                   onNewSession={onNewSession}
                   probes={probes}
+                  error={createSessionError}
                 />
               )}
             </ConversationEmptyState>

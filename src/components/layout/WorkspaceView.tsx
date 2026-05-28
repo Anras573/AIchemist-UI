@@ -35,14 +35,18 @@ export function WorkspaceView() {
     }
   }, [tabSwitchRequest, clearTabSwitchRequest]);
 
+  const [createError, setCreateError] = useState<string | null>(null);
+
   const handleNewSession = useCallback(async (providerOverride?: string) => {
     if (!activeProjectId) return;
+    setCreateError(null);
     try {
       const session = await ipc.createSession(activeProjectId, providerOverride);
       addSession(session);
       setActiveSession(session.id);
     } catch (err) {
       console.error("create_session failed:", err);
+      setCreateError(err instanceof Error ? err.message : "Failed to create session");
     }
   }, [activeProjectId, addSession, setActiveSession, ipc]);
 
@@ -67,7 +71,7 @@ export function WorkspaceView() {
       {/* Main content: chat | context panel | tool strip */}
       <div className="flex flex-1 overflow-hidden">
         <SplitPane
-          left={<TimelinePanel onSendMessage={sendMessage} onNewSession={handleNewSession} />}
+          left={<TimelinePanel onSendMessage={sendMessage} onNewSession={handleNewSession} createSessionError={createError} />}
           right={
             <ContextPanel
               activeTab={activeTab ?? "changes"}

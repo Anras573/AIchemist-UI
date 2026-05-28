@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Bot, Cable, ChevronDown, Plus } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -70,13 +70,17 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  const [createError, setCreateError] = useState<string | null>(null);
+
   const handleNewSession = useCallback(async (providerOverride?: string) => {
+    setCreateError(null);
     try {
       const session = await ipc.createSession(projectId, providerOverride);
       addSession(session);
       setActiveSession(session.id);
     } catch (err) {
       console.error("create_session failed:", err);
+      setCreateError(err instanceof Error ? err.message : "Failed to create session");
     }
   }, [projectId, addSession, setActiveSession]);
 
@@ -90,6 +94,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
   );
 
   return (
+    <>
     <div className="flex items-center h-9 border-b bg-background overflow-x-auto flex-shrink-0">
       <div className="flex items-center min-w-0 flex-1 gap-0.5 px-1">
         {projectSessions.length === 0 && (
@@ -231,6 +236,12 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
         </DropdownMenu>
       </div>
     </div>
+    {createError && (
+      <div className="px-3 py-1 bg-destructive/10 border-b border-destructive/20">
+        <p className="text-xs text-destructive">{createError}</p>
+      </div>
+    )}
+    </>
   );
 }
 
