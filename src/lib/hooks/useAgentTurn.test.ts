@@ -236,4 +236,18 @@ describe("useAgentTurn", () => {
       expect.objectContaining({ agent: undefined })
     );
   });
+
+  it("does not forward one-shot skills for Ollama sessions", async () => {
+    setupActiveSession({ provider: "ollama", model: "llama3.2" });
+    vi.mocked(window.electronAPI.saveMessage).mockResolvedValue(makeMessage());
+    const { result } = renderHook(() => useAgentTurn());
+
+    await act(async () => {
+      await result.current.sendMessage("go", ["ai-sdk"]);
+    });
+
+    expect(window.electronAPI.agentSend).toHaveBeenCalledWith(
+      expect.objectContaining({ oneshotSkills: undefined })
+    );
+  });
 });

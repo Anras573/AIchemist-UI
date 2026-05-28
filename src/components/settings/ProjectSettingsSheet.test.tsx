@@ -6,10 +6,12 @@ import type { ProjectConfig } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
+
 function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return {
     provider: "anthropic",
-    model: "claude-sonnet-4-5",
+    model: DEFAULT_ANTHROPIC_MODEL,
     approval_mode: "custom",
     approval_rules: [
       { tool_category: "filesystem", policy: "risky_only" },
@@ -84,6 +86,34 @@ describe("ProjectSettingsSheet", () => {
         )
       );
     });
+
+    it("clears model when provider is changed", async () => {
+      vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(makeConfig({ model: DEFAULT_ANTHROPIC_MODEL }));
+      renderSheet();
+      await screen.findByDisplayValue(DEFAULT_ANTHROPIC_MODEL);
+
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "ollama" } });
+
+      await waitFor(() => {
+        expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("");
+      });
+    });
+
+    it("restores Anthropic default model when switching back to Anthropic", async () => {
+      vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(makeConfig({ model: "claude-opus-4-5" }));
+      renderSheet();
+      await screen.findByDisplayValue("claude-opus-4-5");
+
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "ollama" } });
+      await waitFor(() => {
+        expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("");
+      });
+
+      fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "anthropic" } });
+      await waitFor(() => {
+        expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe(DEFAULT_ANTHROPIC_MODEL);
+      });
+    });
   });
 
   describe("Approval tab", () => {
@@ -151,7 +181,7 @@ describe("ProjectSettingsSheet", () => {
       vi.mocked(window.electronAPI.saveProjectConfig).mockResolvedValue(undefined);
 
       renderSheet();
-      await screen.findByDisplayValue("claude-sonnet-4-5");
+      await screen.findByDisplayValue(DEFAULT_ANTHROPIC_MODEL);
       fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
       await waitFor(() => expect(screen.getByText("Saved")).toBeDefined());
@@ -162,10 +192,28 @@ describe("ProjectSettingsSheet", () => {
       vi.mocked(window.electronAPI.saveProjectConfig).mockRejectedValue(new Error("write failed"));
 
       renderSheet();
-      await screen.findByDisplayValue("claude-sonnet-4-5");
+      await screen.findByDisplayValue(DEFAULT_ANTHROPIC_MODEL);
       fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
       await waitFor(() => expect(screen.getByText(/write failed/)).toBeDefined());
+    });
+
+    it("saves Anthropic default model when Anthropic model input is empty", async () => {
+      vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(makeConfig());
+      vi.mocked(window.electronAPI.saveProjectConfig).mockResolvedValue(undefined);
+
+      renderSheet("proj-99");
+      await screen.findByDisplayValue(DEFAULT_ANTHROPIC_MODEL);
+
+      fireEvent.change(screen.getByLabelText("Model"), { target: { value: "" } });
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+      await waitFor(() =>
+        expect(window.electronAPI.saveProjectConfig).toHaveBeenCalledWith(
+          "proj-99",
+          expect.objectContaining({ provider: "anthropic", model: DEFAULT_ANTHROPIC_MODEL })
+        )
+      );
     });
   });
 
@@ -173,7 +221,7 @@ describe("ProjectSettingsSheet", () => {
     it("calls onClose when Escape is pressed", async () => {
       vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(makeConfig());
       renderSheet();
-      await screen.findByDisplayValue("claude-sonnet-4-5");
+      await screen.findByDisplayValue(DEFAULT_ANTHROPIC_MODEL);
 
       fireEvent.keyDown(window, { key: "Escape" });
       expect(onClose).toHaveBeenCalled();

@@ -48,6 +48,7 @@ import {
 } from "@/components/session/SlashCommandPopover";
 import { QuestionCard } from "./QuestionCard";
 import { useIpc } from "@/lib/ipc";
+import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 
 const EMPTY_COMPACTIONS: CompactionEvent[] = [];
 
@@ -247,8 +248,10 @@ const CompactionMarker = memo(function CompactionMarker({ event }: { event: Comp
 interface TimelinePanelProps {
   /** Called by Phase 4 when the user submits a message. */
   onSendMessage?: (text: string, oneshotSkills?: string[]) => void;
-  /** Called when the user clicks "Create new session" from the empty state. Optional provider override locks the new session to Claude or Copilot. */
+  /** Called when the user clicks "Create new session" from the empty state. Optional provider override locks the new session provider. */
   onNewSession?: (providerOverride?: string) => void;
+  /** Error message from a failed session creation attempt, to surface in the empty state. */
+  createSessionError?: string | null;
 }
 
 /** Empty-state chooser: radio buttons pick provider, button creates session. */
@@ -256,17 +259,19 @@ export function EmptyStateNewSession({
   defaultProvider,
   onNewSession,
   probes,
+  error,
 }: {
   defaultProvider: string | null;
   onNewSession: (providerOverride?: string) => void;
   probes?: import("@/types").ProviderProbes | null;
+  error?: string | null;
 }) {
-  const isAvailable = (p: "anthropic" | "copilot" | "acp"): boolean => {
+  const isAvailable = (p: "anthropic" | "copilot" | "acp" | "ollama"): boolean => {
     if (!probes) return true; // still checking — keep enabled
     const probe = p === "acp" ? probes.acp : probes[p];
     return !probe || probe.ok;
   };
-  const reasonFor = (p: "anthropic" | "copilot" | "acp"): string | undefined => {
+  const reasonFor = (p: "anthropic" | "copilot" | "acp" | "ollama"): string | undefined => {
     if (!probes) return undefined;
     const probe = p === "acp" ? probes.acp : probes[p];
     return probe?.ok ? undefined : probe?.reason;
@@ -275,13 +280,15 @@ export function EmptyStateNewSession({
   const preferred =
     defaultProvider === "copilot"
       ? "copilot"
+      : defaultProvider === "ollama"
+        ? "ollama"
       : defaultProvider === "acp"
         ? "acp"
         : "anthropic";
-  const initial: "anthropic" | "copilot" | "acp" = isAvailable(preferred as "anthropic" | "copilot" | "acp")
-    ? (preferred as "anthropic" | "copilot" | "acp")
-    : (["anthropic", "copilot", "acp"] as const).find(isAvailable) ?? "anthropic";
-  const [selected, setSelected] = useState<"anthropic" | "copilot" | "acp">(initial);
+  const initial: "anthropic" | "copilot" | "acp" | "ollama" = isAvailable(preferred as "anthropic" | "copilot" | "acp" | "ollama")
+    ? (preferred as "anthropic" | "copilot" | "acp" | "ollama")
+    : (["anthropic", "copilot", "ollama", "acp"] as const).find(isAvailable) ?? "anthropic";
+  const [selected, setSelected] = useState<"anthropic" | "copilot" | "acp" | "ollama">(initial);
 
   // Probes arrive asynchronously after mount. If the initial pick (or a later
   // pick that has since gone unavailable) is no longer available, switch to
@@ -290,14 +297,14 @@ export function EmptyStateNewSession({
   useEffect(() => {
     if (!probes) return;
     if (isAvailable(selected)) return;
-    const fallback = (["anthropic", "copilot", "acp"] as const).find(isAvailable);
+    const fallback = (["anthropic", "copilot", "ollama", "acp"] as const).find(isAvailable);
     if (fallback && fallback !== selected) setSelected(fallback);
     // isAvailable is derived from `probes` which is in deps; selected is read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [probes, selected]);
 
   const renderRadio = (
-    p: "anthropic" | "copilot" | "acp",
+    p: "anthropic" | "copilot" | "acp" | "ollama",
     label: string,
     icon: React.ReactNode,
   ) => {
@@ -348,6 +355,7 @@ export function EmptyStateNewSession({
       >
         {renderRadio("anthropic", "Use Claude", <ModelSelectorLogo provider="anthropic" className="size-3.5" />)}
         {renderRadio("copilot", "Use Copilot", <ModelSelectorLogo provider="github-copilot" className="size-3.5" />)}
+        {renderRadio("ollama", "Use Ollama", <ModelSelectorLogo provider="ollama" className="size-3.5" />)}
         {renderRadio("acp", "Use ACP", <Cable className="size-3.5" />)}
       </div>
       <button
@@ -357,11 +365,14 @@ export function EmptyStateNewSession({
       >
         Create a new session
       </button>
+      {error && (
+        <p className="text-xs text-destructive text-center max-w-xs">{error}</p>
+      )}
     </div>
   );
 }
 
-export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProps) {
+export function TimelinePanel({ onSendMessage, onNewSession, createSessionError }: TimelinePanelProps) {
   const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking } = useSessionStore();
   const { activeProjectId, projects } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
@@ -403,6 +414,7 @@ export function TimelinePanel({ onSendMessage, onNewSession }: TimelinePanelProp
                   defaultProvider={defaultProvider}
                   onNewSession={onNewSession}
                   probes={probes}
+                  error={createSessionError}
                 />
               )}
             </ConversationEmptyState>
@@ -527,6 +539,8 @@ function InputBarInner({
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
   const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
+  const effectiveProvider = useActiveSessionProvider();
+  const skillsSupported = effectiveProvider !== "acp" && effectiveProvider !== "ollama";
 
   const [gitBranch, setGitBranch] = useState<string | null>(null);
 
@@ -554,15 +568,31 @@ function InputBarInner({
     };
   }, [sessionPath]);
 
+  // Reset skills cache and one-shot badges when switching projects
+  useEffect(() => {
+    setSkills(null);
+    setSlashBadges([]);
+  }, [activeProject?.path]);
+
   // Load skills lazily when the user first types "/"
   const ensureSkillsLoaded = useCallback(() => {
-    if (skills !== null || loadingSkills || !sessionPath) return;
+    if (skills !== null || loadingSkills || !sessionPath || !skillsSupported) return;
     setLoadingSkills(true);
     ipc.listSkills(sessionPath)
       .then(setSkills)
       .catch(() => setSkills([]))
       .finally(() => setLoadingSkills(false));
-  }, [skills, loadingSkills, sessionPath]);
+  }, [skills, loadingSkills, sessionPath, ipc, skillsSupported]);
+
+  useEffect(() => {
+    if (!skillsSupported) {
+      setSkills([]);
+      setSlashBadges([]);
+      setLoadingSkills(false);
+    } else {
+      setSkills(null);
+    }
+  }, [skillsSupported]);
 
   // Watch textarea value for slash trigger
   const textValue = controller.textInput.value;
@@ -580,8 +610,8 @@ function InputBarInner({
   }, [textValue, ensureSkillsLoaded]);
 
   const filteredItems = useMemo(
-    () => buildSlashItems(slashQuery, skills ?? []),
-    [slashQuery, skills]
+    () => buildSlashItems(slashQuery, skillsSupported ? (skills ?? []) : []),
+    [slashQuery, skills, skillsSupported]
   );
 
   // Select an item from the popover
@@ -595,6 +625,7 @@ function InputBarInner({
       controller.textInput.setInput(stripped);
 
       if (item.type === "skill") {
+        if (!skillsSupported) return;
         setSlashBadges((prev) =>
           prev.some((b) => b.name === item.skill.name) ? prev : [...prev, item.skill]
         );
@@ -624,7 +655,7 @@ function InputBarInner({
         }
       }
     },
-    [controller, onNewSession, activeSessionId, clearSessionMessages, skills]
+    [controller, onNewSession, activeSessionId, clearSessionMessages, skills, skillsSupported]
   );
 
   // Keyboard navigation while popover is open (capture phase so we beat the textarea)

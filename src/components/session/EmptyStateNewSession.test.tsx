@@ -75,6 +75,7 @@ describe("EmptyStateNewSession", () => {
         probes={{
           anthropic: { ok: false, reason: "no key" },
           copilot: { ok: true },
+          ollama: { ok: true },
         }}
       />,
     );
@@ -98,6 +99,7 @@ describe("EmptyStateNewSession", () => {
         probes={{
           anthropic: { ok: false, reason: "no key" },
           copilot: { ok: false, reason: "no token" },
+          ollama: { ok: false, reason: "not running" },
           acp: { ok: false, reason: "not configured" },
         }}
       />,
@@ -126,6 +128,7 @@ describe("EmptyStateNewSession", () => {
         probes={{
           anthropic: { ok: false, reason: "no key" },
           copilot: { ok: true },
+          ollama: { ok: true },
         }}
       />,
     );

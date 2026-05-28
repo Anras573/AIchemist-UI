@@ -3,10 +3,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   probeAnthropic,
   probeCopilot,
+  probeOllama,
   probeAcpForProject,
   probeAll,
   _setFetch,
   _setCopilotListModels,
+  _setOllamaListModels,
   _setAcpProbe,
   _resetProviderProbeCache,
 } from "./provider-probe";
@@ -23,6 +25,7 @@ describe("provider-probe", () => {
   afterEach(() => {
     _setFetch(null);
     _setCopilotListModels(null);
+    _setOllamaListModels(null);
     _setAcpProbe(null);
   });
 
@@ -174,6 +177,32 @@ describe("provider-probe", () => {
 
   // ── ACP ────────────────────────────────────────────────────────────────────
 
+  describe("probeOllama", () => {
+    it("returns ok when listModels returns at least one model", async () => {
+      _setOllamaListModels(async () => [{ id: "llama3.2", name: "llama3.2" }]);
+      const result = await probeOllama({ force: true });
+      expect(result.ok).toBe(true);
+    });
+
+    it("returns not ok when listModels returns an empty array", async () => {
+      _setOllamaListModels(async () => []);
+      const result = await probeOllama({ force: true });
+      expect(result.ok).toBe(false);
+      expect(result.reason).toMatch(/no models/i);
+    });
+
+    it("surfaces SDK exceptions", async () => {
+      _setOllamaListModels(async () => {
+        throw new Error("connect ECONNREFUSED");
+      });
+      const result = await probeOllama({ force: true });
+      expect(result.ok).toBe(false);
+      expect(result.reason).toMatch(/ECONNREFUSED/);
+    });
+  });
+
+  // ── ACP ────────────────────────────────────────────────────────────────────
+
   describe("probeAcpForProject", () => {
     it("reports missing config when acp_agent is absent", async () => {
       const result = await probeAcpForProject("/proj", {} as never, { force: true });
@@ -230,20 +259,23 @@ describe("provider-probe", () => {
   // ── probeAll ───────────────────────────────────────────────────────────────
 
   describe("probeAll", () => {
-    it("returns anthropic + copilot only when no project is supplied", async () => {
+    it("returns anthropic + copilot + ollama when no project is supplied", async () => {
       _setFetch(vi.fn().mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch);
       _setCopilotListModels(async () => [{ id: "x", name: "x" }]);
+      _setOllamaListModels(async () => [{ id: "llama3.2", name: "llama3.2" }]);
       process.env.ANTHROPIC_API_KEY = "sk";
       process.env.GITHUB_TOKEN = "gh";
       const r = await probeAll(undefined, { force: true });
       expect(r.anthropic.ok).toBe(true);
       expect(r.copilot.ok).toBe(true);
+      expect(r.ollama.ok).toBe(true);
       expect(r.acp).toBeUndefined();
     });
 
     it("includes acp when a project is supplied", async () => {
       _setFetch(vi.fn().mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch);
       _setCopilotListModels(async () => [{ id: "x", name: "x" }]);
+      _setOllamaListModels(async () => [{ id: "llama3.2", name: "llama3.2" }]);
       _setAcpProbe(async () => ({ ok: true }));
       process.env.ANTHROPIC_API_KEY = "sk";
       process.env.GITHUB_TOKEN = "gh";
@@ -260,6 +292,7 @@ describe("provider-probe", () => {
         },
         { force: true },
       );
+      expect(r.ollama.ok).toBe(true);
       expect(r.acp?.ok).toBe(true);
     });
 
@@ -268,6 +301,8 @@ describe("provider-probe", () => {
       _setFetch(fetchSpy as unknown as typeof fetch);
       const copilotSpy = vi.fn(async () => [{ id: "x", name: "x" }]);
       _setCopilotListModels(copilotSpy);
+      const ollamaSpy = vi.fn(async () => [{ id: "llama3.2", name: "llama3.2" }]);
+      _setOllamaListModels(ollamaSpy);
       const acpSpy = vi.fn(async () => ({ ok: true }));
       _setAcpProbe(acpSpy);
       process.env.ANTHROPIC_API_KEY = "sk";
@@ -284,17 +319,20 @@ describe("provider-probe", () => {
             acp_agent: { command: "/x" },
           } as unknown as import("../../src/types/index").ProjectConfig,
         },
-        { force: true, disabled: new Set(["anthropic", "acp"]) },
+        { force: true, disabled: new Set(["anthropic", "acp", "ollama"]) },
       );
 
       expect(r.anthropic.ok).toBe(false);
       expect(r.anthropic.reason).toBe("Disabled in settings");
       expect(r.copilot.ok).toBe(true);
+      expect(r.ollama.ok).toBe(false);
+      expect(r.ollama.reason).toBe("Disabled in settings");
       expect(r.acp?.ok).toBe(false);
       expect(r.acp?.reason).toBe("Disabled in settings");
 
       // The disabled providers were short-circuited — only Copilot's probe ran.
       expect(fetchSpy).not.toHaveBeenCalled();
+      expect(ollamaSpy).not.toHaveBeenCalled();
       expect(acpSpy).not.toHaveBeenCalled();
       expect(copilotSpy).toHaveBeenCalled();
     });

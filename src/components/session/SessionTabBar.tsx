@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Bot, Cable, ChevronDown, GitBranch, Plus } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -36,6 +36,8 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
       ? "Claude"
       : defaultProvider === "copilot"
         ? "Copilot"
+        : defaultProvider === "ollama"
+          ? "Ollama"
         : defaultProvider === "acp"
           ? "ACP"
           : null;
@@ -44,6 +46,8 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
       ? "anthropic"
       : defaultProvider === "copilot"
         ? "github-copilot"
+        : defaultProvider === "ollama"
+          ? "ollama"
         : null;
 
   const projectSessions = Object.values(sessions)
@@ -53,6 +57,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
 
   // Load sessions for this project on mount and when projectId changes
   useEffect(() => {
+    setCreateError(null);
     // Immediately clear the active session so no stale session from another
     // project is shown while the new project's sessions are loading.
     setActiveSession(null);
@@ -70,13 +75,17 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  const [createError, setCreateError] = useState<string | null>(null);
+
   const handleNewSession = useCallback(async (providerOverride?: string) => {
+    setCreateError(null);
     try {
       const session = await ipc.createSession(projectId, providerOverride);
       addSession(session);
       setActiveSession(session.id);
     } catch (err) {
       console.error("create_session failed:", err);
+      setCreateError(err instanceof Error ? err.message : "Failed to create session");
     }
   }, [projectId, addSession, setActiveSession]);
 
@@ -101,6 +110,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
   );
 
   return (
+    <>
     <div className="flex items-center h-9 border-b bg-background overflow-x-auto flex-shrink-0">
       <div className="flex items-center min-w-0 flex-1 gap-0.5 px-1">
         {projectSessions.length === 0 && (
@@ -234,6 +244,14 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
               icon={<ModelSelectorLogo provider="github-copilot" className="size-3.5" />}
             />
             <ProviderMenuItem
+              provider="ollama"
+              probe={probes?.ollama}
+              onSelect={() => handleNewSession("ollama")}
+              isDefault={defaultProvider === "ollama"}
+              label="New Ollama Session"
+              icon={<ModelSelectorLogo provider="ollama" className="size-3.5" />}
+            />
+            <ProviderMenuItem
               provider="acp"
               probe={probes?.acp}
               onSelect={() => handleNewSession("acp")}
@@ -253,6 +271,12 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
         onConfirm={confirmDeleteSession}
       />
     </div>
+    {createError && (
+      <div className="px-3 py-1 bg-destructive/10 border-b border-destructive/20">
+        <p className="text-xs text-destructive">{createError}</p>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -263,7 +287,7 @@ function ProviderMenuItem({
   label,
   icon,
 }: {
-  provider: "anthropic" | "copilot" | "acp";
+  provider: "anthropic" | "copilot" | "acp" | "ollama";
   probe: import("@/types").ProviderProbeResult | undefined;
   onSelect: () => void;
   isDefault: boolean;

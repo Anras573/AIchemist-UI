@@ -129,6 +129,7 @@ export function SkillsPanel() {
   const projectPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
   const activeSkills = activeSessionId ? (sessionSkills[activeSessionId] ?? []) : [];
   const provider = useActiveSessionProvider();
+  const unsupportedProvider = provider === "acp" || provider === "ollama";
 
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
   const [enabledSources, setEnabledSources] = useState<Set<SkillSource>>(
@@ -158,13 +159,16 @@ export function SkillsPanel() {
   }) ?? null;
 
   const loadSkills = useCallback(() => {
-    if (!projectPath) return;
+    if (!projectPath || unsupportedProvider) {
+      setSkills([]);
+      return;
+    }
     setSkills(null);
     ipc
       .listSkills(projectPath, provider ?? undefined)
       .then(setSkills)
       .catch(() => setSkills([]));
-  }, [projectPath, provider, ipc]);
+  }, [projectPath, provider, ipc, unsupportedProvider]);
 
   // Modal state — undefined means closed, null means "new", SkillInfo means "edit/view"
   const [editingSkill, setEditingSkill] = useState<SkillInfo | null | undefined>(undefined);
@@ -195,11 +199,15 @@ export function SkillsPanel() {
     loadSkills();
   }, [loadSkills]);
 
-  if (provider === "acp") {
+  if (provider === "acp" || provider === "ollama") {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs px-3 text-center">
-        <span>Skills are not available for ACP sessions.</span>
-        <span className="opacity-60">Skill injection is provider-specific; ACP agents manage their own context.</span>
+        <span>Skills are not available for {provider === "ollama" ? "Ollama" : "ACP"} sessions.</span>
+        <span className="opacity-60">
+          {provider === "ollama"
+            ? "Ollama sessions currently run in chat-only mode, so skill context is not injected."
+            : "Skill injection is provider-specific; ACP agents manage their own context."}
+        </span>
       </div>
     );
   }

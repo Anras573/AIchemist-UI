@@ -41,6 +41,9 @@ describe("ModelPickerButton", () => {
     vi.mocked(window.electronAPI.getCopilotModels).mockResolvedValue([
       { id: "gpt-5", name: "GPT-5" },
     ]);
+    vi.mocked(window.electronAPI.getOllamaModels).mockResolvedValue([
+      { id: "llama3.2", name: "Llama 3.2" },
+    ]);
 
     renderWithProviders(
       <ModelPickerButton sessionId="s1" provider="anthropic" model="claude-sonnet-4-6" />
@@ -50,7 +53,9 @@ describe("ModelPickerButton", () => {
 
     expect(screen.getByText("Anthropic")).toBeInTheDocument();
     expect(screen.queryByText("GitHub Copilot")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ollama")).not.toBeInTheDocument();
     expect(window.electronAPI.getCopilotModels).not.toHaveBeenCalled();
+    expect(window.electronAPI.getOllamaModels).not.toHaveBeenCalled();
   });
 
   it("shows only Copilot models for a copilot-locked session", async () => {
@@ -69,5 +74,24 @@ describe("ModelPickerButton", () => {
     });
     expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
     expect(window.electronAPI.getCopilotModels).toHaveBeenCalled();
+  });
+
+  it("shows only Ollama models for an ollama-locked session", async () => {
+    vi.mocked(window.electronAPI.getOllamaModels).mockResolvedValue([
+      { id: "llama3.2", name: "Llama 3.2" },
+    ]);
+
+    renderWithProviders(
+      <ModelPickerButton sessionId="s1" provider="ollama" model="llama3.2" />
+    );
+
+    await userEvent.click(screen.getByText("toggle"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Ollama")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
+    expect(screen.queryByText("GitHub Copilot")).not.toBeInTheDocument();
+    expect(window.electronAPI.getOllamaModels).toHaveBeenCalled();
   });
 });

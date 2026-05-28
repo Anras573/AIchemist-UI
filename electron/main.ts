@@ -13,13 +13,14 @@ import { addProject, listProjects, removeProject, getProjectConfig, saveProjectC
 import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent, updateSessionSkills, setDisabledMcpServers, getDisabledMcpServers, recoverStaleSessionStatuses } from "./sessions";
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
-import { parseDisabledProviders } from "./providers";
+import { parseDisabledProviders, isProviderId } from "./providers";
 import type { SettingsMap } from "./settings";
 import { cleanupManagedWorktree, createManagedWorktree, isGitRepo, resolveManagedWorktreeRoot } from "./worktree";
 import { resolveApproval, resolvePermissionChoice, getPendingApprovalData, addToSessionAllowlist, computeFingerprint, cancelSessionApprovals } from "./agent/approval";
 import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
 import { runAgentTurn, getProvider } from "./agent/runner";
 import { cleanupCopilotSession } from "./agent/copilot";
+import { OLLAMA_NO_MODELS_ERROR } from "./agent/ollama";
 import { listPullRequests, listIssues, createPullRequest, getCiStatus, getPullRequestContext } from "./github";
 import type {
   GitHubCreatePrArgs,
@@ -723,7 +724,11 @@ function registerHandlers(): void {  // ── Terminal ────────
   handle(CH.GET_ANTHROPIC_CONFIG, () => getAnthropicConfig());
 
   // ── Projects ─────────────────────────────────────────────────────────────────
-  handle(CH.ADD_PROJECT, (_event, projectPath: string) => addProject(db, projectPath));
+  handle(CH.ADD_PROJECT, (_event, projectPath: string) => {
+    const raw = readSettings().AICHEMIST_DEFAULT_PROVIDER;
+    const defaultProvider = raw && isProviderId(raw) ? raw : "anthropic";
+    return addProject(db, projectPath, defaultProvider);
+  });
   handle(CH.LIST_PROJECTS, () => listProjects(db));
   handle(CH.REMOVE_PROJECT, (_event, id: string) =>
     removeProject(db, id)
@@ -738,7 +743,7 @@ function registerHandlers(): void {  // ── Terminal ────────
   );
 
   // ── Sessions ─────────────────────────────────────────────────────────────────
-  handle(CH.CREATE_SESSION, (_event, payload: string | { projectId: string; providerOverride?: string }) => {
+  handle(CH.CREATE_SESSION, async (_event, payload: string | { projectId: string; providerOverride?: string }) => {
     // Backward-compat: older callers pass projectId as a string; newer ones
     // pass { projectId, providerOverride } to explicitly lock the session's
     // provider at creation time (e.g. from the split-button new-session menu).
@@ -750,13 +755,33 @@ function registerHandlers(): void {  // ── Terminal ────────
 
     // When the user explicitly picks a provider different from the project
     // default, we can't reuse project.config.model (it belongs to the other
-    // SDK). Anthropic has a known default list; Copilot models are dynamic
-    // so we leave model null and let the runner fall back to the SDK default.
+    // SDK). Anthropic gets a known default; Copilot models are dynamic so we
+    // leave model null and let the runner fall back to the SDK default.
     let model: string | null;
     if (providerOverride && providerOverride !== project?.config.provider) {
-      model = provider === "anthropic" ? "claude-sonnet-4-6" : null;
+      if (provider === "anthropic") {
+        model = "claude-sonnet-4-6";
+      } else if (provider === "ollama") {
+        const models = await getProvider("ollama").listModels?.();
+        model = models?.[0]?.id ?? null;
+        if (!model) {
+          throw new Error(OLLAMA_NO_MODELS_ERROR);
+        }
+      } else {
+        model = null;
+      }
     } else {
       model = project?.config.model ?? null;
+      // If the effective provider is Ollama and no model is set (e.g. the
+      // project was saved with Ollama as default but model was left blank),
+      // resolve to an installed model or surface a clear error immediately.
+      if (provider === "ollama" && !model?.trim()) {
+        const models = await getProvider("ollama").listModels?.();
+        model = models?.[0]?.id ?? null;
+        if (!model) {
+          throw new Error(OLLAMA_NO_MODELS_ERROR);
+        }
+      }
     }
 
     if (!project) {
@@ -955,12 +980,13 @@ function registerHandlers(): void {  // ── Terminal ────────
       provider: session.provider ?? project.config.provider,
       model: session.model ?? project.config.model,
     };
-    const agent = args.agent ?? session.agent ?? undefined;
     // Merge session-level skills with any one-shot skills for this turn only
     const sessionSkills = session.skills ?? [];
     const oneshotSkills = args.oneshotSkills ?? [];
     const allSkills = [...new Set([...sessionSkills, ...oneshotSkills])];
-    const skills = allSkills.length > 0 ? allSkills : undefined;
+    const supportsSkills = effectiveConfig.provider !== "acp" && effectiveConfig.provider !== "ollama";
+    const agent = supportsSkills ? (args.agent ?? session.agent ?? undefined) : undefined;
+    const skills = supportsSkills && allSkills.length > 0 ? allSkills : undefined;
 
     activeTurns.add(args.sessionId);
     try {
@@ -979,6 +1005,7 @@ function registerHandlers(): void {  // ── Terminal ────────
     }
   });
   handle(CH.GET_COPILOT_MODELS, () => getProvider("copilot").listModels?.());
+  handle(CH.GET_OLLAMA_MODELS, () => getProvider("ollama").listModels?.());
   handle(CH.GET_CLAUDE_AGENTS, async (_event, projectPath: string) => {
     return getProvider("anthropic").listAgents?.(projectPath);
   });
