@@ -312,7 +312,7 @@ export async function listIssues(
             if (typeof label?.name === "string") return label.name;
             return null;
           })
-          .filter((l) => l !== null)
+          .filter((l): l is string => l !== null)
           .slice(0, 20),
       }));
     return { issues };

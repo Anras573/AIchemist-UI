@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { RefreshCw, GitBranch, Tag, ExternalLink, Github } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIpc } from "@/lib/ipc";
@@ -27,9 +27,12 @@ export function GitHubPanel({}: GitHubPanelProps) {
   const [data, setData] = useState<GitHubData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   const fetchData = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     if (!activeProject) return;
+    if (provider && provider !== "anthropic" && provider !== "copilot") return;
 
     setIsLoading(true);
     setError(null);
@@ -39,6 +42,8 @@ export function GitHubPanel({}: GitHubPanelProps) {
         ipc.githubListPrs({ projectPath: activeProject.path, state: "open" }),
         ipc.githubListIssues({ projectPath: activeProject.path, state: "open" }),
       ]);
+
+      if (requestId !== requestIdRef.current) return;
 
       const prs = "error" in prsResult ? [] : prsResult.prs;
       const issues = "error" in issuesResult ? [] : issuesResult.issues;
@@ -51,11 +56,13 @@ export function GitHubPanel({}: GitHubPanelProps) {
 
       setData({ prs, issues });
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(String(err));
     } finally {
+      if (requestId !== requestIdRef.current) return;
       setIsLoading(false);
     }
-  }, [activeProject, ipc]);
+  }, [activeProject, ipc, provider]);
 
   useEffect(() => {
     fetchData();
