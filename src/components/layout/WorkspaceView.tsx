@@ -18,6 +18,7 @@ export function WorkspaceView() {
 
   // null = panel closed; a tab value = panel open on that tab
   const [activeTab, setActiveTab] = useState<ContextTab | null>("changes");
+  const [showGitHubTab, setShowGitHubTab] = useState(false);
 
   const handleToolSelect = useCallback((tab: ContextTab) => {
     setActiveTab((current) => (current === tab ? null : tab));
@@ -34,6 +35,35 @@ export function WorkspaceView() {
       clearTabSwitchRequest();
     }
   }, [tabSwitchRequest, clearTabSwitchRequest]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!activeProject?.path) {
+      setShowGitHubTab(false);
+      return;
+    }
+
+    void ipc.githubGetPrContext({ projectPath: activeProject.path })
+      .then((context) => {
+        if (cancelled) return;
+        setShowGitHubTab(context.hasRemote);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setShowGitHubTab(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ipc, activeProject?.path]);
+
+  useEffect(() => {
+    if (!showGitHubTab && activeTab === "github") {
+      setActiveTab("changes");
+    }
+  }, [activeTab, showGitHubTab]);
 
   const handleNewSession = useCallback(async (providerOverride?: string) => {
     if (!activeProjectId) return;
@@ -77,7 +107,7 @@ export function WorkspaceView() {
           }
           rightCollapsed={activeTab === null}
         />
-        <ToolStrip activeTab={activeTab} onSelect={handleToolSelect} />
+        <ToolStrip activeTab={activeTab} onSelect={handleToolSelect} showGitHubTab={showGitHubTab} />
       </div>
     </div>
   );

@@ -22,6 +22,7 @@ const TOOLS: ToolStripItem[] = [
 interface ToolStripProps {
   activeTab: ContextTab | null;
   onSelect: (tab: ContextTab) => void;
+  showGitHubTab?: boolean;
 }
 
 /**
@@ -29,10 +30,12 @@ interface ToolStripProps {
  * Each button toggles the corresponding tool panel open/closed.
  * The active tool is highlighted; clicking it again closes the panel.
  */
-export function ToolStrip({ activeTab, onSelect }: ToolStripProps) {
+export function ToolStrip({ activeTab, onSelect, showGitHubTab = true }: ToolStripProps) {
+  const tools = showGitHubTab ? TOOLS : TOOLS.filter((tool) => tool.id !== "github");
+
   return (
     <div className="flex flex-col items-center w-10 border-l bg-background shrink-0 py-1 gap-0.5">
-      {TOOLS.map(({ id, icon: Icon, label }) => {
+      {tools.map(({ id, icon: Icon, label }) => {
         const isActive = activeTab === id;
         return (
           <button
