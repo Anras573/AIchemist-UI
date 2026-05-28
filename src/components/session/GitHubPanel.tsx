@@ -14,6 +14,35 @@ interface GitHubData {
   issues: GitHubIssue[];
 }
 
+function mapGitHubError(rawError: unknown): string {
+  const message = String(rawError).replace(/^Error:\s*/, "").trim();
+  if (!message) return "Failed to load GitHub data.";
+
+  if (message.includes("no-github-remote")) {
+    return "No GitHub remote found for this project. Add an origin remote and try again.";
+  }
+  if (message.includes("GITHUB_TOKEN not configured")) {
+    return "GitHub token is not configured. Set GITHUB_TOKEN in ~/.aichemist/.env.";
+  }
+  if (message.includes("GitHub token is invalid or expired")) {
+    return "GitHub token is invalid or expired. Update GITHUB_TOKEN and try again.";
+  }
+  if (/forbidden/i.test(message)) {
+    return "Access to this GitHub repository was denied. Check your token permissions.";
+  }
+  if (/not found/i.test(message)) {
+    return "GitHub repository not found. Check the configured remote and your access.";
+  }
+  if (message.includes("Invalid URL")) {
+    return "Could not open the GitHub link because the URL is invalid.";
+  }
+  if (message.includes("Only GitHub HTTPS URLs can be opened")) {
+    return "Only GitHub HTTPS URLs can be opened.";
+  }
+
+  return message;
+}
+
 /**
  * Lists open GitHub PRs and issues for the project's repository.
  * Fetches on mount and provides a refresh button.
@@ -49,20 +78,35 @@ export function GitHubPanel({}: GitHubPanelProps) {
       const issues = "error" in issuesResult ? [] : issuesResult.issues;
 
       if ("error" in prsResult || "error" in issuesResult) {
-        setError(
-          "error" in prsResult ? prsResult.error : "error" in issuesResult ? issuesResult.error : "Unknown error"
-        );
+        const fetchError =
+          "error" in prsResult
+            ? prsResult.error
+            : "error" in issuesResult
+              ? issuesResult.error
+              : "Unknown error";
+        setError(mapGitHubError(fetchError));
       }
 
       setData({ prs, issues });
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
-      setError(String(err));
+      setError(mapGitHubError(err));
     } finally {
       if (requestId !== requestIdRef.current) return;
       setIsLoading(false);
     }
   }, [activeProject, ipc, provider]);
+
+  const openGitHubUrl = useCallback(
+    async (url: string) => {
+      try {
+        await ipc.openGitHubUrl(url);
+      } catch (err) {
+        setError(mapGitHubError(err));
+      }
+    },
+    [ipc]
+  );
 
   useEffect(() => {
     fetchData();
@@ -158,7 +202,10 @@ export function GitHubPanel({}: GitHubPanelProps) {
             {data.prs.map((pr) => (
               <button
                 key={pr.id}
-                onClick={() => ipc.openGitHubUrl(pr.html_url)}
+                type="button"
+                onClick={() => {
+                  void openGitHubUrl(pr.html_url);
+                }}
                 className="w-full text-left p-2.5 rounded-sm border border-transparent hover:border-border hover:bg-muted/50 transition-all group"
               >
                 <div className="flex items-start justify-between gap-2">
@@ -201,7 +248,10 @@ export function GitHubPanel({}: GitHubPanelProps) {
             {data.issues.map((issue) => (
               <button
                 key={issue.id}
-                onClick={() => ipc.openGitHubUrl(issue.html_url)}
+                type="button"
+                onClick={() => {
+                  void openGitHubUrl(issue.html_url);
+                }}
                 className="w-full text-left p-2.5 rounded-sm border border-transparent hover:border-border hover:bg-muted/50 transition-all group"
               >
                 <div className="flex items-start justify-between gap-2">
