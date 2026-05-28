@@ -12,7 +12,7 @@ import { addProject, listProjects, removeProject, getProjectConfig, saveProjectC
 import { createSession, listSessions, getSession, deleteSession, saveMessage, updateSessionTitle, updateSessionModel, updateSessionAgent, updateSessionSkills, setDisabledMcpServers, getDisabledMcpServers, recoverStaleSessionStatuses } from "./sessions";
 import { openFolderDialog } from "./dialog";
 import { readSettings, writeSettings } from "./settings";
-import { parseDisabledProviders } from "./providers";
+import { parseDisabledProviders, isProviderId } from "./providers";
 import type { SettingsMap } from "./settings";
 import { resolveApproval, resolvePermissionChoice, getPendingApprovalData, addToSessionAllowlist, computeFingerprint, cancelSessionApprovals } from "./agent/approval";
 import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
@@ -722,9 +722,11 @@ function registerHandlers(): void {  // ── Terminal ────────
   handle(CH.GET_ANTHROPIC_CONFIG, () => getAnthropicConfig());
 
   // ── Projects ─────────────────────────────────────────────────────────────────
-  handle(CH.ADD_PROJECT, (_event, projectPath: string) =>
-    addProject(db, projectPath, readSettings().AICHEMIST_DEFAULT_PROVIDER)
-  );
+  handle(CH.ADD_PROJECT, (_event, projectPath: string) => {
+    const raw = readSettings().AICHEMIST_DEFAULT_PROVIDER;
+    const defaultProvider = raw && isProviderId(raw) ? raw : "anthropic";
+    return addProject(db, projectPath, defaultProvider);
+  });
   handle(CH.LIST_PROJECTS, () => listProjects(db));
   handle(CH.REMOVE_PROJECT, (_event, id: string) =>
     removeProject(db, id)
@@ -771,7 +773,7 @@ function registerHandlers(): void {  // ── Terminal ────────
       // If the effective provider is Ollama and no model is set (e.g. the
       // project was saved with Ollama as default but model was left blank),
       // resolve to an installed model or surface a clear error immediately.
-      if (provider === "ollama" && !model) {
+      if (provider === "ollama" && !model?.trim()) {
         const models = await getProvider("ollama").listModels?.();
         model = models?.[0]?.id ?? null;
         if (!model) {
