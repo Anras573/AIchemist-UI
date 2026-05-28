@@ -33,6 +33,7 @@ export interface GitHubPR {
   updated_at?: string;
   head_ref?: string;
   base_ref?: string;
+  author?: string;
 }
 
 export interface GitHubIssue {
@@ -43,6 +44,7 @@ export interface GitHubIssue {
   html_url: string;
   created_at?: string;
   updated_at?: string;
+  labels?: string[];
 }
 
 export interface CIStatus {

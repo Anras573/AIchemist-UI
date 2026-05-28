@@ -20,6 +20,7 @@ import { ChangesPanel } from "./ChangesPanel";
 import { InteractiveTerminal } from "./InteractiveTerminal";
 import { McpServersPanel } from "./McpServersPanel";
 import { MemoryPanel } from "./MemoryPanel";
+import { GitHubPanel } from "./GitHubPanel";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 
 // ── Rust types ────────────────────────────────────────────────────────────────
@@ -215,7 +216,7 @@ function MemoryFileViewer({ filePath }: { filePath: string }) {
 
 // ── ContextPanel ──────────────────────────────────────────────────────────────
 
-export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes" | "mcp" | "memory";
+export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes" | "mcp" | "memory" | "github";
 
 /**
  * Right panel content — renders whichever tool is active (files or terminal).
@@ -267,6 +268,7 @@ export function ContextPanel({
       : activeTab === "changes" ? "Changes"
       : activeTab === "mcp" ? "MCP Servers"
       : activeTab === "memory" ? "Memory"
+      : activeTab === "github" ? "GitHub"
       : "Skills";
 
   return (
@@ -340,6 +342,8 @@ export function ContextPanel({
               onFileOpen={setViewingMemoryFile}
             />
           )
+        ) : activeTab === "github" ? (
+          <GitHubPanel />
         ) : activeTab === "terminal" ? (
           activeProject ? (
             <InteractiveTerminal projectPath={activeProject.path} />

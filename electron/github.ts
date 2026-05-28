@@ -238,6 +238,7 @@ function mapPr(pr: {
   updated_at: string;
   head: { ref: string };
   base: { ref: string };
+  user?: { login: string } | null;
 }): GitHubPR {
   return {
     id: pr.id,
@@ -250,6 +251,7 @@ function mapPr(pr: {
     updated_at: pr.updated_at,
     head_ref: pr.head.ref,
     base_ref: pr.base.ref,
+    author: pr.user?.login,
   };
 }
 
@@ -296,15 +298,27 @@ export async function listIssues(
     });
     const issues: GitHubIssue[] = response.data
       .filter((issue) => !("pull_request" in issue && issue.pull_request))
-      .map((issue) => ({
-        id: issue.id,
-        number: issue.number,
-        title: issue.title,
-        state: issue.state,
-        html_url: issue.html_url,
-        created_at: issue.created_at,
-        updated_at: issue.updated_at,
-      }));
+      .map((issue) => {
+        const labels = (issue.labels || [])
+          .map((label) => {
+            if (typeof label === "string") return label;
+            if (typeof label?.name === "string") return label.name;
+            return null;
+          })
+          .filter((l): l is string => l !== null)
+          .slice(0, 20);
+
+        return {
+          id: issue.id,
+          number: issue.number,
+          title: issue.title,
+          state: issue.state,
+          html_url: issue.html_url,
+          created_at: issue.created_at,
+          updated_at: issue.updated_at,
+          ...(labels.length > 0 ? { labels } : {}),
+        };
+      });
     return { issues };
   } catch (err) {
     return { error: httpError(err) ?? String(err) };
