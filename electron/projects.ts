@@ -14,7 +14,7 @@ function configPath(projectPath: string): string {
 function defaultProjectConfig(defaultProvider = "anthropic"): ProjectConfig {
   return {
     provider: defaultProvider,
-    model: "claude-sonnet-4-5",
+    model: defaultProvider === "ollama" ? "" : "claude-sonnet-4-5",
     approval_mode: "custom",
     approval_rules: [
       { tool_category: "filesystem", policy: "risky_only" },
