@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { RefreshCw, GitBranch, Tag, ExternalLink, Github } from "lucide-react";
+import { RefreshCw, GitBranch, Tag, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -71,7 +71,7 @@ export function GitHubPanel({}: GitHubPanelProps) {
   if (provider && provider !== "anthropic" && provider !== "copilot") {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs px-3 text-center">
-        <Github className="h-8 w-8 opacity-30" />
+        <GitBranch className="h-8 w-8 opacity-30" />
         <span>GitHub PRs and issues are not available for {provider} sessions.</span>
       </div>
     );
