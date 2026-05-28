@@ -390,6 +390,25 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError 
   const isThinking = activeSessionId ? (sessionIsThinking[activeSessionId] ?? false) : false;
   const isRunning = session?.status === "running" || session?.status === "waiting_approval";
 
+  const messages = session?.messages ?? [];
+
+  // Build a merged, time-sorted list of messages and compaction markers.
+  // Declared here (before early returns) to satisfy Rules of Hooks.
+  type TimelineItem =
+    | { kind: "message"; data: MessageRecord }
+    | { kind: "compaction"; data: CompactionEvent };
+
+  const timelineItems: TimelineItem[] = useMemo(() => {
+    return [
+      ...messages.map((m): TimelineItem => ({ kind: "message", data: m })),
+      ...compactions.map((c): TimelineItem => ({ kind: "compaction", data: c })),
+    ].sort((a, b) => {
+      const ta = a.kind === "message" ? a.data.created_at : a.data.timestamp;
+      const tb = b.kind === "message" ? b.data.created_at : b.data.timestamp;
+      return ta.localeCompare(tb);
+    });
+  }, [messages, compactions]);
+
   function handleApprovalDecision(approvalId: string, approved: boolean, scope: "once" | "session" | "project") {
     if (!activeSessionId) return;
     const approval = approvals.find((a) => a.approvalId === approvalId);
@@ -425,23 +444,6 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError 
     );
   }
 
-  const messages = session.messages ?? [];
-
-  // Build a merged, time-sorted list of messages and compaction markers
-  type TimelineItem =
-    | { kind: "message"; data: MessageRecord }
-    | { kind: "compaction"; data: CompactionEvent };
-
-  const timelineItems: TimelineItem[] = useMemo(() => {
-    return [
-      ...messages.map((m): TimelineItem => ({ kind: "message", data: m })),
-      ...compactions.map((c): TimelineItem => ({ kind: "compaction", data: c })),
-    ].sort((a, b) => {
-      const ta = a.kind === "message" ? a.data.created_at : a.data.timestamp;
-      const tb = b.kind === "message" ? b.data.created_at : b.data.timestamp;
-      return ta.localeCompare(tb);
-    });
-  }, [messages, compactions]);
 
   return (
     <div className="flex flex-col h-full">
