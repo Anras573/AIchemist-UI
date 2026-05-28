@@ -18,6 +18,7 @@ export function useSessionHydration() {
   const ipc = useIpc();
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const hydrateSession = useSessionStore((s) => s.hydrateSession);
+  const setActiveSession = useSessionStore((s) => s.setActiveSession);
   const hydrated = useRef(new Set<string>());
   const [, startTransition] = useTransition();
 
@@ -32,6 +33,15 @@ export function useSessionHydration() {
       .then((session) => {
         if (session) startTransition(() => hydrateSession(session));
       })
-      .catch(console.error);
-  }, [activeSessionId, hydrateSession, startTransition]);
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("Session not found")) {
+          // Stale persisted session ID — clear it so the UI shows the empty state.
+          hydrated.current.delete(activeSessionId);
+          setActiveSession(null);
+        } else {
+          console.error(err);
+        }
+      });
+  }, [activeSessionId, hydrateSession, setActiveSession, startTransition]);
 }
