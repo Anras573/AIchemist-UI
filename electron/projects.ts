@@ -55,7 +55,7 @@ const AcpAgentConfigSchema = z.object({
 
 const ProjectConfigSchema = z.object({
   provider: z.string().default("anthropic"),
-  model: z.string().default("claude-sonnet-4-6"),
+  model: z.string().default(""),
   approval_mode: z.enum(["all", "none", "custom"]).default("custom"),
   approval_rules: z.array(ApprovalRuleSchema).default([]),
   custom_tools: z.array(ToolDefinitionSchema).default([]),
@@ -72,7 +72,13 @@ function parseProjectConfig(raw: string): ProjectConfig {
   try {
     const parsed = JSON.parse(raw);
     const result = ProjectConfigSchema.safeParse(parsed);
-    if (result.success) return result.data as ProjectConfig;
+    if (result.success) {
+      const config = result.data as ProjectConfig;
+      if (!config.model && config.provider === "anthropic") {
+        config.model = "claude-sonnet-4-6";
+      }
+      return config as ProjectConfig;
+    }
     console.warn("[projects] ProjectConfig validation failed, falling back to defaults:", result.error.issues);
     return defaultProjectConfig();
   } catch {

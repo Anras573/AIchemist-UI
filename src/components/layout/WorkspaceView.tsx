@@ -38,6 +38,9 @@ export function WorkspaceView() {
 
   const [createError, setCreateError] = useState<string | null>(null);
   useEffect(() => {
+    setCreateError(null);
+  }, [activeProjectId]);
+  useEffect(() => {
     let cancelled = false;
 
     if (!activeProject?.path) {
