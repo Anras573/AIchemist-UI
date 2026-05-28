@@ -84,8 +84,25 @@ describe("worktree git helpers", () => {
     const result = createManagedWorktree("/repo", "session-123", managedRoot);
 
     expect(result.created).toBe(true);
-    expect(result.branch).toBe("aichemist/session-123-2");
-    expect(result.workspacePath).toBe(path.join(managedRoot, "aichemist-session-123-2"));
+    expect(result.branch).toBe("aichemist/session-123-1");
+    expect(result.workspacePath).toBe(path.join(managedRoot, "aichemist-session-123-1"));
+  });
+
+  it("does not remove a pre-existing non-empty folder", () => {
+    mockSpawnSync
+      .mockReturnValueOnce({ status: 1, stdout: "", stderr: "already exists" } as never)
+      .mockReturnValueOnce({ status: 0, stdout: "", stderr: "" } as never);
+    const managedRoot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aichemist-worktree-root-")), "managed");
+    const occupiedPath = path.join(managedRoot, "aichemist-session-123");
+    const markerFile = path.join(occupiedPath, "keep.txt");
+    fs.mkdirSync(occupiedPath, { recursive: true });
+    fs.writeFileSync(markerFile, "keep");
+
+    const result = createManagedWorktree("/repo", "session-123", managedRoot);
+
+    expect(result.created).toBe(true);
+    expect(result.workspacePath).toBe(path.join(managedRoot, "aichemist-session-123-1"));
+    expect(fs.existsSync(markerFile)).toBe(true);
   });
 
   it("removes the worktree, prunes metadata, and deletes the branch", () => {

@@ -24,14 +24,31 @@ function worktreeBranch(sessionId: string, attempt: number): string {
   const slug = normalizeSlug(sessionId);
   return attempt === 0
     ? `${DEFAULT_BRANCH_PREFIX}/${slug}`
-    : `${DEFAULT_BRANCH_PREFIX}/${slug}-${attempt + 1}`;
+    : `${DEFAULT_BRANCH_PREFIX}/${slug}-${attempt}`;
 }
 
 function worktreeFolderName(sessionId: string, attempt: number): string {
   const slug = normalizeSlug(sessionId);
   return attempt === 0
     ? `${DEFAULT_WORKTREE_PREFIX}-${slug}`
-    : `${DEFAULT_WORKTREE_PREFIX}-${slug}-${attempt + 1}`;
+    : `${DEFAULT_WORKTREE_PREFIX}-${slug}-${attempt}`;
+}
+
+function removeIfEmptyDirectory(targetPath: string): void {
+  try {
+    if (!fs.existsSync(targetPath)) {
+      return;
+    }
+    if (!fs.statSync(targetPath).isDirectory()) {
+      return;
+    }
+    if (fs.readdirSync(targetPath).length > 0) {
+      return;
+    }
+    fs.rmSync(targetPath);
+  } catch {
+    // Best-effort cleanup only.
+  }
 }
 
 export interface ManagedWorktreePlan {
@@ -100,11 +117,7 @@ export function createManagedWorktree(
     const branch = worktreeBranch(sessionId, attempt);
     const workspacePath = path.join(managedRoot, worktreeFolderName(sessionId, attempt));
 
-    try {
-      fs.rmSync(workspacePath, { recursive: true, force: true });
-    } catch {
-      // Ignore pre-existing path cleanup failures — git will report the real error below.
-    }
+    removeIfEmptyDirectory(workspacePath);
 
     const result = childProcess.spawnSync(
       "git",
@@ -121,11 +134,7 @@ export function createManagedWorktree(
 
     lastWarning = [result.stderr, result.stdout].filter(Boolean).join("").trim() || "git worktree add failed";
 
-    try {
-      fs.rmSync(workspacePath, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup only.
-    }
+    removeIfEmptyDirectory(workspacePath);
   }
 
   return {
