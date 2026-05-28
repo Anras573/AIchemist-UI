@@ -183,27 +183,28 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const currentAgent = activeSessionId ? (sessionAgents[activeSessionId] ?? null) : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 shadow-lg max-w-lg">
-        <Command>
-          <CommandInput
-            placeholder={
-              page === "agent"
-                ? "Search agents… (Backspace to go back)"
-                : "Type a command or search…"
-            }
-            value={search}
-            onValueChange={setSearch}
-            onKeyDown={(e) => {
-              if (e.key === "Backspace" && search === "" && page !== "root") {
-                setPage("root");
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="overflow-hidden p-0 shadow-lg max-w-lg">
+          <Command>
+            <CommandInput
+              placeholder={
+                page === "agent"
+                  ? "Search agents… (Backspace to go back)"
+                  : "Type a command or search…"
               }
-            }}
-          />
-          <CommandList>
-            <CommandEmpty>
-              {loadingAgents ? "Loading agents…" : "No results found."}
-            </CommandEmpty>
+              value={search}
+              onValueChange={setSearch}
+              onKeyDown={(e) => {
+                if (e.key === "Backspace" && search === "" && page !== "root") {
+                  setPage("root");
+                }
+              }}
+            />
+            <CommandList>
+              <CommandEmpty>
+                {loadingAgents ? "Loading agents…" : "No results found."}
+              </CommandEmpty>
 
             {/* ── Root page ── */}
             {page === "root" && (
@@ -362,9 +363,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 ))}
               </CommandGroup>
             )}
-          </CommandList>
-        </Command>
-      </DialogContent>
+            </CommandList>
+          </Command>
+        </DialogContent>
+      </Dialog>
       <SessionDeleteDialog
         open={deleteDialogSession !== null}
         session={deleteDialogSession}
@@ -377,6 +379,6 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           setDeleteDialogSession(null);
         }}
       />
-    </Dialog>
+    </>
   );
 }

@@ -148,6 +148,7 @@ export const IPC_CHANNELS = {
   SESSION_THINKING_DONE: "session:thinking-done",
   SESSION_QUESTION_REQUIRED: "session:question_required",
   CONFIG_WARNING: "config:warning",
+  WORKTREE_WARNING: "worktree:warning",
 } as const;
 
 // ── Thinking / reasoning subscription helpers ─────────────────────────────────

@@ -114,3 +114,4 @@ export const ANSWER_QUESTION           = "agent:answer-question";
 
 // ── Startup warnings (push: main → renderer) ──────────────────────────────────
 export const CONFIG_WARNING            = "config:warning";
+export const WORKTREE_WARNING          = "worktree:warning";

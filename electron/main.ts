@@ -797,7 +797,7 @@ function registerHandlers(): void {  // ── Terminal ────────
         const { managedRoot, warning } = resolveManagedWorktreeRoot(project.path, project.config.worktree_root_path);
         if (warning) {
           console.warn(`[worktree] ${warning}`);
-          getMainWindow()?.webContents.send(CH.CONFIG_WARNING, { message: warning, missing: [] });
+          getMainWindow()?.webContents.send(CH.WORKTREE_WARNING, { message: warning });
         }
 
         const worktree = createManagedWorktree(project.path, sessionId, managedRoot);
@@ -806,15 +806,14 @@ function registerHandlers(): void {  // ── Terminal ────────
           workspacePath = worktree.workspacePath;
         } else if (worktree.warning) {
           console.warn(`[worktree] ${worktree.warning}`);
-          getMainWindow()?.webContents.send(CH.CONFIG_WARNING, {
+          getMainWindow()?.webContents.send(CH.WORKTREE_WARNING, {
             message: `Session worktree creation failed; falling back to the main checkout.\n${worktree.warning}`,
-            missing: [],
           });
         }
       } else {
         const warning = `Project is not git-backed; creating the session in the main checkout instead.`;
         console.warn(`[worktree] ${warning}`);
-        getMainWindow()?.webContents.send(CH.CONFIG_WARNING, { message: warning, missing: [] });
+        getMainWindow()?.webContents.send(CH.WORKTREE_WARNING, { message: warning });
       }
     }
 

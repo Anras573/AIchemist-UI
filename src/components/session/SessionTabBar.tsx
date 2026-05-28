@@ -159,12 +159,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
                   </span>
                 )}
                 {session.branch && (
-                  <span className={cn(
-                    "flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-normal",
-                    active
-                      ? "text-muted-foreground bg-muted/60 border border-border/50"
-                      : "text-muted-foreground bg-muted/60 border border-border/50"
-                  )}>
+                  <span className="flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-normal text-muted-foreground bg-muted/60 border border-border/50">
                     <GitBranch className="size-2.5 shrink-0" />
                     <span className="max-w-[110px] truncate">{session.branch}</span>
                   </span>
