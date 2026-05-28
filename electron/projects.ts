@@ -11,9 +11,9 @@ function configPath(projectPath: string): string {
   return path.join(projectPath, ".aichemist", "config.json");
 }
 
-function defaultProjectConfig(): ProjectConfig {
+function defaultProjectConfig(defaultProvider = "anthropic"): ProjectConfig {
   return {
-    provider: "anthropic",
+    provider: defaultProvider,
     model: "claude-sonnet-4-5",
     approval_mode: "custom",
     approval_rules: [
@@ -80,7 +80,7 @@ function parseProjectConfig(raw: string): ProjectConfig {
   }
 }
 
-function readOrCreateConfig(projectPath: string): ProjectConfig {
+function readOrCreateConfig(projectPath: string, defaultProvider = "anthropic"): ProjectConfig {
   const cfgPath = configPath(projectPath);
   if (fs.existsSync(cfgPath)) {
     try {
@@ -91,7 +91,7 @@ function readOrCreateConfig(projectPath: string): ProjectConfig {
     }
   }
 
-  const config = defaultProjectConfig();
+  const config = defaultProjectConfig(defaultProvider);
   const dir = path.dirname(cfgPath);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(cfgPath, JSON.stringify(config, null, 2), "utf-8");
@@ -107,7 +107,7 @@ function nowIso(): string {
 /**
  * Open a folder as a project. Creates `.aichemist/config.json` if absent.
  */
-export function addProject(db: Database, projectPath: string): Project {
+export function addProject(db: Database, projectPath: string, defaultProvider = "anthropic"): Project {
   const trimmedPath = projectPath.replace(/\/+$/, "");
 
   if (!fs.existsSync(trimmedPath) || !fs.statSync(trimmedPath).isDirectory()) {
@@ -115,7 +115,7 @@ export function addProject(db: Database, projectPath: string): Project {
   }
 
   const name = path.basename(trimmedPath) || "Project";
-  const config = readOrCreateConfig(trimmedPath);
+  const config = readOrCreateConfig(trimmedPath, defaultProvider);
   const id = crypto.randomUUID();
   const createdAt = nowIso();
 

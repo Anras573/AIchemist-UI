@@ -722,7 +722,9 @@ function registerHandlers(): void {  // ── Terminal ────────
   handle(CH.GET_ANTHROPIC_CONFIG, () => getAnthropicConfig());
 
   // ── Projects ─────────────────────────────────────────────────────────────────
-  handle(CH.ADD_PROJECT, (_event, projectPath: string) => addProject(db, projectPath));
+  handle(CH.ADD_PROJECT, (_event, projectPath: string) =>
+    addProject(db, projectPath, readSettings().AICHEMIST_DEFAULT_PROVIDER)
+  );
   handle(CH.LIST_PROJECTS, () => listProjects(db));
   handle(CH.REMOVE_PROJECT, (_event, id: string) =>
     removeProject(db, id)
