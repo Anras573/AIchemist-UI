@@ -61,8 +61,9 @@ export function useAgentTurn() {
       clearLiveToolCalls(activeSessionId);
       const sessionIdAtStart = activeSessionId;
       const activeAgent = sessionAgents[activeSessionId] ?? undefined;
-      const supportsOneShotSkills = session.provider !== "acp" && session.provider !== "ollama";
-      const supportsAgent = session.provider !== "acp" && session.provider !== "ollama";
+      const effectiveProvider = session.provider ?? project.config.provider;
+      const supportsOneShotSkills = effectiveProvider !== "acp" && effectiveProvider !== "ollama";
+      const supportsAgent = effectiveProvider !== "acp" && effectiveProvider !== "ollama";
 
       try {
         await ipc.agentSend({
