@@ -130,7 +130,7 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(CH.CREATE_SESSION, { projectId, providerOverride }),
   listSessions: (projectId) => ipcRenderer.invoke(CH.LIST_SESSIONS, projectId),
   getSession: (sessionId) => ipcRenderer.invoke(CH.GET_SESSION, sessionId),
-  deleteSession: (sessionId) => ipcRenderer.invoke(CH.DELETE_SESSION, sessionId),
+  deleteSession: (sessionId, options) => ipcRenderer.invoke(CH.DELETE_SESSION, sessionId, options),
   saveMessage: (args) => ipcRenderer.invoke(CH.SAVE_MESSAGE, args),
   updateSessionTitle: (sessionId, title) => ipcRenderer.invoke(CH.UPDATE_SESSION_TITLE, sessionId, title),
   updateSessionModel: (sessionId, provider, model) => ipcRenderer.invoke(CH.UPDATE_SESSION_MODEL, sessionId, provider, model),
