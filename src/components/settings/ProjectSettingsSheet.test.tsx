@@ -68,7 +68,7 @@ describe("ProjectSettingsSheet", () => {
       vi.mocked(window.electronAPI.saveProjectConfig).mockResolvedValue(undefined);
 
       renderSheet("proj-worktree");
-      await screen.findByDisplayValue("claude-sonnet-4-5");
+      await screen.findByDisplayValue(DEFAULT_ANTHROPIC_MODEL);
 
       fireEvent.click(screen.getByLabelText(/create branch per session/i));
       fireEvent.change(screen.getByLabelText(/managed worktree root/i), {
