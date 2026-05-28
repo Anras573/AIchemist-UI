@@ -33,6 +33,7 @@ function makeOctokitMock(overrides?: Partial<OctokitClient>): OctokitClient {
     },
     repos: {
       get: async () => ({ data: { default_branch: "main" } }),
+      getCombinedStatusForRef: async () => ({ data: { state: "success", statuses: [] } }),
     },
   } as unknown as OctokitClient;
 
@@ -232,7 +233,7 @@ describe("listPullRequests", () => {
       draft: false,
       created_at: "2024-01-01T00:00:00Z",
       updated_at: "2024-01-02T00:00:00Z",
-      head: { ref: "feature-branch" },
+      head: { ref: "feature-branch", sha: "abc123" },
       base: { ref: "main" },
     };
 
@@ -252,6 +253,7 @@ describe("listPullRequests", () => {
           draft: false,
           created_at: "2024-01-01T00:00:00Z",
           updated_at: "2024-01-02T00:00:00Z",
+          head_sha: "abc123",
           head_ref: "feature-branch",
           base_ref: "main",
         },
@@ -617,9 +619,33 @@ describe("getCiStatus", () => {
   it("returns unknown status when no check runs exist", async () => {
     const result = await getCiStatus(
       { projectPath: PROJECT_PATH, ref: "abc123" },
-      happyDeps()
+      happyDeps({
+        repos: {
+          get: async () => ({ data: { default_branch: "main" } }),
+          getCombinedStatusForRef: async () => ({ data: { state: "", statuses: [] } }),
+        } as unknown as OctokitClient["repos"],
+      })
     );
     expect(result).toEqual({ status: { state: "unknown" } });
+  });
+
+  it("falls back to legacy commit statuses when no check runs exist", async () => {
+    const client = makeOctokitMock({
+      checks: {
+        listForRef: async () => ({ data: { check_runs: [] } }),
+      } as unknown as OctokitClient["checks"],
+      repos: {
+        get: async () => ({ data: { default_branch: "main" } }),
+        getCombinedStatusForRef: async () => ({ data: { state: "failure", statuses: [{ state: "failure" }] } }),
+      } as unknown as OctokitClient["repos"],
+    });
+
+    const result = await getCiStatus(
+      { projectPath: PROJECT_PATH, ref: "legacy-status-sha" },
+      { remoteInfo: REMOTE, client }
+    );
+
+    expect(result).toEqual({ status: { state: "failure" } });
   });
 
   it("aggregates success when all runs pass", async () => {

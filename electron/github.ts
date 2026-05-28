@@ -192,6 +192,22 @@ export function aggregateCiStatus(
   return "unknown";
 }
 
+function aggregateLegacyCommitStatus(
+  state: string | null | undefined
+): "success" | "failure" | "pending" | "unknown" {
+  switch (state) {
+    case "success":
+      return "success";
+    case "failure":
+    case "error":
+      return "failure";
+    case "pending":
+      return "pending";
+    default:
+      return "unknown";
+  }
+}
+
 async function resolveContext(
   projectPath: string,
   deps: GitHubTestDeps | undefined
@@ -236,8 +252,9 @@ function mapPr(pr: {
   draft?: boolean;
   created_at: string;
   updated_at: string;
-  head: { ref: string };
+  head: { ref: string; sha: string };
   base: { ref: string };
+  user?: { login: string } | null;
 }): GitHubPR {
   return {
     id: pr.id,
@@ -248,8 +265,10 @@ function mapPr(pr: {
     draft: pr.draft,
     created_at: pr.created_at,
     updated_at: pr.updated_at,
+    head_sha: pr.head.sha,
     head_ref: pr.head.ref,
     base_ref: pr.base.ref,
+    author: pr.user?.login,
   };
 }
 
@@ -296,15 +315,27 @@ export async function listIssues(
     });
     const issues: GitHubIssue[] = response.data
       .filter((issue) => !("pull_request" in issue && issue.pull_request))
-      .map((issue) => ({
-        id: issue.id,
-        number: issue.number,
-        title: issue.title,
-        state: issue.state,
-        html_url: issue.html_url,
-        created_at: issue.created_at,
-        updated_at: issue.updated_at,
-      }));
+      .map((issue) => {
+        const labels = (issue.labels || [])
+          .map((label) => {
+            if (typeof label === "string") return label;
+            if (typeof label?.name === "string") return label.name;
+            return null;
+          })
+          .filter((l): l is string => l !== null)
+          .slice(0, 20);
+
+        return {
+          id: issue.id,
+          number: issue.number,
+          title: issue.title,
+          state: issue.state,
+          html_url: issue.html_url,
+          created_at: issue.created_at,
+          updated_at: issue.updated_at,
+          ...(labels.length > 0 ? { labels } : {}),
+        };
+      });
     return { issues };
   } catch (err) {
     return { error: httpError(err) ?? String(err) };
@@ -405,12 +436,27 @@ export async function getCiStatus(
       ref: resolvedRef,
       per_page: 100, // fetches first page only; repos with >100 check runs may return incomplete status
     });
-    const state = aggregateCiStatus(
+    const checkRunState = aggregateCiStatus(
       response.data.check_runs.map((r) => ({
         status: r.status,
         conclusion: r.conclusion ?? null,
       }))
     );
+
+    let state = checkRunState;
+    if (state === "unknown" && response.data.check_runs.length === 0) {
+      try {
+        const combined = await client.repos.getCombinedStatusForRef({
+          owner,
+          repo,
+          ref: resolvedRef,
+        });
+        state = aggregateLegacyCommitStatus(combined.data.state);
+      } catch {
+        state = checkRunState;
+      }
+    }
+
     return { status: { state, ...(refIsConfirmedSha ? { sha: resolvedRef } : {}) } };
   } catch (err) {
     return { error: httpError(err) ?? String(err) };
