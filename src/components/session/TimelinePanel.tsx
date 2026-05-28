@@ -563,6 +563,8 @@ function InputBarInner({
       setSkills([]);
       setSlashBadges([]);
       setLoadingSkills(false);
+    } else {
+      setSkills(null);
     }
   }, [skillsSupported]);
 
