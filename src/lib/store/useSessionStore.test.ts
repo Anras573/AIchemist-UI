@@ -14,6 +14,8 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     messages: [],
     provider: "anthropic",
     model: "claude-sonnet-4-6",
+    branch: null,
+    workspace_path: null,
     agent: null,
     skills: null,
     ...overrides,
@@ -160,6 +162,22 @@ describe("removeSession", () => {
     get().setActiveSession("sess-1");
     get().removeSession("sess-2");
     expect(get().activeSessionId).toBe("sess-1");
+  });
+
+  it("clears per-session caches when a session is removed", () => {
+    get().addSession(makeSession());
+    get().setSessionAgent("sess-1", "coder");
+    get().setSessionSkills("sess-1", ["skill-1"]);
+    get().setSessionDisabledMcp("sess-1", ["server-1"]);
+    get().appendStreamingDelta("sess-1", "stream");
+    get().appendTerminalOutput("sess-1", "terminal");
+    get().removeSession("sess-1");
+
+    expect(get().sessionAgents["sess-1"]).toBeUndefined();
+    expect(get().sessionSkills["sess-1"]).toBeUndefined();
+    expect(get().sessionDisabledMcp["sess-1"]).toBeUndefined();
+    expect(get().streamingText["sess-1"]).toBeUndefined();
+    expect(get().terminalOutput["sess-1"]).toBeUndefined();
   });
 });
 

@@ -21,6 +21,8 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     messages: [],
     provider: "anthropic",
     model: "claude-sonnet-4-6",
+    branch: null,
+    workspace_path: null,
     agent: null,
     skills: null,
     ...overrides,
@@ -58,20 +60,45 @@ describe("SessionTabBar", () => {
     });
   });
 
+  it("shows the session branch badge when a branch is present", async () => {
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([
+      makeSession({
+        id: "sess-1",
+        title: "Branch session",
+        branch: "aichemist/branch-session",
+        workspace_path: "/tmp/branch-session",
+      }),
+    ]);
+
+    renderWithProviders(<SessionTabBar projectId="proj-1" />);
+
+    await screen.findByText("Branch session");
+    expect(screen.getByText("aichemist/branch-session")).toBeInTheDocument();
+  });
+
   it("calls ipc.deleteSession and removes the tab when the close button is clicked", async () => {
     vi.mocked(window.electronAPI.listSessions).mockResolvedValue([
-      makeSession({ id: "sess-1", title: "Closeable" }),
+      makeSession({
+        id: "sess-1",
+        title: "Closeable",
+        branch: "aichemist/closeable",
+        workspace_path: "/tmp/closeable",
+      }),
     ]);
     vi.mocked(window.electronAPI.deleteSession).mockResolvedValue(undefined);
 
     renderWithProviders(<SessionTabBar projectId="proj-1" />);
     await screen.findByText("Closeable");
 
-    // The close button is a span[role=button] with aria-label="Close session"
-    const closeBtn = screen.getByLabelText("Close session");
+    // The delete button is a span[role=button] with aria-label="Delete session"
+    const closeBtn = screen.getByLabelText("Delete session");
     await userEvent.click(closeBtn);
+    const deleteButtons = await screen.findAllByRole("button", { name: /delete session/i });
+    await userEvent.click(deleteButtons[deleteButtons.length - 1]);
 
-    expect(window.electronAPI.deleteSession).toHaveBeenCalledWith("sess-1");
+    expect(window.electronAPI.deleteSession).toHaveBeenCalledWith("sess-1", {
+      cleanupWorktree: true,
+    });
     await waitFor(() => {
       expect(screen.queryByText("Closeable")).not.toBeInTheDocument();
     });

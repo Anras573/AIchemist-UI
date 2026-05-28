@@ -19,14 +19,15 @@ export function createSession(
   db: Database,
   projectId: string,
   provider: string | null = null,
-  model: string | null = null
+  model: string | null = null,
+  options: { id?: string; branch?: string | null; workspacePath?: string | null } = {}
 ): Session {
-  const id = crypto.randomUUID();
+  const id = options.id ?? crypto.randomUUID();
   const createdAt = nowIso();
 
   db.prepare(
-    "INSERT INTO sessions (id, project_id, title, status, created_at, provider, model) VALUES (?, ?, 'New session', 'idle', ?, ?, ?)"
-  ).run(id, projectId, createdAt, provider, model);
+    "INSERT INTO sessions (id, project_id, title, status, created_at, provider, model, branch, workspace_path) VALUES (?, ?, 'New session', 'idle', ?, ?, ?, ?, ?)"
+  ).run(id, projectId, createdAt, provider, model, options.branch ?? null, options.workspacePath ?? null);
 
   return {
     id,
@@ -37,6 +38,8 @@ export function createSession(
     messages: [],
     provider,
     model,
+    branch: options.branch ?? null,
+    workspace_path: options.workspacePath ?? null,
     agent: null,
     skills: null,
     disabled_mcp_servers: null,
@@ -50,7 +53,7 @@ export function createSession(
 export function listSessions(db: Database, projectId: string): Session[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, title, status, created_at, provider, model, agent, skills, disabled_mcp_servers, acp_session_id
+      `SELECT id, project_id, title, status, created_at, provider, model, branch, workspace_path, agent, skills, disabled_mcp_servers, acp_session_id
        FROM sessions
        WHERE project_id = ?
        ORDER BY created_at ASC`
@@ -63,6 +66,8 @@ export function listSessions(db: Database, projectId: string): Session[] {
     created_at: string;
     provider: string | null;
     model: string | null;
+    branch: string | null;
+    workspace_path: string | null;
     agent: string | null;
     skills: string | null;
     disabled_mcp_servers: string | null;
@@ -78,6 +83,8 @@ export function listSessions(db: Database, projectId: string): Session[] {
     messages: [],
     provider: row.provider,
     model: row.model,
+    branch: row.branch,
+    workspace_path: row.workspace_path,
     agent: row.agent,
     skills: parseJsonStringArray(row.skills),
     disabled_mcp_servers: parseJsonStringArray(row.disabled_mcp_servers),
@@ -91,7 +98,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
 export function getSession(db: Database, sessionId: string): Session {
   const row = db
     .prepare(
-      "SELECT id, project_id, title, status, created_at, provider, model, agent, skills, disabled_mcp_servers, acp_session_id FROM sessions WHERE id = ?"
+      "SELECT id, project_id, title, status, created_at, provider, model, branch, workspace_path, agent, skills, disabled_mcp_servers, acp_session_id FROM sessions WHERE id = ?"
     )
     .get(sessionId) as
     | {
@@ -102,6 +109,8 @@ export function getSession(db: Database, sessionId: string): Session {
         created_at: string;
         provider: string | null;
         model: string | null;
+        branch: string | null;
+        workspace_path: string | null;
         agent: string | null;
         skills: string | null;
         disabled_mcp_servers: string | null;
@@ -185,6 +194,8 @@ export function getSession(db: Database, sessionId: string): Session {
     messages,
     provider: row.provider,
     model: row.model,
+    branch: row.branch,
+    workspace_path: row.workspace_path,
     agent: row.agent,
     skills: parseJsonStringArray(row.skills),
     disabled_mcp_servers: parseJsonStringArray(row.disabled_mcp_servers),

@@ -30,7 +30,8 @@ export const ipc = {
     window.electronAPI.createSession(projectId, providerOverride),
   listSessions: (projectId: string) => window.electronAPI.listSessions(projectId),
   getSession: (sessionId: string) => window.electronAPI.getSession(sessionId),
-  deleteSession: (sessionId: string) => window.electronAPI.deleteSession(sessionId),
+  deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) =>
+    window.electronAPI.deleteSession(sessionId, options),
   saveMessage: (args: { sessionId: string; role: string; content: string }) =>
     window.electronAPI.saveMessage(args),
   updateSessionTitle: (sessionId: string, title: string) =>
@@ -147,6 +148,7 @@ export const IPC_CHANNELS = {
   SESSION_THINKING_DONE: "session:thinking-done",
   SESSION_QUESTION_REQUIRED: "session:question_required",
   CONFIG_WARNING: "config:warning",
+  WORKTREE_WARNING: "worktree:warning",
 } as const;
 
 // ── Thinking / reasoning subscription helpers ─────────────────────────────────

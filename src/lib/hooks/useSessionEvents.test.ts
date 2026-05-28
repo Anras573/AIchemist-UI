@@ -17,6 +17,8 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     messages: [],
     provider: "anthropic",
     model: "claude-sonnet-4-6",
+    branch: null,
+    workspace_path: null,
     agent: null,
     skills: null,
     ...overrides,

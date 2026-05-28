@@ -33,12 +33,24 @@ function App() {
   // Warn in the console if the main process reports missing API keys at startup.
   // A proper toast can replace this once a toast system is added.
   useEffect(() => {
-    return onSessionEvent<{ message: string; missing: string[] }>(
+    const offConfigWarning = onSessionEvent<{ message: string; missing: string[] }>(
       IPC_CHANNELS.CONFIG_WARNING,
       ({ message, missing }) => {
         console.warn(`[AIchemist] Config warning — missing keys: ${missing.join(", ")}\n${message}`);
       }
     );
+
+    const offWorktreeWarning = onSessionEvent<{ message: string }>(
+      IPC_CHANNELS.WORKTREE_WARNING,
+      ({ message }) => {
+        console.warn(`[AIchemist] Worktree warning\n${message}`);
+      }
+    );
+
+    return () => {
+      offConfigWarning();
+      offWorktreeWarning();
+    };
   }, []);
 
   return (

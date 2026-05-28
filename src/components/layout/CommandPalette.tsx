@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback } from "react";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useIpc } from "@/lib/ipc";
-import type { AgentInfo } from "@/types";
+import type { AgentInfo, Session } from "@/types";
+import { SessionDeleteDialog } from "@/components/session/SessionDeleteDialog";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +53,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [approvalMode, setApprovalMode] = useState<"all" | "none" | "custom" | null>(null);
+  const [deleteDialogSession, setDeleteDialogSession] = useState<Session | null>(null);
 
   // Register Cmd+K globally
   useEffect(() => {
@@ -111,12 +113,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   async function handleDeleteSession() {
     if (!activeSessionId) return;
-    try {
-      await ipc.deleteSession(activeSessionId);
-      removeSession(activeSessionId); // store auto-clears activeSessionId
-    } catch (err) {
-      console.error("Failed to delete session", err);
-    }
+    setDeleteDialogSession(sessions[activeSessionId] ?? null);
     close();
   }
 
@@ -142,11 +139,13 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const loadAgents = useCallback(() => {
     const project = projects.find((p) => p.id === activeProjectId);
     if (!project) return;
+    const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+    const sessionPath = activeSession?.workspace_path ?? project.path;
     setLoadingAgents(true);
     // Load from both providers and merge, deduplicating by name
     Promise.allSettled([
-      ipc.getClaudeAgents(project.path),
-      ipc.getCopilotAgents(project.path),
+      ipc.getClaudeAgents(sessionPath),
+      ipc.getCopilotAgents(sessionPath),
     ]).then((results) => {
       const merged: AgentInfo[] = [];
       const seen = new Set<string>();
@@ -162,7 +161,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       }
       setAgents(merged);
     }).finally(() => setLoadingAgents(false));
-  }, [activeProjectId, projects]);
+  }, [activeProjectId, projects, activeSessionId, sessions, ipc]);
 
   function handleOpenAgentPage() {
     setPage("agent");
@@ -184,27 +183,28 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const currentAgent = activeSessionId ? (sessionAgents[activeSessionId] ?? null) : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 shadow-lg max-w-lg">
-        <Command>
-          <CommandInput
-            placeholder={
-              page === "agent"
-                ? "Search agents… (Backspace to go back)"
-                : "Type a command or search…"
-            }
-            value={search}
-            onValueChange={setSearch}
-            onKeyDown={(e) => {
-              if (e.key === "Backspace" && search === "" && page !== "root") {
-                setPage("root");
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="overflow-hidden p-0 shadow-lg max-w-lg">
+          <Command>
+            <CommandInput
+              placeholder={
+                page === "agent"
+                  ? "Search agents… (Backspace to go back)"
+                  : "Type a command or search…"
               }
-            }}
-          />
-          <CommandList>
-            <CommandEmpty>
-              {loadingAgents ? "Loading agents…" : "No results found."}
-            </CommandEmpty>
+              value={search}
+              onValueChange={setSearch}
+              onKeyDown={(e) => {
+                if (e.key === "Backspace" && search === "" && page !== "root") {
+                  setPage("root");
+                }
+              }}
+            />
+            <CommandList>
+              <CommandEmpty>
+                {loadingAgents ? "Loading agents…" : "No results found."}
+              </CommandEmpty>
 
             {/* ── Root page ── */}
             {page === "root" && (
@@ -363,9 +363,22 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 ))}
               </CommandGroup>
             )}
-          </CommandList>
-        </Command>
-      </DialogContent>
-    </Dialog>
+            </CommandList>
+          </Command>
+        </DialogContent>
+      </Dialog>
+      <SessionDeleteDialog
+        open={deleteDialogSession !== null}
+        session={deleteDialogSession}
+        projectPath={projects.find((p) => p.id === deleteDialogSession?.project_id)?.path ?? ""}
+        onOpenChange={(open) => !open && setDeleteDialogSession(null)}
+        onConfirm={async (cleanupWorktree) => {
+          if (!deleteDialogSession) return;
+          await ipc.deleteSession(deleteDialogSession.id, { cleanupWorktree });
+          removeSession(deleteDialogSession.id);
+          setDeleteDialogSession(null);
+        }}
+      />
+    </>
   );
 }

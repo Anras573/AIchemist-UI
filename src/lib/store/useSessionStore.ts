@@ -191,10 +191,34 @@ export const useSessionStore = create<SessionStore>()(
       removeSession: (id) =>
         set((state) => {
           const { [id]: _removed, ...rest } = state.sessions;
+          const { [id]: _streaming, ...streamingRest } = state.streamingText;
+          const { [id]: _liveToolCalls, ...liveToolCallsRest } = state.liveToolCalls;
+          const { [id]: _pendingApprovals, ...pendingApprovalsRest } = state.pendingApprovals;
+          const { [id]: _pendingQuestions, ...pendingQuestionsRest } = state.pendingQuestions;
+          const { [id]: _sessionAgents, ...sessionAgentsRest } = state.sessionAgents;
+          const { [id]: _sessionSkills, ...sessionSkillsRest } = state.sessionSkills;
+          const { [id]: _sessionDisabledMcp, ...sessionDisabledMcpRest } = state.sessionDisabledMcp;
           const { [id]: _t, ...tracesRest } = state.sessionTraces;
+          const { [id]: _fileChanges, ...fileChangesRest } = state.sessionFileChanges;
+          const { [id]: _compactions, ...compactionsRest } = state.sessionCompactions;
+          const { [id]: _thinking, ...thinkingRest } = state.sessionThinking;
+          const { [id]: _isThinking, ...isThinkingRest } = state.sessionIsThinking;
+          const { [id]: _terminalOutput, ...terminalOutputRest } = state.terminalOutput;
           return {
             sessions: rest,
+            streamingText: streamingRest,
+            liveToolCalls: liveToolCallsRest,
+            pendingApprovals: pendingApprovalsRest,
+            pendingQuestions: pendingQuestionsRest,
+            sessionAgents: sessionAgentsRest,
+            sessionSkills: sessionSkillsRest,
+            sessionDisabledMcp: sessionDisabledMcpRest,
             sessionTraces: tracesRest,
+            sessionFileChanges: fileChangesRest,
+            sessionCompactions: compactionsRest,
+            sessionThinking: thinkingRest,
+            sessionIsThinking: isThinkingRest,
+            terminalOutput: terminalOutputRest,
             activeSessionId:
               state.activeSessionId === id ? null : state.activeSessionId,
           };

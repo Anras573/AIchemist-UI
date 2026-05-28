@@ -20,6 +20,7 @@ function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
     ],
     custom_tools: [],
     allowed_tools: [],
+    create_worktree_per_session: false,
     ...overrides,
   };
 }
@@ -60,6 +61,30 @@ describe("ProjectSettingsSheet", () => {
       renderSheet();
       await waitFor(() => expect(screen.getByDisplayValue("claude-opus-4-5")).toBeDefined());
       expect(screen.getByDisplayValue("Anthropic (Claude)")).toBeDefined();
+    });
+
+    it("persists worktree settings", async () => {
+      vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(makeConfig());
+      vi.mocked(window.electronAPI.saveProjectConfig).mockResolvedValue(undefined);
+
+      renderSheet("proj-worktree");
+      await screen.findByDisplayValue(DEFAULT_ANTHROPIC_MODEL);
+
+      fireEvent.click(screen.getByLabelText(/create branch per session/i));
+      fireEvent.change(screen.getByLabelText(/managed worktree root/i), {
+        target: { value: "/tmp/worktrees" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+      await waitFor(() =>
+        expect(window.electronAPI.saveProjectConfig).toHaveBeenCalledWith(
+          "proj-worktree",
+          expect.objectContaining({
+            create_worktree_per_session: true,
+            worktree_root_path: "/tmp/worktrees",
+          })
+        )
+      );
     });
 
     it("clears model when provider is changed", async () => {

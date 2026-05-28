@@ -30,6 +30,7 @@ function makeConfig(
     approval_rules,
     custom_tools: [],
     allowed_tools,
+    create_worktree_per_session: false,
   };
 }
 

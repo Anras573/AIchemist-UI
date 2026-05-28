@@ -540,6 +540,7 @@ function InputBarInner({
   const { projects, activeProjectId } = useProjectStore();
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
+  const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
   const effectiveProvider = useActiveSessionProvider();
   const skillsSupported = effectiveProvider !== "acp" && effectiveProvider !== "ollama";
 
@@ -554,9 +555,20 @@ function InputBarInner({
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   useEffect(() => {
-    if (!activeProject?.path) { setGitBranch(null); return; }
-    ipc.getGitBranch(activeProject.path).then(setGitBranch).catch(() => setGitBranch(null));
-  }, [activeProject?.path]);
+    let cancelled = false;
+    if (!sessionPath) { setGitBranch(null); return () => { cancelled = true; }; }
+    ipc
+      .getGitBranch(sessionPath)
+      .then((branch) => {
+        if (!cancelled) setGitBranch(branch);
+      })
+      .catch(() => {
+        if (!cancelled) setGitBranch(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionPath]);
 
   // Reset skills cache and one-shot badges when switching projects
   useEffect(() => {
@@ -566,13 +578,13 @@ function InputBarInner({
 
   // Load skills lazily when the user first types "/"
   const ensureSkillsLoaded = useCallback(() => {
-    if (skills !== null || loadingSkills || !activeProject?.path || !skillsSupported) return;
+    if (skills !== null || loadingSkills || !sessionPath || !skillsSupported) return;
     setLoadingSkills(true);
-    ipc.listSkills(activeProject.path)
+    ipc.listSkills(sessionPath)
       .then(setSkills)
       .catch(() => setSkills([]))
       .finally(() => setLoadingSkills(false));
-  }, [skills, loadingSkills, activeProject?.path, ipc, skillsSupported]);
+  }, [skills, loadingSkills, sessionPath, ipc, skillsSupported]);
 
   useEffect(() => {
     if (!skillsSupported) {
@@ -739,12 +751,12 @@ function InputBarInner({
               />
             )}
             <AgentPickerButton />
-            {gitBranch && (
+            {(activeSession?.branch ?? gitBranch) && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground/60">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                   <path d="M11.75 2.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm.75 2.25a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM4.25 13.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM5 15.75a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM4.25 2.5a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM5 4.75a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM5.75 8A3.25 3.25 0 0 0 9 11.25v.5a2.25 2.25 0 1 0 1.5 0v-.5a4.75 4.75 0 0 1-4.75-4.75v-.5a2.25 2.25 0 1 0-1.5 0v.5A3.25 3.25 0 0 0 5.75 8Z"/>
                 </svg>
-                {gitBranch}
+                {activeSession?.branch ?? gitBranch}
               </span>
             )}
           </PromptInputTools>

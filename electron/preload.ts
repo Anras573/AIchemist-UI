@@ -30,7 +30,7 @@ export interface ElectronAPI {
   createSession: (projectId: string, providerOverride?: string) => Promise<import("../src/types").Session>;
   listSessions: (projectId: string) => Promise<import("../src/types").Session[]>;
   getSession: (sessionId: string) => Promise<import("../src/types").Session>;
-  deleteSession: (sessionId: string) => Promise<void>;
+  deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) => Promise<void>;
   saveMessage: (args: { sessionId: string; role: string; content: string }) => Promise<import("../src/types").Message>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   updateSessionModel: (sessionId: string, provider: string, model: string) => Promise<void>;
@@ -131,7 +131,7 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(CH.CREATE_SESSION, { projectId, providerOverride }),
   listSessions: (projectId) => ipcRenderer.invoke(CH.LIST_SESSIONS, projectId),
   getSession: (sessionId) => ipcRenderer.invoke(CH.GET_SESSION, sessionId),
-  deleteSession: (sessionId) => ipcRenderer.invoke(CH.DELETE_SESSION, sessionId),
+  deleteSession: (sessionId, options) => ipcRenderer.invoke(CH.DELETE_SESSION, sessionId, options),
   saveMessage: (args) => ipcRenderer.invoke(CH.SAVE_MESSAGE, args),
   updateSessionTitle: (sessionId, title) => ipcRenderer.invoke(CH.UPDATE_SESSION_TITLE, sessionId, title),
   updateSessionModel: (sessionId, provider, model) => ipcRenderer.invoke(CH.UPDATE_SESSION_MODEL, sessionId, provider, model),

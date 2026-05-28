@@ -21,6 +21,7 @@ function defaultConfig(): ProjectConfig {
     ],
     custom_tools: [],
     allowed_tools: [],
+    create_worktree_per_session: false,
   };
 }
 
@@ -73,6 +74,7 @@ describe("getProjectConfig", () => {
     const config = getProjectConfig(db, "proj-1");
     expect(config.provider).toBe("anthropic");
     expect(config.approval_mode).toBe("custom");
+    expect(config.create_worktree_per_session).toBe(false);
     // File should have been created
     expect(fs.existsSync(path.join(tmpDir, ".aichemist", "config.json"))).toBe(true);
   });

@@ -36,6 +36,8 @@ function makeSession(id: string, overrides: Partial<Session> = {}): Session {
     messages: [],
     provider: "anthropic",
     model: "claude-sonnet-4-6",
+    branch: null,
+    workspace_path: null,
     agent: null,
     skills: null,
     ...overrides,
@@ -55,6 +57,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
       approval_rules: [],
       custom_tools: [],
       allowed_tools: [],
+      create_worktree_per_session: false,
     },
     ...overrides,
   };
@@ -213,7 +216,11 @@ describe("ChangesPanel Open PR flow", () => {
 
   it("prefills title/base/head when opening the PR form", async () => {
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
-    useSessionStore.getState().addSession(makeSession("sess-pr", { title: "Session title" }));
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
     useSessionStore.getState().setActiveSession("sess-pr");
     useProjectStore.getState().addProject(makeProject());
     useProjectStore.getState().setActiveProject("proj-1");
@@ -222,6 +229,7 @@ describe("ChangesPanel Open PR flow", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
 
+    expect(window.electronAPI.getGitBranch).toHaveBeenCalledWith("/worktrees/sess-pr");
     expect(screen.getByPlaceholderText("PR title")).toHaveValue("Session title");
     expect(screen.getByPlaceholderText("Auto-detect if empty")).toHaveValue("main");
     expect(screen.getByPlaceholderText("feature-branch")).toHaveValue("feature/open-pr");
@@ -230,7 +238,11 @@ describe("ChangesPanel Open PR flow", () => {
 
   it("submits create PR payload and opens created URL", async () => {
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
-    useSessionStore.getState().addSession(makeSession("sess-pr", { title: "Session title" }));
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
     useSessionStore.getState().setActiveSession("sess-pr");
     useProjectStore.getState().addProject(makeProject());
     useProjectStore.getState().setActiveProject("proj-1");
@@ -241,7 +253,7 @@ describe("ChangesPanel Open PR flow", () => {
 
     await waitFor(() => {
       expect(window.electronAPI.githubCreatePr).toHaveBeenCalledWith({
-        projectPath: "/project",
+        projectPath: "/worktrees/sess-pr",
         title: "Session title",
         body: undefined,
         head: "feature/open-pr",

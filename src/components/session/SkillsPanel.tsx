@@ -124,9 +124,9 @@ export function SkillsPanel() {
   const ipc = useIpc();
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
-  const projectPath = activeProject?.path ?? "";
-
-  const { activeSessionId, sessionSkills, setSessionSkills } = useSessionStore();
+  const { activeSessionId, sessionSkills, setSessionSkills, sessions } = useSessionStore();
+  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+  const projectPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
   const activeSkills = activeSessionId ? (sessionSkills[activeSessionId] ?? []) : [];
   const provider = useActiveSessionProvider();
   const unsupportedProvider = provider === "acp" || provider === "ollama";

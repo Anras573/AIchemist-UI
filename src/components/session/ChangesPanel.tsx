@@ -518,6 +518,7 @@ export function ChangesPanel() {
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const activeSessionTitle = activeSession?.title ?? null;
+  const workspacePath = activeSession?.workspace_path ?? activeProject?.path ?? "";
 
   const changes: FileChange[] = activeSessionId
     ? (sessionFileChanges[activeSessionId] ?? [])
@@ -546,18 +547,18 @@ export function ChangesPanel() {
       <div className="border-t" />
 
       {/* Git diff */}
-      {activeProject?.path ? (
-        <GitDiffSection projectPath={activeProject.path} />
+      {workspacePath ? (
+        <GitDiffSection projectPath={workspacePath} />
       ) : (
         <p className="text-xs text-muted-foreground italic">No project path available for git diff.</p>
       )}
 
-      {activeProject?.path ? (
+      {workspacePath ? (
         <>
           <div className="border-t" />
           <OpenPrSection
-            key={activeProject.path}
-            projectPath={activeProject.path}
+            key={workspacePath}
+            projectPath={workspacePath}
             sessionTitle={activeSessionTitle}
           />
         </>

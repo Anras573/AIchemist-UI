@@ -16,6 +16,8 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     messages: [],
     provider: "ollama",
     model: "llama3.2",
+    branch: null,
+    workspace_path: null,
     agent: null,
     skills: null,
     ...overrides,
@@ -35,6 +37,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
       approval_rules: [],
       custom_tools: [],
       allowed_tools: [],
+      create_worktree_per_session: false,
     },
     ...overrides,
   };

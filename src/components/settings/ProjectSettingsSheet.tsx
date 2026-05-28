@@ -107,6 +107,7 @@ function GeneralTab({
   onChange: (patch: Partial<ProjectConfig>) => void;
   probes: import("@/types").ProviderProbes | null;
 }) {
+  const ipc = useIpc();
   const probeFor = (
     p: "anthropic" | "copilot" | "acp" | "ollama",
   ): import("@/types").ProviderProbeResult | undefined => {
@@ -177,6 +178,49 @@ function GeneralTab({
             Ollama sessions are currently chat-only in AIchemist. Skills, MCP servers, and approval-gated tools are unavailable.
           </p>
         )}
+      </FieldRow>
+      <FieldRow>
+        <label htmlFor="ps-create-worktree" className="flex items-start gap-2 text-sm font-medium leading-none">
+          <input
+            id="ps-create-worktree"
+            type="checkbox"
+            checked={config.create_worktree_per_session}
+            onChange={(e) => onChange({ create_worktree_per_session: e.target.checked })}
+            className="mt-0.5 h-4 w-4 rounded border-border"
+          />
+          <span className="space-y-1">
+            <span className="block">Create branch per session</span>
+            <span className="block text-xs font-normal text-muted-foreground">
+              Create a git worktree for each session when the project is git-backed.
+            </span>
+          </span>
+        </label>
+      </FieldRow>
+      <FieldRow>
+        <FieldLabel htmlFor="ps-worktree-root">Managed worktree root (optional)</FieldLabel>
+        <div className="flex gap-2">
+          <Input
+            id="ps-worktree-root"
+            value={config.worktree_root_path ?? ""}
+            onChange={(e) => onChange({ worktree_root_path: e.target.value || undefined })}
+            placeholder="Defaults to the project parent directory"
+            className="font-mono text-sm"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              const selected = await ipc.openFolderDialog();
+              if (selected) onChange({ worktree_root_path: selected });
+            }}
+          >
+            Browse
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Invalid paths fall back to the project parent directory when a session is created.
+        </p>
       </FieldRow>
       {config.provider === "acp" && <AcpAgentFields config={config} onChange={onChange} />}
     </div>
