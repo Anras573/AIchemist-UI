@@ -30,6 +30,13 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
   const [copilotModels, setCopilotModels] = useState<ModelOption[]>([]);
   const [ollamaModels, setOllamaModels] = useState<ModelOption[]>([]);
 
+  // Reset cached model lists when the session changes so a fresh fetch occurs
+  // for the new session's provider.
+  useEffect(() => {
+    setCopilotModels([]);
+    setOllamaModels([]);
+  }, [sessionId]);
+
   // Provider is locked at session creation time. Only load Copilot models if
   // this session is a Copilot session — saves an IPC round trip for Claude
   // sessions and avoids showing the other SDK's models at all.

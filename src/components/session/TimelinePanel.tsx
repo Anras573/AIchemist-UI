@@ -556,6 +556,12 @@ function InputBarInner({
     ipc.getGitBranch(activeProject.path).then(setGitBranch).catch(() => setGitBranch(null));
   }, [activeProject?.path]);
 
+  // Reset skills cache and one-shot badges when switching projects
+  useEffect(() => {
+    setSkills(null);
+    setSlashBadges([]);
+  }, [activeProject?.path]);
+
   // Load skills lazily when the user first types "/"
   const ensureSkillsLoaded = useCallback(() => {
     if (skills !== null || loadingSkills || !activeProject?.path || !skillsSupported) return;
