@@ -89,7 +89,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
       console.error("create_session failed:", err);
       setCreateError(err instanceof Error ? err.message : "Failed to create session");
     }
-  }, [projectId, addSession, setActiveSession]);
+  }, [projectId, ipc, addSession, setActiveSession]);
 
   const handleDeleteSession = useCallback(
     (e: React.MouseEvent, sessionId: string) => {
