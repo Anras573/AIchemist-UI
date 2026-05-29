@@ -991,31 +991,31 @@ function registerHandlers(): void {  // ── Terminal ────────
     const agent = supportsSkills ? (args.agent ?? session.agent ?? undefined) : undefined;
     const skills = supportsSkills && allSkills.length > 0 ? allSkills : undefined;
 
-    // On the first turn of a session that has a linked issue, prepend the
-    // issue context block to the prompt. First turn = session has exactly 1
-    // message (the user message just saved before agentSend was called).
-    let prompt = args.prompt;
-    if (
-      session.github_issue_number != null &&
-      session.messages.length === 1
-    ) {
-      const projectPath = session.workspace_path ?? project.path;
-      try {
-        const result = await getIssue({ projectPath, issueNumber: session.github_issue_number });
-        if ("issue" in result) {
-          const { issue } = result;
-          const labelStr = issue.labels?.length ? issue.labels.join(", ") : "none";
-          const bodyStr = issue.body ? `\n\n${issue.body}` : "";
-          prompt =
-            `GitHub Issue #${issue.number}: ${issue.title}\nLabels: ${labelStr}${bodyStr}\n\n---\n\n${args.prompt}`;
-        }
-      } catch (err) {
-        console.warn(`[issue-context] Failed to fetch issue #${session.github_issue_number}:`, err);
-      }
-    }
-
     activeTurns.add(args.sessionId);
     try {
+      // On the first turn of a session that has a linked issue, prepend the
+      // issue context block to the prompt. First turn = session has exactly 1
+      // message (the user message just saved before agentSend was called).
+      let prompt = args.prompt;
+      if (
+        session.github_issue_number != null &&
+        session.messages.length === 1
+      ) {
+        const projectPath = session.workspace_path ?? project.path;
+        try {
+          const result = await getIssue({ projectPath, issueNumber: session.github_issue_number });
+          if ("issue" in result) {
+            const { issue } = result;
+            const labelStr = issue.labels?.length ? issue.labels.join(", ") : "none";
+            const bodyStr = issue.body ? `\n\n${issue.body}` : "";
+            prompt =
+              `GitHub Issue #${issue.number}: ${issue.title}\nLabels: ${labelStr}${bodyStr}\n\n---\n\n${args.prompt}`;
+          }
+        } catch (err) {
+          console.warn(`[issue-context] Failed to fetch issue #${session.github_issue_number}:`, err);
+        }
+      }
+
       await runAgentTurn({
         db,
         sessionId: args.sessionId,
