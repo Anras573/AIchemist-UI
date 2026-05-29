@@ -62,8 +62,8 @@ export function useAgentTurn() {
       const sessionIdAtStart = activeSessionId;
       const activeAgent = sessionAgents[activeSessionId] ?? undefined;
       const effectiveProvider = session.provider ?? project.config.provider;
-      const supportsOneShotSkills = effectiveProvider !== "acp" && effectiveProvider !== "ollama";
-      const supportsAgent = effectiveProvider !== "acp" && effectiveProvider !== "ollama";
+      const supportsOneShotSkills = effectiveProvider !== "acp";
+      const supportsAgent = effectiveProvider !== "acp";
 
       try {
         await ipc.agentSend({

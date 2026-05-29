@@ -2,18 +2,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as CH from "../ipc-channels";
 
-const ollamaMocks = vi.hoisted(() => ({
-  list: vi.fn(),
-  chat: vi.fn(),
-  ctor: vi.fn(),
+vi.mock("ollama", () => ({
+  default: { list: vi.fn(), chat: vi.fn() },
+  Ollama: vi.fn(),
 }));
 
-vi.mock("ollama", () => ({
-  default: {
-    list: ollamaMocks.list,
-    chat: ollamaMocks.chat,
-  },
-  Ollama: ollamaMocks.ctor,
+vi.mock("./mcp-bridge", () => ({
+  createManagedMcpBridge: vi.fn(),
 }));
 
 import {
@@ -23,15 +18,37 @@ import {
   runOllamaAgentTurn,
 } from "./ollama";
 
-function makeDb(rows: Array<{ id: string; role: string; content: string }>) {
+type OllamaMockState = {
+  list: ReturnType<typeof vi.fn>;
+  chat: ReturnType<typeof vi.fn>;
+  ctor: ReturnType<typeof vi.fn>;
+  bridge: ReturnType<typeof vi.fn>;
+};
+
+let ollamaMocks: OllamaMockState;
+
+async function loadMocks(): Promise<OllamaMockState> {
+  const ollamaModule = await import("ollama");
+  const bridgeModule = await import("./mcp-bridge");
   return {
-    prepare: vi.fn().mockReturnValue({
-      all: vi.fn().mockReturnValue(rows),
-    }),
+    list: ollamaModule.default.list as OllamaMockState["list"],
+    chat: ollamaModule.default.chat as OllamaMockState["chat"],
+    ctor: ollamaModule.Ollama as OllamaMockState["ctor"],
+    bridge: bridgeModule.createManagedMcpBridge as OllamaMockState["bridge"],
   };
 }
 
-function streamChunks(chunks: Array<{ message?: { content?: string } }>) {
+function makeDb(rows: Array<{ id: string; role: string; content: string }>) {
+  return {
+    prepare: vi.fn().mockImplementation((sql: string) => ({
+      all: vi.fn().mockReturnValue(sql.includes("FROM tool_calls") ? [] : rows),
+      get: vi.fn().mockReturnValue(sql.includes("disabled_mcp_servers") ? { disabled_mcp_servers: null } : undefined),
+      run: vi.fn().mockReturnValue({ changes: 1 }),
+    })),
+  };
+}
+
+function streamChunks(chunks: Array<{ message?: { content?: string; tool_calls?: Array<{ function: { name: string; arguments?: Record<string, unknown> } }> } }>) {
   return {
     [Symbol.asyncIterator]: async function* () {
       for (const chunk of chunks) yield chunk;
@@ -40,10 +57,17 @@ function streamChunks(chunks: Array<{ message?: { content?: string } }>) {
 }
 
 describe("ollama provider", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     _resetOllamaClientForTests();
     delete process.env.OLLAMA_HOST;
+    ollamaMocks = await loadMocks();
+    ollamaMocks.bridge.mockResolvedValue({
+      tools: [],
+      hasTool: () => false,
+      callTool: async () => "",
+      close: async () => {},
+    });
     ollamaMocks.ctor.mockImplementation(function () {
       return {
         list: ollamaMocks.list,
@@ -73,14 +97,21 @@ describe("ollama provider", () => {
     } as never);
 
     expect(text).toBe("Hello");
-    expect(ollamaMocks.chat).toHaveBeenCalledWith({
-      model: "qwen2.5:latest",
-      messages: [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
-      ],
-      stream: true,
-    });
+    expect(ollamaMocks.chat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "qwen2.5:latest",
+        stream: true,
+      }),
+    );
+    const call = ollamaMocks.chat.mock.calls[0][0];
+    expect(call.messages).toEqual([
+      expect.objectContaining({ role: "system" }),
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+    ]);
+    expect(call.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ function: expect.objectContaining({ name: "read_file" }) }),
+    ]));
     expect(send).toHaveBeenNthCalledWith(1, CH.SESSION_DELTA, {
       session_id: "s-1",
       text_delta: "Hel",
@@ -153,5 +184,57 @@ describe("ollama provider", () => {
       host: "http://127.0.0.1:11434",
     });
     expect(hostList).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes managed MCP tools through the bridge", async () => {
+    const db = makeDb([
+      { id: "m-placeholder", role: "user", content: "placeholder" },
+      { id: "m-user", role: "user", content: "use the tool" },
+    ]);
+    const send = vi.fn();
+    const toolName = "mcp__context7__lookup__abcdef12";
+    const callTool = vi.fn().mockResolvedValue("bridge result");
+    ollamaMocks.bridge.mockResolvedValue({
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: toolName,
+            description: "context7 — lookup — Search docs",
+            parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+          },
+        },
+      ],
+      hasTool: (name: string) => name === toolName,
+      callTool,
+      close: async () => {},
+    });
+    ollamaMocks.chat
+      .mockResolvedValueOnce(
+        streamChunks([
+          {
+            message: {
+              content: "",
+              tool_calls: [{ function: { name: toolName, arguments: { query: "needle" } } }],
+            },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce({ message: { content: "Done" } });
+
+    await expect(
+      runOllamaAgentTurn({
+        db: db as never,
+        sessionId: "s-4",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "custom", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never),
+    ).resolves.toBe("Done");
+
+    expect(ollamaMocks.bridge).toHaveBeenCalledTimes(1);
+    expect(callTool).toHaveBeenCalledWith("mcp__context7__lookup__abcdef12", { query: "needle" });
+    expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({ tool_name: toolName }));
+    expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({ tool_name: toolName, output: "bridge result" }));
   });
 });

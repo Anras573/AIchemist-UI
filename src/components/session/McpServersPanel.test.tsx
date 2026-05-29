@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+// @vitest-environment jsdom
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { McpServersPanel } from "@/components/session/McpServersPanel";
@@ -44,7 +45,28 @@ function makeProject(overrides: Partial<Project> = {}): Project {
 }
 
 describe("McpServersPanel", () => {
-  it("shows Ollama chat-only messaging without loading MCP servers", async () => {
+  beforeEach(() => {
+    vi.mocked(window.electronAPI.listMcpServers).mockResolvedValue([
+      {
+        name: "context7",
+        command: "npx -y @context7/mcp",
+        transport: "stdio",
+        connected: true,
+        status: "Connected",
+        source: "aichemist",
+      },
+      {
+        name: "claude-only",
+        command: "npx -y claude-mcp",
+        transport: "stdio",
+        connected: true,
+        status: "Connected",
+        source: "claude",
+      },
+    ]);
+  });
+
+  it("shows AIchemist-managed servers for Ollama sessions", async () => {
     useSessionStore.getState().addSession(makeSession());
     useSessionStore.getState().setActiveSession("sess-1");
     useProjectStore.getState().addProject(makeProject());
@@ -52,8 +74,9 @@ describe("McpServersPanel", () => {
 
     renderWithProviders(<McpServersPanel />);
 
-    expect(await screen.findByText(/mcp servers are not injected into ollama sessions/i)).toBeInTheDocument();
-    expect(window.electronAPI.listMcpServers).not.toHaveBeenCalled();
+    expect(await screen.findByText("context7")).toBeInTheDocument();
+    expect(screen.queryByText("claude-only")).not.toBeInTheDocument();
+    expect(window.electronAPI.listMcpServers).toHaveBeenCalledTimes(1);
     expect(window.electronAPI.mcpProbeManaged).not.toHaveBeenCalled();
   });
 });
