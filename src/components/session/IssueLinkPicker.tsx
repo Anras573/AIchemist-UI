@@ -12,6 +12,8 @@ interface IssueLinkPickerProps {
 }
 
 type LoadState = "idle" | "loading" | "success" | "unavailable" | "error";
+const isUnavailableError = (error: string) =>
+  error === "no-github-remote" || error === "GITHUB_TOKEN not configured";
 
 /**
  * Searchable issue picker populated from GITHUB_LIST_ISSUES.
@@ -26,7 +28,7 @@ export function IssueLinkPicker({
 }: IssueLinkPickerProps) {
   const ipc = useIpc();
   const [issues, setIssues] = useState<GitHubIssue[] | null>(null);
-  const [loadState, setLoadState] = useState<LoadState>("idle");
+  const [loadState, setLoadState] = useState<LoadState>("unavailable");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -46,7 +48,7 @@ export function IssueLinkPicker({
         } else {
           // Check if this is an unavailability error (no remote or no token)
           const error = result.error;
-          if (error === "no-github-remote" || error === "GITHUB_TOKEN not configured") {
+          if (isUnavailableError(error)) {
             setLoadState("unavailable");
             setIssues(null);
           } else {
@@ -65,13 +67,32 @@ export function IssueLinkPicker({
       });
   }, [ipc, projectPath]);
 
-  // Reset to idle when projectPath changes so the next open triggers a fresh fetch.
+  // On project changes, probe whether GitHub issue-linking is available for this repo.
+  // Keep the picker hidden until availability is known.
   useEffect(() => {
-    setLoadState("idle");
+    const currentId = ++requestIdRef.current;
+    setLoadState("unavailable");
     setIssues(null);
+    setErrorMessage("");
     setOpen(false);
     setSearch("");
-  }, [projectPath]);
+
+    if (!projectPath) return;
+
+    ipc.githubListIssues({ projectPath, state: "open", limit: 1 })
+      .then((result) => {
+        if (currentId !== requestIdRef.current) return;
+        if ("error" in result && isUnavailableError(result.error)) {
+          setLoadState("unavailable");
+          return;
+        }
+        setLoadState("idle");
+      })
+      .catch(() => {
+        if (currentId !== requestIdRef.current) return;
+        setLoadState("idle");
+      });
+  }, [ipc, projectPath]);
 
   const filtered = useMemo(() => {
     if (!issues) return [];
