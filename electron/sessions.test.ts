@@ -96,7 +96,27 @@ describe("createSession", () => {
       "anthropic",
       "claude-sonnet-4-6",
       "aichemist/sess-1",
-      "/tmp/aichemist-sess-1"
+      "/tmp/aichemist-sess-1",
+      null
+    );
+  });
+
+  it("stores github_issue_number when provided in options", () => {
+    const { db, mockRun } = makeDb();
+    createSession(db, "proj-1", "anthropic", "claude-sonnet-4-6", {
+      id: "sess-2",
+      issueNumber: 19,
+    });
+
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess-2",
+      "proj-1",
+      expect.any(String),
+      "anthropic",
+      "claude-sonnet-4-6",
+      null,
+      null,
+      19
     );
   });
 });

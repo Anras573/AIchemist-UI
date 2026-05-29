@@ -52,6 +52,7 @@ export const LIST_SKILLS            = "agent:list-skills";
 export const GITHUB_CREATE_PR       = "github:create-pr";
 export const GITHUB_LIST_PRS        = "github:list-prs";
 export const GITHUB_LIST_ISSUES     = "github:list-issues";
+export const GITHUB_GET_ISSUE       = "github:get-issue";
 export const GITHUB_GET_CI_STATUS   = "github:get-ci-status";
 export const GITHUB_GET_PR_CONTEXT  = "github:get-pr-context";
 // ── MCP servers ───────────────────────────────────────────────────────────────

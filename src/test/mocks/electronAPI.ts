@@ -65,6 +65,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     githubCreatePr: vi.fn().mockImplementation(githubStubResponse),
     githubListPrs: vi.fn().mockImplementation(githubStubResponse),
     githubListIssues: vi.fn().mockImplementation(githubStubResponse),
+    githubGetIssue: vi.fn().mockImplementation(githubStubResponse),
     githubGetCiStatus: vi.fn().mockImplementation(githubStubResponse),
     githubGetPrContext: vi.fn().mockResolvedValue({ hasRemote: false, defaultBase: null }),
     listSkills: vi.fn().mockResolvedValue([]),

@@ -115,6 +115,13 @@ function migrate(db: Database.Database): void {
     db.exec("ALTER TABLE sessions ADD COLUMN acp_session_id TEXT;");
   }
 
+  // GitHub issue number linked to this session at creation time (optional).
+  // Stored so the agent runner can inject the issue's title/labels/body as
+  // first-turn context without requiring the renderer to pass it on every send.
+  if (!hasColumn("github_issue_number")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN github_issue_number INTEGER;");
+  }
+
   // Add agent column to messages table to stamp which agent produced each message.
   const msgColumns = db
     .prepare("PRAGMA table_info(messages)")

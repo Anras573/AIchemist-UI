@@ -115,7 +115,7 @@ describe("SessionTabBar", () => {
     const newBtn = screen.getByLabelText("New session (project default)");
     await userEvent.click(newBtn);
 
-    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", undefined);
+    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", undefined, undefined);
   });
 
   it("calls ipc.createSession with 'anthropic' when New Claude Session is picked from the split-button menu", async () => {
@@ -129,7 +129,7 @@ describe("SessionTabBar", () => {
     await userEvent.click(screen.getByLabelText("New session with specific provider"));
     await userEvent.click(await screen.findByText("New Claude Session"));
 
-    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "anthropic");
+    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "anthropic", undefined);
   });
 
   it("calls ipc.createSession with 'copilot' when New Copilot Session is picked", async () => {
@@ -143,7 +143,7 @@ describe("SessionTabBar", () => {
     await userEvent.click(screen.getByLabelText("New session with specific provider"));
     await userEvent.click(await screen.findByText("New Copilot Session"));
 
-    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "copilot");
+    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "copilot", undefined);
   });
 
   it("calls ipc.createSession with 'ollama' when New Ollama Session is picked", async () => {
@@ -157,7 +157,7 @@ describe("SessionTabBar", () => {
     await userEvent.click(screen.getByLabelText("New session with specific provider"));
     await userEvent.click(await screen.findByText("New Ollama Session"));
 
-    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "ollama");
+    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "ollama", undefined);
   });
 
   it("reflects session status via StatusDot aria-label", async () => {
@@ -187,5 +187,31 @@ describe("SessionTabBar", () => {
     await waitFor(() => {
       expect(screen.queryByText("Foreign session")).not.toBeInTheDocument();
     });
+  });
+
+  it("shows a #N issue badge on session tabs that have github_issue_number set", async () => {
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([
+      makeSession({
+        id: "sess-1",
+        title: "Issue session",
+        github_issue_number: 42,
+      }),
+    ]);
+
+    renderWithProviders(<SessionTabBar projectId="proj-1" />);
+
+    await screen.findByText("Issue session");
+    expect(screen.getByTestId("issue-badge-sess-1")).toBeInTheDocument();
+  });
+
+  it("does not show an issue badge when github_issue_number is not set", async () => {
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([
+      makeSession({ id: "sess-1", title: "Plain session" }),
+    ]);
+
+    renderWithProviders(<SessionTabBar projectId="proj-1" />);
+
+    await screen.findByText("Plain session");
+    expect(screen.queryByTestId("issue-badge-sess-1")).not.toBeInTheDocument();
   });
 });

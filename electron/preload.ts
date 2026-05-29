@@ -27,7 +27,7 @@ export interface ElectronAPI {
   saveProjectConfig: (id: string, config: import("../src/types").ProjectConfig) => Promise<void>;
 
   // ── Sessions ──────────────────────────────────────────────────────────────
-  createSession: (projectId: string, providerOverride?: string) => Promise<import("../src/types").Session>;
+  createSession: (projectId: string, providerOverride?: string, issueNumber?: number) => Promise<import("../src/types").Session>;
   listSessions: (projectId: string) => Promise<import("../src/types").Session[]>;
   getSession: (sessionId: string) => Promise<import("../src/types").Session>;
   deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) => Promise<void>;
@@ -65,6 +65,8 @@ export interface ElectronAPI {
     Promise<import("../src/types").GitHubListPrsResult>;
   githubListIssues: (args: import("../src/types").GitHubListIssuesArgs) =>
     Promise<import("../src/types").GitHubListIssuesResult>;
+  githubGetIssue: (args: import("../src/types").GitHubGetIssueArgs) =>
+    Promise<import("../src/types").GitHubGetIssueResult>;
   githubGetCiStatus: (args: import("../src/types").GitHubGetCiStatusArgs) =>
     Promise<import("../src/types").GitHubGetCiStatusResult>;
   githubGetPrContext: (args: import("../src/types").GitHubGetPrContextArgs) =>
@@ -127,8 +129,8 @@ const api: ElectronAPI = {
   getProjectConfig: (id) => ipcRenderer.invoke(CH.GET_PROJECT_CONFIG, id),
   saveProjectConfig: (id, config) => ipcRenderer.invoke(CH.SAVE_PROJECT_CONFIG, id, config),
 
-  createSession: (projectId, providerOverride) =>
-    ipcRenderer.invoke(CH.CREATE_SESSION, { projectId, providerOverride }),
+  createSession: (projectId, providerOverride, issueNumber) =>
+    ipcRenderer.invoke(CH.CREATE_SESSION, { projectId, providerOverride, issueNumber }),
   listSessions: (projectId) => ipcRenderer.invoke(CH.LIST_SESSIONS, projectId),
   getSession: (sessionId) => ipcRenderer.invoke(CH.GET_SESSION, sessionId),
   deleteSession: (sessionId, options) => ipcRenderer.invoke(CH.DELETE_SESSION, sessionId, options),
@@ -161,6 +163,7 @@ const api: ElectronAPI = {
   githubCreatePr: (args) => ipcRenderer.invoke(CH.GITHUB_CREATE_PR, args),
   githubListPrs: (args) => ipcRenderer.invoke(CH.GITHUB_LIST_PRS, args),
   githubListIssues: (args) => ipcRenderer.invoke(CH.GITHUB_LIST_ISSUES, args),
+  githubGetIssue: (args) => ipcRenderer.invoke(CH.GITHUB_GET_ISSUE, args),
   githubGetCiStatus: (args) => ipcRenderer.invoke(CH.GITHUB_GET_CI_STATUS, args),
   githubGetPrContext: (args) => ipcRenderer.invoke(CH.GITHUB_GET_PR_CONTEXT, args),
   listSkills: (projectPath, provider) =>

@@ -9,6 +9,7 @@ import {
   getPullRequestContext,
   createPullRequest,
   getCiStatus,
+  getIssue,
 } from "./github";
 import type { GitHubRemoteInfo, OctokitClient, GitHubTestDeps } from "./github";
 
@@ -27,6 +28,7 @@ function makeOctokitMock(overrides?: Partial<OctokitClient>): OctokitClient {
     },
     issues: {
       listForRepo: async () => ({ data: [] }),
+      get: async () => ({ data: { id: 1, number: 42, title: "Test Issue", state: "open", html_url: "https://github.com/test/repo/issues/42", created_at: "2023-01-01T00:00:00Z", updated_at: "2023-01-02T00:00:00Z" } }),
     },
     checks: {
       listForRef: async () => ({ data: { check_runs: [] } }),
@@ -753,5 +755,350 @@ describe("getCiStatus", () => {
       { remoteInfo: REMOTE, client }
     );
     expect(result).toEqual({ error: "GitHub token is invalid or expired" });
+  });
+});
+
+// ─── getIssue ─────────────────────────────────────────────────────────────────
+
+describe("getIssue", () => {
+  it("returns issue without labels or body when not provided", async () => {
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => ({
+          data: {
+            id: 1,
+            number: 42,
+            title: "Test Issue",
+            state: "open",
+            html_url: "https://github.com/octo-org/example-repo/issues/42",
+            created_at: "2023-01-01T00:00:00Z",
+            updated_at: "2023-01-02T00:00:00Z",
+          },
+        }),
+      } as unknown as OctokitClient["issues"],
+    });
+
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: REMOTE, client }
+    );
+    
+    expect(result).toEqual({
+      issue: {
+        id: 1,
+        number: 42,
+        title: "Test Issue",
+        state: "open",
+        html_url: "https://github.com/octo-org/example-repo/issues/42",
+        created_at: "2023-01-01T00:00:00Z",
+        updated_at: "2023-01-02T00:00:00Z",
+      },
+    });
+  });
+
+  it("maps string labels correctly", async () => {
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => ({
+          data: {
+            id: 1,
+            number: 42,
+            title: "Test Issue",
+            state: "open",
+            html_url: "https://github.com/octo-org/example-repo/issues/42",
+            created_at: "2023-01-01T00:00:00Z",
+            updated_at: "2023-01-02T00:00:00Z",
+            labels: ["bug", "help-wanted"],
+          },
+        }),
+      } as unknown as OctokitClient["issues"],
+    });
+
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: REMOTE, client }
+    );
+    
+    expect(result).toEqual({
+      issue: {
+        id: 1,
+        number: 42,
+        title: "Test Issue",
+        state: "open",
+        html_url: "https://github.com/octo-org/example-repo/issues/42",
+        created_at: "2023-01-01T00:00:00Z",
+        updated_at: "2023-01-02T00:00:00Z",
+        labels: ["bug", "help-wanted"],
+      },
+    });
+  });
+
+  it("maps label objects with name field correctly", async () => {
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => ({
+          data: {
+            id: 1,
+            number: 42,
+            title: "Test Issue",
+            state: "open",
+            html_url: "https://github.com/octo-org/example-repo/issues/42",
+            created_at: "2023-01-01T00:00:00Z",
+            updated_at: "2023-01-02T00:00:00Z",
+            labels: [{ name: "bug", color: "ff0000" }, { name: "help-wanted", color: "00ff00" }],
+          },
+        }),
+      } as unknown as OctokitClient["issues"],
+    });
+
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: REMOTE, client }
+    );
+    
+    expect(result).toEqual({
+      issue: {
+        id: 1,
+        number: 42,
+        title: "Test Issue",
+        state: "open",
+        html_url: "https://github.com/octo-org/example-repo/issues/42",
+        created_at: "2023-01-01T00:00:00Z",
+        updated_at: "2023-01-02T00:00:00Z",
+        labels: ["bug", "help-wanted"],
+      },
+    });
+  });
+
+  it("handles mixed string and object labels", async () => {
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => ({
+          data: {
+            id: 1,
+            number: 42,
+            title: "Test Issue",
+            state: "open",
+            html_url: "https://github.com/octo-org/example-repo/issues/42",
+            created_at: "2023-01-01T00:00:00Z",
+            updated_at: "2023-01-02T00:00:00Z",
+            labels: ["bug", { name: "help-wanted", color: "00ff00" }, "documentation"],
+          },
+        }),
+      } as unknown as OctokitClient["issues"],
+    });
+
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: REMOTE, client }
+    );
+    
+    expect(result).toEqual({
+      issue: {
+        id: 1,
+        number: 42,
+        title: "Test Issue",
+        state: "open",
+        html_url: "https://github.com/octo-org/example-repo/issues/42",
+        created_at: "2023-01-01T00:00:00Z",
+        updated_at: "2023-01-02T00:00:00Z",
+        labels: ["bug", "help-wanted", "documentation"],
+      },
+    });
+  });
+
+  it("slices labels to maximum of 20", async () => {
+    const manyLabels = Array.from({ length: 30 }, (_, i) => `label-${i}`);
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => ({
+          data: {
+            id: 1,
+            number: 42,
+            title: "Test Issue",
+            state: "open",
+            html_url: "https://github.com/octo-org/example-repo/issues/42",
+            created_at: "2023-01-01T00:00:00Z",
+            updated_at: "2023-01-02T00:00:00Z",
+            labels: manyLabels,
+          },
+        }),
+      } as unknown as OctokitClient["issues"],
+    });
+
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: REMOTE, client }
+    );
+    
+    const issue = (result as any).issue;
+    expect(issue.labels).toHaveLength(20);
+    expect(issue.labels).toEqual(Array.from({ length: 20 }, (_, i) => `label-${i}`));
+  });
+
+  it("truncates body to 5000 characters", async () => {
+    const longBody = "x".repeat(10000);
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => ({
+          data: {
+            id: 1,
+            number: 42,
+            title: "Test Issue",
+            state: "open",
+            html_url: "https://github.com/octo-org/example-repo/issues/42",
+            created_at: "2023-01-01T00:00:00Z",
+            updated_at: "2023-01-02T00:00:00Z",
+            body: longBody,
+          },
+        }),
+      } as unknown as OctokitClient["issues"],
+    });
+
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: REMOTE, client }
+    );
+    
+    const issue = (result as any).issue;
+    expect(issue.body).toHaveLength(5000);
+    expect(issue.body).toEqual("x".repeat(5000));
+  });
+
+  it("includes body when it is exactly 5000 characters", async () => {
+    const exactBody = "x".repeat(5000);
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => ({
+          data: {
+            id: 1,
+            number: 42,
+            title: "Test Issue",
+            state: "open",
+            html_url: "https://github.com/octo-org/example-repo/issues/42",
+            created_at: "2023-01-01T00:00:00Z",
+            updated_at: "2023-01-02T00:00:00Z",
+            body: exactBody,
+          },
+        }),
+      } as unknown as OctokitClient["issues"],
+    });
+
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: REMOTE, client }
+    );
+    
+    const issue = (result as any).issue;
+    expect(issue.body).toEqual(exactBody);
+  });
+
+  it("excludes body when it is undefined", async () => {
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => ({
+          data: {
+            id: 1,
+            number: 42,
+            title: "Test Issue",
+            state: "open",
+            html_url: "https://github.com/octo-org/example-repo/issues/42",
+            created_at: "2023-01-01T00:00:00Z",
+            updated_at: "2023-01-02T00:00:00Z",
+            body: undefined,
+          },
+        }),
+      } as unknown as OctokitClient["issues"],
+    });
+
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: REMOTE, client }
+    );
+    
+    const issue = (result as any).issue;
+    expect(issue).not.toHaveProperty("body");
+  });
+
+  it("excludes body when it is empty string", async () => {
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => ({
+          data: {
+            id: 1,
+            number: 42,
+            title: "Test Issue",
+            state: "open",
+            html_url: "https://github.com/octo-org/example-repo/issues/42",
+            created_at: "2023-01-01T00:00:00Z",
+            updated_at: "2023-01-02T00:00:00Z",
+            body: "",
+          },
+        }),
+      } as unknown as OctokitClient["issues"],
+    });
+
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: REMOTE, client }
+    );
+    
+    const issue = (result as any).issue;
+    expect(issue).not.toHaveProperty("body");
+  });
+
+  it("returns no-github-remote error when remote is null", async () => {
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: null }
+    );
+    expect(result).toEqual({ error: "no-github-remote" });
+  });
+
+  it("returns no-token error when client is null", async () => {
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: REMOTE, client: null }
+    );
+    expect(result).toEqual({ error: "GITHUB_TOKEN not configured" });
+  });
+
+  it("returns typed error on 401 when fetching issue", async () => {
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => { throw makeHttpError(401); },
+      } as unknown as OctokitClient["issues"],
+    });
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 999 },
+      { remoteInfo: REMOTE, client }
+    );
+    expect(result).toEqual({ error: "GitHub token is invalid or expired" });
+  });
+
+  it("returns typed error on 404 when issue not found", async () => {
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => { throw makeHttpError(404); },
+      } as unknown as OctokitClient["issues"],
+    });
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 999 },
+      { remoteInfo: REMOTE, client }
+    );
+    expect((result as { error: string }).error).toMatch(/not found/i);
+  });
+
+  it("returns generic error string when error is not an HTTP error", async () => {
+    const client = makeOctokitMock({
+      issues: {
+        get: async () => { throw new Error("Network timeout"); },
+      } as unknown as OctokitClient["issues"],
+    });
+    const result = await getIssue(
+      { projectPath: PROJECT_PATH, issueNumber: 42 },
+      { remoteInfo: REMOTE, client }
+    );
+    expect(result).toEqual({ error: "Error: Network timeout" });
   });
 });

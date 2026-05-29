@@ -21,9 +21,10 @@ import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
 import { runAgentTurn, getProvider } from "./agent/runner";
 import { cleanupCopilotSession } from "./agent/copilot";
 import { OLLAMA_NO_MODELS_ERROR } from "./agent/ollama";
-import { listPullRequests, listIssues, createPullRequest, getCiStatus, getPullRequestContext } from "./github";
+import { listPullRequests, listIssues, getIssue, createPullRequest, getCiStatus, getPullRequestContext } from "./github";
 import type {
   GitHubCreatePrArgs,
+  GitHubGetIssueArgs,
   GitHubGetPrContextArgs,
   GitHubListPrsArgs,
   GitHubListIssuesArgs,
@@ -744,12 +745,13 @@ function registerHandlers(): void {  // ── Terminal ────────
   );
 
   // ── Sessions ─────────────────────────────────────────────────────────────────
-  handle(CH.CREATE_SESSION, async (_event, payload: string | { projectId: string; providerOverride?: string }) => {
+  handle(CH.CREATE_SESSION, async (_event, payload: string | { projectId: string; providerOverride?: string; issueNumber?: number | null }) => {
     // Backward-compat: older callers pass projectId as a string; newer ones
     // pass { projectId, providerOverride } to explicitly lock the session's
     // provider at creation time (e.g. from the split-button new-session menu).
     const projectId = typeof payload === "string" ? payload : payload.projectId;
     const providerOverride = typeof payload === "string" ? undefined : payload.providerOverride;
+    const issueNumber = typeof payload === "string" ? undefined : (payload.issueNumber ?? undefined);
 
     const project = listProjects(db).find((p) => p.id === projectId);
     const provider = providerOverride ?? project?.config.provider ?? null;
@@ -822,6 +824,7 @@ function registerHandlers(): void {  // ── Terminal ────────
       id: sessionId,
       branch,
       workspacePath,
+      issueNumber,
     });
   });
   handle(CH.LIST_SESSIONS, (_event, projectId: string) =>
@@ -990,10 +993,37 @@ function registerHandlers(): void {  // ── Terminal ────────
 
     activeTurns.add(args.sessionId);
     try {
+      // On the first turn of a session that has a linked issue, prepend the
+      // issue context block to the prompt. First turn = session has exactly 1
+      // message (the user message just saved before agentSend was called).
+      let prompt = args.prompt;
+      if (
+        session.github_issue_number != null &&
+        session.messages.length === 1
+      ) {
+        const projectPath = session.workspace_path ?? project.path;
+        try {
+          const result = await getIssue({ projectPath, issueNumber: session.github_issue_number });
+          if ("issue" in result) {
+            const { issue } = result;
+            const labelStr = issue.labels?.length ? issue.labels.join(", ") : "none";
+            const bodyStr = issue.body ? `\n\n${issue.body}` : "";
+            prompt =
+              `GitHub Issue #${issue.number}: ${issue.title}\nLabels: ${labelStr}${bodyStr}\n\n---\n\n${args.prompt}`;
+          } else {
+            console.warn(
+              `[issue-context] Issue #${session.github_issue_number} context unavailable: ${result.error}`
+            );
+          }
+        } catch (err) {
+          console.warn(`[issue-context] Failed to fetch issue #${session.github_issue_number}:`, err);
+        }
+      }
+
       await runAgentTurn({
         db,
         sessionId: args.sessionId,
-        prompt: args.prompt,
+        prompt,
         projectPath: session.workspace_path ?? project.path,
         projectConfig: effectiveConfig,
         webContents: win.webContents,
@@ -1014,6 +1044,7 @@ function registerHandlers(): void {  // ── Terminal ────────
   });
   handle(CH.GITHUB_LIST_PRS, (_event, args: GitHubListPrsArgs) => listPullRequests(args));
   handle(CH.GITHUB_LIST_ISSUES, (_event, args: GitHubListIssuesArgs) => listIssues(args));
+  handle(CH.GITHUB_GET_ISSUE, (_event, args: GitHubGetIssueArgs) => getIssue(args));
   handle(CH.GITHUB_CREATE_PR, (_event, args: GitHubCreatePrArgs) => createPullRequest(args));
   handle(CH.GITHUB_GET_CI_STATUS, (_event, args: GitHubGetCiStatusArgs) => getCiStatus(args));
   handle(CH.GITHUB_GET_PR_CONTEXT, (_event, args: GitHubGetPrContextArgs) => getPullRequestContext(args));
