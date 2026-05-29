@@ -11,9 +11,12 @@ interface IssueLinkPickerProps {
   className?: string;
 }
 
+type LoadState = "loading" | "success" | "unavailable" | "error";
+
 /**
  * Searchable issue picker populated from GITHUB_LIST_ISSUES.
- * Renders nothing when GitHub is unavailable (no remote or no token).
+ * Renders nothing when GitHub is truly unavailable (no remote or no token).
+ * Shows an error state for transient errors (invalid token, permission issues, etc.)
  */
 export function IssueLinkPicker({
   projectPath,
@@ -23,30 +26,42 @@ export function IssueLinkPicker({
 }: IssueLinkPickerProps) {
   const ipc = useIpc();
   const [issues, setIssues] = useState<GitHubIssue[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [errorMessage, setErrorMessage] = useState<string>("");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
+  const fetchIssues = () => {
+    setLoadState("loading");
+    setErrorMessage("");
     ipc.githubListIssues({ projectPath, state: "open", limit: 50 })
       .then((result) => {
-        if (cancelled) return;
         if ("issues" in result) {
           setIssues(result.issues);
+          setLoadState("success");
         } else {
-          // No remote or no token — hide the picker
-          setIssues(null);
+          // Check if this is an unavailability error (no remote or no token)
+          const error = result.error;
+          if (error === "no-github-remote" || error === "GITHUB_TOKEN not configured") {
+            setLoadState("unavailable");
+            setIssues(null);
+          } else {
+            // Transient/retryable error (auth issue, network, permission, etc.)
+            setLoadState("error");
+            setErrorMessage(error);
+            setIssues(null);
+          }
         }
       })
-      .catch(() => {
-        if (!cancelled) setIssues(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+      .catch((err) => {
+        setLoadState("error");
+        setErrorMessage(err instanceof Error ? err.message : String(err));
+        setIssues(null);
       });
-    return () => { cancelled = true; };
+  };
+
+  useEffect(() => {
+    fetchIssues();
   }, [projectPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
@@ -61,9 +76,8 @@ export function IssueLinkPicker({
     );
   }, [issues, search]);
 
-  // Don't render if GitHub isn't available (loading still shown briefly to
-  // avoid layout jumps, but hidden once we know it's unavailable).
-  if (!loading && issues === null) return null;
+  // Don't render if GitHub is truly unavailable (no remote or no token).
+  if (loadState === "unavailable") return null;
 
   const selectedIssue = selectedNumber != null
     ? issues?.find((i) => i.number === selectedNumber) ?? null
@@ -72,8 +86,19 @@ export function IssueLinkPicker({
   return (
     <div className={cn("flex flex-col gap-1 w-full", className)}>
       <span className="text-xs text-muted-foreground font-medium">Link to issue (optional)</span>
-      {loading ? (
+      {loadState === "loading" ? (
         <div className="h-8 rounded border border-border bg-muted/40 animate-pulse" />
+      ) : loadState === "error" ? (
+        <div className="px-2 py-1.5 rounded border border-destructive/50 bg-destructive/5 flex items-center justify-between gap-2">
+          <span className="text-xs text-destructive/90">{errorMessage}</span>
+          <button
+            type="button"
+            onClick={fetchIssues}
+            className="text-xs px-2 py-1 rounded bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors shrink-0"
+          >
+            Retry
+          </button>
+        </div>
       ) : (
         <div className="relative">
           <button
@@ -106,6 +131,13 @@ export function IssueLinkPicker({
                   placeholder="Search issues…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setOpen(false);
+                      setSearch("");
+                    }
+                  }}
                   className="w-full text-xs px-2 py-1 rounded bg-background border border-input focus:outline-none focus:ring-1 focus:ring-ring"
                   aria-label="Search issues"
                 />

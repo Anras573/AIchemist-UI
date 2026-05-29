@@ -336,9 +336,6 @@ export async function listIssues(
           created_at: issue.created_at,
           updated_at: issue.updated_at,
           ...(labels.length > 0 ? { labels } : {}),
-          ...(typeof issue.body === "string" && issue.body
-            ? { body: issue.body.slice(0, 5000) }
-            : {}),
         };
       });
     return { issues };
