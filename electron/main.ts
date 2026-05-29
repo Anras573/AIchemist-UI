@@ -1010,6 +1010,10 @@ function registerHandlers(): void {  // ── Terminal ────────
             const bodyStr = issue.body ? `\n\n${issue.body}` : "";
             prompt =
               `GitHub Issue #${issue.number}: ${issue.title}\nLabels: ${labelStr}${bodyStr}\n\n---\n\n${args.prompt}`;
+          } else {
+            console.warn(
+              `[issue-context] Issue #${session.github_issue_number} context unavailable: ${result.error}`
+            );
           }
         } catch (err) {
           console.warn(`[issue-context] Failed to fetch issue #${session.github_issue_number}:`, err);

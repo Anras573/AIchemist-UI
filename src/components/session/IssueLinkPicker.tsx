@@ -76,6 +76,19 @@ export function IssueLinkPicker({
     );
   }, [issues, search]);
 
+  // When issues reload (e.g. projectPath changes), clear a stale selection that
+  // is no longer present in the new list so the parent doesn't pass a ghost
+  // issue number when creating a session.
+  useEffect(() => {
+    if (
+      selectedNumber != null &&
+      issues != null &&
+      !issues.some((i) => i.number === selectedNumber)
+    ) {
+      onChange(null);
+    }
+  }, [issues, selectedNumber, onChange]);
+
   // Don't render if GitHub is truly unavailable (no remote or no token).
   if (loadState === "unavailable") return null;
 
