@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Bot, Cable, ChevronDown, GitBranch, Plus } from "lucide-react";
+import { Bot, Cable, ChevronDown, GitBranch, Hash, Link, Plus } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -11,6 +11,7 @@ import { StatusDot } from "@/components/session/StatusDot";
 import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
 import { getModelLabel, getLogoProvider } from "@/lib/models";
 import { SessionDeleteDialog } from "@/components/session/SessionDeleteDialog";
+import { NewSessionWithIssueDialog } from "@/components/session/NewSessionWithIssueDialog";
 import type { Session } from "@/types";
 import {
   DropdownMenu,
@@ -54,6 +55,7 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
     .filter((s) => s.project_id === projectId)
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
   const [deleteDialogSession, setDeleteDialogSession] = useState<Session | null>(null);
+  const [issueDialogOpen, setIssueDialogOpen] = useState(false);
 
   // Load sessions for this project on mount and when projectId changes
   useEffect(() => {
@@ -77,10 +79,10 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
 
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const handleNewSession = useCallback(async (providerOverride?: string) => {
+  const handleNewSession = useCallback(async (providerOverride?: string, issueNumber?: number) => {
     setCreateError(null);
     try {
-      const session = await ipc.createSession(projectId, providerOverride);
+      const session = await ipc.createSession(projectId, providerOverride, issueNumber);
       addSession(session);
       setActiveSession(session.id);
     } catch (err) {
@@ -163,6 +165,20 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
                     <GitBranch className="size-2.5 shrink-0" />
                     <span className="max-w-[110px] truncate">{session.branch}</span>
                   </span>
+                )}
+                {/* Issue badge — shown on all tabs where an issue is linked */}
+                {session.github_issue_number && (
+                  <WithTooltip label={`Linked to issue #${session.github_issue_number}`}>
+                    <span className={cn(
+                      "flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-normal",
+                      active
+                        ? "text-blue-700 dark:text-blue-400 bg-blue-500/10 border border-blue-500/30"
+                        : "text-muted-foreground bg-muted/60 border border-border/50"
+                    )}>
+                      <Hash className="size-2.5 shrink-0" />
+                      {session.github_issue_number}
+                    </span>
+                  </WithTooltip>
                 )}
                 {/* Close button — visible on hover */}
                 <WithTooltip label="Delete session">
@@ -254,6 +270,12 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
               label="New ACP Session"
               icon={<Cable className="size-3.5" />}
             />
+            <DropdownMenuItem
+              onClick={() => setIssueDialogOpen(true)}
+            >
+              <Link className="size-3.5" />
+              <span>New session linked to issue…</span>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -265,6 +287,16 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
         onOpenChange={(open) => !open && setDeleteDialogSession(null)}
         onConfirm={confirmDeleteSession}
       />
+      {project && (
+        <NewSessionWithIssueDialog
+          open={issueDialogOpen}
+          onOpenChange={setIssueDialogOpen}
+          projectPath={project.path}
+          defaultProvider={defaultProvider}
+          probes={probes}
+          onCreate={(providerOverride, issueNumber) => handleNewSession(providerOverride, issueNumber)}
+        />
+      )}
     </div>
     {createError && (
       <div className="px-3 py-1 bg-destructive/10 border-b border-destructive/20">

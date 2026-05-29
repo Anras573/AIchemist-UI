@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
@@ -6,6 +6,25 @@ import { EmptyStateNewSession } from "@/components/session/TimelinePanel";
 
 vi.mock("@/components/ai-elements/model-selector", () => ({
   ModelSelectorLogo: () => null,
+}));
+
+// Mock IssueLinkPicker so tests are isolated from IPC
+vi.mock("@/components/session/IssueLinkPicker", () => ({
+  IssueLinkPicker: ({
+    onChange,
+  }: {
+    selectedNumber: number | null;
+    onChange: (n: number | null) => void;
+    projectPath: string;
+    className?: string;
+  }) => (
+    <button
+      data-testid="issue-picker-mock"
+      onClick={() => onChange(42)}
+    >
+      Pick issue
+    </button>
+  ),
 }));
 
 describe("EmptyStateNewSession", () => {
@@ -22,7 +41,7 @@ describe("EmptyStateNewSession", () => {
     expect(screen.getByText(/use claude/i).textContent).toMatch(/default/i);
 
     await userEvent.click(screen.getByRole("button", { name: /create a new session/i }));
-    expect(onNewSession).toHaveBeenCalledWith("anthropic");
+    expect(onNewSession).toHaveBeenCalledWith("anthropic", undefined);
   });
 
   it("preselects Copilot when that is the project default", async () => {
@@ -36,7 +55,7 @@ describe("EmptyStateNewSession", () => {
     expect(screen.getByText(/use copilot/i).textContent).toMatch(/default/i);
 
     await userEvent.click(screen.getByRole("button", { name: /create a new session/i }));
-    expect(onNewSession).toHaveBeenCalledWith("copilot");
+    expect(onNewSession).toHaveBeenCalledWith("copilot", undefined);
   });
 
   it("falls back to Claude when the project has no default provider", async () => {
@@ -51,7 +70,7 @@ describe("EmptyStateNewSession", () => {
     expect(screen.queryByText(/\(default\)/i)).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /create a new session/i }));
-    expect(onNewSession).toHaveBeenCalledWith("anthropic");
+    expect(onNewSession).toHaveBeenCalledWith("anthropic", undefined);
   });
 
   it("passes the selected provider when the user switches radios", async () => {
@@ -63,7 +82,7 @@ describe("EmptyStateNewSession", () => {
     await userEvent.click(screen.getByRole("radio", { name: /use copilot/i }));
     await userEvent.click(screen.getByRole("button", { name: /create a new session/i }));
 
-    expect(onNewSession).toHaveBeenCalledWith("copilot");
+    expect(onNewSession).toHaveBeenCalledWith("copilot", undefined);
   });
 
   it("disables an unavailable radio and skips it when picking the initial selection", async () => {
@@ -88,7 +107,7 @@ describe("EmptyStateNewSession", () => {
     expect(copilot.checked).toBe(true);
 
     await userEvent.click(screen.getByRole("button", { name: /create a new session/i }));
-    expect(onNewSession).toHaveBeenCalledWith("copilot");
+    expect(onNewSession).toHaveBeenCalledWith("copilot", undefined);
   });
 
   it("disables the create button when the selected provider is unavailable", () => {
@@ -139,6 +158,59 @@ describe("EmptyStateNewSession", () => {
     expect(claudeAfter.checked).toBe(false);
 
     await userEvent.click(screen.getByRole("button", { name: /create a new session/i }));
-    expect(onNewSession).toHaveBeenCalledWith("copilot");
+    expect(onNewSession).toHaveBeenCalledWith("copilot", undefined);
+  });
+
+  describe("issue picker integration", () => {
+    it("does not render the issue picker when projectPath is not provided", () => {
+      renderWithProviders(
+        <EmptyStateNewSession defaultProvider="anthropic" onNewSession={vi.fn()} />,
+      );
+      expect(screen.queryByTestId("issue-picker-mock")).not.toBeInTheDocument();
+    });
+
+    it("renders the issue picker when projectPath is provided", () => {
+      renderWithProviders(
+        <EmptyStateNewSession
+          defaultProvider="anthropic"
+          onNewSession={vi.fn()}
+          projectPath="/some/project"
+        />,
+      );
+      expect(screen.getByTestId("issue-picker-mock")).toBeInTheDocument();
+    });
+
+    it("passes the selected issue number to onNewSession when an issue is picked", async () => {
+      const onNewSession = vi.fn();
+      renderWithProviders(
+        <EmptyStateNewSession
+          defaultProvider="anthropic"
+          onNewSession={onNewSession}
+          projectPath="/some/project"
+        />,
+      );
+
+      // Simulate picking issue #42 via the mock picker
+      await userEvent.click(screen.getByTestId("issue-picker-mock"));
+      await userEvent.click(screen.getByRole("button", { name: /create a new session/i }));
+
+      expect(onNewSession).toHaveBeenCalledWith("anthropic", 42);
+    });
+
+    it("passes undefined as issueNumber when no issue is selected", async () => {
+      const onNewSession = vi.fn();
+      renderWithProviders(
+        <EmptyStateNewSession
+          defaultProvider="anthropic"
+          onNewSession={onNewSession}
+          projectPath="/some/project"
+        />,
+      );
+
+      // Don't click the issue picker — no issue selected
+      await userEvent.click(screen.getByRole("button", { name: /create a new session/i }));
+
+      expect(onNewSession).toHaveBeenCalledWith("anthropic", undefined);
+    });
   });
 });

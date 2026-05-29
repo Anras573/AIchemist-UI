@@ -47,6 +47,7 @@ import {
   type SlashItem,
 } from "@/components/session/SlashCommandPopover";
 import { QuestionCard } from "./QuestionCard";
+import { IssueLinkPicker } from "./IssueLinkPicker";
 import { useIpc } from "@/lib/ipc";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 
@@ -249,9 +250,11 @@ interface TimelinePanelProps {
   /** Called by Phase 4 when the user submits a message. */
   onSendMessage?: (text: string, oneshotSkills?: string[]) => void;
   /** Called when the user clicks "Create new session" from the empty state. Optional provider override locks the new session provider. */
-  onNewSession?: (providerOverride?: string) => void;
+  onNewSession?: (providerOverride?: string, issueNumber?: number) => void;
   /** Error message from a failed session creation attempt, to surface in the empty state. */
   createSessionError?: string | null;
+  /** Project path — used for the issue picker in the empty state. */
+  projectPath?: string;
 }
 
 /** Empty-state chooser: radio buttons pick provider, button creates session. */
@@ -260,11 +263,14 @@ export function EmptyStateNewSession({
   onNewSession,
   probes,
   error,
+  projectPath,
 }: {
   defaultProvider: string | null;
-  onNewSession: (providerOverride?: string) => void;
+  onNewSession: (providerOverride?: string, issueNumber?: number) => void;
   probes?: import("@/types").ProviderProbes | null;
   error?: string | null;
+  /** When provided, shows an optional issue picker. */
+  projectPath?: string;
 }) {
   const isAvailable = (p: "anthropic" | "copilot" | "acp" | "ollama"): boolean => {
     if (!probes) return true; // still checking — keep enabled
@@ -289,6 +295,7 @@ export function EmptyStateNewSession({
     ? (preferred as "anthropic" | "copilot" | "acp" | "ollama")
     : (["anthropic", "copilot", "ollama", "acp"] as const).find(isAvailable) ?? "anthropic";
   const [selected, setSelected] = useState<"anthropic" | "copilot" | "acp" | "ollama">(initial);
+  const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
 
   // Probes arrive asynchronously after mount. If the initial pick (or a later
   // pick that has since gone unavailable) is no longer available, switch to
@@ -358,8 +365,16 @@ export function EmptyStateNewSession({
         {renderRadio("ollama", "Use Ollama", <ModelSelectorLogo provider="ollama" className="size-3.5" />)}
         {renderRadio("acp", "Use ACP", <Cable className="size-3.5" />)}
       </div>
+      {projectPath && (
+        <IssueLinkPicker
+          projectPath={projectPath}
+          selectedNumber={selectedIssue}
+          onChange={setSelectedIssue}
+          className="max-w-xs w-full"
+        />
+      )}
       <button
-        onClick={() => onNewSession(selected)}
+        onClick={() => onNewSession(selected, selectedIssue ?? undefined)}
         disabled={!selectedAvailable}
         className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
@@ -372,7 +387,7 @@ export function EmptyStateNewSession({
   );
 }
 
-export function TimelinePanel({ onSendMessage, onNewSession, createSessionError }: TimelinePanelProps) {
+export function TimelinePanel({ onSendMessage, onNewSession, createSessionError, projectPath }: TimelinePanelProps) {
   const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking } = useSessionStore();
   const { activeProjectId, projects } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
@@ -434,6 +449,7 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError 
                   onNewSession={onNewSession}
                   probes={probes}
                   error={createSessionError}
+                  projectPath={projectPath}
                 />
               )}
             </ConversationEmptyState>
@@ -515,7 +531,7 @@ interface InputBarProps {
   disabled?: boolean;
   placeholder?: string;
   onSend?: (text: string, oneshotSkills?: string[]) => void;
-  onNewSession?: (providerOverride?: string) => void;
+  onNewSession?: (providerOverride?: string, issueNumber?: number) => void;
 }
 
 /** Outer shell — provides the controlled text context for the inner bar. */

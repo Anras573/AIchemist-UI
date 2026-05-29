@@ -2,6 +2,7 @@ import React from "react";
 import type {
   GitHubCreatePrArgs,
   GitHubGetCiStatusArgs,
+  GitHubGetIssueArgs,
   GitHubGetPrContextArgs,
   GitHubListIssuesArgs,
   GitHubListPrsArgs,
@@ -26,8 +27,8 @@ export const ipc = {
     window.electronAPI.saveProjectConfig(id, config),
 
   // Sessions
-  createSession: (projectId: string, providerOverride?: string) =>
-    window.electronAPI.createSession(projectId, providerOverride),
+  createSession: (projectId: string, providerOverride?: string, issueNumber?: number) =>
+    window.electronAPI.createSession(projectId, providerOverride, issueNumber),
   listSessions: (projectId: string) => window.electronAPI.listSessions(projectId),
   getSession: (sessionId: string) => window.electronAPI.getSession(sessionId),
   deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) =>
@@ -73,6 +74,7 @@ export const ipc = {
   githubCreatePr: (args: GitHubCreatePrArgs) => window.electronAPI.githubCreatePr(args),
   githubListPrs: (args: GitHubListPrsArgs) => window.electronAPI.githubListPrs(args),
   githubListIssues: (args: GitHubListIssuesArgs) => window.electronAPI.githubListIssues(args),
+  githubGetIssue: (args: GitHubGetIssueArgs) => window.electronAPI.githubGetIssue(args),
   githubGetCiStatus: (args: GitHubGetCiStatusArgs) => window.electronAPI.githubGetCiStatus(args),
   githubGetPrContext: (args: GitHubGetPrContextArgs) => window.electronAPI.githubGetPrContext(args),
   listSkills: (projectPath: string, provider?: string) =>

@@ -20,14 +20,14 @@ export function createSession(
   projectId: string,
   provider: string | null = null,
   model: string | null = null,
-  options: { id?: string; branch?: string | null; workspacePath?: string | null } = {}
+  options: { id?: string; branch?: string | null; workspacePath?: string | null; issueNumber?: number | null } = {}
 ): Session {
   const id = options.id ?? crypto.randomUUID();
   const createdAt = nowIso();
 
   db.prepare(
-    "INSERT INTO sessions (id, project_id, title, status, created_at, provider, model, branch, workspace_path) VALUES (?, ?, 'New session', 'idle', ?, ?, ?, ?, ?)"
-  ).run(id, projectId, createdAt, provider, model, options.branch ?? null, options.workspacePath ?? null);
+    "INSERT INTO sessions (id, project_id, title, status, created_at, provider, model, branch, workspace_path, github_issue_number) VALUES (?, ?, 'New session', 'idle', ?, ?, ?, ?, ?, ?)"
+  ).run(id, projectId, createdAt, provider, model, options.branch ?? null, options.workspacePath ?? null, options.issueNumber ?? null);
 
   return {
     id,
@@ -44,6 +44,7 @@ export function createSession(
     skills: null,
     disabled_mcp_servers: null,
     acp_session_id: null,
+    github_issue_number: options.issueNumber ?? null,
   };
 }
 
@@ -53,7 +54,7 @@ export function createSession(
 export function listSessions(db: Database, projectId: string): Session[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, title, status, created_at, provider, model, branch, workspace_path, agent, skills, disabled_mcp_servers, acp_session_id
+      `SELECT id, project_id, title, status, created_at, provider, model, branch, workspace_path, agent, skills, disabled_mcp_servers, acp_session_id, github_issue_number
        FROM sessions
        WHERE project_id = ?
        ORDER BY created_at ASC`
@@ -72,6 +73,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
     skills: string | null;
     disabled_mcp_servers: string | null;
     acp_session_id: string | null;
+    github_issue_number: number | null;
   }[];
 
   return rows.map((row) => ({
@@ -89,6 +91,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
     skills: parseJsonStringArray(row.skills),
     disabled_mcp_servers: parseJsonStringArray(row.disabled_mcp_servers),
     acp_session_id: row.acp_session_id,
+    github_issue_number: row.github_issue_number,
   }));
 }
 
@@ -98,7 +101,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
 export function getSession(db: Database, sessionId: string): Session {
   const row = db
     .prepare(
-      "SELECT id, project_id, title, status, created_at, provider, model, branch, workspace_path, agent, skills, disabled_mcp_servers, acp_session_id FROM sessions WHERE id = ?"
+      "SELECT id, project_id, title, status, created_at, provider, model, branch, workspace_path, agent, skills, disabled_mcp_servers, acp_session_id, github_issue_number FROM sessions WHERE id = ?"
     )
     .get(sessionId) as
     | {
@@ -115,6 +118,7 @@ export function getSession(db: Database, sessionId: string): Session {
         skills: string | null;
         disabled_mcp_servers: string | null;
         acp_session_id: string | null;
+        github_issue_number: number | null;
       }
     | undefined;
 
@@ -200,6 +204,7 @@ export function getSession(db: Database, sessionId: string): Session {
     skills: parseJsonStringArray(row.skills),
     disabled_mcp_servers: parseJsonStringArray(row.disabled_mcp_servers),
     acp_session_id: row.acp_session_id,
+    github_issue_number: row.github_issue_number,
   };
 }
 

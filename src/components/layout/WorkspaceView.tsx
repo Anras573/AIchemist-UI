@@ -70,11 +70,11 @@ export function WorkspaceView() {
     }
   }, [activeTab, showGitHubTab]);
 
-  const handleNewSession = useCallback(async (providerOverride?: string) => {
+  const handleNewSession = useCallback(async (providerOverride?: string, issueNumber?: number) => {
     if (!activeProjectId) return;
     setCreateError(null);
     try {
-      const session = await ipc.createSession(activeProjectId, providerOverride);
+      const session = await ipc.createSession(activeProjectId, providerOverride, issueNumber);
       addSession(session);
       setActiveSession(session.id);
     } catch (err) {
@@ -104,7 +104,7 @@ export function WorkspaceView() {
       {/* Main content: chat | context panel | tool strip */}
       <div className="flex flex-1 overflow-hidden">
         <SplitPane
-          left={<TimelinePanel onSendMessage={sendMessage} onNewSession={handleNewSession} createSessionError={createError} />}
+          left={<TimelinePanel onSendMessage={sendMessage} onNewSession={handleNewSession} createSessionError={createError} projectPath={activeProject?.path} />}
           right={
             <ContextPanel
               activeTab={activeTab ?? "changes"}

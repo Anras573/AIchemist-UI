@@ -7,6 +7,8 @@ import type {
   GitHubCreatePrResult,
   GitHubGetCiStatusArgs,
   GitHubGetCiStatusResult,
+  GitHubGetIssueArgs,
+  GitHubGetIssueResult,
   GitHubGetPrContextArgs,
   GitHubGetPrContextResult,
   GitHubIssue,
@@ -334,6 +336,9 @@ export async function listIssues(
           created_at: issue.created_at,
           updated_at: issue.updated_at,
           ...(labels.length > 0 ? { labels } : {}),
+          ...(typeof issue.body === "string" && issue.body
+            ? { body: issue.body.slice(0, 5000) }
+            : {}),
         };
       });
     return { issues };
@@ -458,6 +463,50 @@ export async function getCiStatus(
     }
 
     return { status: { state, ...(refIsConfirmedSha ? { sha: resolvedRef } : {}) } };
+  } catch (err) {
+    return { error: httpError(err) ?? String(err) };
+  }
+}
+
+export async function getIssue(
+  args: GitHubGetIssueArgs,
+  _deps?: Pick<GitHubTestDeps, "remoteInfo" | "client">
+): Promise<GitHubGetIssueResult> {
+  const ctx = await resolveContext(args.projectPath, _deps);
+  if ("error" in ctx) return ctx;
+  const { client, owner, repo } = ctx;
+
+  try {
+    const response = await client.issues.get({
+      owner,
+      repo,
+      issue_number: args.issueNumber,
+    });
+    const issue = response.data;
+    const labels = (issue.labels || [])
+      .map((label) => {
+        if (typeof label === "string") return label;
+        if (typeof label?.name === "string") return label.name;
+        return null;
+      })
+      .filter((l): l is string => l !== null)
+      .slice(0, 20);
+
+    return {
+      issue: {
+        id: issue.id,
+        number: issue.number,
+        title: issue.title,
+        state: issue.state,
+        html_url: issue.html_url,
+        created_at: issue.created_at,
+        updated_at: issue.updated_at,
+        ...(labels.length > 0 ? { labels } : {}),
+        ...(typeof issue.body === "string" && issue.body
+          ? { body: issue.body.slice(0, 5000) }
+          : {}),
+      },
+    };
   } catch (err) {
     return { error: httpError(err) ?? String(err) };
   }

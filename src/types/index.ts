@@ -47,7 +47,15 @@ export interface GitHubIssue {
   created_at?: string;
   updated_at?: string;
   labels?: string[];
+  body?: string;
 }
+
+export interface GitHubGetIssueArgs {
+  projectPath: string;
+  issueNumber: number;
+}
+
+export type GitHubGetIssueResult = { issue: GitHubIssue } | { error: string };
 
 export interface CIStatus {
   state: string;
@@ -239,6 +247,8 @@ export interface Session {
   disabled_mcp_servers?: string[] | null;
   /** ACP session id returned by the agent on session/new. Persisted for diagnostics; we do not resume in v1. */
   acp_session_id?: string | null;
+  /** GitHub issue number linked at session creation time. Null when no issue is linked. */
+  github_issue_number?: number | null;
 }
 
 // ─── IPC event payloads ──────────────────────────────────────────────────────
