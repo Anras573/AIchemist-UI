@@ -984,7 +984,7 @@ function registerHandlers(): void {  // ── Terminal ────────
     const sessionSkills = session.skills ?? [];
     const oneshotSkills = args.oneshotSkills ?? [];
     const allSkills = [...new Set([...sessionSkills, ...oneshotSkills])];
-    const supportsSkills = effectiveConfig.provider !== "acp" && effectiveConfig.provider !== "ollama";
+    const supportsSkills = effectiveConfig.provider !== "acp";
     const agent = supportsSkills ? (args.agent ?? session.agent ?? undefined) : undefined;
     const skills = supportsSkills && allSkills.length > 0 ? allSkills : undefined;
 

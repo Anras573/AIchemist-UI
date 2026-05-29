@@ -237,7 +237,7 @@ describe("useAgentTurn", () => {
     );
   });
 
-  it("does not forward one-shot skills for Ollama sessions", async () => {
+  it("forwards one-shot skills for Ollama sessions", async () => {
     setupActiveSession({ provider: "ollama", model: "llama3.2" });
     vi.mocked(window.electronAPI.saveMessage).mockResolvedValue(makeMessage());
     const { result } = renderHook(() => useAgentTurn());
@@ -247,7 +247,7 @@ describe("useAgentTurn", () => {
     });
 
     expect(window.electronAPI.agentSend).toHaveBeenCalledWith(
-      expect.objectContaining({ oneshotSkills: undefined })
+      expect.objectContaining({ oneshotSkills: ["ai-sdk"] })
     );
   });
 });

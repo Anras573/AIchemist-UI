@@ -168,7 +168,7 @@ export function McpServersPanel() {
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const sessionDisabledMcp = useSessionStore((s) => s.sessionDisabledMcp);
   const setSessionDisabledMcp = useSessionStore((s) => s.setSessionDisabledMcp);
-  const unsupportedProvider = provider === "acp" || provider === "ollama";
+  const unsupportedProvider = provider === "acp";
   const disabledSet = useMemo(
     () => new Set(activeSessionId ? sessionDisabledMcp[activeSessionId] ?? [] : []),
     [activeSessionId, sessionDisabledMcp],
@@ -229,8 +229,11 @@ export function McpServersPanel() {
   const visibleServers = useMemo(() => {
     if (!servers) return null;
     if (!provider) return servers;
-    if (provider === "acp" || provider === "ollama") return [];
+    if (provider === "acp") return [];
     const providerKey = provider === "anthropic" ? "claude" : "copilot";
+    if (provider === "ollama") {
+      return servers.filter((s) => s.source === "aichemist");
+    }
     return servers.filter(
       (s) => s.source === providerKey || s.source === "both" || s.source === "aichemist",
     );
@@ -240,17 +243,13 @@ export function McpServersPanel() {
   const failed = visibleServers?.filter((s) => s.connected === false) ?? [];
   const unknown = visibleServers?.filter((s) => s.connected === null) ?? [];
 
-  if (provider === "acp" || provider === "ollama") {
+  if (provider === "acp") {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs px-3 text-center">
         <span>
-          MCP servers are not injected into {provider === "ollama" ? "Ollama" : "ACP"} sessions.
+          MCP servers are not available for ACP sessions.
         </span>
-        <span className="opacity-60">
-          {provider === "ollama"
-            ? "Ollama sessions currently run in chat-only mode, so AIchemist tools and MCP servers are unavailable."
-            : "ACP agents may declare their own MCP support; configure that in the agent itself."}
-        </span>
+        <span className="opacity-60">ACP agents may declare their own MCP support; configure that in the agent itself.</span>
       </div>
     );
   }
@@ -308,10 +307,19 @@ export function McpServersPanel() {
             <Server className="h-8 w-8 opacity-30" />
             <span>
               No MCP servers configured for{" "}
-              {provider === "copilot" ? "Copilot" : provider === "anthropic" ? "Claude" : "this session"}
+              {provider === "copilot"
+                ? "Copilot"
+                : provider === "anthropic"
+                  ? "Claude"
+                  : provider === "ollama"
+                    ? "Ollama"
+                    : "this session"}
             </span>
             {provider === "anthropic" && (
               <span className="text-[11px]">Configure servers via <code className="font-mono">claude mcp add</code></span>
+            )}
+            {provider === "ollama" && (
+              <span className="text-[11px]">Configure AIchemist-managed servers in <code className="font-mono">~/.aichemist/mcp.json</code></span>
             )}
           </div>
         )}

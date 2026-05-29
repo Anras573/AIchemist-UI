@@ -149,7 +149,7 @@ describe("SkillsPanel", () => {
     });
   });
 
-  it("shows an unavailable message for Ollama sessions without loading skills", async () => {
+  it("loads skills for Ollama sessions", async () => {
     setupStores();
     useSessionStore.getState().addSession(makeSession({
       id: "sess-ollama",
@@ -157,11 +157,14 @@ describe("SkillsPanel", () => {
       model: "llama3.2",
     }));
     useSessionStore.getState().setActiveSession("sess-ollama");
+    vi.mocked(window.electronAPI.listSkills).mockResolvedValue([USER_SKILL]);
 
     renderWithProviders(<SkillsPanel />);
 
-    expect(await screen.findByText(/skills are not available for ollama sessions/i)).toBeInTheDocument();
-    expect(window.electronAPI.listSkills).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(window.electronAPI.listSkills).toHaveBeenCalledWith("/home/user/proj", "ollama");
+      expect(screen.getByText("brainstorming")).toBeInTheDocument();
+    });
   });
 
   it("filters skills by source when a filter chip is toggled off", async () => {

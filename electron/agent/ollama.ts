@@ -1,12 +1,42 @@
 import type { Database } from "better-sqlite3";
+import * as crypto from "crypto";
+import * as fs from "fs";
+import * as path from "path";
 import * as CH from "../ipc-channels";
+import { buildSkillsContext } from "./skills";
+import { readAgentFileSystemPrompt } from "./claude";
+import { requestApproval, requiresApproval } from "./approval";
+import { requestQuestion } from "./question";
+import { loadManagedMcpServers } from "./mcp-managed";
+import { createManagedMcpBridge } from "./mcp-bridge";
+import {
+  loadToolCallsForMessage,
+  saveToolCall,
+  updateToolCallStatus,
+} from "../sessions";
+import {
+  implDeleteFileWithChange,
+  implExecuteBash,
+  implWebFetch,
+  implWriteFileWithChange,
+} from "./tool-impls";
 import type { AgentProvider, AgentProviderParams } from "./provider";
+import { getDisabledMcpServers } from "../sessions";
 
-type ChatRole = "system" | "user" | "assistant";
+type ChatRole = "system" | "user" | "assistant" | "tool";
 
 interface OllamaMessage {
   role: ChatRole;
   content: string;
+  tool_calls?: OllamaToolCall[];
+  tool_name?: string;
+}
+
+interface OllamaToolCall {
+  function: {
+    name: string;
+    arguments?: Record<string, unknown>;
+  };
 }
 
 interface OllamaModel {
@@ -19,7 +49,7 @@ interface OllamaListResult {
 }
 
 interface OllamaChatChunk {
-  message?: { content?: string };
+  message?: Partial<OllamaMessage>;
 }
 
 interface OllamaClientLike {
@@ -28,14 +58,229 @@ interface OllamaClientLike {
     model: string;
     messages: OllamaMessage[];
     stream?: boolean;
-  }): Promise<AsyncIterable<OllamaChatChunk> | { message?: { content?: string } }>;
+    tools?: OllamaToolDefinition[];
+  }): Promise<AsyncIterable<OllamaChatChunk> | { message?: Partial<OllamaMessage> }>;
+}
+
+interface OllamaToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+interface ToolExecutionContext {
+  db: Database;
+  sessionId: string;
+  messageId: string;
+  projectPath: string;
+  projectConfig: AgentProviderParams["projectConfig"];
+  webContents: Electron.WebContents;
 }
 
 export const OLLAMA_NO_MODELS_ERROR =
   "No Ollama models found. Install a model with `ollama pull <model>` or configure one in Project Settings.";
 
+const OLLAMA_SYSTEM_PROMPT = [
+  "You are AIchemist, a coding assistant running inside a desktop app.",
+  "Use the available tools to inspect and modify the project, run commands, fetch URLs, and ask the user questions when needed.",
+  "Never invent file contents or command output. If you need more context, use a tool.",
+  "When you need clarification, use ask_user instead of asking in plain text.",
+].join(" ");
+
+const MAX_TOOL_ROUNDS = 8;
+const MAX_READ_BYTES = 512 * 1024;
+
 function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
   return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
+}
+
+function isBinaryBuffer(buf: Buffer): boolean {
+  const len = Math.min(buf.length, 8192);
+  for (let i = 0; i < len; i++) {
+    if (buf[i] === 0) return true;
+  }
+  return false;
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function resolveProjectPath(projectPath: string, inputPath: string): string {
+  const root = fs.realpathSync(path.resolve(projectPath));
+  const candidate = path.resolve(root, inputPath);
+  const rel = path.relative(root, candidate).replace(/\\/g, "/");
+  if (isSensitiveRelativePath(rel)) {
+    throw new Error(`Access to sensitive path is not allowed: "${rel}"`);
+  }
+  const resolved = fs.realpathSync(candidate);
+  const resolvedRel = path.relative(root, resolved).replace(/\\/g, "/");
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    throw new Error(`Path escapes project boundary: "${inputPath}"`);
+  }
+  if (isSensitiveRelativePath(resolvedRel)) {
+    throw new Error(`Access to sensitive path is not allowed: "${resolvedRel}"`);
+  }
+  return resolved;
+}
+
+function isSensitiveRelativePath(relPath: string): boolean {
+  return [
+    /(?:^|\/)\.git(?:\/|$)/,
+    /(?:^|\/)node_modules(?:\/|$)/,
+    /(?:^|\/|^)\.env(\.|$)/,
+  ].some((pattern) => pattern.test(relPath));
+}
+
+function shouldIgnoreDir(name: string): boolean {
+  return [
+    "node_modules",
+    ".git",
+    ".hg",
+    ".svn",
+    "dist",
+    "build",
+    "out",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    "__pycache__",
+    ".cache",
+    ".parcel-cache",
+    ".vite",
+    "coverage",
+    ".nyc_output",
+  ].includes(name);
+}
+
+function globPatternToRegExp(pattern: string): RegExp {
+  const normalized = pattern.replace(/\\/g, "/");
+  let re = "^";
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i];
+    if (ch === "*") {
+      if (normalized[i + 1] === "*") {
+        i++;
+        if (normalized[i + 1] === "/") {
+          i++;
+          re += "(?:.*\\/)?";
+        } else {
+          re += ".*";
+        }
+      } else {
+        re += "[^/]*";
+      }
+      continue;
+    }
+    if (ch === "?") {
+      re += "[^/]";
+      continue;
+    }
+    re += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  re += "$";
+  return new RegExp(re);
+}
+
+function readTextFile(projectPath: string, inputPath: string): string {
+  const resolved = resolveProjectPath(projectPath, inputPath);
+  const stat = fs.statSync(resolved);
+  if (!stat.isFile()) {
+    throw new Error(`Not a file: "${inputPath}"`);
+  }
+  if (stat.size > MAX_READ_BYTES) {
+    throw new Error(`File too large (${Math.round(stat.size / 1024)} KB). Only files under 512 KB can be previewed.`);
+  }
+  const buf = fs.readFileSync(resolved);
+  if (isBinaryBuffer(buf)) {
+    return safeJson({
+      path: resolved,
+      is_binary: true,
+      size_bytes: buf.length,
+      content: "",
+    });
+  }
+  return buf.toString("utf8");
+}
+
+function listDirectory(projectPath: string, inputPath: string): string {
+  const resolved = resolveProjectPath(projectPath, inputPath || ".");
+  const dirents = fs.readdirSync(resolved, { withFileTypes: true });
+  const filtered = dirents.filter((d) => {
+    const entryPath = path.join(resolved, d.name);
+    const entryRel = path.relative(resolved, entryPath).replace(/\\/g, "/");
+    return !shouldIgnoreDir(d.name) && !isSensitiveRelativePath(entryRel);
+  });
+  const truncated = filtered.length > 500;
+  const visible = truncated ? filtered.slice(0, 500) : filtered;
+  const entries = visible.map((dirent) => {
+    const entryPath = path.join(resolved, dirent.name);
+    let size_bytes = 0;
+    if (!dirent.isDirectory()) {
+      try {
+        size_bytes = fs.statSync(entryPath).size;
+      } catch {
+        size_bytes = 0;
+      }
+    }
+    return {
+      name: dirent.name,
+      path: entryPath,
+      is_dir: dirent.isDirectory(),
+      size_bytes,
+    };
+  });
+  return safeJson({ path: resolved, truncated, entries });
+}
+
+function walkGlob(
+  root: string,
+  cwd: string,
+  pattern: RegExp,
+  out: string[],
+  limit: number,
+): void {
+  if (out.length >= limit) return;
+  let dirents: fs.Dirent[];
+  try {
+    dirents = fs.readdirSync(cwd, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const dirent of dirents) {
+    if (out.length >= limit) return;
+    const abs = path.join(cwd, dirent.name);
+    const rel = path.relative(root, abs).replace(/\\/g, "/");
+    if (shouldIgnoreDir(dirent.name) || isSensitiveRelativePath(rel)) continue;
+    if (dirent.isDirectory()) {
+      walkGlob(root, abs, pattern, out, limit);
+      continue;
+    }
+    if (pattern.test(rel) || pattern.test(path.basename(rel))) {
+      out.push(abs);
+    }
+  }
+}
+
+function globFiles(projectPath: string, inputPattern: string): string {
+  const pattern = inputPattern.trim();
+  if (!pattern) return safeJson({ pattern, matches: [] as string[] });
+
+  const root = fs.realpathSync(path.resolve(projectPath));
+  const normalized = pattern.replace(/\\/g, "/");
+  const regex = globPatternToRegExp(
+    path.isAbsolute(normalized) ? path.relative(root, normalized).replace(/\\/g, "/") : normalized,
+  );
+  const matches: string[] = [];
+  walkGlob(root, root, regex, matches, 200);
+  return safeJson({ pattern, matches, truncated: matches.length >= 200 });
 }
 
 let clientPromise: Promise<OllamaClientLike> | null = null;
@@ -53,6 +298,13 @@ async function loadClient(): Promise<OllamaClientLike> {
   return clientPromise;
 }
 
+function buildSystemPrompt(params: AgentProviderParams): string {
+  const skillsContext = buildSkillsContext(params.skills ?? [], params.projectPath);
+  const agentBody = params.agent ? readAgentFileSystemPrompt(params.agent)?.body ?? "" : "";
+  const parts = [OLLAMA_SYSTEM_PROMPT, agentBody, skillsContext];
+  return parts.filter((part) => part.trim().length > 0).join("\n\n");
+}
+
 function loadHistory(db: Database, sessionId: string, placeholderMessageId: string): OllamaMessage[] {
   const rows = db
     .prepare(
@@ -63,48 +315,398 @@ function loadHistory(db: Database, sessionId: string, placeholderMessageId: stri
     )
     .all(sessionId) as Array<{ id: string; role: string; content: string }>;
 
-  return rows
-    .filter((row) => row.id !== placeholderMessageId)
-    .filter((row) => row.role === "user" || row.role === "assistant")
-    .map((row) => ({
-      role: row.role as "user" | "assistant",
-      content: row.content,
+  const history: OllamaMessage[] = [];
+  for (const row of rows) {
+    if (row.id === placeholderMessageId) continue;
+    if (row.role === "user") {
+      history.push({ role: "user", content: row.content });
+      continue;
+    }
+    if (row.role !== "assistant") continue;
+
+    const toolCalls = loadToolCallsForMessage(db, row.id);
+    const toolCallRefs = toolCalls.map((call) => ({
+      function: {
+        name: call.name,
+        arguments: (call.args ?? {}) as Record<string, unknown>,
+      },
     }));
+
+    history.push({
+      role: "assistant",
+      content: row.content,
+      ...(toolCallRefs.length > 0 ? { tool_calls: toolCallRefs } : {}),
+    });
+
+    for (const call of toolCalls) {
+      history.push({
+        role: "tool",
+        content: stringifyToolResult(call.result),
+        tool_name: call.name,
+      });
+    }
+  }
+  return history;
+}
+
+function stringifyToolResult(result: unknown): string {
+  if (typeof result === "string") return result;
+  if (result === null || result === undefined) return "";
+  return safeJson(result);
+}
+
+function makeToolDefinitions(): OllamaToolDefinition[] {
+  return [
+    {
+      type: "function",
+      function: {
+        name: "read_file",
+        description: "Read a file from the project and return its text content.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Absolute or relative file path" },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "list_directory",
+        description: "List the contents of a directory in the project.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Absolute or relative directory path" },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "glob",
+        description: "Find project files matching a glob pattern.",
+        parameters: {
+          type: "object",
+          properties: {
+            pattern: { type: "string", description: "Glob pattern relative to the project root" },
+          },
+          required: ["pattern"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "write_file",
+        description: "Write content to a file, creating parent directories as needed.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Absolute or relative file path" },
+            content: { type: "string", description: "Content to write" },
+          },
+          required: ["path", "content"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "delete_file",
+        description: "Delete a file from the project.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Absolute or relative file path" },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "execute_bash",
+        description: "Execute a shell command and return its output. Always requires approval.",
+        parameters: {
+          type: "object",
+          properties: {
+            command: { type: "string", description: "Shell command to execute" },
+            cwd: { type: "string", description: "Working directory for the command" },
+          },
+          required: ["command"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "web_fetch",
+        description: "Fetch a URL via HTTP GET and return its content.",
+        parameters: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "URL to fetch" },
+          },
+          required: ["url"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "ask_user",
+        description: "Ask the user a question and wait for the answer before proceeding.",
+        parameters: {
+          type: "object",
+          properties: {
+            question: { type: "string", description: "The question to ask the user" },
+            options: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional choices to present to the user",
+            },
+            placeholder: { type: "string", description: "Placeholder for free-form input" },
+          },
+          required: ["question"],
+        },
+      },
+    },
+  ];
+}
+
+async function runTool(
+  ctx: ToolExecutionContext,
+  name: string,
+  args: Record<string, unknown>,
+  category: "filesystem" | "shell" | "web" | "custom",
+  impl: () => Promise<string>,
+): Promise<string> {
+  const toolCallId = crypto.randomUUID();
+  const needsGate = category !== "custom" && requiresApproval(ctx.sessionId, ctx.projectConfig, category, name, args);
+  ctx.webContents.send(CH.SESSION_TOOL_CALL, {
+    session_id: ctx.sessionId,
+    tool_name: name,
+    tool_call_id: toolCallId,
+    input: args,
+  });
+  saveToolCall(ctx.db, {
+    id: toolCallId,
+    messageId: ctx.messageId,
+    name,
+    args,
+    status: needsGate ? "pending_approval" : "approved",
+    category,
+  });
+
+  if (needsGate) {
+    const approved = await requestApproval(ctx.webContents, ctx.sessionId, name, args);
+    if (!approved) {
+      const denied = "Tool call denied by user.";
+      updateToolCallStatus(ctx.db, toolCallId, "rejected", denied);
+      ctx.webContents.send(CH.SESSION_TOOL_RESULT, {
+        session_id: ctx.sessionId,
+        tool_name: name,
+        output: denied,
+      });
+      return denied;
+    }
+    updateToolCallStatus(ctx.db, toolCallId, "approved");
+  }
+
+  try {
+    const output = await impl();
+    updateToolCallStatus(ctx.db, toolCallId, "complete", output);
+    ctx.webContents.send(CH.SESSION_TOOL_RESULT, {
+      session_id: ctx.sessionId,
+      tool_name: name,
+      output,
+    });
+    return output;
+  } catch (err) {
+    const output = err instanceof Error ? err.message : String(err);
+    updateToolCallStatus(ctx.db, toolCallId, "error", output);
+    ctx.webContents.send(CH.SESSION_TOOL_RESULT, {
+      session_id: ctx.sessionId,
+      tool_name: name,
+      output,
+    });
+    return output;
+  }
+}
+
+async function executeTool(
+  ctx: ToolExecutionContext,
+  toolCall: OllamaToolCall,
+  managedMcpBridge: { hasTool(name: string): boolean; callTool(name: string, args: Record<string, unknown>): Promise<string> },
+): Promise<string> {
+  const name = toolCall.function.name;
+  const args = toolCall.function.arguments ?? {};
+
+  switch (name) {
+    case "read_file":
+      return runTool(ctx, name, args, "filesystem", async () => readTextFile(ctx.projectPath, String(args.path ?? "")));
+    case "list_directory":
+      return runTool(ctx, name, args, "filesystem", async () => listDirectory(ctx.projectPath, String(args.path ?? "")));
+    case "glob":
+      return runTool(ctx, name, args, "filesystem", async () => globFiles(ctx.projectPath, String(args.pattern ?? "")));
+    case "write_file":
+      return runTool(ctx, name, args, "filesystem", async () => {
+        const { result, change } = await implWriteFileWithChange(
+          { path: String(args.path ?? ""), content: String(args.content ?? "") },
+          ctx.projectPath,
+        );
+        if (change) {
+          ctx.webContents.send(CH.SESSION_FILE_CHANGE, { session_id: ctx.sessionId, file_change: change });
+        }
+        return result;
+      });
+    case "delete_file":
+      return runTool(ctx, name, args, "filesystem", async () => {
+        const { result, change } = await implDeleteFileWithChange({ path: String(args.path ?? "") }, ctx.projectPath);
+        if (change) {
+          ctx.webContents.send(CH.SESSION_FILE_CHANGE, { session_id: ctx.sessionId, file_change: change });
+        }
+        return result;
+      });
+    case "execute_bash":
+      return runTool(ctx, name, args, "shell", async () => implExecuteBash({
+        command: String(args.command ?? ""),
+        cwd: typeof args.cwd === "string" ? args.cwd : undefined,
+        projectPath: ctx.projectPath,
+      }));
+    case "web_fetch":
+      return runTool(ctx, name, args, "web", async () => implWebFetch({ url: String(args.url ?? "") }));
+    case "ask_user":
+      return runTool(ctx, name, args, "custom", async () =>
+        requestQuestion(
+          ctx.webContents,
+          ctx.sessionId,
+          String(args.question ?? ""),
+          Array.isArray(args.options) ? args.options.filter((option): option is string => typeof option === "string") : undefined,
+          typeof args.placeholder === "string" ? args.placeholder : undefined,
+        ).then((answer) => answer || "(no answer provided)")
+      );
+    default:
+      if (managedMcpBridge.hasTool(name)) {
+        // Managed MCP tools can do anything, so gate them with the strictest
+        // existing approval category instead of treating them as file edits.
+        return runTool(ctx, name, args, "shell", async () => managedMcpBridge.callTool(name, args));
+      }
+      return `Error: Unsupported tool "${name}"`;
+  }
+}
+
+async function runChatRound(
+  client: OllamaClientLike,
+  model: string,
+  messages: OllamaMessage[],
+  tools: OllamaToolDefinition[],
+  ctx: ToolExecutionContext,
+): Promise<{ text: string; toolCalls: OllamaToolCall[] }> {
+  const response = await client.chat({
+    model,
+    messages,
+    stream: true,
+    tools,
+  });
+
+  let fullText = "";
+  let toolCalls: OllamaToolCall[] = [];
+  const seenToolCalls = new Set<string>();
+
+  if (isAsyncIterable<OllamaChatChunk>(response)) {
+    for await (const chunk of response) {
+      const delta = chunk.message?.content ?? "";
+      if (delta) {
+        fullText += delta;
+        ctx.webContents.send(CH.SESSION_DELTA, {
+          session_id: ctx.sessionId,
+          text_delta: delta,
+        });
+      }
+      if (chunk.message?.tool_calls?.length) {
+        for (const toolCall of chunk.message.tool_calls) {
+          const key = `${toolCall.function.name}::${safeJson(toolCall.function.arguments ?? {})}`;
+          if (seenToolCalls.has(key)) continue;
+          seenToolCalls.add(key);
+          toolCalls.push(toolCall);
+        }
+      }
+    }
+    return { text: fullText, toolCalls };
+  }
+
+  const message = response.message ?? {};
+  const text = message.content ?? "";
+  if (text) {
+    fullText += text;
+    ctx.webContents.send(CH.SESSION_DELTA, {
+      session_id: ctx.sessionId,
+      text_delta: text,
+    });
+  }
+  return { text: fullText, toolCalls: message.tool_calls ?? [] };
 }
 
 export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<string> {
   const client = await loadClient();
   const history = loadHistory(params.db, params.sessionId, params.messageId);
   const model = await resolveModel(client, params.projectConfig.model);
+  const managedMcpBridge = await createManagedMcpBridge(
+    loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
+  );
+  const tools = [...makeToolDefinitions(), ...managedMcpBridge.tools];
+  const ctx: ToolExecutionContext = {
+    db: params.db,
+    sessionId: params.sessionId,
+    messageId: params.messageId,
+    projectPath: params.projectPath,
+    projectConfig: params.projectConfig,
+    webContents: params.webContents,
+  };
 
-  const response = await client.chat({
-    model,
-    messages: history,
-    stream: true,
-  });
+  const systemPrompt = buildSystemPrompt(params);
+  const messages: OllamaMessage[] = [
+    { role: "system", content: systemPrompt },
+    ...history,
+  ];
 
   let fullText = "";
-  if (isAsyncIterable<OllamaChatChunk>(response)) {
-    for await (const chunk of response) {
-      const delta = chunk?.message?.content ?? "";
-      if (!delta) continue;
-      fullText += delta;
-      params.webContents.send(CH.SESSION_DELTA, {
-        session_id: params.sessionId,
-        text_delta: delta,
+  try {
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const { text, toolCalls } = await runChatRound(client, model, messages, tools, ctx);
+      fullText += text;
+
+      if (toolCalls.length === 0) {
+        return fullText;
+      }
+
+      messages.push({
+        role: "assistant",
+        content: text,
+        tool_calls: toolCalls,
       });
+
+      for (const toolCall of toolCalls) {
+        const output = await executeTool(ctx, toolCall, managedMcpBridge);
+        messages.push({
+          role: "tool",
+          content: output,
+          tool_name: toolCall.function.name,
+        });
+      }
     }
-    return fullText;
+  } finally {
+    await managedMcpBridge.close();
   }
 
-  const text = response?.message?.content ?? "";
-  if (text) {
-    params.webContents.send(CH.SESSION_DELTA, {
-      session_id: params.sessionId,
-      text_delta: text,
-    });
-  }
-  return text;
+  throw new Error(`Ollama tool loop exceeded ${MAX_TOOL_ROUNDS} rounds`);
 }
 
 async function listInstalledModels(client: OllamaClientLike): Promise<Array<{ id: string; name: string }>> {

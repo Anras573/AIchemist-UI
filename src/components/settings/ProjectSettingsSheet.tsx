@@ -137,7 +137,7 @@ function GeneralTab({
           options={[
             opt("anthropic", "Anthropic (Claude)"),
             opt("copilot", "GitHub Copilot"),
-            opt("ollama", "Ollama (chat only)"),
+            opt("ollama", "Ollama"),
             opt("acp", "ACP agent (subprocess)"),
           ]}
           onChange={(v) => {
@@ -173,11 +173,6 @@ function GeneralTab({
           placeholder="e.g. claude-sonnet-4-6"
           className="font-mono text-sm"
         />
-        {config.provider === "ollama" && (
-          <p className="text-xs text-muted-foreground">
-            Ollama sessions are currently chat-only in AIchemist. Skills, MCP servers, and approval-gated tools are unavailable.
-          </p>
-        )}
       </FieldRow>
       <FieldRow>
         <label htmlFor="ps-create-worktree" className="flex items-start gap-2 text-sm font-medium leading-none">
@@ -345,17 +340,6 @@ function ApprovalTab({
       policy: tc.category === category ? policy : getPolicyForCategory(tc.category),
     }));
     onChange({ approval_rules: rules });
-  }
-
-  if (config.provider === "ollama") {
-    return (
-      <div className="flex flex-col gap-3 rounded-md border border-dashed px-4 py-3 text-sm">
-        <p className="font-medium">Approval rules do not apply to Ollama sessions yet.</p>
-        <p className="text-xs text-muted-foreground">
-          AIchemist currently uses Ollama in chat-only mode, so tool approvals and MCP-backed tools are unavailable for this provider.
-        </p>
-      </div>
-    );
   }
 
   return (

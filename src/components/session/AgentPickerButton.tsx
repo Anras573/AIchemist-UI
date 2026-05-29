@@ -49,7 +49,6 @@ function AgentSourceBadge({ source, plugin }: { source?: string; plugin?: string
 
 /**
  * Compact dropdown placed inside the input bar for selecting a sub-agent.
- * Only renders when the active project uses the Anthropic provider.
  * Agents are loaded lazily when the dropdown is first opened.
  */
 export function AgentPickerButton() {
@@ -81,12 +80,12 @@ export function AgentPickerButton() {
 
   const loadAgents = useCallback(() => {
     if (!projectPath) return;
-    if (provider !== "anthropic" && provider !== "copilot") return;
+    if (provider !== "anthropic" && provider !== "copilot" && provider !== "ollama") return;
     setLoadingAgents(true);
     const fetch =
-      provider === "anthropic"
-        ? ipc.getClaudeAgents(projectPath)
-        : ipc.getCopilotAgents(projectPath);
+      provider === "copilot"
+        ? ipc.getCopilotAgents(projectPath)
+        : ipc.getClaudeAgents(projectPath);
     fetch
       .then(setAgents)
       .catch(() => {/* Silently hide agent list on error */})
@@ -96,7 +95,7 @@ export function AgentPickerButton() {
   // Lazy-load agents the first time the dropdown opens
   useEffect(() => {
     if (!open || !projectPath || agents.length > 0) return;
-    if (provider !== "anthropic" && provider !== "copilot") return;
+    if (provider !== "anthropic" && provider !== "copilot" && provider !== "ollama") return;
     loadAgents();
   }, [open, projectPath, provider, agents.length, loadAgents]);
 
