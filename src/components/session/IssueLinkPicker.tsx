@@ -11,7 +11,7 @@ interface IssueLinkPickerProps {
   className?: string;
 }
 
-type LoadState = "loading" | "success" | "unavailable" | "error";
+type LoadState = "idle" | "loading" | "success" | "unavailable" | "error";
 
 /**
  * Searchable issue picker populated from GITHUB_LIST_ISSUES.
@@ -26,7 +26,7 @@ export function IssueLinkPicker({
 }: IssueLinkPickerProps) {
   const ipc = useIpc();
   const [issues, setIssues] = useState<GitHubIssue[] | null>(null);
-  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [loadState, setLoadState] = useState<LoadState>("idle");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
@@ -60,9 +60,13 @@ export function IssueLinkPicker({
       });
   }, [ipc, projectPath]);
 
+  // Reset to idle when projectPath changes so the next open triggers a fresh fetch.
   useEffect(() => {
-    fetchIssues();
-  }, [fetchIssues]);
+    setLoadState("idle");
+    setIssues(null);
+    setOpen(false);
+    setSearch("");
+  }, [projectPath]);
 
   const filtered = useMemo(() => {
     if (!issues) return [];
@@ -96,12 +100,20 @@ export function IssueLinkPicker({
     ? issues?.find((i) => i.number === selectedNumber) ?? null
     : null;
 
+  const handleToggleOpen = () => {
+    const willOpen = !open;
+    // Lazily fetch issues on first open; call fetchIssues() before setOpen() so
+    // the loading indicator is guaranteed to show from the moment the dropdown appears.
+    if (willOpen && loadState === "idle") {
+      fetchIssues();
+    }
+    setOpen(willOpen);
+  };
+
   return (
     <div className={cn("flex flex-col gap-1 w-full", className)}>
       <span className="text-xs text-muted-foreground font-medium">Link to issue (optional)</span>
-      {loadState === "loading" ? (
-        <div className="h-8 rounded border border-border bg-muted/40 animate-pulse" />
-      ) : loadState === "error" ? (
+      {loadState === "error" ? (
         <div className="px-2 py-1.5 rounded border border-destructive/50 bg-destructive/5 flex items-center justify-between gap-2">
           <span className="text-xs text-destructive/90">{errorMessage}</span>
           <button
@@ -116,7 +128,7 @@ export function IssueLinkPicker({
         <div className="relative">
           <button
             type="button"
-            onClick={() => setOpen((v) => !v)}
+            onClick={handleToggleOpen}
             className={cn(
               "w-full flex items-center gap-1.5 px-2 py-1.5 text-xs rounded border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors text-left",
               open && "ring-1 ring-ring"
@@ -137,87 +149,93 @@ export function IssueLinkPicker({
 
           {open && (
             <div className="absolute z-50 mt-1 w-full bg-popover border border-border rounded shadow-md">
-              <div className="p-1 border-b border-border">
-                <input
-                  autoFocus
-                  type="text"
-                  placeholder="Search issues…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                      e.preventDefault();
-                      setOpen(false);
-                      setSearch("");
-                    }
-                  }}
-                  className="w-full text-xs px-2 py-1 rounded bg-background border border-input focus:outline-none focus:ring-1 focus:ring-ring"
-                  aria-label="Search issues"
-                />
-              </div>
-              <ul
-                role="listbox"
-                aria-label="Issues"
-                className="max-h-48 overflow-y-auto py-1"
-              >
-                <li
-                  role="option"
-                  aria-selected={selectedNumber === null}
-                  tabIndex={0}
-                  onClick={() => { onChange(null); setOpen(false); setSearch(""); }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onChange(null);
-                      setOpen(false);
-                      setSearch("");
-                    }
-                  }}
-                  className={cn(
-                    "px-2 py-1.5 text-xs cursor-pointer hover:bg-accent hover:text-accent-foreground",
-                    selectedNumber === null && "bg-accent/50"
-                  )}
-                >
-                  <span className="text-muted-foreground">None</span>
-                </li>
-                {filtered.map((issue) => (
-                  <li
-                    key={issue.number}
-                    role="option"
-                    aria-selected={issue.number === selectedNumber}
-                    tabIndex={0}
-                    onClick={() => { onChange(issue.number); setOpen(false); setSearch(""); }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onChange(issue.number);
-                        setOpen(false);
-                        setSearch("");
-                      }
-                    }}
-                    className={cn(
-                      "px-2 py-1.5 text-xs cursor-pointer hover:bg-accent hover:text-accent-foreground",
-                      issue.number === selectedNumber && "bg-accent/50"
-                    )}
+              {loadState === "loading" ? (
+                <div role="status" aria-live="polite" className="px-2 py-3 text-xs text-muted-foreground animate-pulse">Loading issues…</div>
+              ) : (
+                <>
+                  <div className="p-1 border-b border-border">
+                    <input
+                      autoFocus
+                      type="text"
+                      placeholder="Search issues…"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setOpen(false);
+                          setSearch("");
+                        }
+                      }}
+                      className="w-full text-xs px-2 py-1 rounded bg-background border border-input focus:outline-none focus:ring-1 focus:ring-ring"
+                      aria-label="Search issues"
+                    />
+                  </div>
+                  <ul
+                    role="listbox"
+                    aria-label="Issues"
+                    className="max-h-48 overflow-y-auto py-1"
                   >
-                    <span className="flex items-start gap-1.5 min-w-0">
-                      <span className="text-muted-foreground shrink-0">#{issue.number}</span>
-                      <span className="truncate flex-1">{issue.title}</span>
-                      {issue.labels?.slice(0, 3).map((label) => (
-                        <span
-                          key={label}
-                          className="shrink-0 px-1 rounded text-[10px] bg-muted text-muted-foreground"
-                        >
-                          {label}
+                    <li
+                      role="option"
+                      aria-selected={selectedNumber === null}
+                      tabIndex={0}
+                      onClick={() => { onChange(null); setOpen(false); setSearch(""); }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onChange(null);
+                          setOpen(false);
+                          setSearch("");
+                        }
+                      }}
+                      className={cn(
+                        "px-2 py-1.5 text-xs cursor-pointer hover:bg-accent hover:text-accent-foreground",
+                        selectedNumber === null && "bg-accent/50"
+                      )}
+                    >
+                      <span className="text-muted-foreground">None</span>
+                    </li>
+                    {filtered.map((issue) => (
+                      <li
+                        key={issue.number}
+                        role="option"
+                        aria-selected={issue.number === selectedNumber}
+                        tabIndex={0}
+                        onClick={() => { onChange(issue.number); setOpen(false); setSearch(""); }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onChange(issue.number);
+                            setOpen(false);
+                            setSearch("");
+                          }
+                        }}
+                        className={cn(
+                          "px-2 py-1.5 text-xs cursor-pointer hover:bg-accent hover:text-accent-foreground",
+                          issue.number === selectedNumber && "bg-accent/50"
+                        )}
+                      >
+                        <span className="flex items-start gap-1.5 min-w-0">
+                          <span className="text-muted-foreground shrink-0">#{issue.number}</span>
+                          <span className="truncate flex-1">{issue.title}</span>
+                          {issue.labels?.slice(0, 3).map((label) => (
+                            <span
+                              key={label}
+                              className="shrink-0 px-1 rounded text-[10px] bg-muted text-muted-foreground"
+                            >
+                              {label}
+                            </span>
+                          ))}
                         </span>
-                      ))}
-                    </span>
-                  </li>
-                ))}
-                {filtered.length === 0 && (
-                  <li className="px-2 py-1.5 text-xs text-muted-foreground">No issues found</li>
-                )}
-              </ul>
+                      </li>
+                    ))}
+                    {filtered.length === 0 && (
+                      <li className="px-2 py-1.5 text-xs text-muted-foreground">No issues found</li>
+                    )}
+                  </ul>
+                </>
+              )}
             </div>
           )}
         </div>
