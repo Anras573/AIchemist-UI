@@ -660,6 +660,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   const model = await resolveModel(client, params.projectConfig.model);
   const managedMcpBridge = await createManagedMcpBridge(
     loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
+    params.projectPath,
   );
   const tools = [...makeToolDefinitions(), ...managedMcpBridge.tools];
   const ctx: ToolExecutionContext = {

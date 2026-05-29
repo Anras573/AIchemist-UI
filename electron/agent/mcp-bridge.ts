@@ -17,6 +17,7 @@ interface SdkModules {
     args?: string[];
     env?: Record<string, string>;
     stderr?: string;
+    cwd?: string;
   }) => { close: () => Promise<void> };
   StreamableHTTPClientTransport: new (url: URL, opts?: TransportOptions) => { close: () => Promise<void> };
   SSEClientTransport: new (url: URL, opts?: TransportOptions) => { close: () => Promise<void> };
@@ -131,7 +132,7 @@ function makeTransportOptions(entry: McpServerEntry): TransportOptions | undefin
   };
 }
 
-async function createTransport(entry: McpServerEntry, sdk: SdkModules): Promise<{ close: () => Promise<void> }> {
+async function createTransport(entry: McpServerEntry, sdk: SdkModules, cwd?: string): Promise<{ close: () => Promise<void> }> {
   const isHttp = entry.type === "http" || entry.type === "sse" || (entry.url != null && entry.type !== "stdio");
   if (isHttp) {
     const url = entry.url?.trim();
@@ -151,6 +152,7 @@ async function createTransport(entry: McpServerEntry, sdk: SdkModules): Promise<
     command: entry.command,
     args: Array.isArray(entry.args) ? entry.args : [],
     env: { ...env, ...(entry.env ?? {}) },
+    cwd,
     stderr: "pipe",
   });
 }
@@ -158,8 +160,10 @@ async function createTransport(entry: McpServerEntry, sdk: SdkModules): Promise<
 /**
  * Create a best-effort bridge over a managed MCP server map. Servers that fail
  * to connect or list tools are skipped so one bad entry does not break the turn.
+ * @param map - The MCP server map to connect to
+ * @param cwd - Working directory for stdio servers (optional)
  */
-export async function createManagedMcpBridge(map: McpServersMap): Promise<ManagedMcpBridge> {
+export async function createManagedMcpBridge(map: McpServersMap, cwd?: string): Promise<ManagedMcpBridge> {
   const filteredEntries = Object.entries(map).filter(([name]) => name !== "aichemist-tools");
   if (filteredEntries.length === 0) {
     return {
@@ -192,7 +196,7 @@ export async function createManagedMcpBridge(map: McpServersMap): Promise<Manage
       let transport: { close: () => Promise<void> } | null = null;
       let client: McpClientLike | null = null;
       try {
-        transport = await createTransport(entry, sdk);
+        transport = await createTransport(entry, sdk, cwd);
         client = new sdk.Client({ name: "aichemist-ollama-mcp", version: "1.0.0" }, { capabilities: {} });
         await client.connect(transport as never);
         const listed = await client.listTools();
