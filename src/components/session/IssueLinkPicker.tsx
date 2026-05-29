@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Hash } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
@@ -31,11 +31,15 @@ export function IssueLinkPicker({
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
 
+  const requestIdRef = useRef(0);
+
   const fetchIssues = useCallback(() => {
+    const currentId = ++requestIdRef.current;
     setLoadState("loading");
     setErrorMessage("");
     ipc.githubListIssues({ projectPath, state: "open", limit: 50 })
       .then((result) => {
+        if (currentId !== requestIdRef.current) return;
         if ("issues" in result) {
           setIssues(result.issues);
           setLoadState("success");
@@ -54,6 +58,7 @@ export function IssueLinkPicker({
         }
       })
       .catch((err) => {
+        if (currentId !== requestIdRef.current) return;
         setLoadState("error");
         setErrorMessage(err instanceof Error ? err.message : String(err));
         setIssues(null);
@@ -80,18 +85,20 @@ export function IssueLinkPicker({
     );
   }, [issues, search]);
 
-  // When issues reload (e.g. projectPath changes), clear a stale selection that
-  // is no longer present in the new list so the parent doesn't pass a ghost
-  // issue number when creating a session.
+  // When the picker becomes unavailable, or when issues reload and the
+  // previously-selected issue is no longer in the list, clear the stale
+  // selection so the parent doesn't pass a ghost issue number.
   useEffect(() => {
-    if (
+    if (loadState === "unavailable" && selectedNumber != null) {
+      onChange(null);
+    } else if (
       selectedNumber != null &&
       issues != null &&
       !issues.some((i) => i.number === selectedNumber)
     ) {
       onChange(null);
     }
-  }, [issues, selectedNumber, onChange]);
+  }, [issues, loadState, selectedNumber, onChange]);
 
   // Don't render if GitHub is truly unavailable (no remote or no token).
   if (loadState === "unavailable") return null;
