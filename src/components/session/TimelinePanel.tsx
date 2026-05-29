@@ -542,7 +542,7 @@ function InputBarInner({
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
   const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
   const effectiveProvider = useActiveSessionProvider();
-  const skillsSupported = effectiveProvider !== "acp" && effectiveProvider !== "ollama";
+  const skillsSupported = effectiveProvider !== "acp";
 
   const [gitBranch, setGitBranch] = useState<string | null>(null);
 
