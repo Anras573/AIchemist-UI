@@ -20,6 +20,7 @@ import {
   OLLAMA_NO_MODELS_ERROR,
   runOllamaAgentTurn,
 } from "./ollama";
+import { resolveApproval } from "./approval";
 
 type OllamaMockState = {
   list: ReturnType<typeof vi.fn>;
@@ -48,12 +49,18 @@ async function loadMocks(): Promise<OllamaMockState> {
   };
 }
 
-function makeDb(rows: Array<{ id: string; role: string; content: string }>) {
+function makeDb(
+  rows: Array<{ id: string; role: string; content: string }>,
+  onRun?: (sql: string, args: unknown[]) => void,
+) {
   return {
     prepare: vi.fn().mockImplementation((sql: string) => ({
       all: vi.fn().mockReturnValue(sql.includes("FROM tool_calls") ? [] : rows),
       get: vi.fn().mockReturnValue(sql.includes("disabled_mcp_servers") ? { disabled_mcp_servers: null } : undefined),
-      run: vi.fn().mockReturnValue({ changes: 1 }),
+      run: vi.fn().mockImplementation((...args: unknown[]) => {
+        onRun?.(sql, args);
+        return { changes: 1 };
+      }),
     })),
   };
 }
@@ -279,10 +286,15 @@ describe("ollama provider", () => {
   });
 
   it("routes managed MCP tools through the bridge", async () => {
+    let recordedCategory: string | undefined;
     const db = makeDb([
       { id: "m-placeholder", role: "user", content: "placeholder" },
       { id: "m-user", role: "user", content: "use the tool" },
-    ]);
+    ], (sql, args) => {
+      if (sql.includes("INSERT INTO tool_calls")) {
+        recordedCategory = String(args[5] ?? "");
+      }
+    });
     const send = vi.fn();
     const toolName = "mcp__context7__lookup__abcdef12";
     const callTool = vi.fn().mockResolvedValue("bridge result");
@@ -300,6 +312,11 @@ describe("ollama provider", () => {
       hasTool: (name: string) => name === toolName,
       callTool,
       close: async () => {},
+    });
+    send.mockImplementation((channel: string, payload: { approval_id?: string }) => {
+      if (channel === CH.SESSION_APPROVAL_REQUIRED && payload.approval_id) {
+        resolveApproval(payload.approval_id, true);
+      }
     });
     ollamaMocks.chat
       .mockResolvedValueOnce(
@@ -326,6 +343,8 @@ describe("ollama provider", () => {
 
     expect(ollamaMocks.bridge).toHaveBeenCalledTimes(1);
     expect(callTool).toHaveBeenCalledWith("mcp__context7__lookup__abcdef12", { query: "needle" });
+    expect(send).toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.objectContaining({ tool_name: toolName }));
+    expect(recordedCategory).toBe("shell");
     expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({ tool_name: toolName }));
     expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({ tool_name: toolName, output: "bridge result" }));
   });

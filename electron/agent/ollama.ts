@@ -303,7 +303,8 @@ function loadHistory(db: Database, sessionId: string, placeholderMessageId: stri
     }
     if (row.role !== "assistant") continue;
 
-    const toolCalls = loadToolCallsForMessage(db, row.id).map((call) => ({
+    const toolCalls = loadToolCallsForMessage(db, row.id);
+    const toolCallRefs = toolCalls.map((call) => ({
       function: {
         name: call.name,
         arguments: (call.args ?? {}) as Record<string, unknown>,
@@ -313,10 +314,10 @@ function loadHistory(db: Database, sessionId: string, placeholderMessageId: stri
     history.push({
       role: "assistant",
       content: row.content,
-      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+      ...(toolCallRefs.length > 0 ? { tool_calls: toolCallRefs } : {}),
     });
 
-    for (const call of loadToolCallsForMessage(db, row.id)) {
+    for (const call of toolCalls) {
       history.push({
         role: "tool",
         content: stringifyToolResult(call.result),
@@ -572,7 +573,9 @@ async function executeTool(
       );
     default:
       if (managedMcpBridge.hasTool(name)) {
-        return runTool(ctx, name, args, "filesystem", async () => managedMcpBridge.callTool(name, args));
+        // Managed MCP tools can do anything, so gate them with the strictest
+        // existing approval category instead of treating them as file edits.
+        return runTool(ctx, name, args, "shell", async () => managedMcpBridge.callTool(name, args));
       }
       return `Error: Unsupported tool "${name}"`;
   }
