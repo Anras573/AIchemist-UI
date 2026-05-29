@@ -1,6 +1,5 @@
 // @vitest-environment node
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as CH from "../ipc-channels";
@@ -33,7 +32,7 @@ let ollamaMocks: OllamaMockState;
 const tempDirs: string[] = [];
 
 function makeTempProject(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ollama-provider-"));
+  const dir = fs.mkdtempSync(path.join(process.cwd(), ".ollama-provider-"));
   tempDirs.push(dir);
   return dir;
 }
@@ -247,7 +246,7 @@ describe("ollama provider", () => {
 
   it("rejects read_file for symlinks that escape the project boundary", async () => {
     const projectPath = makeTempProject();
-    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "ollama-outside-"));
+    const outsideDir = fs.mkdtempSync(path.join(process.cwd(), ".ollama-outside-"));
     tempDirs.push(outsideDir);
     const outsideFile = path.join(outsideDir, "secret.txt");
     fs.writeFileSync(outsideFile, "secret");
@@ -283,6 +282,134 @@ describe("ollama provider", () => {
     const toolMessage = (ollamaMocks.chat.mock.calls[1][0].messages as Array<{ role: string; content: string; tool_name?: string }>)
       .find((message) => message.role === "tool" && message.tool_name === "read_file");
     expect(toolMessage?.content).toContain("Path escapes project boundary");
+  });
+
+  it("rejects read_file for sensitive paths", async () => {
+    const projectPath = makeTempProject();
+    fs.writeFileSync(path.join(projectPath, ".env.local"), "secret");
+    const send = vi.fn();
+    ollamaMocks.chat
+      .mockResolvedValueOnce(
+        streamChunks([
+          {
+            message: {
+              content: "",
+              tool_calls: [{ function: { name: "read_file", arguments: { path: ".env.local" } } }],
+            },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce({ message: { content: "Done" } });
+
+    await expect(
+      runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "read the file" },
+        ]) as never,
+        sessionId: "s-7",
+        messageId: "m-placeholder",
+        projectPath,
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never),
+    ).resolves.toBe("Done");
+
+    const toolMessage = (ollamaMocks.chat.mock.calls[1][0].messages as Array<{ role: string; content: string; tool_name?: string }>)
+      .find((message) => message.role === "tool" && message.tool_name === "read_file");
+    expect(toolMessage?.content).toContain("Access to sensitive path");
+  });
+
+  it("hides sensitive entries from list_directory", async () => {
+    const projectPath = makeTempProject();
+    fs.writeFileSync(path.join(projectPath, ".env.local"), "secret");
+    fs.mkdirSync(path.join(projectPath, ".git"));
+    fs.mkdirSync(path.join(projectPath, "node_modules"));
+    fs.writeFileSync(path.join(projectPath, "visible.txt"), "ok");
+    const send = vi.fn();
+    ollamaMocks.chat
+      .mockResolvedValueOnce(
+        streamChunks([
+          {
+            message: {
+              content: "",
+              tool_calls: [{ function: { name: "list_directory", arguments: { path: "." } } }],
+            },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce({ message: { content: "Done" } });
+
+    await expect(
+      runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "list the directory" },
+        ]) as never,
+        sessionId: "s-8",
+        messageId: "m-placeholder",
+        projectPath,
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never),
+    ).resolves.toBe("Done");
+
+    const toolMessage = (ollamaMocks.chat.mock.calls[1][0].messages as Array<{ role: string; content: string; tool_name?: string }>)
+      .find((message) => message.role === "tool" && message.tool_name === "list_directory");
+    expect(toolMessage).toBeDefined();
+    const listing = JSON.parse(toolMessage!.content) as { entries: Array<{ name: string }> };
+    expect(listing.entries.map((entry) => entry.name)).toEqual(["visible.txt"]);
+  });
+
+  it("skips sensitive files and directories in glob", async () => {
+    const projectPath = makeTempProject();
+    fs.writeFileSync(path.join(projectPath, ".env.local"), "secret");
+    fs.mkdirSync(path.join(projectPath, ".git"));
+    fs.writeFileSync(path.join(projectPath, ".git", "config"), "secret");
+    fs.mkdirSync(path.join(projectPath, "node_modules", "pkg"), { recursive: true });
+    fs.writeFileSync(path.join(projectPath, "node_modules", "pkg", "index.js"), "secret");
+    fs.mkdirSync(path.join(projectPath, "src"));
+    fs.writeFileSync(path.join(projectPath, "src", "keep.md"), "ok");
+    fs.writeFileSync(path.join(projectPath, "visible.txt"), "ok");
+    const send = vi.fn();
+    ollamaMocks.chat
+      .mockResolvedValueOnce(
+        streamChunks([
+          {
+            message: {
+              content: "",
+              tool_calls: [{ function: { name: "glob", arguments: { pattern: "**/*" } } }],
+            },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce({ message: { content: "Done" } });
+
+    await expect(
+      runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "glob the tree" },
+        ]) as never,
+        sessionId: "s-9",
+        messageId: "m-placeholder",
+        projectPath,
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never),
+    ).resolves.toBe("Done");
+
+    const toolMessage = (ollamaMocks.chat.mock.calls[1][0].messages as Array<{ role: string; content: string; tool_name?: string }>)
+      .find((message) => message.role === "tool" && message.tool_name === "glob");
+    expect(toolMessage).toBeDefined();
+    const result = JSON.parse(toolMessage!.content) as { matches: string[] };
+    expect(result.matches).toEqual(expect.arrayContaining([
+      path.join(projectPath, "visible.txt"),
+      path.join(projectPath, "src", "keep.md"),
+    ]));
+    expect(result.matches.join("\n")).not.toContain(".env.local");
+    expect(result.matches.join("\n")).not.toContain(".git");
+    expect(result.matches.join("\n")).not.toContain("node_modules");
   });
 
   it("routes managed MCP tools through the bridge", async () => {
@@ -336,7 +463,11 @@ describe("ollama provider", () => {
         db: db as never,
         sessionId: "s-4",
         messageId: "m-placeholder",
-        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        projectConfig: {
+          model: "qwen2.5:latest",
+          approval_mode: "custom",
+          approval_rules: [{ tool_category: "filesystem", policy: "never" }],
+        } as never,
         webContents: { send } as never,
       } as never),
     ).resolves.toBe("Done");

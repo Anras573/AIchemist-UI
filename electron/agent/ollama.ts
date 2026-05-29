@@ -115,11 +115,28 @@ function safeJson(value: unknown): string {
 
 function resolveProjectPath(projectPath: string, inputPath: string): string {
   const root = fs.realpathSync(path.resolve(projectPath));
-  const resolved = fs.realpathSync(path.resolve(root, inputPath));
+  const candidate = path.resolve(root, inputPath);
+  const rel = path.relative(root, candidate).replace(/\\/g, "/");
+  if (isSensitiveRelativePath(rel)) {
+    throw new Error(`Access to sensitive path is not allowed: "${rel}"`);
+  }
+  const resolved = fs.realpathSync(candidate);
+  const resolvedRel = path.relative(root, resolved).replace(/\\/g, "/");
   if (resolved !== root && !resolved.startsWith(root + path.sep)) {
     throw new Error(`Path escapes project boundary: "${inputPath}"`);
   }
+  if (isSensitiveRelativePath(resolvedRel)) {
+    throw new Error(`Access to sensitive path is not allowed: "${resolvedRel}"`);
+  }
   return resolved;
+}
+
+function isSensitiveRelativePath(relPath: string): boolean {
+  return [
+    /(?:^|\/)\.git(?:\/|$)/,
+    /(?:^|\/)node_modules(?:\/|$)/,
+    /(?:^|\/|^)\.env(\.|$)/,
+  ].some((pattern) => pattern.test(relPath));
 }
 
 function shouldIgnoreDir(name: string): boolean {
@@ -196,7 +213,11 @@ function readTextFile(projectPath: string, inputPath: string): string {
 function listDirectory(projectPath: string, inputPath: string): string {
   const resolved = resolveProjectPath(projectPath, inputPath || ".");
   const dirents = fs.readdirSync(resolved, { withFileTypes: true });
-  const filtered = dirents.filter((d) => !(d.isDirectory() && shouldIgnoreDir(d.name)));
+  const filtered = dirents.filter((d) => {
+    const entryPath = path.join(resolved, d.name);
+    const entryRel = path.relative(resolved, entryPath).replace(/\\/g, "/");
+    return !shouldIgnoreDir(d.name) && !isSensitiveRelativePath(entryRel);
+  });
   const truncated = filtered.length > 500;
   const visible = truncated ? filtered.slice(0, 500) : filtered;
   const entries = visible.map((dirent) => {
@@ -235,9 +256,9 @@ function walkGlob(
   }
   for (const dirent of dirents) {
     if (out.length >= limit) return;
-    if (dirent.isDirectory() && shouldIgnoreDir(dirent.name)) continue;
     const abs = path.join(cwd, dirent.name);
     const rel = path.relative(root, abs).replace(/\\/g, "/");
+    if (shouldIgnoreDir(dirent.name) || isSensitiveRelativePath(rel)) continue;
     if (dirent.isDirectory()) {
       walkGlob(root, abs, pattern, out, limit);
       continue;
@@ -252,7 +273,7 @@ function globFiles(projectPath: string, inputPattern: string): string {
   const pattern = inputPattern.trim();
   if (!pattern) return safeJson({ pattern, matches: [] as string[] });
 
-  const root = path.resolve(projectPath);
+  const root = fs.realpathSync(path.resolve(projectPath));
   const normalized = pattern.replace(/\\/g, "/");
   const regex = globPatternToRegExp(
     path.isAbsolute(normalized) ? path.relative(root, normalized).replace(/\\/g, "/") : normalized,
