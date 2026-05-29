@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Hash } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
@@ -31,7 +31,7 @@ export function IssueLinkPicker({
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
 
-  const fetchIssues = () => {
+  const fetchIssues = useCallback(() => {
     setLoadState("loading");
     setErrorMessage("");
     ipc.githubListIssues({ projectPath, state: "open", limit: 50 })
@@ -58,11 +58,11 @@ export function IssueLinkPicker({
         setErrorMessage(err instanceof Error ? err.message : String(err));
         setIssues(null);
       });
-  };
+  }, [ipc, projectPath]);
 
   useEffect(() => {
     fetchIssues();
-  }, [projectPath]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchIssues]);
 
   const filtered = useMemo(() => {
     if (!issues) return [];
