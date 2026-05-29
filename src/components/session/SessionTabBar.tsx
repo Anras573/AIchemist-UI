@@ -169,7 +169,9 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
                 {/* Issue badge — shown on all tabs where an issue is linked */}
                 {session.github_issue_number && (
                   <WithTooltip label={`Linked to issue #${session.github_issue_number}`}>
-                    <span className={cn(
+                    <span
+                      data-testid="issue-badge"
+                      className={cn(
                       "flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-normal",
                       active
                         ? "text-blue-700 dark:text-blue-400 bg-blue-500/10 border border-blue-500/30"

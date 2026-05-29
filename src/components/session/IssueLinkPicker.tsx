@@ -118,7 +118,16 @@ export function IssueLinkPicker({
                 <li
                   role="option"
                   aria-selected={selectedNumber === null}
+                  tabIndex={0}
                   onClick={() => { onChange(null); setOpen(false); setSearch(""); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onChange(null);
+                      setOpen(false);
+                      setSearch("");
+                    }
+                  }}
                   className={cn(
                     "px-2 py-1.5 text-xs cursor-pointer hover:bg-accent hover:text-accent-foreground",
                     selectedNumber === null && "bg-accent/50"
@@ -131,7 +140,16 @@ export function IssueLinkPicker({
                     key={issue.number}
                     role="option"
                     aria-selected={issue.number === selectedNumber}
+                    tabIndex={0}
                     onClick={() => { onChange(issue.number); setOpen(false); setSearch(""); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onChange(issue.number);
+                        setOpen(false);
+                        setSearch("");
+                      }
+                    }}
                     className={cn(
                       "px-2 py-1.5 text-xs cursor-pointer hover:bg-accent hover:text-accent-foreground",
                       issue.number === selectedNumber && "bg-accent/50"

@@ -201,7 +201,7 @@ describe("SessionTabBar", () => {
     renderWithProviders(<SessionTabBar projectId="proj-1" />);
 
     await screen.findByText("Issue session");
-    expect(screen.getByText("42")).toBeInTheDocument();
+    expect(screen.getByTestId("issue-badge")).toBeInTheDocument();
   });
 
   it("does not show an issue badge when github_issue_number is not set", async () => {
@@ -212,6 +212,6 @@ describe("SessionTabBar", () => {
     renderWithProviders(<SessionTabBar projectId="proj-1" />);
 
     await screen.findByText("Plain session");
-    expect(screen.queryByText(/#\d+/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("issue-badge")).not.toBeInTheDocument();
   });
 });
