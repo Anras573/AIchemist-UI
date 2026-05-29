@@ -91,6 +91,7 @@ const OLLAMA_SYSTEM_PROMPT = [
 ].join(" ");
 
 const MAX_TOOL_ROUNDS = 8;
+const MAX_READ_BYTES = 512 * 1024;
 
 function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
   return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
@@ -113,8 +114,8 @@ function safeJson(value: unknown): string {
 }
 
 function resolveProjectPath(projectPath: string, inputPath: string): string {
-  const root = path.resolve(projectPath);
-  const resolved = path.resolve(root, inputPath);
+  const root = fs.realpathSync(path.resolve(projectPath));
+  const resolved = fs.realpathSync(path.resolve(root, inputPath));
   if (resolved !== root && !resolved.startsWith(root + path.sep)) {
     throw new Error(`Path escapes project boundary: "${inputPath}"`);
   }
@@ -176,6 +177,9 @@ function readTextFile(projectPath: string, inputPath: string): string {
   const stat = fs.statSync(resolved);
   if (!stat.isFile()) {
     throw new Error(`Not a file: "${inputPath}"`);
+  }
+  if (stat.size > MAX_READ_BYTES) {
+    throw new Error(`File too large (${Math.round(stat.size / 1024)} KB). Only files under 512 KB can be previewed.`);
   }
   const buf = fs.readFileSync(resolved);
   if (isBinaryBuffer(buf)) {

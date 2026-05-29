@@ -1,5 +1,8 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as CH from "../ipc-channels";
 
 vi.mock("ollama", () => ({
@@ -26,6 +29,13 @@ type OllamaMockState = {
 };
 
 let ollamaMocks: OllamaMockState;
+const tempDirs: string[] = [];
+
+function makeTempProject(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ollama-provider-"));
+  tempDirs.push(dir);
+  return dir;
+}
 
 async function loadMocks(): Promise<OllamaMockState> {
   const ollamaModule = await import("ollama");
@@ -74,6 +84,12 @@ describe("ollama provider", () => {
         chat: ollamaMocks.chat,
       };
     });
+  });
+
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
+    }
   });
 
   it("runs a turn with filtered history and emits streaming deltas", async () => {
@@ -186,6 +202,82 @@ describe("ollama provider", () => {
     expect(hostList).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects read_file for files above the preview cap", async () => {
+    const projectPath = makeTempProject();
+    fs.writeFileSync(path.join(projectPath, "large.txt"), Buffer.alloc(512 * 1024 + 1, "a"));
+    const send = vi.fn();
+    ollamaMocks.chat
+      .mockResolvedValueOnce(
+        streamChunks([
+          {
+            message: {
+              content: "",
+              tool_calls: [{ function: { name: "read_file", arguments: { path: "large.txt" } } }],
+            },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce({ message: { content: "Done" } });
+
+    await expect(
+      runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "read the file" },
+        ]) as never,
+        sessionId: "s-5",
+        messageId: "m-placeholder",
+        projectPath,
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never),
+    ).resolves.toBe("Done");
+
+    const toolMessage = (ollamaMocks.chat.mock.calls[1][0].messages as Array<{ role: string; content: string; tool_name?: string }>)
+      .find((message) => message.role === "tool" && message.tool_name === "read_file");
+    expect(toolMessage?.content).toContain("File too large");
+  });
+
+  it("rejects read_file for symlinks that escape the project boundary", async () => {
+    const projectPath = makeTempProject();
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "ollama-outside-"));
+    tempDirs.push(outsideDir);
+    const outsideFile = path.join(outsideDir, "secret.txt");
+    fs.writeFileSync(outsideFile, "secret");
+    fs.symlinkSync(outsideFile, path.join(projectPath, "secret.txt"));
+    const send = vi.fn();
+    ollamaMocks.chat
+      .mockResolvedValueOnce(
+        streamChunks([
+          {
+            message: {
+              content: "",
+              tool_calls: [{ function: { name: "read_file", arguments: { path: "secret.txt" } } }],
+            },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce({ message: { content: "Done" } });
+
+    await expect(
+      runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "read the file" },
+        ]) as never,
+        sessionId: "s-6",
+        messageId: "m-placeholder",
+        projectPath,
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never),
+    ).resolves.toBe("Done");
+
+    const toolMessage = (ollamaMocks.chat.mock.calls[1][0].messages as Array<{ role: string; content: string; tool_name?: string }>)
+      .find((message) => message.role === "tool" && message.tool_name === "read_file");
+    expect(toolMessage?.content).toContain("Path escapes project boundary");
+  });
+
   it("routes managed MCP tools through the bridge", async () => {
     const db = makeDb([
       { id: "m-placeholder", role: "user", content: "placeholder" },
@@ -227,7 +319,7 @@ describe("ollama provider", () => {
         db: db as never,
         sessionId: "s-4",
         messageId: "m-placeholder",
-        projectConfig: { model: "qwen2.5:latest", approval_mode: "custom", approval_rules: [] } as never,
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
         webContents: { send } as never,
       } as never),
     ).resolves.toBe("Done");

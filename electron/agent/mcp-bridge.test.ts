@@ -94,4 +94,24 @@ describe("createManagedMcpBridge", () => {
     expect(mocks.transportClose).toHaveBeenCalled();
     expect(mocks.clientClose).toHaveBeenCalled();
   });
+
+  it("passes HTTP and SSE headers through to transport constructors", async () => {
+    const bridge = await createManagedMcpBridge({
+      httpDocs: { type: "http", url: "https://example.test/mcp", headers: { Authorization: "Bearer http" } },
+      sseDocs: { type: "sse", url: "https://example.test/sse", headers: { Authorization: "Bearer sse" } },
+    });
+
+    expect(mocks.httpCtor).toHaveBeenCalledWith(
+      expect.any(URL),
+      { requestInit: { headers: { Authorization: "Bearer http" } } },
+    );
+    expect((mocks.httpCtor.mock.calls[0][0] as URL).href).toBe("https://example.test/mcp");
+    expect(mocks.sseCtor).toHaveBeenCalledWith(
+      expect.any(URL),
+      { requestInit: { headers: { Authorization: "Bearer sse" } } },
+    );
+    expect((mocks.sseCtor.mock.calls[0][0] as URL).href).toBe("https://example.test/sse");
+
+    await bridge.close();
+  });
 });

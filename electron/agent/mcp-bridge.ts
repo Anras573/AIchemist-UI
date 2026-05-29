@@ -18,8 +18,14 @@ interface SdkModules {
     env?: Record<string, string>;
     stderr?: string;
   }) => { close: () => Promise<void> };
-  StreamableHTTPClientTransport: new (url: URL) => { close: () => Promise<void> };
-  SSEClientTransport: new (url: URL) => { close: () => Promise<void> };
+  StreamableHTTPClientTransport: new (url: URL, opts?: TransportOptions) => { close: () => Promise<void> };
+  SSEClientTransport: new (url: URL, opts?: TransportOptions) => { close: () => Promise<void> };
+}
+
+interface TransportOptions {
+  requestInit?: {
+    headers?: Record<string, string>;
+  };
 }
 
 interface McpClientLike {
@@ -116,15 +122,24 @@ function stringifyResult(result: {
   return safeJson(result);
 }
 
+function makeTransportOptions(entry: McpServerEntry): TransportOptions | undefined {
+  if (!entry.headers) return undefined;
+  return {
+    requestInit: {
+      headers: entry.headers,
+    },
+  };
+}
+
 async function createTransport(entry: McpServerEntry, sdk: SdkModules): Promise<{ close: () => Promise<void> }> {
   const isHttp = entry.type === "http" || entry.type === "sse" || (entry.url != null && entry.type !== "stdio");
   if (isHttp) {
     const url = entry.url?.trim();
     if (!url) throw new Error("HTTP/SSE server config has no `url`");
     if (entry.type === "sse") {
-      return new sdk.SSEClientTransport(new URL(url));
+      return new sdk.SSEClientTransport(new URL(url), makeTransportOptions(entry));
     }
-    return new sdk.StreamableHTTPClientTransport(new URL(url));
+    return new sdk.StreamableHTTPClientTransport(new URL(url), makeTransportOptions(entry));
   }
 
   if (!entry.command) throw new Error("Stdio server config has no `command`");
