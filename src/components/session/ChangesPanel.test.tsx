@@ -285,7 +285,7 @@ describe("ChangesPanel Open PR flow", () => {
     expect(await screen.findByText("Validation failed")).toBeInTheDocument();
   });
 
-  it("streams generated description text into the textarea", async () => {
+  it("streams generated output and applies parsed title/body after completion", async () => {
     let resolveSend: (() => void) | undefined;
     window.electronAPI.agentSend = vi.fn().mockImplementation(
       () =>
@@ -328,19 +328,99 @@ describe("ChangesPanel Open PR flow", () => {
       | ((payload: { session_id: string; text_delta: string }) => void)
       | undefined;
 
-    deltaListener?.({ session_id: "sess-pr", text_delta: "Generated heading" });
+    const titleInput = screen.getByPlaceholderText("PR title");
+    const textarea = screen.getByPlaceholderText("Optional PR description");
+
+    deltaListener?.({ session_id: "sess-pr", text_delta: "Title: Generated heading" });
     await waitFor(() => {
-      expect(screen.getByPlaceholderText("Optional PR description")).toHaveValue("Generated heading");
+      expect(textarea).toHaveValue("Title: Generated heading");
     });
-    deltaListener?.({ session_id: "sess-pr", text_delta: "\n\n- bullet" });
+    deltaListener?.({ session_id: "sess-pr", text_delta: "\n\nBody:\n- bullet" });
     await waitFor(() => {
-      expect(screen.getByPlaceholderText("Optional PR description")).toHaveValue(
-        "Generated heading\n\n- bullet"
-      );
+      expect(textarea).toHaveValue("Title: Generated heading\n\nBody:\n- bullet");
     });
 
     resolveSend?.();
     await waitFor(() => {
+      expect(window.electronAPI.agentSend).toHaveBeenCalledOnce();
+      expect(titleInput).toHaveValue("Generated heading");
+      expect(textarea).toHaveValue("- bullet");
+    });
+  });
+
+  it("clears description when parsed generated body is empty", async () => {
+    let resolveSend: (() => void) | undefined;
+    window.electronAPI.agentSend = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.on).toHaveBeenCalledWith("session:delta", expect.any(Function));
+    });
+    const deltaListener = vi
+      .mocked(window.electronAPI.on)
+      .mock.calls
+      .filter(([channel]) => channel === "session:delta")
+      .at(-1)?.[1] as
+      | ((payload: { session_id: string; text_delta: string }) => void)
+      | undefined;
+
+    const titleInput = screen.getByPlaceholderText("PR title");
+    const textarea = screen.getByPlaceholderText("Optional PR description");
+    deltaListener?.({ session_id: "sess-pr", text_delta: "Title: Generated heading\n\nBody:\n" });
+    await waitFor(() => {
+      expect(textarea).toHaveValue("Title: Generated heading\n\nBody:\n");
+    });
+
+    resolveSend?.();
+    await waitFor(() => {
+      expect(titleInput).toHaveValue("Generated heading");
+      expect(textarea).toHaveValue("");
+    });
+  });
+
+  it("ignores rapid duplicate generate clicks while a request is in flight", async () => {
+    let resolveGitDiff: ((value: string) => void) | undefined;
+    const gitDiffPromise = new Promise<string>((resolve) => {
+      resolveGitDiff = resolve;
+    });
+    window.electronAPI.getGitDiff = vi.fn().mockImplementation(() => gitDiffPromise);
+    window.electronAPI.agentSend = vi.fn().mockResolvedValue(undefined);
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    const generateButton = await screen.findByRole("button", { name: /generate/i });
+    fireEvent.click(generateButton);
+    fireEvent.click(generateButton);
+
+    resolveGitDiff?.("diff --git a/file.ts b/file.ts\n+new line");
+    await waitFor(() => {
+      expect(window.electronAPI.getGitDiff).toHaveBeenCalledOnce();
       expect(window.electronAPI.agentSend).toHaveBeenCalledOnce();
     });
   });
