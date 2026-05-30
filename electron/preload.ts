@@ -33,7 +33,7 @@ export interface ElectronAPI {
   deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) => Promise<void>;
   saveMessage: (args: { sessionId: string; role: string; content: string }) => Promise<import("../src/types").Message>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
-  updateSessionModel: (sessionId: string, provider: string, model: string) => Promise<void>;
+  updateSessionModel: (sessionId: string, provider: import("../src/types").Provider, model: string) => Promise<void>;
   updateSessionAgent: (sessionId: string, agent: string | null) => Promise<void>;
   updateSessionSkills: (sessionId: string, skills: string[]) => Promise<void>;
   updateSessionDisabledMcp: (sessionId: string, names: string[]) => Promise<string[]>;

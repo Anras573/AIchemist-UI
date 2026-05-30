@@ -3,7 +3,7 @@
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
-export type Provider = "anthropic" | "copilot" | "acp" | "ollama" | string;
+export type Provider = "anthropic" | "copilot" | "acp" | "ollama";
 
 // ─── Provider availability ───────────────────────────────────────────────────
 
@@ -232,7 +232,7 @@ export interface Session {
   created_at: string;
   messages: Message[];
   /** The AI provider used for this session (e.g. "anthropic", "copilot"). Null for legacy sessions. */
-  provider: string | null;
+  provider: Provider | null;
   /** The model ID used for this session. Null for legacy sessions — runner falls back to project config. */
   model: string | null;
   /** Branch created for the session when worktree-backed sessions are enabled. Null for fallback/main-checkout sessions. */

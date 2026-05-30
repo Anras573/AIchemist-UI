@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Database } from "better-sqlite3";
 import { z } from "zod";
-import type { Project, ProjectConfig } from "../src/types/index";
+import type { Project, ProjectConfig, Provider } from "../src/types/index";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -11,7 +11,7 @@ function configPath(projectPath: string): string {
   return path.join(projectPath, ".aichemist", "config.json");
 }
 
-function defaultProjectConfig(defaultProvider = "anthropic"): ProjectConfig {
+function defaultProjectConfig(defaultProvider: Provider = "anthropic"): ProjectConfig {
   return {
     provider: defaultProvider,
     model: defaultProvider === "anthropic" ? "claude-sonnet-4-6" : "",
@@ -89,7 +89,7 @@ function parseProjectConfig(raw: string): ProjectConfig {
   }
 }
 
-function readOrCreateConfig(projectPath: string, defaultProvider = "anthropic"): ProjectConfig {
+function readOrCreateConfig(projectPath: string, defaultProvider: Provider = "anthropic"): ProjectConfig {
   const cfgPath = configPath(projectPath);
   if (fs.existsSync(cfgPath)) {
     try {
@@ -116,7 +116,7 @@ function nowIso(): string {
 /**
  * Open a folder as a project. Creates `.aichemist/config.json` if absent.
  */
-export function addProject(db: Database, projectPath: string, defaultProvider = "anthropic"): Project {
+export function addProject(db: Database, projectPath: string, defaultProvider: Provider = "anthropic"): Project {
   const trimmedPath = projectPath.replace(/\/+$/, "");
 
   if (!fs.existsSync(trimmedPath) || !fs.statSync(trimmedPath).isDirectory()) {

@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useIpc } from "@/lib/ipc";
+import type { Provider } from "@/types";
 import {
   ModelSelector,
   ModelSelectorContent,
@@ -88,8 +89,8 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
     async (option: ModelOption) => {
       setOpen(false);
       try {
-        await ipc.updateSessionModel(sessionId, option.provider, option.model);
-        updateSessionModel(sessionId, option.provider, option.model);
+        await ipc.updateSessionModel(sessionId, option.provider as Provider, option.model);
+        updateSessionModel(sessionId, option.provider as Provider, option.model);
       } catch (err) {
         console.error("update_session_model failed:", err);
       }
