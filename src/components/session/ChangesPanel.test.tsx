@@ -460,6 +460,52 @@ describe("ChangesPanel Open PR flow", () => {
     });
   });
 
+  it("uses configured history limit when local storage value is valid and under max", async () => {
+    window.localStorage.setItem("aichemist.prDescriptionHistoryLimit", "7");
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.agentSend).toHaveBeenCalledWith(expect.objectContaining({
+        prompt: expect.stringContaining("Recent conversation messages (last 7):"),
+      }));
+    });
+  });
+
+  it("falls back to the default history limit when local storage value is invalid", async () => {
+    window.localStorage.setItem("aichemist.prDescriptionHistoryLimit", "invalid");
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.agentSend).toHaveBeenCalledWith(expect.objectContaining({
+        prompt: expect.stringContaining("Recent conversation messages (last 10):"),
+      }));
+    });
+  });
+
   it("prevents submitting and locks description edits while generation is in progress", async () => {
     let resolveSend: (() => void) | undefined;
     window.electronAPI.agentSend = vi.fn().mockImplementation(
@@ -484,7 +530,7 @@ describe("ChangesPanel Open PR flow", () => {
 
     const textarea = await screen.findByPlaceholderText("Optional PR description");
     const createPrButton = screen.getByRole("button", { name: "Create PR" });
-    expect(textarea).toHaveAttribute("readonly");
+    expect(textarea).toHaveProperty("readOnly", true);
     expect(createPrButton).toBeDisabled();
     fireEvent.click(createPrButton);
     expect(window.electronAPI.githubCreatePr).not.toHaveBeenCalled();
@@ -492,7 +538,7 @@ describe("ChangesPanel Open PR flow", () => {
     resolveSend?.();
     await waitFor(() => {
       expect(createPrButton).toBeEnabled();
-      expect(textarea).not.toHaveAttribute("readonly");
+      expect(textarea).toHaveProperty("readOnly", false);
     });
   });
 
