@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import type { Database } from "better-sqlite3";
-import { z } from "zod";
+import { ProjectConfigSchema } from "../src/types/schemas";
 import type { Project, ProjectConfig, Provider } from "../src/types/index";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -27,45 +27,6 @@ function defaultProjectConfig(defaultProvider: Provider = "anthropic"): ProjectC
   };
 }
 
-// ─── Zod schema ───────────────────────────────────────────────────────────────
-
-const ApprovalRuleSchema = z.object({
-  tool_category: z.enum(["filesystem", "shell", "web", "custom"]),
-  policy: z.enum(["always", "never", "risky_only"]),
-});
-
-const AllowedToolSchema = z.object({
-  tool_name: z.string(),
-  command_pattern: z.string().optional(),
-});
-
-const ToolDefinitionSchema = z.object({
-  name: z.string(),
-  description: z.string(),
-  category: z.string(),
-  parameters: z.record(z.string(), z.unknown()).optional(),
-});
-
-const AcpAgentConfigSchema = z.object({
-  command: z.string(),
-  args: z.array(z.string()).optional(),
-  env: z.record(z.string(), z.string()).optional(),
-  cwd: z.string().optional(),
-  auth_method_id: z.string().optional(),
-});
-
-const ProjectConfigSchema = z.object({
-  provider: z.string().default("anthropic"),
-  model: z.string().default(""),
-  approval_mode: z.enum(["all", "none", "custom"]).default("custom"),
-  approval_rules: z.array(ApprovalRuleSchema).default([]),
-  custom_tools: z.array(ToolDefinitionSchema).default([]),
-  allowed_tools: z.array(AllowedToolSchema).default([]),
-  create_worktree_per_session: z.boolean().default(false),
-  worktree_root_path: z.string().optional(),
-  acp_agent: AcpAgentConfigSchema.optional(),
-});
-
 /**
  * Parse raw JSON into a validated ProjectConfig.
  * Unknown extra fields are stripped; missing optional fields get defaults.
@@ -76,11 +37,11 @@ function parseProjectConfig(raw: string): ProjectConfig {
     const parsed = JSON.parse(raw);
     const result = ProjectConfigSchema.safeParse(parsed);
     if (result.success) {
-      const config = result.data as ProjectConfig;
+      const config = result.data;
       if (!config.model && config.provider === "anthropic") {
         config.model = "claude-sonnet-4-6";
       }
-      return config as ProjectConfig;
+      return config;
     }
     console.warn("[projects] ProjectConfig validation failed, falling back to defaults:", result.error.issues);
     return defaultProjectConfig();

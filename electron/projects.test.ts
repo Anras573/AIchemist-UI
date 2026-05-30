@@ -81,7 +81,7 @@ describe("getProjectConfig", () => {
 
   it("returns a valid stored config", () => {
     writeConfig(tmpDir, {
-      provider: "github",
+      provider: "copilot",
       model: "gpt-4o",
       approval_mode: "none",
       approval_rules: [],
@@ -89,9 +89,23 @@ describe("getProjectConfig", () => {
       allowed_tools: [],
     });
     const config = getProjectConfig(makeDbForPath(tmpDir), "proj-1");
-    expect(config.provider).toBe("github");
+    expect(config.provider).toBe("copilot");
     expect(config.model).toBe("gpt-4o");
     expect(config.approval_mode).toBe("none");
+  });
+
+  it("falls back to defaults when provider is not a valid enum value", () => {
+    writeConfig(tmpDir, {
+      ...defaultConfig(),
+      provider: "github",
+    });
+
+    const config = getProjectConfig(makeDbForPath(tmpDir), "proj-1");
+    expect(config.provider).toBe("anthropic");
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("[projects]"),
+      expect.anything()
+    );
   });
 
   it("falls back to defaults when config JSON is corrupt", () => {

@@ -1,6 +1,24 @@
 // AIchemist UI — shared types
 // These mirror the Rust data model; field names use snake_case to match serde defaults.
 
+export {
+  ApprovalRuleSchema,
+  AllowedToolSchema,
+  ToolDefinitionSchema,
+  AcpAgentConfigSchema,
+  ProjectConfigSchema,
+} from "./schemas";
+
+export type {
+  ApprovalRule,
+  AllowedTool,
+  ToolDefinition,
+  AcpAgentConfig,
+  ProjectConfig,
+} from "./schemas";
+
+import type { ProjectConfig } from "./schemas";
+
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 export type Provider = "anthropic" | "copilot" | "acp" | "ollama";
@@ -110,25 +128,6 @@ export type GitHubListIssuesResult = { issues: GitHubIssue[] } | { error: string
 export type GitHubGetCiStatusResult = { status: CIStatus } | { error: string };
 export type GitHubGetPrContextResult = GitHubPrContext;
 
-// ─── ACP Agent ───────────────────────────────────────────────────────────────
-
-/**
- * Per-project configuration for a local ACP-compatible agent (subprocess over stdio).
- * Used when ProjectConfig.provider === "acp".
- */
-export interface AcpAgentConfig {
-  /** Executable to launch (PATH-resolved or absolute). Required when provider is "acp". */
-  command: string;
-  /** Command-line arguments. */
-  args?: string[];
-  /** Extra environment variables merged onto process.env. */
-  env?: Record<string, string>;
-  /** Working directory for the subprocess. Defaults to the project path. */
-  cwd?: string;
-  /** Selected ACP authMethod id, populated after the user picks one in the config UI. */
-  auth_method_id?: string;
-}
-
 // ─── Tool ────────────────────────────────────────────────────────────────────
 
 export type ToolCategory = "filesystem" | "shell" | "web" | "custom";
@@ -149,51 +148,9 @@ export interface ToolCall {
   category: ToolCategory;
 }
 
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  // JSON Schema object for tool parameters (passed to AI SDK)
-  parameters: Record<string, unknown>;
-  category: ToolCategory | string;
-  requires_approval: boolean | "inherit";
-}
-
 // ─── Approval ────────────────────────────────────────────────────────────────
 
 export type ApprovalPolicy = "always" | "never" | "risky_only";
-
-export interface ApprovalRule {
-  tool_category: ToolCategory;
-  policy: ApprovalPolicy;
-}
-
-/** A tool (or specific command) that is always allowed without prompting. */
-export interface AllowedTool {
-  tool_name: string;
-  /**
-   * For execute_bash: prefix-matched against the command string.
-   * e.g. "mkdir" allows "mkdir -p foo/bar".
-   * Omit to allow all invocations of tool_name.
-   */
-  command_pattern?: string;
-}
-
-// ─── Project ─────────────────────────────────────────────────────────────────
-
-export interface ProjectConfig {
-  provider: Provider;
-  model: string;
-  approval_mode: "all" | "none" | "custom";
-  approval_rules: ApprovalRule[];
-  custom_tools: ToolDefinition[];
-  allowed_tools: AllowedTool[];
-  /** When enabled, create a branch/worktree per session for git-backed projects. */
-  create_worktree_per_session: boolean;
-  /** Optional override for the base directory that holds managed session worktrees. */
-  worktree_root_path?: string;
-  /** Configured ACP agent for this project. Required when `provider === "acp"`. */
-  acp_agent?: AcpAgentConfig;
-}
 
 export interface Project {
   id: string;
