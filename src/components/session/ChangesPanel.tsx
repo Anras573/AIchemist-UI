@@ -118,6 +118,26 @@ function formatRecentMessages(messages: Message[], count: number): string {
     .join("\n\n");
 }
 
+function parseGeneratedPrDraft(raw: string): { title: string | null; body: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { title: null, body: "" };
+
+  const lines = trimmed.split("\n");
+  const firstLine = lines[0]?.trim() ?? "";
+  const title = firstLine
+    .replace(/^title\s*:\s*/i, "")
+    .replace(/^#+\s*/, "")
+    .trim();
+
+  let bodyLines = lines.slice(1);
+  if ((bodyLines[0] ?? "").trim().toLowerCase() === "body:") {
+    bodyLines = bodyLines.slice(1);
+  }
+  const body = bodyLines.join("\n").trim();
+
+  return { title: title || null, body };
+}
+
 async function readPullRequestTemplate(ipc: ReturnType<typeof useIpc>, projectPath: string): Promise<string | null> {
   for (const relativePath of PR_TEMPLATE_CANDIDATE_PATHS) {
     const result = await ipc.readFile(`${projectPath}/${relativePath}`);
@@ -320,6 +340,7 @@ function OpenPrSection({
   const cancelGenerateRef = useRef(false);
   const initialDescriptionRef = useRef("");
   const generatedDescriptionRef = useRef("");
+  const streamUnsubscribeRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -389,13 +410,15 @@ function OpenPrSection({
 
   const closeForm = () => {
     cancelGenerateRef.current = true;
+    streamUnsubscribeRef.current?.();
+    streamUnsubscribeRef.current = null;
     setIsOpen(false);
     setIsSubmitting(false);
     setIsGenerating(false);
   };
 
   const canSubmit = title.trim().length > 0 && head.trim().length > 0 && !isSubmitting;
-  const canGenerate = !isSubmitting && !isGenerating;
+  const canGenerate = !isSubmitting && !isGenerating && Boolean(activeSessionId);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -429,6 +452,8 @@ function OpenPrSection({
 
   const cancelGeneration = () => {
     cancelGenerateRef.current = true;
+    streamUnsubscribeRef.current?.();
+    streamUnsubscribeRef.current = null;
     setDescription(initialDescriptionRef.current);
     setIsGenerating(false);
     setGenerateError(null);
@@ -456,7 +481,11 @@ function OpenPrSection({
 
     const prompt = [
       "System instruction: Draft a concise pull request title and markdown body.",
-      "Return markdown only. Start with a single line title, then a blank line, then the body.",
+      "Return plain markdown in this exact shape:",
+      "Title: <concise PR title>",
+      "",
+      "Body:",
+      "<markdown body suitable for the PR description field>",
       pullRequestTemplate
         ? `Follow this pull request template structure exactly (keep headings):\n\n${pullRequestTemplate}`
         : "No pull request template was found. Use a short summary and concise bullet points.",
@@ -470,7 +499,8 @@ function OpenPrSection({
     setDescription("");
     setIsGenerating(true);
 
-    const unsubscribe = onSessionEvent<SessionDeltaEvent>(IPC_CHANNELS.SESSION_DELTA, (payload) => {
+    streamUnsubscribeRef.current?.();
+    streamUnsubscribeRef.current = onSessionEvent<SessionDeltaEvent>(IPC_CHANNELS.SESSION_DELTA, (payload) => {
       if (payload.session_id !== activeSessionId || cancelGenerateRef.current) return;
       generatedDescriptionRef.current += payload.text_delta;
       setDescription(generatedDescriptionRef.current);
@@ -482,13 +512,21 @@ function OpenPrSection({
         prompt,
         agent: undefined,
       });
+      if (!cancelGenerateRef.current) {
+        const { title: generatedTitle, body } = parseGeneratedPrDraft(generatedDescriptionRef.current);
+        if (generatedTitle) setTitle(generatedTitle);
+        if (body) {
+          setDescription(body);
+        }
+      }
     } catch (e) {
       if (!cancelGenerateRef.current) {
         setGenerateError(e instanceof Error ? e.message : String(e));
         setDescription(initialDescriptionRef.current);
       }
     } finally {
-      unsubscribe();
+      streamUnsubscribeRef.current?.();
+      streamUnsubscribeRef.current = null;
       setIsGenerating(false);
     }
   };
