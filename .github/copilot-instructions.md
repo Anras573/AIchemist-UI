@@ -1,159 +1,161 @@
 # AIchemist-UI — Copilot Instructions
 
-## Project Overview
-
-AIchemist-UI is an **Electron desktop AI assistant** — a React/TypeScript renderer process over a Node.js main process. The app lets users point it at a project directory and chat with an LLM agent that can read/write files, run shell commands, and fetch URLs.
+AIchemist-UI is an **Electron desktop application** with a React/TypeScript renderer (`src/`) and a Node.js main process (`electron/`). Full architecture reference is in [`CLAUDE.md`](../CLAUDE.md). This file covers the conventions and footguns most likely to require review feedback.
 
 ---
 
 ## Commands
 
 ```bash
-# Start dev environment (main process + renderer, hot-reload)
-bun run dev
-
-# Production build
-bun run build
-
-# Preview production build
-bun run start
-
-# Type-check both src/ and electron/
-bun run typecheck
-
-# Rebuild native modules (e.g. after Electron version bump)
-bun run rebuild
+bun run dev        # start dev environment (hot-reload)
+bun run typecheck  # type-check both src/ and electron/
+bun run test       # run the test suite
+bun run build      # production build
 ```
 
-There are no automated tests currently. TypeScript strict mode is enabled with `noUnusedLocals` and `noUnusedParameters` — unused variables are compile errors.
+Package manager is **bun** — never use npm or yarn. TypeScript strict mode is enabled with `noUnusedLocals` and `noUnusedParameters` — unused variables are compile errors.
 
 ---
 
-## Architecture
+## IPC wiring — all four locations are required
 
-### Two-process model
+Every new IPC channel must be wired in exactly four places:
 
-| Layer | Location | Language | Entry point |
-|---|---|---|---|
-| Renderer (UI) | `src/` | TypeScript / React 19 | `src/main.tsx` → `src/App.tsx` |
-| Main process (backend) | `electron/` | TypeScript / Node.js | `electron/main.ts` |
+1. **`electron/ipc-channels.ts`** — add a channel name constant
+2. **`electron/main.ts`** — register `ipcMain.handle(CH.YOUR_CHANNEL, handler)`
+3. **`electron/preload.ts`** — expose the method via `contextBridge.exposeInMainWorld`
+4. **`src/lib/ipc.ts`** — add a typed wrapper function
 
-### IPC — Frontend ↔ Backend
+Always use the constant from `ipc-channels.ts` — never use raw channel strings.
 
-- **Renderer → Main:** `window.electronAPI.<method>(args)` — typed bridge defined in `electron/preload.ts` via `contextBridge`. Use the `ipc` wrapper in `src/lib/ipc.ts` rather than calling `window.electronAPI` directly.
-- **Main → Renderer (push events):** `webContents.send(channel, payload)` — subscribed to via `onSessionEvent()` from `src/lib/ipc.ts`.
-- **Channel constants** live in `electron/ipc-channels.ts` — always use those instead of raw strings.
-- **Adding a new IPC method:** add the channel constant to `ipc-channels.ts`, add `ipcMain.handle(CH.*, handler)` in `electron/main.ts`, expose it in `electron/preload.ts`, add the wrapper to `src/lib/ipc.ts`.
+---
 
-### Electron main process modules (`electron/`)
+## Critical footguns
 
-| Module | Role |
+### `allowedTools` vs `tools` in the Claude Code SDK
+
+These two `Options` fields are not interchangeable:
+
+| Field | Effect |
 |---|---|
-| `main.ts` | App entry, creates `BrowserWindow`, registers all `ipcMain` handlers |
-| `preload.ts` | `contextBridge` — exposes typed `window.electronAPI` to the renderer |
-| `ipc-channels.ts` | Shared IPC channel name constants |
-| `config.ts` | Loads `~/.aichemist/.env` via `dotenv`; resolves API keys |
-| `db.ts` | Opens `~/.aichemist/aichemist.db` via `better-sqlite3`; forward-only migrations |
-| `projects.ts` | CRUD for projects + per-project JSON config |
-| `sessions.ts` | CRUD for sessions and messages |
-| `dialog.ts` | Native folder picker via Electron's `dialog` module |
-| `settings.ts` | App-level settings persisted as JSON |
-| `agent/runner.ts` | Dispatches agent turns to the appropriate provider |
-| `agent/claude.ts` | Claude agent runner (Anthropic) |
-| `agent/copilot.ts` | Copilot agent runner (GitHub) |
-| `agent/mcp-tools.ts` | MCP tool approval gate |
+| `allowedTools: string[]` | Auto-approves the listed tools without a permission prompt. Does **not** restrict availability. |
+| `tools: string[]` | Restricts available built-in tools to exactly that list — and also **silently blocks all MCP tool calls**. |
 
-### Frontend data flow
+**Never change `allowedTools` to `tools`** in `electron/agent/claude.ts`. Doing so prevents all MCP tool calls (write_file, execute_bash, web_fetch, delete_file) without showing any error to the user.
 
-1. User message → `useAgentTurn.sendMessage()` (hook in `src/lib/hooks/`)
-2. Persists user message via `ipc.saveMessage()` → SQLite
-3. Calls `ipc.agentSend({ sessionId, prompt })` → main process runs the agent turn
-4. Main process streams events back: `SESSION_STATUS`, `SESSION_DELTA`, `SESSION_TOOL_CALL`, `SESSION_TOOL_RESULT`, `SESSION_APPROVAL_REQUIRED`, `SESSION_MESSAGE`
-5. `useSessionEvents` hook (mounted once in `AppShell`) subscribes via `onSessionEvent()` and updates Zustand
-6. Approval-gated tools: main emits `SESSION_APPROVAL_REQUIRED`; UI shows approval dialog; renderer calls `ipc.approveToolCall()`
+### `DropdownMenu` uses Base UI, not Radix UI
 
-**Session history hydration:** `listSessions()` returns metadata only (`messages: []`). When `activeSessionId` changes, `useSessionHydration` (mounted in `App.tsx`) calls `ipc.getSession()` to load full message history and calls `hydrateSession()` on the store. `mergeSessions()` deliberately preserves existing messages to avoid a race where a metadata refresh wipes hydrated history.
+`src/components/ui/dropdown-menu.tsx` wraps `@base-ui/react/menu`. Base UI's `Menu.Item` fires `onClick`, **not** `onSelect`. Always use `onClick` on `DropdownMenuItem` — `onSelect` silently does nothing.
 
-### State management (Zustand)
+`DropdownMenuTrigger` and `ModelSelectorTrigger` do **not** support `asChild` — style them directly with `className`.
 
-- `useSessionStore` — sessions, messages, streaming text, live tool calls, pending approvals, terminal output. Only `activeSessionId` is persisted (session data lives in SQLite).
-- `useProjectStore` — projects list, active project. Only `activeProjectId` is persisted.
+### Agent-tracking normalization (Copilot provider)
 
-### Database
+When comparing or storing the active agent name in `copilot.ts`, always normalize both sides to the same type:
 
-SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `messages` → `tool_calls` (cascade deletes). Config stored as JSON in `projects.config`. Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
+```typescript
+// ✅ Correct — both sides normalize undefined to ""
+const normalizedAgent = agent ?? "";
+const lastAgent = copilotSessionIds.get(lastAgentKey) ?? "";
+if (normalizedAgent !== lastAgent) { ... }
 
-### API keys / config
+// ❌ Wrong — undefined !== "" resets the Copilot session on every turn
+const lastAgent = copilotSessionIds.get(lastAgentKey) ?? null;
+if (agent !== lastAgent) { ... }
+```
 
-Place in `~/.aichemist/.env` — loaded at startup by `electron/config.ts` via `dotenv`.
+The asymmetry silently destroys conversation history on every turn when no agent is selected.
 
-| Variable | Effect |
-|---|---|
-| `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | Anthropic key (first wins) |
-| `ANTHROPIC_BASE_URL` | Custom proxy endpoint |
-| `ANTHROPIC_DEFAULT_SONNET_MODEL` | Override any model ID containing `"sonnet"` |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | Override any model ID containing `"haiku"` |
-| `ANTHROPIC_DEFAULT_OPUS_MODEL` | Override any model ID containing `"opus"` |
-| `GITHUB_TOKEN` | GitHub Copilot key |
-| `CLAUDE_CODE_PATH` | Explicit path to the `claude` CLI binary |
+### Never use `useChat` in AI Elements components
 
----
+`useChat` from `@ai-sdk/react` requires an HTTP endpoint and **does not work in Electron**. Drive AI Elements components from Zustand state updated by push events from the main process. Do not add `useChat` to any component in this repo.
 
-## Agent Selection & Skills Panel
+### Provider gating — always use `effectiveProvider`
 
-### Agent picker (`AgentPickerButton`)
+When checking which provider a session uses, always resolve `effectiveProvider`:
 
-VS Code-style dropdown in the input bar. Loads agents lazily via `ipc.getClaudeAgents()` / `ipc.getCopilotAgents()`. Each item has two hover icons:
-- **Eye** — opens `AgentEditorModal` with `readOnly=true` (viewer)
-- **Pencil** — opens `AgentEditorModal` in edit mode (only for `agent.editable !== false && agent.path`)
+```typescript
+const effectiveProvider = session.provider ?? project.config.provider;
+```
 
-### Skills panel (`SkillsPanel`)
+Never gate on `session.provider` alone — legacy sessions have `provider: null` and inherit the project's provider.
 
-Lists skills from `.agents/skills/` and `~/.claude/skills/` (or `~/.agents/skills/` for Copilot) plus installed plugins. Each card:
-- **Click** — toggles the skill on/off for the session
-- **Eye icon** (hover) — opens `SkillEditorModal` with `readOnly=true`
-- **Pencil icon** (hover) — opens `SkillEditorModal` in edit mode (user skills only; plugin skills are read-only)
+Apply gating on **both sides** of the IPC boundary: in the renderer hook/component and in the `AGENT_SEND` handler in `main.ts`.
 
-Above the list:
-- **Search input** — case-insensitive substring match against `name`, `description`, and `plugin`
-- **Source filter chips** (`project` / `global` / `plugin`) — toggleable, with per-source counts. All on by default. Composes (AND) with search.
+### Streaming vs Extended Thinking (Claude SDK)
 
-The (i) info tooltip describing discovery paths is rendered in the right-panel header beam by `ContextPanel.tsx` via the exported `SkillsHeaderInfo` component, not inside the panel body.
+Enabling extended thinking (`thinking: { type: "enabled" }` or `maxThinkingTokens`) **disables all `StreamEvent` messages**, making the UI appear frozen until the full response is ready. Do not add a `thinking` option to the `query()` call in `electron/agent/claude.ts`.
 
-### readOnly viewer pattern
+### `customAgents` vs `systemMessage` in the Copilot SDK
 
-Both `SkillEditorModal` and `AgentEditorModal` accept `readOnly?: boolean`. When `true`:
-- Frontmatter stripped via `stripFrontmatter()`, body rendered with `Streamdown`
-- Title: "X — name" (not "Edit X — name")
-- "Cancel" → "Close"; Save and Delete hidden
-- For SDK built-in agents (no `path`): renders name + description; skips `ipc.readFile`
+`customAgents` in Copilot sessions are sub-agent delegation configs — they are not a replacement for the session system prompt. To apply a user-selected agent's instructions, use `systemMessage: { mode: "replace", content: agentBody }` in `createSession`/`resumeSession`. When the agent changes between turns, discard the cached SDK session so the new system message takes effect from turn 1.
 
 ---
 
-## Key Conventions
+## Patterns to follow
 
-### AI Elements components
+### Tool call persistence — placeholder message
 
-The AI Elements skill is installed at `.agents/skills/ai-elements/`. Reference docs for every component live at `.agents/skills/ai-elements/references/<component>.md`.
+Tool calls are stored with a `message_id NOT NULL` FK. Create a placeholder assistant message **before** `provider.run()` so tool calls have a valid FK immediately:
 
-- Use `@/components/ai-elements/...` (the `@/` alias is required)
-- **Do not use `useChat`** from `@ai-sdk/react` — it requires an HTTP endpoint and does not work in Electron. All AI state is driven from Zustand updated by push events from the main process.
-- **`ModelSelectorTrigger` does not support `asChild`** — style it directly with `className`
+```typescript
+const placeholder = createPlaceholderMessage(db, { sessionId, agent });
+const text = await provider.run({ ...params, messageId: placeholder.id });
+const toolCalls = loadToolCallsForMessage(db, placeholder.id);
+if (text.trim() || toolCalls.length > 0) {
+  updateMessageContent(db, placeholder.id, text);
+} else {
+  db.prepare("DELETE FROM messages WHERE id = ?").run(placeholder.id);
+}
+```
 
-### Path alias
+### Session state split
 
-`@/` resolves to `src/` — configured in both `electron.vite.config.ts` (`resolve.alias`) and `tsconfig.json` (`paths`). Always use `@/` for non-relative imports within `src/`.
+- **SQLite** is the source of truth for persisted messages, tool calls, and session metadata.
+- **Zustand (`useSessionStore`)** holds ephemeral streaming state, live tool calls, pending approvals, and pending questions.
+- Do not manually sync them — the IPC event flow handles it.
 
-### Types
+### New local state must be cleared on context change
 
-`src/types/index.ts` defines shared types mirroring the SQLite schema. Field names use **snake_case**. Do not rename them to camelCase.
+Any local state scoped to a session or project must have a `useEffect` that clears it when the scoping context changes:
 
-### Package manager
+```typescript
+useEffect(() => {
+  setLocalState(null);
+}, [sessionId]); // or projectId, activeProjectId, etc.
+```
 
-Use **`bun`** (not npm/yarn). Lock file is `bun.lock`.
+### Provider lock
 
-### Styling
+Sessions are locked to a single provider (`"anthropic"`, `"copilot"`, `"acp"`, or `"ollama"`) at creation. Never allow mid-session provider switching — each provider has its own session ID and cannot resume the other's state.
 
-Tailwind CSS v4 (via `@tailwindcss/vite` plugin). UI primitives are shadcn/ui components in `src/components/ui/`. Use `cn()` from `src/lib/utils.ts` for conditional class merging.
+### Session status persistence
 
-**⚠️ Tailwind v4 does not scan `node_modules`:** If a third-party component (e.g. `streamdown`) renders Tailwind arbitrary-value classes from its dist bundle, those classes will never be generated. Add explicit CSS rules in `src/index.css` instead. Example: streamdown token spans write colors as inline CSS custom properties (`--sdm-c`, `--shiki-dark`); `index.css` targets `[data-streamdown="code-block"] span` to apply them.
+If you add an IPC handler that starts an agent turn, always call `updateSessionStatus(db, sessionId, "running")` at the start and `"idle"` or `"error"` at the end. This enables crash recovery — `recoverStaleSessionStatuses()` on startup marks any `"running"` session as `"error"`.
+
+### `LIST_DIRECTORY` — check the `truncated` flag
+
+`LIST_DIRECTORY` filters ignored directories (`node_modules`, `.git`, etc.) and caps results at 500 entries. Always check the `truncated` flag in code that consumes the result.
+
+---
+
+## Styling
+
+Tailwind CSS v4 (via `@tailwindcss/vite` plugin). Use `cn()` from `src/lib/utils.ts` for conditional class merging. Use shadcn/ui components from `src/components/ui/`.
+
+**Tailwind v4 does not scan `node_modules`** — if a third-party component (e.g. `streamdown`) renders Tailwind classes from its dist bundle, those classes will not be generated. Add explicit CSS rules in `src/index.css` instead.
+
+Use `<WithTooltip label="…">` from `src/components/ui/with-tooltip.tsx` for hover hints — do not use native `title=` on the same element.
+
+---
+
+## Path alias and types
+
+- `@/` resolves to `src/` — always use it for non-relative imports within `src/`.
+- Types are in `src/types/index.ts`. Field names use **snake_case** — do not rename to camelCase.
+
+---
+
+## Testing xterm.js components
+
+jsdom has no canvas. Mock `@xterm/xterm` and `@xterm/addon-fit` using `vi.fn().mockImplementation(function() { ... })` (arrow functions are not constructors). Also stub `global.ResizeObserver` the same way.
