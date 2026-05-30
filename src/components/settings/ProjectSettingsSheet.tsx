@@ -141,14 +141,15 @@ function GeneralTab({
             opt("acp", "ACP agent (subprocess)"),
           ]}
           onChange={(v) => {
+            const provider = v as import("@/types").Provider;
             if (v !== config.provider) {
               onChange({
-                provider: v,
+                provider,
                 model: v === "anthropic" ? DEFAULT_ANTHROPIC_MODEL : "",
               });
               return;
             }
-            onChange({ provider: v });
+            onChange({ provider });
           }}
         />
         {probes && (() => {

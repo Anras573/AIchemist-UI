@@ -1,6 +1,6 @@
 import * as crypto from "crypto";
 import type { Database } from "better-sqlite3";
-import type { Message, Session, ToolCall, ToolCallStatus, ToolCategory } from "../src/types/index";
+import type { Message, Provider, Session, ToolCall, ToolCallStatus, ToolCategory } from "../src/types/index";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -18,7 +18,7 @@ function nowIso(): string {
 export function createSession(
   db: Database,
   projectId: string,
-  provider: string | null = null,
+  provider: Provider | null = null,
   model: string | null = null,
   options: { id?: string; branch?: string | null; workspacePath?: string | null; issueNumber?: number | null } = {}
 ): Session {
@@ -83,7 +83,7 @@ export function listSessions(db: Database, projectId: string): Session[] {
     status: row.status as Session["status"],
     created_at: row.created_at,
     messages: [],
-    provider: row.provider,
+    provider: row.provider as Provider | null,
     model: row.model,
     branch: row.branch,
     workspace_path: row.workspace_path,
@@ -110,7 +110,7 @@ export function getSession(db: Database, sessionId: string): Session {
         title: string;
         status: string;
         created_at: string;
-        provider: string | null;
+        provider: string | null; // raw DB string, cast below
         model: string | null;
         branch: string | null;
         workspace_path: string | null;
@@ -196,7 +196,7 @@ export function getSession(db: Database, sessionId: string): Session {
     status: row.status as Session["status"],
     created_at: row.created_at,
     messages,
-    provider: row.provider,
+    provider: row.provider as Provider | null,
     model: row.model,
     branch: row.branch,
     workspace_path: row.workspace_path,
@@ -283,7 +283,7 @@ export function updateSessionTitle(
 export function updateSessionModel(
   db: Database,
   sessionId: string,
-  provider: string,
+  provider: Provider,
   model: string
 ): void {
   db.prepare("UPDATE sessions SET provider = ?, model = ? WHERE id = ?").run(

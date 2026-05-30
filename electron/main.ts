@@ -46,7 +46,7 @@ import {
   watchCopilotTranscript,
   type CopilotTranscriptWatcher,
 } from "./copilot-transcript";
-import type { ProjectConfig } from "../src/types/index";
+import type { ProjectConfig, Provider } from "../src/types/index";
 import { parseMcpListOutput, readCopilotMcpServers, readAichemistMcpServers, mergeMcpServers } from "./mcp-utils";
 import { loadManagedMcpServers } from "./agent/mcp-managed";
 import { probeManagedServers } from "./agent/mcp-probe";
@@ -745,7 +745,7 @@ function registerHandlers(): void {  // ── Terminal ────────
   );
 
   // ── Sessions ─────────────────────────────────────────────────────────────────
-  handle(CH.CREATE_SESSION, async (_event, payload: string | { projectId: string; providerOverride?: string; issueNumber?: number | null }) => {
+  handle(CH.CREATE_SESSION, async (_event, payload: string | { projectId: string; providerOverride?: Provider; issueNumber?: number | null }) => {
     // Backward-compat: older callers pass projectId as a string; newer ones
     // pass { projectId, providerOverride } to explicitly lock the session's
     // provider at creation time (e.g. from the split-button new-session menu).
@@ -869,7 +869,7 @@ function registerHandlers(): void {  // ── Terminal ────────
   );
   handle(
     CH.UPDATE_SESSION_MODEL,
-    (_event, sessionId: string, provider: string, model: string) =>
+    (_event, sessionId: string, provider: Provider, model: string) =>
       updateSessionModel(db, sessionId, provider, model)
   );
   handle(

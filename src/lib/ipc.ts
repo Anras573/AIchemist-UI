@@ -7,6 +7,7 @@ import type {
   GitHubListIssuesArgs,
   GitHubListPrsArgs,
   ProjectConfig,
+  Provider,
 } from "@/types";
 
 // ── Typed wrapper over window.electronAPI ─────────────────────────────────────
@@ -37,7 +38,7 @@ export const ipc = {
     window.electronAPI.saveMessage(args),
   updateSessionTitle: (sessionId: string, title: string) =>
     window.electronAPI.updateSessionTitle(sessionId, title),
-  updateSessionModel: (sessionId: string, provider: string, model: string) =>
+  updateSessionModel: (sessionId: string, provider: Provider, model: string) =>
     window.electronAPI.updateSessionModel(sessionId, provider, model),
   updateSessionAgent: (sessionId: string, agent: string | null) =>
     window.electronAPI.updateSessionAgent(sessionId, agent),

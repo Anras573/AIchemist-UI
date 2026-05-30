@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { Session, SessionStatus, Message, TraceSpan, FileChange, CompactionEvent } from "@/types";
+import { Provider, Session, SessionStatus, Message, TraceSpan, FileChange, CompactionEvent } from "@/types";
 
 export interface LiveToolCall {
   toolCallId: string;
@@ -75,7 +75,7 @@ interface SessionStore {
   removeSession: (id: string) => void;
   updateSessionStatus: (sessionId: string, status: SessionStatus) => void;
   updateSessionTitle: (sessionId: string, title: string) => void;
-  updateSessionModel: (sessionId: string, provider: string, model: string) => void;
+  updateSessionModel: (sessionId: string, provider: Provider, model: string) => void;
   appendMessage: (sessionId: string, message: Message) => void;
   /** Atomically appends a completed message and clears the streaming buffer. */
   commitMessage: (sessionId: string, message: Message) => void;
