@@ -95,6 +95,8 @@ interface GitFileEntry {
 
 const DEFAULT_PR_DESCRIPTION_HISTORY_LIMIT = 10;
 const PR_DESCRIPTION_HISTORY_LIMIT_STORAGE_KEY = "aichemist.prDescriptionHistoryLimit";
+// Keeps prompt payload bounded to avoid large-diff UI churn and provider request failures.
+const MAX_PR_DESCRIPTION_DIFF_CHARS = 30_000;
 const PR_TEMPLATE_CANDIDATE_PATHS = [
   ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/pull_request_template.md",
@@ -129,13 +131,21 @@ function parseGeneratedPrDraft(raw: string): { title: string | null; body: strin
     .replace(/^#+\s*/, "")
     .trim();
 
-  let bodyLines = lines.slice(1);
-  if ((bodyLines[0] ?? "").trim().toLowerCase() === "body:") {
-    bodyLines = bodyLines.slice(1);
+  let bodyStartIndex = 1;
+  while (bodyStartIndex < lines.length && (lines[bodyStartIndex] ?? "").trim() === "") {
+    bodyStartIndex += 1;
   }
-  const body = bodyLines.join("\n").trim();
+  if ((lines[bodyStartIndex] ?? "").trim().toLowerCase() === "body:") {
+    bodyStartIndex += 1;
+  }
+  const body = lines.slice(bodyStartIndex).join("\n").trim();
 
   return { title: title || null, body };
+}
+
+function truncateForPrompt(value: string, maxChars: number): { text: string; truncated: boolean } {
+  if (value.length <= maxChars) return { text: value, truncated: false };
+  return { text: value.slice(0, maxChars), truncated: true };
 }
 
 async function readPullRequestTemplate(ipc: ReturnType<typeof useIpc>, projectPath: string): Promise<string | null> {
@@ -341,6 +351,7 @@ function OpenPrSection({
   const initialDescriptionRef = useRef("");
   const generatedDescriptionRef = useRef("");
   const streamUnsubscribeRef = useRef<(() => void) | null>(null);
+  const generateInFlightRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -460,74 +471,89 @@ function OpenPrSection({
   };
 
   const generateDescription = async () => {
-    if (!activeSessionId) {
-      setGenerateError("Select an active session before generating a PR description.");
-      return;
-    }
-
-    setGenerateError(null);
-    setError(null);
-
-    const gitDiffResult = await ipc.getGitDiff(projectPath);
-    if (typeof gitDiffResult !== "string") {
-      setGenerateError(gitDiffResult.error);
-      return;
-    }
-
-    const historyLimit = parsePositiveInt(window.localStorage.getItem(PR_DESCRIPTION_HISTORY_LIMIT_STORAGE_KEY))
-      ?? DEFAULT_PR_DESCRIPTION_HISTORY_LIMIT;
-    const recentMessages = formatRecentMessages(sessionMessages, historyLimit);
-    const pullRequestTemplate = await readPullRequestTemplate(ipc, projectPath);
-
-    const prompt = [
-      "System instruction: Draft a concise pull request title and markdown body.",
-      "Return plain markdown in this exact shape:",
-      "Title: <concise PR title>",
-      "",
-      "Body:",
-      "<markdown body suitable for the PR description field>",
-      pullRequestTemplate
-        ? `Follow this pull request template structure exactly (keep headings):\n\n${pullRequestTemplate}`
-        : "No pull request template was found. Use a short summary and concise bullet points.",
-      `Recent conversation messages (last ${historyLimit}):\n\n${recentMessages}`,
-      `Project diff (git diff HEAD):\n\n\`\`\`diff\n${gitDiffResult}\n\`\`\``,
-    ].join("\n\n---\n\n");
-
-    initialDescriptionRef.current = description;
-    generatedDescriptionRef.current = "";
-    cancelGenerateRef.current = false;
-    setDescription("");
-    setIsGenerating(true);
-
-    streamUnsubscribeRef.current?.();
-    streamUnsubscribeRef.current = onSessionEvent<SessionDeltaEvent>(IPC_CHANNELS.SESSION_DELTA, (payload) => {
-      if (payload.session_id !== activeSessionId || cancelGenerateRef.current) return;
-      generatedDescriptionRef.current += payload.text_delta;
-      setDescription(generatedDescriptionRef.current);
-    });
-
+    if (generateInFlightRef.current) return;
+    generateInFlightRef.current = true;
     try {
-      await ipc.agentSend({
-        sessionId: activeSessionId,
-        prompt,
-        agent: undefined,
+      if (!activeSessionId) {
+        setGenerateError("Select an active session before generating a PR description.");
+        return;
+      }
+
+      setGenerateError(null);
+      setError(null);
+
+      const gitDiffResult = await ipc.getGitDiff(projectPath);
+      if (typeof gitDiffResult !== "string") {
+        setGenerateError(gitDiffResult.error);
+        return;
+      }
+
+      const historyLimit = parsePositiveInt(window.localStorage.getItem(PR_DESCRIPTION_HISTORY_LIMIT_STORAGE_KEY))
+        ?? DEFAULT_PR_DESCRIPTION_HISTORY_LIMIT;
+      const recentMessages = formatRecentMessages(sessionMessages, historyLimit);
+      const pullRequestTemplate = await readPullRequestTemplate(ipc, projectPath);
+      const { text: gitDiffForPrompt, truncated: isDiffTruncated } = truncateForPrompt(
+        gitDiffResult,
+        MAX_PR_DESCRIPTION_DIFF_CHARS
+      );
+      const diffLabel = isDiffTruncated
+        ? `Project diff (git diff HEAD, truncated to ${MAX_PR_DESCRIPTION_DIFF_CHARS} chars):`
+        : "Project diff (git diff HEAD):";
+      const diffTruncationNote = isDiffTruncated
+        ? `\n\nNOTE: Diff was truncated from ${gitDiffResult.length} chars.`
+        : "";
+
+      const prompt = [
+        "System instruction: Draft a concise pull request title and markdown body.",
+        "Return plain markdown in this exact shape:",
+        "Title: <concise PR title>",
+        "",
+        "Body:",
+        "<markdown body suitable for the PR description field>",
+        pullRequestTemplate
+          ? `Follow this pull request template structure exactly (keep headings):\n\n${pullRequestTemplate}`
+          : "No pull request template was found. Use a short summary and concise bullet points.",
+        `Recent conversation messages (last ${historyLimit}):\n\n${recentMessages}`,
+        `${diffLabel}\n\n\`\`\`diff\n${gitDiffForPrompt}\n\`\`\`${diffTruncationNote}`,
+      ].join("\n\n---\n\n");
+
+      initialDescriptionRef.current = description;
+      generatedDescriptionRef.current = "";
+      cancelGenerateRef.current = false;
+      setDescription("");
+      setIsGenerating(true);
+
+      streamUnsubscribeRef.current?.();
+      streamUnsubscribeRef.current = onSessionEvent<SessionDeltaEvent>(IPC_CHANNELS.SESSION_DELTA, (payload) => {
+        if (payload.session_id !== activeSessionId || cancelGenerateRef.current) return;
+        generatedDescriptionRef.current += payload.text_delta;
+        setDescription(generatedDescriptionRef.current);
       });
-      if (!cancelGenerateRef.current) {
-        const { title: generatedTitle, body } = parseGeneratedPrDraft(generatedDescriptionRef.current);
-        if (generatedTitle) setTitle(generatedTitle);
-        if (body) {
+
+      try {
+        await ipc.agentSend({
+          sessionId: activeSessionId,
+          prompt,
+          agent: undefined,
+        });
+        if (!cancelGenerateRef.current) {
+          const { title: generatedTitle, body } = parseGeneratedPrDraft(generatedDescriptionRef.current);
+          if (generatedTitle) setTitle(generatedTitle);
+          // Intentionally allow empty body to clear streamed Title/Body contract text from the textarea.
           setDescription(body);
         }
-      }
-    } catch (e) {
-      if (!cancelGenerateRef.current) {
-        setGenerateError(e instanceof Error ? e.message : String(e));
-        setDescription(initialDescriptionRef.current);
+      } catch (e) {
+        if (!cancelGenerateRef.current) {
+          setGenerateError(e instanceof Error ? e.message : String(e));
+          setDescription(initialDescriptionRef.current);
+        }
+      } finally {
+        streamUnsubscribeRef.current?.();
+        streamUnsubscribeRef.current = null;
+        setIsGenerating(false);
       }
     } finally {
-      streamUnsubscribeRef.current?.();
-      streamUnsubscribeRef.current = null;
-      setIsGenerating(false);
+      generateInFlightRef.current = false;
     }
   };
 
