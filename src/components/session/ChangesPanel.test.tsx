@@ -169,6 +169,7 @@ describe("ChangesPanel Open PR flow", () => {
   beforeEach(() => {
     useSessionStore.setState({ activeSessionId: null, sessions: {}, sessionFileChanges: {} });
     useProjectStore.setState({ projects: [], activeProjectId: null });
+    window.localStorage.removeItem("aichemist.prDescriptionHistoryLimit");
     window.electronAPI.getGitBranch = vi.fn().mockResolvedValue("feature/open-pr");
     window.electronAPI.githubGetPrContext = vi
       .fn()
@@ -423,6 +424,114 @@ describe("ChangesPanel Open PR flow", () => {
       expect(window.electronAPI.getGitDiff).toHaveBeenCalledOnce();
       expect(window.electronAPI.agentSend).toHaveBeenCalledOnce();
     });
+  });
+
+  it("clamps local storage history limit when building the generation prompt", async () => {
+    window.localStorage.setItem("aichemist.prDescriptionHistoryLimit", "1000");
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+      messages: [
+        {
+          id: "m1",
+          session_id: "sess-pr",
+          role: "user",
+          content: "Please summarize this work.",
+          tool_calls: [],
+          created_at: "2024-01-01T00:00:00Z",
+        },
+      ],
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.agentSend).toHaveBeenCalledOnce();
+      expect(window.electronAPI.agentSend).toHaveBeenCalledWith(expect.objectContaining({
+        prompt: expect.stringContaining("Recent conversation messages (last 50):"),
+      }));
+    });
+  });
+
+  it("prevents submitting and locks description edits while generation is in progress", async () => {
+    let resolveSend: (() => void) | undefined;
+    window.electronAPI.agentSend = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    const textarea = await screen.findByPlaceholderText("Optional PR description");
+    const createPrButton = screen.getByRole("button", { name: "Create PR" });
+    expect(textarea).toHaveAttribute("readonly");
+    expect(createPrButton).toBeDisabled();
+    fireEvent.click(createPrButton);
+    expect(window.electronAPI.githubCreatePr).not.toHaveBeenCalled();
+
+    resolveSend?.();
+    await waitFor(() => {
+      expect(createPrButton).toBeEnabled();
+      expect(textarea).not.toHaveAttribute("readonly");
+    });
+  });
+
+  it("cleans up generation stream subscription when the component unmounts", async () => {
+    let resolveSend: (() => void) | undefined;
+    window.electronAPI.agentSend = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    const { unmount } = renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.on).toHaveBeenCalledWith("session:delta", expect.any(Function));
+    });
+
+    const deltaListener = vi
+      .mocked(window.electronAPI.on)
+      .mock.calls
+      .filter(([channel]) => channel === "session:delta")
+      .at(-1)?.[1];
+
+    unmount();
+
+    expect(window.electronAPI.off).toHaveBeenCalledWith("session:delta", deltaListener);
+    resolveSend?.();
   });
 
   it("restores the original description when generation is cancelled", async () => {
