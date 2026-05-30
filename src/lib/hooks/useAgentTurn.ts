@@ -61,16 +61,13 @@ export function useAgentTurn() {
       clearLiveToolCalls(activeSessionId);
       const sessionIdAtStart = activeSessionId;
       const activeAgent = sessionAgents[activeSessionId] ?? undefined;
-      const effectiveProvider = session.provider ?? project.config.provider;
-      const supportsOneShotSkills = effectiveProvider !== "acp";
-      const supportsAgent = effectiveProvider !== "acp";
 
       try {
         await ipc.agentSend({
           sessionId: activeSessionId,
           prompt: text,
-          agent: supportsAgent ? activeAgent : undefined,
-          oneshotSkills: supportsOneShotSkills ? oneshotSkills : undefined,
+          agent: activeAgent,
+          oneshotSkills,
         });
         clearLiveToolCalls(sessionIdAtStart);
         clearPendingApprovals(sessionIdAtStart);

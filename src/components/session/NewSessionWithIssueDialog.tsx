@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Cable } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
 import { WithTooltip } from "@/components/ui/with-tooltip";
@@ -21,15 +20,14 @@ interface NewSessionWithIssueDialogProps {
   onCreate: (providerOverride: string, issueNumber?: number) => void;
 }
 
-type Provider = "anthropic" | "copilot" | "ollama" | "acp";
-const PROVIDERS: Provider[] = ["anthropic", "copilot", "ollama", "acp"];
+type Provider = "anthropic" | "copilot" | "ollama";
+const PROVIDERS: Provider[] = ["anthropic", "copilot", "ollama"];
 
 function providerLabel(p: Provider): string {
   switch (p) {
     case "anthropic": return "Claude";
     case "copilot": return "Copilot";
     case "ollama": return "Ollama";
-    case "acp": return "ACP";
   }
 }
 
@@ -38,7 +36,6 @@ function providerIcon(p: Provider): React.ReactNode {
     case "anthropic": return <ModelSelectorLogo provider="anthropic" className="size-3.5" />;
     case "copilot": return <ModelSelectorLogo provider="github-copilot" className="size-3.5" />;
     case "ollama": return <ModelSelectorLogo provider="ollama" className="size-3.5" />;
-    case "acp": return <Cable className="size-3.5" />;
   }
 }
 
@@ -52,20 +49,17 @@ export function NewSessionWithIssueDialog({
 }: NewSessionWithIssueDialogProps) {
   const isAvailable = (p: Provider): boolean => {
     if (!probes) return true;
-    const probe = p === "acp" ? probes.acp : probes[p];
-    return !probe || probe.ok;
+    return !probes[p] || probes[p].ok;
   };
 
   const reasonFor = (p: Provider): string | undefined => {
     if (!probes) return undefined;
-    const probe = p === "acp" ? probes.acp : probes[p];
-    return probe?.ok ? undefined : probe?.reason;
+    return probes[p]?.ok ? undefined : probes[p]?.reason;
   };
 
   const preferred =
     defaultProvider === "copilot" ? "copilot"
     : defaultProvider === "ollama" ? "ollama"
-    : defaultProvider === "acp" ? "acp"
     : "anthropic";
 
   const initial: Provider = isAvailable(preferred as Provider)

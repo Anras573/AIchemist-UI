@@ -29,8 +29,6 @@ interface ApprovalRequiredEvent {
   tool_call_id?: string;
   tool_name: string;
   input: Record<string, unknown>;
-  /** ACP option-based permission options. When present, UI renders option buttons. */
-  permission_options?: { id: string; name: string; kind: string }[];
 }
 
 interface QuestionRequiredEvent {
@@ -152,8 +150,6 @@ export function useSessionEvents() {
             toolCallId: payload.tool_call_id ?? payload.approval_id,
             toolName: payload.tool_name,
             args: payload.input ?? {},
-            permissionOptions: payload.permission_options,
-            // Calling resolve unblocks the agent in the main process
             resolve: (approved, options) =>
               ipc.approveToolCall(payload.session_id, payload.approval_id, approved, options),
           });

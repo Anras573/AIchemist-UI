@@ -4,12 +4,10 @@ import {
   probeAnthropic,
   probeCopilot,
   probeOllama,
-  probeAcpForProject,
   probeAll,
   _setFetch,
   _setCopilotListModels,
   _setOllamaListModels,
-  _setAcpProbe,
   _resetProviderProbeCache,
 } from "./provider-probe";
 
@@ -26,7 +24,6 @@ describe("provider-probe", () => {
     _setFetch(null);
     _setCopilotListModels(null);
     _setOllamaListModels(null);
-    _setAcpProbe(null);
   });
 
   // ── Anthropic ──────────────────────────────────────────────────────────────
@@ -175,7 +172,7 @@ describe("provider-probe", () => {
     });
   });
 
-  // ── ACP ────────────────────────────────────────────────────────────────────
+  // ── Ollama ─────────────────────────────────────────────────────────────────
 
   describe("probeOllama", () => {
     it("returns ok when listModels returns at least one model", async () => {
@@ -201,65 +198,10 @@ describe("provider-probe", () => {
     });
   });
 
-  // ── ACP ────────────────────────────────────────────────────────────────────
-
-  describe("probeAcpForProject", () => {
-    it("reports missing config when acp_agent is absent", async () => {
-      const result = await probeAcpForProject("/proj", {} as never, { force: true });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toMatch(/not configured/);
-    });
-
-    it("delegates to acpProbe and caches the result", async () => {
-      const probeSpy = vi.fn().mockResolvedValue({ ok: true });
-      _setAcpProbe(probeSpy);
-      const cfg = ({
-        provider: "acp",
-        model: "",
-        approval_policy: "manual" as const,
-        approval_rules: [],
-        acp_agent: { command: "/bin/echo" },
-      } as unknown as import("../../src/types/index").ProjectConfig);
-      const r1 = await probeAcpForProject("/proj", cfg, { force: true });
-      const r2 = await probeAcpForProject("/proj", cfg);
-      expect(r1.ok).toBe(true);
-      expect(r2.ok).toBe(true);
-      expect(probeSpy).toHaveBeenCalledTimes(1);
-    });
-
-    it("invalidates the cache when acp_agent fingerprint changes", async () => {
-      const probeSpy = vi.fn().mockResolvedValue({ ok: true });
-      _setAcpProbe(probeSpy);
-      const base = {
-        provider: "acp",
-        model: "",
-        approval_policy: "manual" as const,
-        approval_rules: [],
-      } as unknown as import("../../src/types/index").ProjectConfig;
-      await probeAcpForProject("/proj", { ...base, acp_agent: { command: "/bin/a" } }, { force: true });
-      await probeAcpForProject("/proj", { ...base, acp_agent: { command: "/bin/b" } });
-      expect(probeSpy).toHaveBeenCalledTimes(2);
-    });
-
-    it("surfaces acpProbe failure reason", async () => {
-      _setAcpProbe(async () => ({ ok: false, reason: "ENOENT" }));
-      const cfg = ({
-        provider: "acp",
-        model: "",
-        approval_policy: "manual" as const,
-        approval_rules: [],
-        acp_agent: { command: "/missing" },
-      } as unknown as import("../../src/types/index").ProjectConfig);
-      const r = await probeAcpForProject("/proj", cfg, { force: true });
-      expect(r.ok).toBe(false);
-      expect(r.reason).toBe("ENOENT");
-    });
-  });
-
   // ── probeAll ───────────────────────────────────────────────────────────────
 
   describe("probeAll", () => {
-    it("returns anthropic + copilot + ollama when no project is supplied", async () => {
+    it("returns anthropic + copilot + ollama", async () => {
       _setFetch(vi.fn().mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch);
       _setCopilotListModels(async () => [{ id: "x", name: "x" }]);
       _setOllamaListModels(async () => [{ id: "llama3.2", name: "llama3.2" }]);
@@ -269,31 +211,6 @@ describe("provider-probe", () => {
       expect(r.anthropic.ok).toBe(true);
       expect(r.copilot.ok).toBe(true);
       expect(r.ollama.ok).toBe(true);
-      expect(r.acp).toBeUndefined();
-    });
-
-    it("includes acp when a project is supplied", async () => {
-      _setFetch(vi.fn().mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch);
-      _setCopilotListModels(async () => [{ id: "x", name: "x" }]);
-      _setOllamaListModels(async () => [{ id: "llama3.2", name: "llama3.2" }]);
-      _setAcpProbe(async () => ({ ok: true }));
-      process.env.ANTHROPIC_API_KEY = "sk";
-      process.env.GITHUB_TOKEN = "gh";
-      const r = await probeAll(
-        {
-          path: "/proj",
-          config: {
-            provider: "acp",
-            model: "",
-            approval_policy: "manual",
-            approval_rules: [],
-            acp_agent: { command: "/x" },
-          } as unknown as import("../../src/types/index").ProjectConfig,
-        },
-        { force: true },
-      );
-      expect(r.ollama.ok).toBe(true);
-      expect(r.acp?.ok).toBe(true);
     });
 
     it("treats user-disabled providers as not ok without invoking the underlying probe", async () => {
@@ -303,23 +220,12 @@ describe("provider-probe", () => {
       _setCopilotListModels(copilotSpy);
       const ollamaSpy = vi.fn(async () => [{ id: "llama3.2", name: "llama3.2" }]);
       _setOllamaListModels(ollamaSpy);
-      const acpSpy = vi.fn(async () => ({ ok: true }));
-      _setAcpProbe(acpSpy);
       process.env.ANTHROPIC_API_KEY = "sk";
       process.env.GITHUB_TOKEN = "gh";
 
       const r = await probeAll(
-        {
-          path: "/proj",
-          config: {
-            provider: "acp",
-            model: "",
-            approval_policy: "manual",
-            approval_rules: [],
-            acp_agent: { command: "/x" },
-          } as unknown as import("../../src/types/index").ProjectConfig,
-        },
-        { force: true, disabled: new Set(["anthropic", "acp", "ollama"]) },
+        undefined,
+        { force: true, disabled: new Set(["anthropic", "ollama"]) },
       );
 
       expect(r.anthropic.ok).toBe(false);
@@ -327,13 +233,10 @@ describe("provider-probe", () => {
       expect(r.copilot.ok).toBe(true);
       expect(r.ollama.ok).toBe(false);
       expect(r.ollama.reason).toBe("Disabled in settings");
-      expect(r.acp?.ok).toBe(false);
-      expect(r.acp?.reason).toBe("Disabled in settings");
 
       // The disabled providers were short-circuited — only Copilot's probe ran.
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(ollamaSpy).not.toHaveBeenCalled();
-      expect(acpSpy).not.toHaveBeenCalled();
       expect(copilotSpy).toHaveBeenCalled();
     });
   });

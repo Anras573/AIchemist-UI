@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Bot, Cable, ChevronDown, GitBranch, Hash, Link, Plus } from "lucide-react";
+import { Bot, ChevronDown, GitBranch, Hash, Link, Plus } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -39,8 +39,6 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
         ? "Copilot"
         : defaultProvider === "ollama"
           ? "Ollama"
-        : defaultProvider === "acp"
-          ? "ACP"
           : null;
   const defaultLogoProvider =
     defaultProvider === "anthropic"
@@ -225,9 +223,6 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
             {defaultLogoProvider && (
               <ModelSelectorLogo provider={defaultLogoProvider} className="size-3.5 opacity-80" />
             )}
-            {defaultProvider === "acp" && (
-              <Cable className="size-3.5 opacity-80" />
-            )}
           </Button>
         </WithTooltip>
         <DropdownMenu>
@@ -263,14 +258,6 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
               isDefault={defaultProvider === "ollama"}
               label="New Ollama Session"
               icon={<ModelSelectorLogo provider="ollama" className="size-3.5" />}
-            />
-            <ProviderMenuItem
-              provider="acp"
-              probe={probes?.acp}
-              onSelect={() => handleNewSession("acp")}
-              isDefault={defaultProvider === "acp"}
-              label="New ACP Session"
-              icon={<Cable className="size-3.5" />}
             />
             <DropdownMenuItem
               onClick={() => setIssueDialogOpen(true)}
@@ -316,7 +303,7 @@ function ProviderMenuItem({
   label,
   icon,
 }: {
-  provider: "anthropic" | "copilot" | "acp" | "ollama";
+  provider: "anthropic" | "copilot" | "ollama";
   probe: import("@/types").ProviderProbeResult | undefined;
   onSelect: () => void;
   isDefault: boolean;

@@ -119,7 +119,6 @@ describe("EmptyStateNewSession", () => {
           anthropic: { ok: false, reason: "no key" },
           copilot: { ok: false, reason: "no token" },
           ollama: { ok: false, reason: "not running" },
-          acp: { ok: false, reason: "not configured" },
         }}
       />,
     );
