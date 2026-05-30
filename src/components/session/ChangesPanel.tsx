@@ -95,6 +95,7 @@ interface GitFileEntry {
 
 const DEFAULT_PR_DESCRIPTION_HISTORY_LIMIT = 10;
 const PR_DESCRIPTION_HISTORY_LIMIT_STORAGE_KEY = "aichemist.prDescriptionHistoryLimit";
+const MAX_PR_DESCRIPTION_HISTORY_LIMIT = 50;
 // Keeps prompt payload bounded to avoid large-diff UI churn and provider request failures.
 const MAX_PR_DESCRIPTION_DIFF_CHARS = 30_000;
 const PR_TEMPLATE_CANDIDATE_PATHS = [
@@ -405,6 +406,14 @@ function OpenPrSection({
     return () => window.clearTimeout(timeout);
   }, [successToast]);
 
+  useEffect(() => {
+    return () => {
+      cancelGenerateRef.current = true;
+      streamUnsubscribeRef.current?.();
+      streamUnsubscribeRef.current = null;
+    };
+  }, []);
+
   const visible = !isChecking && hasGitHubToken && hasGitHubRemote;
   if (!visible) return null;
 
@@ -428,7 +437,7 @@ function OpenPrSection({
     setIsGenerating(false);
   };
 
-  const canSubmit = title.trim().length > 0 && head.trim().length > 0 && !isSubmitting;
+  const canSubmit = title.trim().length > 0 && head.trim().length > 0 && !isSubmitting && !isGenerating;
   const canGenerate = !isSubmitting && !isGenerating && Boolean(activeSessionId);
 
   const submit = async (event: FormEvent) => {
@@ -488,8 +497,11 @@ function OpenPrSection({
         return;
       }
 
-      const historyLimit = parsePositiveInt(window.localStorage.getItem(PR_DESCRIPTION_HISTORY_LIMIT_STORAGE_KEY))
-        ?? DEFAULT_PR_DESCRIPTION_HISTORY_LIMIT;
+      const historyLimit = Math.min(
+        parsePositiveInt(window.localStorage.getItem(PR_DESCRIPTION_HISTORY_LIMIT_STORAGE_KEY))
+          ?? DEFAULT_PR_DESCRIPTION_HISTORY_LIMIT,
+        MAX_PR_DESCRIPTION_HISTORY_LIMIT
+      );
       const recentMessages = formatRecentMessages(sessionMessages, historyLimit);
       const pullRequestTemplate = await readPullRequestTemplate(ipc, projectPath);
       const { text: gitDiffForPrompt, truncated: isDiffTruncated } = truncateForPrompt(
@@ -651,6 +663,7 @@ function OpenPrSection({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Optional PR description"
+              readOnly={isGenerating}
             />
           </div>
 
