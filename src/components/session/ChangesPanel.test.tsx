@@ -182,6 +182,9 @@ describe("ChangesPanel Open PR flow", () => {
         html_url: "https://github.com/acme/repo/pull/12",
       },
     });
+    window.electronAPI.getGitDiff = vi.fn().mockResolvedValue("diff --git a/file.ts b/file.ts\n+new line");
+    window.electronAPI.agentSend = vi.fn().mockResolvedValue(undefined);
+    window.electronAPI.readFile = vi.fn().mockResolvedValue({ error: "not found" });
     window.electronAPI.openGitHubUrl = vi.fn().mockResolvedValue(undefined);
   });
 
@@ -280,5 +283,136 @@ describe("ChangesPanel Open PR flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create PR" }));
 
     expect(await screen.findByText("Validation failed")).toBeInTheDocument();
+  });
+
+  it("streams generated description text into the textarea", async () => {
+    let resolveSend: (() => void) | undefined;
+    window.electronAPI.agentSend = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+      messages: [
+        {
+          id: "m1",
+          session_id: "sess-pr",
+          role: "user",
+          content: "Please summarize this work.",
+          tool_calls: [],
+          created_at: "2024-01-01T00:00:00Z",
+        },
+      ],
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.on).toHaveBeenCalledWith("session:delta", expect.any(Function));
+    });
+    const deltaListener = vi
+      .mocked(window.electronAPI.on)
+      .mock.calls
+      .filter(([channel]) => channel === "session:delta")
+      .at(-1)?.[1] as
+      | ((payload: { session_id: string; text_delta: string }) => void)
+      | undefined;
+
+    deltaListener?.({ session_id: "sess-pr", text_delta: "Generated heading" });
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Optional PR description")).toHaveValue("Generated heading");
+    });
+    deltaListener?.({ session_id: "sess-pr", text_delta: "\n\n- bullet" });
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Optional PR description")).toHaveValue(
+        "Generated heading\n\n- bullet"
+      );
+    });
+
+    resolveSend?.();
+    await waitFor(() => {
+      expect(window.electronAPI.agentSend).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("restores the original description when generation is cancelled", async () => {
+    let resolveSend: (() => void) | undefined;
+    window.electronAPI.agentSend = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    const textarea = await screen.findByPlaceholderText("Optional PR description");
+    fireEvent.change(textarea, { target: { value: "Original description" } });
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.on).toHaveBeenCalledWith("session:delta", expect.any(Function));
+    });
+    const deltaListener = vi
+      .mocked(window.electronAPI.on)
+      .mock.calls
+      .filter(([channel]) => channel === "session:delta")
+      .at(-1)?.[1] as
+      | ((payload: { session_id: string; text_delta: string }) => void)
+      | undefined;
+    deltaListener?.({ session_id: "sess-pr", text_delta: "Draft text" });
+    await waitFor(() => {
+      expect(textarea).toHaveValue("Draft text");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    expect(textarea).toHaveValue("Original description");
+
+    deltaListener?.({ session_id: "sess-pr", text_delta: "ignored" });
+    expect(textarea).toHaveValue("Original description");
+
+    resolveSend?.();
+  });
+
+  it("shows generate error and keeps description unchanged on failure", async () => {
+    window.electronAPI.agentSend = vi.fn().mockRejectedValue(new Error("Generation failed"));
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    const textarea = await screen.findByPlaceholderText("Optional PR description");
+    fireEvent.change(textarea, { target: { value: "Keep this text" } });
+
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    expect(await screen.findByText("Generation failed")).toBeInTheDocument();
+    expect(textarea).toHaveValue("Keep this text");
   });
 });
