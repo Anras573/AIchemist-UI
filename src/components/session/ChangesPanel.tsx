@@ -12,7 +12,7 @@ import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { IPC_CHANNELS, onSessionEvent, useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
-import type { FileChange, Message, SessionDeltaEvent } from "@/types";
+import type { FileChange, Message, SessionDeltaEvent, SessionStatus } from "@/types";
 import { CodeBlock } from "@/components/ai-elements/code-block";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -318,11 +318,13 @@ function OpenPrSection({
   sessionTitle,
   activeSessionId,
   sessionMessages,
+  sessionStatus,
 }: {
   projectPath: string;
   sessionTitle: string | null;
   activeSessionId: string | null;
   sessionMessages: Message[];
+  sessionStatus: SessionStatus | undefined;
 }) {
   const ipc = useIpc();
   const formId = useId();
@@ -438,7 +440,8 @@ function OpenPrSection({
   };
 
   const canSubmit = title.trim().length > 0 && head.trim().length > 0 && !isSubmitting && !isGenerating;
-  const canGenerate = !isSubmitting && !isGenerating && Boolean(activeSessionId);
+  const sessionIsBusy = sessionStatus === "running" || sessionStatus === "waiting_approval";
+  const canGenerate = !isSubmitting && !isGenerating && Boolean(activeSessionId) && !sessionIsBusy;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -485,6 +488,10 @@ function OpenPrSection({
     try {
       if (!activeSessionId) {
         setGenerateError("Select an active session before generating a PR description.");
+        return;
+      }
+      if (sessionStatus === "running" || sessionStatus === "waiting_approval") {
+        setGenerateError("Cannot generate while the session is busy. Wait for the current turn to finish.");
         return;
       }
 
@@ -773,6 +780,7 @@ export function ChangesPanel() {
             sessionTitle={activeSessionTitle}
             activeSessionId={activeSessionId}
             sessionMessages={activeSession?.messages ?? []}
+            sessionStatus={activeSession?.status}
           />
         </>
       ) : null}
