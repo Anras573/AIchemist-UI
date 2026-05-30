@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useId, type FormEvent } from "react";
+import { useState, useCallback, useEffect, useId, useRef, type FormEvent } from "react";
 import {
   RefreshCw,
   ChevronDown,
@@ -10,9 +10,9 @@ import {
 } from "lucide-react";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import { useIpc } from "@/lib/ipc";
+import { IPC_CHANNELS, onSessionEvent, useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
-import type { FileChange } from "@/types";
+import type { FileChange, Message, SessionDeltaEvent } from "@/types";
 import { CodeBlock } from "@/components/ai-elements/code-block";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,6 +91,39 @@ interface GitFileEntry {
   relativePath: string;
   diff: string;
   isUntracked: boolean;
+}
+
+const DEFAULT_PR_DESCRIPTION_HISTORY_LIMIT = 10;
+const PR_DESCRIPTION_HISTORY_LIMIT_STORAGE_KEY = "aichemist.prDescriptionHistoryLimit";
+const PR_TEMPLATE_CANDIDATE_PATHS = [
+  ".github/PULL_REQUEST_TEMPLATE.md",
+  ".github/pull_request_template.md",
+  "PULL_REQUEST_TEMPLATE.md",
+  "pull_request_template.md",
+  "docs/PULL_REQUEST_TEMPLATE.md",
+  "docs/pull_request_template.md",
+];
+
+function parsePositiveInt(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function formatRecentMessages(messages: Message[], count: number): string {
+  if (messages.length === 0) return "(no prior messages)";
+  return messages
+    .slice(-count)
+    .map((message, index) => `Message ${index + 1} (${message.role}):\n${message.content}`)
+    .join("\n\n");
+}
+
+async function readPullRequestTemplate(ipc: ReturnType<typeof useIpc>, projectPath: string): Promise<string | null> {
+  for (const relativePath of PR_TEMPLATE_CANDIDATE_PATHS) {
+    const result = await ipc.readFile(`${projectPath}/${relativePath}`);
+    if ("content" in result && result.content.trim()) return result.content;
+  }
+  return null;
 }
 
 function parseGitDiff(raw: string): GitFileEntry[] {
@@ -252,9 +285,13 @@ function GitDiffSection({ projectPath }: { projectPath: string }) {
 function OpenPrSection({
   projectPath,
   sessionTitle,
+  activeSessionId,
+  sessionMessages,
 }: {
   projectPath: string;
   sessionTitle: string | null;
+  activeSessionId: string | null;
+  sessionMessages: Message[];
 }) {
   const ipc = useIpc();
   const formId = useId();
@@ -275,9 +312,14 @@ function OpenPrSection({
   const [head, setHead] = useState("");
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const [createdPrUrl, setCreatedPrUrl] = useState<string | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const cancelGenerateRef = useRef(false);
+  const initialDescriptionRef = useRef("");
+  const generatedDescriptionRef = useRef("");
 
   useEffect(() => {
     let cancelled = false;
@@ -340,16 +382,20 @@ function OpenPrSection({
     setHead(defaultHeadBranch ?? "");
     setDescription("");
     setError(null);
+    setGenerateError(null);
     setCreatedPrUrl(null);
     setIsOpen(true);
   };
 
   const closeForm = () => {
+    cancelGenerateRef.current = true;
     setIsOpen(false);
     setIsSubmitting(false);
+    setIsGenerating(false);
   };
 
   const canSubmit = title.trim().length > 0 && head.trim().length > 0 && !isSubmitting;
+  const canGenerate = !isSubmitting && !isGenerating;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -378,6 +424,72 @@ function OpenPrSection({
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const cancelGeneration = () => {
+    cancelGenerateRef.current = true;
+    setDescription(initialDescriptionRef.current);
+    setIsGenerating(false);
+    setGenerateError(null);
+  };
+
+  const generateDescription = async () => {
+    if (!activeSessionId) {
+      setGenerateError("Select an active session before generating a PR description.");
+      return;
+    }
+
+    setGenerateError(null);
+    setError(null);
+
+    const gitDiffResult = await ipc.getGitDiff(projectPath);
+    if (typeof gitDiffResult !== "string") {
+      setGenerateError(gitDiffResult.error);
+      return;
+    }
+
+    const historyLimit = parsePositiveInt(window.localStorage.getItem(PR_DESCRIPTION_HISTORY_LIMIT_STORAGE_KEY))
+      ?? DEFAULT_PR_DESCRIPTION_HISTORY_LIMIT;
+    const recentMessages = formatRecentMessages(sessionMessages, historyLimit);
+    const pullRequestTemplate = await readPullRequestTemplate(ipc, projectPath);
+
+    const prompt = [
+      "System instruction: Draft a concise pull request title and markdown body.",
+      "Return markdown only. Start with a single line title, then a blank line, then the body.",
+      pullRequestTemplate
+        ? `Follow this pull request template structure exactly (keep headings):\n\n${pullRequestTemplate}`
+        : "No pull request template was found. Use a short summary and concise bullet points.",
+      `Recent conversation messages (last ${historyLimit}):\n\n${recentMessages}`,
+      `Project diff (git diff HEAD):\n\n\`\`\`diff\n${gitDiffResult}\n\`\`\``,
+    ].join("\n\n---\n\n");
+
+    initialDescriptionRef.current = description;
+    generatedDescriptionRef.current = "";
+    cancelGenerateRef.current = false;
+    setDescription("");
+    setIsGenerating(true);
+
+    const unsubscribe = onSessionEvent<SessionDeltaEvent>(IPC_CHANNELS.SESSION_DELTA, (payload) => {
+      if (payload.session_id !== activeSessionId || cancelGenerateRef.current) return;
+      generatedDescriptionRef.current += payload.text_delta;
+      setDescription(generatedDescriptionRef.current);
+    });
+
+    try {
+      await ipc.agentSend({
+        sessionId: activeSessionId,
+        prompt,
+        agent: undefined,
+      });
+    } catch (e) {
+      if (!cancelGenerateRef.current) {
+        setGenerateError(e instanceof Error ? e.message : String(e));
+        setDescription(initialDescriptionRef.current);
+      }
+    } finally {
+      unsubscribe();
+      setIsGenerating(false);
     }
   };
 
@@ -449,9 +561,27 @@ function OpenPrSection({
           </div>
 
           <div className="flex flex-col gap-1">
-            <label htmlFor={descriptionInputId} className="text-xs text-muted-foreground">
-              Description
-            </label>
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor={descriptionInputId} className="text-xs text-muted-foreground">
+                Description
+              </label>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={!isGenerating && !canGenerate}
+                onClick={isGenerating ? cancelGeneration : generateDescription}
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Cancel
+                  </>
+                ) : (
+                  "✨ Generate"
+                )}
+              </Button>
+            </div>
             <Textarea
               id={descriptionInputId}
               value={description}
@@ -459,6 +589,10 @@ function OpenPrSection({
               placeholder="Optional PR description"
             />
           </div>
+
+          {generateError && (
+            <p className="text-xs text-red-400 bg-red-950/30 rounded px-2 py-1">{generateError}</p>
+          )}
 
           {!head.trim() && (
             <p className="text-xs text-amber-300">
@@ -560,6 +694,8 @@ export function ChangesPanel() {
             key={workspacePath}
             projectPath={workspacePath}
             sessionTitle={activeSessionTitle}
+            activeSessionId={activeSessionId}
+            sessionMessages={activeSession?.messages ?? []}
           />
         </>
       ) : null}
