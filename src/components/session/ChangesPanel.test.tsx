@@ -650,4 +650,46 @@ describe("ChangesPanel Open PR flow", () => {
     expect(await screen.findByText("Generation failed")).toBeInTheDocument();
     expect(textarea).toHaveValue("Keep this text");
   });
+
+  it("disables Generate button and shows error when session is running", async () => {
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+      status: "running",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+
+    const generateButton = await screen.findByRole("button", { name: /generate/i });
+    expect(generateButton).toBeDisabled();
+  });
+
+  it("rejects generateDescription call when session becomes busy between render and click", async () => {
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    const session = makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    });
+    useSessionStore.getState().addSession(session);
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+
+    useSessionStore.getState().updateSessionStatus("sess-pr", "running");
+
+    const generateButton = await screen.findByRole("button", { name: /generate/i });
+    fireEvent.click(generateButton);
+
+    expect(window.electronAPI.agentSend).not.toHaveBeenCalled();
+  });
 });
