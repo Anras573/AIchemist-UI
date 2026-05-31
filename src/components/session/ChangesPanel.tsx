@@ -488,7 +488,10 @@ function OpenPrSection({
   };
 
   const generateDescription = async () => {
-    if (generateInFlightRef.current) return;
+    if (generateInFlightRef.current) {
+      setGenerateError("A generation is still in progress. Please wait for it to complete.");
+      return;
+    }
     generateInFlightRef.current = true;
     try {
       if (!activeSessionId) {
@@ -503,9 +506,18 @@ function OpenPrSection({
       setGenerateError(null);
       setError(null);
 
-      const gitDiffResult = await ipc.getGitDiff(projectPath);
-      if (typeof gitDiffResult !== "string") {
-        setGenerateError(gitDiffResult.error);
+      let gitDiffText: string;
+      let pullRequestTemplate: string | null;
+      try {
+        const gitDiffResult = await ipc.getGitDiff(projectPath);
+        if (typeof gitDiffResult !== "string") {
+          setGenerateError(gitDiffResult.error);
+          return;
+        }
+        gitDiffText = gitDiffResult;
+        pullRequestTemplate = await readPullRequestTemplate(ipc, projectPath);
+      } catch (e) {
+        setGenerateError(e instanceof Error ? e.message : String(e));
         return;
       }
 
@@ -515,16 +527,15 @@ function OpenPrSection({
         MAX_PR_DESCRIPTION_HISTORY_LIMIT
       );
       const recentMessages = formatRecentMessages(sessionMessages, historyLimit);
-      const pullRequestTemplate = await readPullRequestTemplate(ipc, projectPath);
       const { text: gitDiffForPrompt, truncated: isDiffTruncated } = truncateForPrompt(
-        gitDiffResult,
+        gitDiffText,
         MAX_PR_DESCRIPTION_DIFF_CHARS
       );
       const diffLabel = isDiffTruncated
         ? `Project diff (git diff HEAD, truncated to ${MAX_PR_DESCRIPTION_DIFF_CHARS} chars):`
         : "Project diff (git diff HEAD):";
       const diffTruncationNote = isDiffTruncated
-        ? `\n\nNOTE: Diff was truncated from ${gitDiffResult.length} chars.`
+        ? `\n\nNOTE: Diff was truncated from ${gitDiffText.length} chars.`
         : "";
 
       const prompt = [
