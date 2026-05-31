@@ -576,6 +576,7 @@ function OpenPrSection({
           sessionId: activeSessionId,
           prompt,
           agent: undefined,
+          skipPersistence: true,
         });
         if (!cancelGenerateRef.current) {
           const { title: generatedTitle, body } = parseGeneratedPrDraft(generatedDescriptionRef.current);
@@ -805,7 +806,7 @@ export function ChangesPanel() {
         <>
           <div className="border-t" />
           <OpenPrSection
-            key={workspacePath}
+            key={`${workspacePath}:${activeSessionId}`}
             projectPath={workspacePath}
             sessionTitle={activeSessionTitle}
             activeSessionId={activeSessionId}
