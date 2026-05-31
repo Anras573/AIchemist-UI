@@ -126,17 +126,22 @@ function parseGeneratedPrDraft(raw: string): { title: string | null; body: strin
   if (!trimmed) return { title: null, body: "" };
 
   const lines = trimmed.split("\n");
-  const firstLine = lines[0]?.trim() ?? "";
-  const title = firstLine
+
+  // Scan for the first "Title:" marker — ignore any model preamble before it.
+  const titleLineIndex = lines.findIndex((l) => /^title\s*:/i.test(l.trim()));
+  if (titleLineIndex === -1) return { title: null, body: trimmed };
+
+  const title = (lines[titleLineIndex]?.trim() ?? "")
     .replace(/^title\s*:\s*/i, "")
     .replace(/^#+\s*/, "")
     .trim();
 
-  let bodyStartIndex = 1;
+  // Skip blank lines after the title, then consume a "Body:" marker if present.
+  let bodyStartIndex = titleLineIndex + 1;
   while (bodyStartIndex < lines.length && (lines[bodyStartIndex] ?? "").trim() === "") {
     bodyStartIndex += 1;
   }
-  if ((lines[bodyStartIndex] ?? "").trim().toLowerCase() === "body:") {
+  if (/^body\s*:/i.test((lines[bodyStartIndex] ?? "").trim())) {
     bodyStartIndex += 1;
   }
   const body = lines.slice(bodyStartIndex).join("\n").trim();
