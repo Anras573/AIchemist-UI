@@ -64,7 +64,7 @@ export const ipc = {
   // Agent
   agentSend: (args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[] }) =>
     window.electronAPI.agentSend(args),
-  approveToolCall: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string; optionId?: string | null }) =>
+  approveToolCall: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) =>
     window.electronAPI.approveToolCall(sessionId, approvalId, approved, options),
   answerQuestion: (questionId: string, answer: string) =>
     window.electronAPI.answerQuestion(questionId, answer),

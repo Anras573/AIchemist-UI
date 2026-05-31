@@ -16,7 +16,7 @@ import { readSettings, writeSettings } from "./settings";
 import { parseDisabledProviders, isProviderId } from "./providers";
 import type { SettingsMap } from "./settings";
 import { cleanupManagedWorktree, createManagedWorktree, isGitRepo, resolveManagedWorktreeRoot } from "./worktree";
-import { resolveApproval, resolvePermissionChoice, getPendingApprovalData, addToSessionAllowlist, computeFingerprint, cancelSessionApprovals } from "./agent/approval";
+import { resolveApproval, getPendingApprovalData, addToSessionAllowlist, computeFingerprint, cancelSessionApprovals } from "./agent/approval";
 import { resolveQuestion, cancelSessionQuestions } from "./agent/question";
 import { runAgentTurn, getProvider } from "./agent/runner";
 import { cleanupCopilotSession } from "./agent/copilot";
@@ -987,9 +987,8 @@ function registerHandlers(): void {  // ── Terminal ────────
     const sessionSkills = session.skills ?? [];
     const oneshotSkills = args.oneshotSkills ?? [];
     const allSkills = [...new Set([...sessionSkills, ...oneshotSkills])];
-    const supportsSkills = effectiveConfig.provider !== "acp";
-    const agent = supportsSkills ? (args.agent ?? session.agent ?? undefined) : undefined;
-    const skills = supportsSkills && allSkills.length > 0 ? allSkills : undefined;
+    const agent = args.agent ?? session.agent ?? undefined;
+    const skills = allSkills.length > 0 ? allSkills : undefined;
 
     activeTurns.add(args.sessionId);
     try {
@@ -1171,8 +1170,6 @@ function registerHandlers(): void {  // ── Terminal ────────
       approved: boolean;
       scope?: "once" | "session" | "project";
       projectId?: string;
-      /** ACP option id when resolving an option-based (choice) approval. null = cancelled. */
-      optionId?: string | null;
     }) => {
       if (args.approved && args.scope && args.scope !== "once") {
         const data = getPendingApprovalData(args.approvalId);
@@ -1196,12 +1193,7 @@ function registerHandlers(): void {  // ── Terminal ────────
           }
         }
       }
-      // ACP option-based path (UI passes optionId, possibly null for cancel).
-      if (args.optionId !== undefined) {
-        resolvePermissionChoice(args.approvalId, args.optionId);
-      } else {
-        resolveApproval(args.approvalId, args.approved);
-      }
+      resolveApproval(args.approvalId, args.approved);
     }
   );
 

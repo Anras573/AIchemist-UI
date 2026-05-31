@@ -1,4 +1,3 @@
-import { Cable } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -49,7 +48,6 @@ import {
 import { QuestionCard } from "./QuestionCard";
 import { IssueLinkPicker } from "./IssueLinkPicker";
 import { useIpc } from "@/lib/ipc";
-import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 
 const EMPTY_COMPACTIONS: CompactionEvent[] = [];
 
@@ -137,21 +135,11 @@ interface ApprovalGateProps {
 function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
   const [decision, setDecision] = useState<ApprovalDecision>("pending");
   const [scope, setScope] = useState<ApprovalScope>("once");
-  const [chosenOptionName, setChosenOptionName] = useState<string | null>(null);
 
   function decide(approved: boolean, chosenScope: ApprovalScope) {
     setDecision(approved ? "approved" : "denied");
     setScope(chosenScope);
     onDecide(approval.approvalId, approved, chosenScope);
-  }
-
-  function decideOption(opt: { id: string; name: string; kind: string }) {
-    const isAllow = opt.kind === "allow_once" || opt.kind === "allow_always";
-    setDecision(isAllow ? "approved" : "denied");
-    setChosenOptionName(opt.name);
-    // Resolve through the existing pipeline; main process routes to resolvePermissionChoice
-    // when optionId is present in the IPC payload.
-    approval.resolve(isAllow, { optionId: opt.id });
   }
 
   const isPending = decision === "pending";
@@ -161,7 +149,6 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
     session: "for this session",
     project: "for this project",
   };
-  const hasOptions = (approval.permissionOptions?.length ?? 0) > 0;
 
   return (
     <div className="flex w-full justify-start">
@@ -173,24 +160,7 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
               <ToolInput input={approval.args} />
             )}
             {isPending ? (
-              hasOptions ? (
-                <div className="flex flex-wrap gap-2">
-                  {approval.permissionOptions!.map((opt) => {
-                    const isAllow = opt.kind === "allow_once" || opt.kind === "allow_always";
-                    return (
-                      <Button
-                        key={opt.id}
-                        variant={isAllow ? "outline" : "destructive"}
-                        size="sm"
-                        onClick={() => decideOption(opt)}
-                      >
-                        {opt.name}
-                      </Button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2">
                   <Button variant="outline" size="sm" onClick={() => decide(true, "once")}>
                     Allow once
                   </Button>
@@ -204,7 +174,6 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
                     Deny
                   </Button>
                 </div>
-              )
             ) : (
               <p className={cn(
                 "text-xs font-medium",
@@ -212,11 +181,9 @@ function ApprovalGate({ approval, onDecide }: ApprovalGateProps) {
                   ? "text-green-600 dark:text-green-400"
                   : "text-destructive"
               )}>
-                {chosenOptionName
-                  ? chosenOptionName
-                  : decision === "approved"
-                    ? `Allowed ${scopeLabel[scope]}`
-                    : "Denied"}
+                {decision === "approved"
+                  ? `Allowed ${scopeLabel[scope]}`
+                  : "Denied"}
               </p>
             )}
           </ToolContent>
@@ -272,15 +239,13 @@ export function EmptyStateNewSession({
   /** When provided, shows an optional issue picker. */
   projectPath?: string;
 }) {
-  const isAvailable = (p: "anthropic" | "copilot" | "acp" | "ollama"): boolean => {
+  const isAvailable = (p: "anthropic" | "copilot" | "ollama"): boolean => {
     if (!probes) return true; // still checking — keep enabled
-    const probe = p === "acp" ? probes.acp : probes[p];
-    return !probe || probe.ok;
+    return !probes[p] || probes[p].ok;
   };
-  const reasonFor = (p: "anthropic" | "copilot" | "acp" | "ollama"): string | undefined => {
+  const reasonFor = (p: "anthropic" | "copilot" | "ollama"): string | undefined => {
     if (!probes) return undefined;
-    const probe = p === "acp" ? probes.acp : probes[p];
-    return probe?.ok ? undefined : probe?.reason;
+    return probes[p]?.ok ? undefined : probes[p]?.reason;
   };
   // Pick a default that isn't disabled.
   const preferred =
@@ -288,13 +253,11 @@ export function EmptyStateNewSession({
       ? "copilot"
       : defaultProvider === "ollama"
         ? "ollama"
-      : defaultProvider === "acp"
-        ? "acp"
         : "anthropic";
-  const initial: "anthropic" | "copilot" | "acp" | "ollama" = isAvailable(preferred as "anthropic" | "copilot" | "acp" | "ollama")
-    ? (preferred as "anthropic" | "copilot" | "acp" | "ollama")
-    : (["anthropic", "copilot", "ollama", "acp"] as const).find(isAvailable) ?? "anthropic";
-  const [selected, setSelected] = useState<"anthropic" | "copilot" | "acp" | "ollama">(initial);
+  const initial: "anthropic" | "copilot" | "ollama" = isAvailable(preferred as "anthropic" | "copilot" | "ollama")
+    ? (preferred as "anthropic" | "copilot" | "ollama")
+    : (["anthropic", "copilot", "ollama"] as const).find(isAvailable) ?? "anthropic";
+  const [selected, setSelected] = useState<"anthropic" | "copilot" | "ollama">(initial);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
 
   // Probes arrive asynchronously after mount. If the initial pick (or a later
@@ -304,14 +267,14 @@ export function EmptyStateNewSession({
   useEffect(() => {
     if (!probes) return;
     if (isAvailable(selected)) return;
-    const fallback = (["anthropic", "copilot", "ollama", "acp"] as const).find(isAvailable);
+    const fallback = (["anthropic", "copilot", "ollama"] as const).find(isAvailable);
     if (fallback && fallback !== selected) setSelected(fallback);
     // isAvailable is derived from `probes` which is in deps; selected is read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [probes, selected]);
 
   const renderRadio = (
-    p: "anthropic" | "copilot" | "acp" | "ollama",
+    p: "anthropic" | "copilot" | "ollama",
     label: string,
     icon: React.ReactNode,
   ) => {
@@ -363,7 +326,6 @@ export function EmptyStateNewSession({
         {renderRadio("anthropic", "Use Claude", <ModelSelectorLogo provider="anthropic" className="size-3.5" />)}
         {renderRadio("copilot", "Use Copilot", <ModelSelectorLogo provider="github-copilot" className="size-3.5" />)}
         {renderRadio("ollama", "Use Ollama", <ModelSelectorLogo provider="ollama" className="size-3.5" />)}
-        {renderRadio("acp", "Use ACP", <Cable className="size-3.5" />)}
       </div>
       {projectPath && (
         <IssueLinkPicker
@@ -557,9 +519,6 @@ function InputBarInner({
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
   const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
-  const effectiveProvider = useActiveSessionProvider();
-  const skillsSupported = effectiveProvider !== "acp";
-
   const [gitBranch, setGitBranch] = useState<string | null>(null);
 
   // Slash-command state
@@ -594,23 +553,13 @@ function InputBarInner({
 
   // Load skills lazily when the user first types "/"
   const ensureSkillsLoaded = useCallback(() => {
-    if (skills !== null || loadingSkills || !sessionPath || !skillsSupported) return;
+    if (skills !== null || loadingSkills || !sessionPath) return;
     setLoadingSkills(true);
     ipc.listSkills(sessionPath)
       .then(setSkills)
       .catch(() => setSkills([]))
       .finally(() => setLoadingSkills(false));
-  }, [skills, loadingSkills, sessionPath, ipc, skillsSupported]);
-
-  useEffect(() => {
-    if (!skillsSupported) {
-      setSkills([]);
-      setSlashBadges([]);
-      setLoadingSkills(false);
-    } else {
-      setSkills(null);
-    }
-  }, [skillsSupported]);
+  }, [skills, loadingSkills, sessionPath, ipc]);
 
   // Watch textarea value for slash trigger
   const textValue = controller.textInput.value;
@@ -628,8 +577,8 @@ function InputBarInner({
   }, [textValue, ensureSkillsLoaded]);
 
   const filteredItems = useMemo(
-    () => buildSlashItems(slashQuery, skillsSupported ? (skills ?? []) : []),
-    [slashQuery, skills, skillsSupported]
+    () => buildSlashItems(slashQuery, skills ?? []),
+    [slashQuery, skills]
   );
 
   // Select an item from the popover
@@ -643,7 +592,6 @@ function InputBarInner({
       controller.textInput.setInput(stripped);
 
       if (item.type === "skill") {
-        if (!skillsSupported) return;
         setSlashBadges((prev) =>
           prev.some((b) => b.name === item.skill.name) ? prev : [...prev, item.skill]
         );
@@ -673,7 +621,7 @@ function InputBarInner({
         }
       }
     },
-    [controller, onNewSession, activeSessionId, clearSessionMessages, skills, skillsSupported]
+    [controller, onNewSession, activeSessionId, clearSessionMessages, skills]
   );
 
   // Keyboard navigation while popover is open (capture phase so we beat the textarea)

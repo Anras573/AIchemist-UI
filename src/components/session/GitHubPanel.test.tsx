@@ -56,12 +56,12 @@ function deferred<T>() {
 }
 
 describe("GitHubPanel", () => {
-  it("shows provider-gated placeholder for ACP sessions", () => {
+  it("shows provider-gated placeholder for non-GitHub sessions (Ollama)", () => {
     useProjectStore.getState().addProject(makeProject({
-      id: "proj-acp",
+      id: "proj-ollama",
       config: {
-        provider: "acp",
-        model: "acp",
+        provider: "ollama",
+        model: "llama3.2",
         approval_mode: "custom",
         approval_rules: [],
         custom_tools: [],
@@ -69,11 +69,11 @@ describe("GitHubPanel", () => {
         create_worktree_per_session: false,
       },
     }));
-    useProjectStore.getState().setActiveProject("proj-acp");
+    useProjectStore.getState().setActiveProject("proj-ollama");
 
     renderWithProviders(<GitHubPanel />);
 
-    expect(screen.getByText(/not available for acp sessions/i)).toBeInTheDocument();
+    expect(screen.getByText(/not available for ollama sessions/i)).toBeInTheDocument();
     expect(window.electronAPI.githubListPrs).not.toHaveBeenCalled();
     expect(window.electronAPI.githubListIssues).not.toHaveBeenCalled();
   });

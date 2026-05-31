@@ -1,7 +1,7 @@
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 
-export type SessionProvider = "anthropic" | "copilot" | "acp" | "ollama";
+export type SessionProvider = "anthropic" | "copilot" | "ollama";
 
 /**
  * Returns the effective provider for the active session.
@@ -22,6 +22,6 @@ export function useActiveSessionProvider(): SessionProvider | null {
   );
 
   const raw = session?.provider ?? project?.config.provider ?? null;
-  if (raw === "anthropic" || raw === "copilot" || raw === "acp" || raw === "ollama") return raw;
+  if (raw === "anthropic" || raw === "copilot" || raw === "ollama") return raw;
   return null;
 }

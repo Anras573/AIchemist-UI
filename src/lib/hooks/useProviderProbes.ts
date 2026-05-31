@@ -3,14 +3,11 @@ import { ipc } from "@/lib/ipc";
 import type { ProviderProbes } from "@/types";
 
 /**
- * Fetches provider availability probes (Anthropic / Copilot / Ollama / ACP) and keeps
+ * Fetches provider availability probes (Anthropic / Copilot / Ollama) and keeps
  * them fresh on:
  *  - mount
  *  - window focus (the 30 s backend cache absorbs spurious focus events)
  *  - explicit `refresh()` from a UI button
- *
- * Pass `projectId` to include the per-project ACP probe; otherwise only
- * `anthropic`, `copilot`, and `ollama` are returned.
  */
 export function useProviderProbes(projectId?: string): {
   probes: ProviderProbes | null;
@@ -39,7 +36,6 @@ export function useProviderProbes(projectId?: string): {
           anthropic: { ok: false, reason: "Probe IPC failed" },
           copilot: { ok: false, reason: "Probe IPC failed" },
           ollama: { ok: false, reason: "Probe IPC failed" },
-          ...(projectId ? { acp: { ok: false, reason: "Probe IPC failed" } } : {}),
         });
       } finally {
         if (myGen === generation.current) setChecking(false);

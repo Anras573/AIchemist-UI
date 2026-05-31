@@ -5,7 +5,6 @@ export {
   ApprovalRuleSchema,
   AllowedToolSchema,
   ToolDefinitionSchema,
-  AcpAgentConfigSchema,
   ProjectConfigSchema,
 } from "./schemas";
 
@@ -13,7 +12,6 @@ export type {
   ApprovalRule,
   AllowedTool,
   ToolDefinition,
-  AcpAgentConfig,
   ProjectConfig,
 } from "./schemas";
 
@@ -21,7 +19,7 @@ import type { ProjectConfig } from "./schemas";
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
-export type Provider = "anthropic" | "copilot" | "acp" | "ollama";
+export type Provider = "anthropic" | "copilot" | "ollama";
 
 // ─── Provider availability ───────────────────────────────────────────────────
 
@@ -35,8 +33,6 @@ export interface ProviderProbes {
   anthropic: ProviderProbeResult;
   copilot: ProviderProbeResult;
   ollama: ProviderProbeResult;
-  /** Per-project — only present when the IPC call passed a projectId. */
-  acp?: ProviderProbeResult;
 }
 
 // ─── GitHub integration ────────────────────────────────────────────────────────
@@ -202,8 +198,6 @@ export interface Session {
   skills: string[] | null;
   /** Names of AIchemist-managed MCP servers disabled for this session. Null/empty/undefined means none disabled. */
   disabled_mcp_servers?: string[] | null;
-  /** ACP session id returned by the agent on session/new. Persisted for diagnostics; we do not resume in v1. */
-  acp_session_id?: string | null;
   /** GitHub issue number linked at session creation time. Null when no issue is linked. */
   github_issue_number?: number | null;
 }

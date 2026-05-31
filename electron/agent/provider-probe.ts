@@ -1,20 +1,14 @@
 /**
  * Provider availability probes.
  *
- * Lightweight liveness checks for the agent providers (Anthropic,
- * Copilot, Ollama, ACP) so the renderer can disable provider options that are not
- * usable on this machine (missing key, broken ACP subprocess, etc.) before
- * the user picks them.
+ * Lightweight liveness checks for the agent providers (Anthropic, Copilot, Ollama)
+ * so the renderer can disable provider options that are not usable on this machine
+ * (missing key, etc.) before the user picks them.
  *
  * Mirrors the pattern in `mcp-probe.ts`:
  *   - 30 s in-process cache
  *   - `force: true` bypasses the cache
  *   - Loaders for fetch / SDK are injectable test seams
- *
- * Anthropic and Copilot probes are global (process env). The ACP probe is
- * per-project — it requires `ProjectConfig.acp_agent` and reuses
- * `getOrCreateConnection()` so the warm subprocess is shared with the real
- * session that follows.
  */
 
 import * as fs from "fs";
@@ -22,8 +16,7 @@ import * as os from "os";
 import * as path from "path";
 import { copilotProvider } from "./copilot";
 import { ollamaProvider } from "./ollama";
-import { acpProbe } from "./acp";
-import type { AcpAgentConfig, ProjectConfig } from "../../src/types/index";
+import type { ProjectConfig } from "../../src/types/index";
 import { getApiKey } from "../config";
 
 export interface ProviderProbeResult {
@@ -39,15 +32,12 @@ export interface ProviderProbes {
   anthropic: ProviderProbeResult;
   copilot: ProviderProbeResult;
   ollama: ProviderProbeResult;
-  /** Only present when a projectId / projectConfig was supplied to probeAll(). */
-  acp?: ProviderProbeResult;
 }
 
 const CACHE_TTL_MS = 30_000;
 const ANTHROPIC_TIMEOUT_MS = 5_000;
 const COPILOT_TIMEOUT_MS = 5_000;
 const OLLAMA_TIMEOUT_MS = 5_000;
-const ACP_TIMEOUT_MS = 3_000;
 
 interface CacheEntry {
   result: ProviderProbeResult;
@@ -80,18 +70,6 @@ export function _setOllamaListModels(
   fn: (() => Promise<Array<{ id: string; name: string }>>) | null,
 ): void {
   ollamaListModels = fn ?? (async () => (await ollamaProvider.listModels?.()) ?? []);
-}
-
-/** Override the ACP probe (defaults to `acpProbe` re-exported from acp.ts). */
-let acpProbeImpl: (
-  projectPath: string,
-  cfg: AcpAgentConfig,
-  timeoutMs: number,
-) => Promise<{ ok: boolean; reason?: string }> = acpProbe;
-export function _setAcpProbe(
-  fn: ((projectPath: string, cfg: AcpAgentConfig, timeoutMs: number) => Promise<{ ok: boolean; reason?: string }>) | null,
-): void {
-  acpProbeImpl = fn ?? acpProbe;
 }
 
 export function _resetProviderProbeCache(): void {
@@ -321,70 +299,24 @@ export async function probeOllama(opts?: { force?: boolean }): Promise<ProviderP
   }
 }
 
-export async function probeAcpForProject(
-  projectPath: string,
-  config: ProjectConfig,
-  opts?: { force?: boolean },
-): Promise<ProviderProbeResult> {
-  const cfg = config.acp_agent;
-  if (!cfg || !cfg.command) {
-    return { ok: false, reason: "ACP agent not configured (set acp_agent.command in project settings)" };
-  }
-  // Cache key includes the agent fingerprint so config edits invalidate naturally.
-  const cacheKey = `acp:${projectPath}:${fingerprintAcp(cfg)}`;
-  const cached = cacheGet(cacheKey, opts?.force);
-  if (cached) return cached;
-
-  const start = Date.now();
-  try {
-    const probe = await acpProbeImpl(projectPath, cfg, ACP_TIMEOUT_MS);
-    const durationMs = Date.now() - start;
-    const result: ProviderProbeResult = { ...probe, durationMs };
-    cacheSet(cacheKey, result);
-    return result;
-  } catch (err) {
-    const result: ProviderProbeResult = {
-      ok: false,
-      reason: errMessage(err),
-      durationMs: Date.now() - start,
-    };
-    cacheSet(cacheKey, result);
-    return result;
-  }
-}
-
-/** Probe all providers in parallel; ACP is included only when `project` is supplied. */
+/** Probe all providers in parallel. */
 export async function probeAll(
-  project?: { path: string; config: ProjectConfig },
-  opts?: { force?: boolean; disabled?: ReadonlySet<"anthropic" | "copilot" | "acp" | "ollama"> },
+  _project?: { path: string; config: ProjectConfig },
+  opts?: { force?: boolean; disabled?: ReadonlySet<"anthropic" | "copilot" | "ollama"> },
 ): Promise<ProviderProbes> {
-  const disabled = opts?.disabled ?? new Set<"anthropic" | "copilot" | "acp" | "ollama">();
+  const disabled = opts?.disabled ?? new Set<"anthropic" | "copilot" | "ollama">();
   const userDisabled = (): ProviderProbeResult => ({
     ok: false,
     reason: "Disabled in settings",
     durationMs: 0,
   });
 
-  const anthropicTask: Promise<ProviderProbeResult> = disabled.has("anthropic")
-    ? Promise.resolve(userDisabled())
-    : probeAnthropic(opts);
-  const copilotTask: Promise<ProviderProbeResult> = disabled.has("copilot")
-    ? Promise.resolve(userDisabled())
-    : probeCopilot(opts);
-  const ollamaTask: Promise<ProviderProbeResult> = disabled.has("ollama")
-    ? Promise.resolve(userDisabled())
-    : probeOllama(opts);
-
-  if (!project) {
-    const [anthropic, copilot, ollama] = await Promise.all([anthropicTask, copilotTask, ollamaTask]);
-    return { anthropic, copilot, ollama };
-  }
-
-  const acpTask: Promise<ProviderProbeResult> = disabled.has("acp")
-    ? Promise.resolve(userDisabled())
-    : probeAcpForProject(project.path, project.config, opts);
-  const [anthropic, copilot, ollama, acp] = await Promise.all([anthropicTask, copilotTask, ollamaTask, acpTask]);
-  return { anthropic, copilot, ollama, acp };
+  const [anthropic, copilot, ollama] = await Promise.all([
+    disabled.has("anthropic") ? Promise.resolve(userDisabled()) : probeAnthropic(opts),
+    disabled.has("copilot") ? Promise.resolve(userDisabled()) : probeCopilot(opts),
+    disabled.has("ollama") ? Promise.resolve(userDisabled()) : probeOllama(opts),
+  ]);
+  return { anthropic, copilot, ollama };
 }
 
 // ── Internals ─────────────────────────────────────────────────────────────────
@@ -394,13 +326,3 @@ function errMessage(err: unknown): string {
   return String(err);
 }
 
-function fingerprintAcp(cfg: AcpAgentConfig): string {
-  // Order-stable serialization of fields that affect subprocess identity.
-  return JSON.stringify({
-    command: cfg.command,
-    args: cfg.args ?? [],
-    env: cfg.env ?? {},
-    cwd: cfg.cwd ?? "",
-    auth_method_id: cfg.auth_method_id ?? "",
-  });
-}

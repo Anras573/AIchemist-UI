@@ -108,7 +108,7 @@ function mapGitHubError(rawError: unknown): string {
 /**
  * Lists open GitHub PRs and issues for the project's repository.
  * Fetches on mount and provides a refresh button.
- * Shows "not available" placeholder for ACP sessions.
+ * Shows "not available" placeholder for non-GitHub sessions.
  */
 export function GitHubPanel({}: GitHubPanelProps) {
   const ipc = useIpc();

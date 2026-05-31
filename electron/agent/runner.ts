@@ -5,7 +5,6 @@ import * as CH from "../ipc-channels";
 import { createPlaceholderMessage, updateMessageContent, loadToolCallsForMessage, updateSessionStatus } from "../sessions";
 import { claudeProvider } from "./claude";
 import { copilotProvider } from "./copilot";
-import { acpProvider } from "./acp";
 import { ollamaProvider } from "./ollama";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 
@@ -14,7 +13,6 @@ import type { AgentProvider, AgentProviderParams } from "./provider";
 const PROVIDERS: Record<string, AgentProvider> = {
   anthropic: claudeProvider,
   copilot: copilotProvider,
-  acp: acpProvider,
   ollama: ollamaProvider,
 };
 
