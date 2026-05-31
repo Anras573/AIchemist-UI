@@ -215,8 +215,9 @@ export async function runCopilotAgentTurn(params: {
   webContents: Electron.WebContents;
   agent?: string;
   skills?: string[];
+  noTools?: boolean;
 }): Promise<string> {
-  const { db, sessionId, messageId, prompt, projectPath, projectConfig, webContents, agent, skills } = params;
+  const { db, sessionId, messageId, prompt, projectPath, projectConfig, webContents, agent, skills, noTools } = params;
 
   const { defineTool } = await import("@github/copilot-sdk");
 
@@ -488,22 +489,28 @@ export async function runCopilotAgentTurn(params: {
   // SDK session (resumeSession does NOT honour an updated mcpServers map).
   // Per-session disabled servers are filtered out BEFORE fingerprinting so
   // toggling a server off naturally invalidates the cached SDK session.
-  const managedMcpRaw = loadManagedMcpServers({
-    excludeNames: new Set(getDisabledMcpServers(db, sessionId)),
-  });
+  // Skipped entirely when noTools is true (text-only generation turns).
+  const managedMcpRaw = noTools
+    ? {}
+    : loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) });
   const mcpFingerprint = fingerprintManaged(managedMcpRaw);
 
   const sessionConfig = {
     model: projectConfig.model,
     streaming: true,
     workingDirectory: projectPath,
-    tools: [writeFileTool, deleteFileTool, executeBashTool, webFetchTool, askUserTool],
-    onPermissionRequest,
+    // When noTools is true, omit all custom tool definitions and block all
+    // built-in CLI tool permissions so the model cannot perform side-effects.
+    tools: noTools ? [] : [writeFileTool, deleteFileTool, executeBashTool, webFetchTool, askUserTool],
+    onPermissionRequest: noTools
+      ? () => Promise.resolve({ kind: "reject" as const })
+      : onPermissionRequest,
     ...(systemMessageContent ? { systemMessage: { mode: systemMessageMode, content: systemMessageContent } } : {}),
     ...(customAgents.length > 0 ? { customAgents } : {}),
     // AIchemist-managed MCP servers (~/.aichemist/mcp.json), injected per-session
     // so they don't pollute Copilot CLI's global ~/.copilot/mcp-config.json.
-    ...(Object.keys(managedMcpRaw).length > 0
+    // Omitted when noTools is true.
+    ...(!noTools && Object.keys(managedMcpRaw).length > 0
       ? { mcpServers: toCopilotMcpServers(managedMcpRaw) }
       : {}),
   };

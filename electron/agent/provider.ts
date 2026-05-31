@@ -15,6 +15,12 @@ export interface AgentProviderParams {
   agent?: string;
   /** Active skill names to inject into the system prompt. */
   skills?: string[];
+  /**
+   * When true, the provider must not register or invoke any tools (filesystem,
+   * shell, web, MCP, etc.). Use for text-only generation turns such as PR draft
+   * generation where side-effects must be prevented.
+   */
+  noTools?: boolean;
 }
 
 /**
