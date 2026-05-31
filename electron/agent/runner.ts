@@ -39,8 +39,9 @@ export async function runAgentTurn(params: {
   webContents: Electron.WebContents;
   agent?: string;
   skills?: string[];
+  skipPersistence?: boolean;
 }): Promise<void> {
-  const { db, sessionId, prompt, projectPath, projectConfig, webContents, agent, skills } = params;
+  const { db, sessionId, prompt, projectPath, projectConfig, webContents, agent, skills, skipPersistence } = params;
 
   webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "running" });
   updateSessionStatus(db, sessionId, "running");
@@ -64,15 +65,22 @@ export async function runAgentTurn(params: {
     const provider = getProvider(projectConfig.provider);
     const fullText = await provider.run(providerParams);
 
-    const toolCalls = loadToolCallsForMessage(db, placeholderMsg.id);
-    if (fullText.trim() || toolCalls.length > 0) {
-      updateMessageContent(db, placeholderMsg.id, fullText);
-      webContents.send(CH.SESSION_MESSAGE, {
-        session_id: sessionId,
-        message: { ...placeholderMsg, content: fullText, tool_calls: toolCalls },
-      });
-    } else {
+    if (skipPersistence) {
+      // Side-effect-free run (e.g. PR description generation): discard the
+      // placeholder and never emit SESSION_MESSAGE so no orphaned assistant
+      // message appears in the chat history.
       db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);
+    } else {
+      const toolCalls = loadToolCallsForMessage(db, placeholderMsg.id);
+      if (fullText.trim() || toolCalls.length > 0) {
+        updateMessageContent(db, placeholderMsg.id, fullText);
+        webContents.send(CH.SESSION_MESSAGE, {
+          session_id: sessionId,
+          message: { ...placeholderMsg, content: fullText, tool_calls: toolCalls },
+        });
+      } else {
+        db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);
+      }
     }
 
     webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "idle" });

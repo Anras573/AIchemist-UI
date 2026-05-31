@@ -966,7 +966,7 @@ function registerHandlers(): void {  // ── Terminal ────────
   });
 
   // ── Agent ─────────────────────────────────────────────────────────────────────
-  handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[] }) => {
+  handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[]; skipPersistence?: boolean }) => {
     const win = getMainWindow();
     if (!win) throw new Error("No window available");
 
@@ -1028,6 +1028,7 @@ function registerHandlers(): void {  // ── Terminal ────────
         webContents: win.webContents,
         agent,
         skills,
+        skipPersistence: args.skipPersistence,
       });
     } finally {
       activeTurns.delete(args.sessionId);
