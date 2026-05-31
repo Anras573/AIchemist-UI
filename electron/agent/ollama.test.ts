@@ -9,7 +9,7 @@ vi.mock("ollama", () => ({
   Ollama: vi.fn(),
 }));
 
-vi.mock("./mcp-bridge", () => ({
+vi.mock("../mcp/approval", () => ({
   createManagedMcpBridge: vi.fn(),
 }));
 
@@ -39,7 +39,7 @@ function makeTempProject(): string {
 
 async function loadMocks(): Promise<OllamaMockState> {
   const ollamaModule = await import("ollama");
-  const bridgeModule = await import("./mcp-bridge");
+  const bridgeModule = await import("../mcp/approval");
   return {
     list: ollamaModule.default.list as OllamaMockState["list"],
     chat: ollamaModule.default.chat as OllamaMockState["chat"],

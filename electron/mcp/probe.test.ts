@@ -5,8 +5,8 @@ import {
   _resetProbeCache,
   _setSdkLoader,
   type ProbeResult,
-} from "./mcp-probe";
-import type { McpServersMap } from "../mcp-config";
+} from "./probe";
+import type { McpServersMap } from "./config";
 
 interface StubOpts {
   listToolsResult?: { tools: { name: string }[] };

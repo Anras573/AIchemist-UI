@@ -13,7 +13,7 @@ import { createApprovalMcpServer } from "./mcp-tools";
 import {
   loadManagedMcpServers,
   toClaudeMcpServers,
-} from "./mcp-managed";
+} from "../mcp";
 import { buildSkillsContext } from "./skills";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
 import { requestApproval, requiresApproval } from "./approval";

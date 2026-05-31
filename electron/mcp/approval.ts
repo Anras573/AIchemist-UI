@@ -1,5 +1,5 @@
 import * as crypto from "crypto";
-import type { McpServerEntry, McpServersMap } from "../mcp-config";
+import type { McpServerEntry, McpServersMap } from "./config";
 
 interface SdkModules {
   Client: new (info: unknown, opts: unknown) => {

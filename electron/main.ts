@@ -48,8 +48,7 @@ import {
 } from "./copilot-transcript";
 import type { ProjectConfig, Provider } from "../src/types/index";
 import { parseMcpListOutput, readCopilotMcpServers, readAichemistMcpServers, mergeMcpServers } from "./mcp-utils";
-import { loadManagedMcpServers } from "./agent/mcp-managed";
-import { probeManagedServers } from "./agent/mcp-probe";
+import { loadManagedMcpServers, probeManagedServers } from "./mcp";
 import { probeAll } from "./agent/provider-probe";
 import {
   readMcpServers as readMcpServersConfig,
@@ -57,7 +56,7 @@ import {
   deleteMcpServer as deleteMcpServerConfig,
   type McpScope,
   type McpServersMap,
-} from "./mcp-config";
+} from "./mcp";
 import type { McpServerInfo } from "../src/types/index";
 
 // ── Prevent multiple instances ───────────────────────────────────────────────
