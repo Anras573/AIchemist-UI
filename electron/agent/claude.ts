@@ -267,13 +267,16 @@ export async function runClaudeAgentTurn(params: {
   webContents: Electron.WebContents;
   agent?: string;
   skills?: string[];
+  noTools?: boolean;
 }): Promise<string> {
-  const { db, sessionId, messageId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent, skills } =
+  const { db, sessionId, messageId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent, skills, noTools } =
     params;
 
-  // 1. Create the in-process MCP server (approval-gated custom tools)
-  const mcpServer: McpSdkServerConfigWithInstance =
-    await createApprovalMcpServer(webContents, sessionId, projectConfig, projectPath, db, messageId);
+  // 1. Create the in-process MCP server (approval-gated custom tools).
+  //    Skipped when noTools is true (text-only generation turns).
+  const mcpServer: McpSdkServerConfigWithInstance | null = noTools
+    ? null
+    : await createApprovalMcpServer(webContents, sessionId, projectConfig, projectPath, db, messageId);
 
   // 2. Resolve model — agent file can override the project model
   let effectiveModel = resolveModel(projectConfig.model);
@@ -329,59 +332,68 @@ export async function runClaudeAgentTurn(params: {
       resume: sdkSessionId ?? undefined,
       model: effectiveModel,
       cwd: projectPath,
-      // Spread managed servers FIRST, then aichemist-tools — guarantees the
-      // built-in approval-gated tools cannot be displaced by a managed entry
-      // (loadManagedMcpServers also strips that name defensively).
-      // Per-session disabled set is applied at load time so the next turn
-      // simply omits the user-disabled servers — Claude takes mcpServers
-      // fresh per query() call, no cache invalidation needed.
-      mcpServers: {
-        ...toClaudeMcpServers(
-          loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) }),
-        ),
-        "aichemist-tools": mcpServer,
-      },
-      settingSources: ["local", "user", "project"],
-      permissionMode: "acceptEdits",
+      // When noTools is true (text-only generation): pass empty mcpServers and
+      // restrict built-in tools to none so the model cannot perform side-effects.
       // ⚠️  SDK naming trap:
       //   allowedTools = "auto-approve these without a permission prompt" (does NOT restrict availability)
-      //   tools        = "restrict to ONLY these built-in tools" (also blocks our MCP tools — don't use)
-      // We use allowedTools to suppress interactive prompts for safe native tools (Read, Glob, etc.)
-      // while letting the model still access all MCP tools from our custom server.
-      // File changes from native Write/Edit are tracked via the tool_use intercept below.
-      allowedTools: ["Read", "Glob", "LS", "Skill", "Agent"],
+      //   tools        = "restrict to ONLY these built-in tools" (also blocks our MCP tools — use for noTools)
+      ...(noTools
+        ? {
+            mcpServers: {},
+            tools: [],
+          }
+        : {
+            // Spread managed servers FIRST, then aichemist-tools — guarantees the
+            // built-in approval-gated tools cannot be displaced by a managed entry
+            // (loadManagedMcpServers also strips that name defensively).
+            // Per-session disabled set is applied at load time so the next turn
+            // simply omits the user-disabled servers — Claude takes mcpServers
+            // fresh per query() call, no cache invalidation needed.
+            mcpServers: {
+              ...toClaudeMcpServers(
+                loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) }),
+              ),
+              // mcpServer is non-null here (only null when noTools is true)
+              "aichemist-tools": mcpServer!,
+            },
+            // We use allowedTools to suppress interactive prompts for safe native
+            // tools (Read, Glob, etc.) while letting the model access all MCP tools.
+            // File changes from native Write/Edit are tracked via the tool_use intercept.
+            allowedTools: ["Read", "Glob", "LS", "Skill", "Agent"],
+            // ── Pre-tool hook: approval gate for native Claude Code tools ──────
+            // MCP tools handle approval inside mcp-tools.ts. This hook covers
+            // native SDK tools that bypass the MCP server (Write, Edit, Bash, etc.).
+            hooks: {
+              PreToolUse: [
+                {
+                  hooks: [
+                    async (input: unknown) => {
+                      const { tool_name, tool_input } = input as { tool_name: string; tool_input: unknown };
+                      // MCP tools use their own approval gate — skip
+                      if (tool_name.startsWith("mcp__")) {
+                        return { decision: "approve" as const };
+                      }
+                      const category = getNativeToolCategory(tool_name);
+                      if (!category) return { decision: "approve" as const };
+                      if (!requiresApproval(sessionId, projectConfig, category, tool_name, tool_input)) {
+                        return { decision: "approve" as const };
+                      }
+                      const approved = await requestApproval(webContents, sessionId, tool_name, tool_input);
+                      return approved
+                        ? { decision: "approve" as const }
+                        : { decision: "block" as const, reason: "Denied by user." };
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+      settingSources: ["local", "user", "project"],
+      permissionMode: "acceptEdits",
       includePartialMessages: true,
       systemPrompt,
       ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
       ...(sdkAgent ? { agent: sdkAgent } : {}),
-      // ── Pre-tool hook: approval gate for native Claude Code tools ──────────
-      // MCP tools (write_file, delete_file, execute_bash, web_fetch) handle
-      // approval inside mcp-tools.ts. This hook covers native SDK tools that
-      // bypass the MCP server (Write, Edit, Bash, WebFetch, etc.).
-      hooks: {
-        PreToolUse: [
-          {
-            hooks: [
-              async (input: unknown) => {
-                const { tool_name, tool_input } = input as { tool_name: string; tool_input: unknown };
-                // MCP tools use their own approval gate — skip
-                if (tool_name.startsWith("mcp__")) {
-                  return { decision: "approve" as const };
-                }
-                const category = getNativeToolCategory(tool_name);
-                if (!category) return { decision: "approve" as const };
-                if (!requiresApproval(sessionId, projectConfig, category, tool_name, tool_input)) {
-                  return { decision: "approve" as const };
-                }
-                const approved = await requestApproval(webContents, sessionId, tool_name, tool_input);
-                return approved
-                  ? { decision: "approve" as const }
-                  : { decision: "block" as const, reason: "Denied by user." };
-              },
-            ],
-          },
-        ],
-      },
     },
   });
 

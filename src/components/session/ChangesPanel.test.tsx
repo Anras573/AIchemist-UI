@@ -742,6 +742,50 @@ describe("ChangesPanel Open PR flow", () => {
     });
   });
 
+  it("parses title/body correctly when model uses markdown heading markers", async () => {
+    let resolveSend: (() => void) | undefined;
+    window.electronAPI.agentSend = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.on).toHaveBeenCalledWith("session:delta", expect.any(Function));
+    });
+    const deltaListener = vi
+      .mocked(window.electronAPI.on)
+      .mock.calls
+      .filter(([channel]) => channel === "session:delta")
+      .at(-1)?.[1] as ((payload: { session_id: string; text_delta: string }) => void) | undefined;
+
+    // Model emits markdown heading-style markers: "## Title:" and "## Body:"
+    deltaListener?.({
+      session_id: "sess-pr",
+      text_delta: "## Title: Add markdown heading support\n\n## Body:\n- updated parser",
+    });
+
+    resolveSend?.();
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("PR title")).toHaveValue("Add markdown heading support");
+      expect(screen.getByPlaceholderText("Optional PR description")).toHaveValue("- updated parser");
+    });
+  });
+
   it("disables Generate button and shows error when session is running", async () => {
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
     useSessionStore.getState().addSession(makeSession("sess-pr", {

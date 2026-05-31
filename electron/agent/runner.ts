@@ -59,6 +59,9 @@ export async function runAgentTurn(params: {
     webContents,
     agent,
     skills,
+    // When skipPersistence is enabled (e.g. PR description generation), disable
+    // all tool access so the model cannot perform filesystem/shell side-effects.
+    noTools: !!skipPersistence,
   };
 
   try {
@@ -66,7 +69,7 @@ export async function runAgentTurn(params: {
     const fullText = await provider.run(providerParams);
 
     if (skipPersistence) {
-      // Side-effect-free run (e.g. PR description generation): discard the
+      // No-persistence run (e.g. PR description generation): discard the
       // placeholder and never emit SESSION_MESSAGE so no orphaned assistant
       // message appears in the chat history.
       db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);

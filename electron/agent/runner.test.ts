@@ -71,4 +71,51 @@ describe("runAgentTurn skipPersistence", () => {
     expect(deleteRun).toHaveBeenCalledWith("msg-1");
     expect(loadToolCallsForMessageMock).not.toHaveBeenCalled();
   });
+
+  it("passes noTools: true to the provider when skipPersistence is enabled", async () => {
+    copilotRunMock.mockResolvedValueOnce("draft text");
+
+    const deleteRun = vi.fn();
+    const db = {
+      prepare: vi.fn().mockReturnValue({ run: deleteRun }),
+    };
+    const webContents = { send: vi.fn() };
+
+    await runAgentTurn({
+      db: db as any,
+      sessionId: "sess-1",
+      prompt: "draft a PR",
+      projectPath: "/project",
+      projectConfig: { provider: "copilot" } as any,
+      webContents: webContents as any,
+      skipPersistence: true,
+    });
+
+    expect(copilotRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({ noTools: true })
+    );
+  });
+
+  it("passes noTools: false to the provider for normal (non-skipPersistence) turns", async () => {
+    copilotRunMock.mockResolvedValueOnce("response");
+    loadToolCallsForMessageMock.mockReturnValueOnce([]);
+
+    const db = {
+      prepare: vi.fn().mockReturnValue({ run: vi.fn(), get: vi.fn() }),
+    };
+    const webContents = { send: vi.fn() };
+
+    await runAgentTurn({
+      db: db as any,
+      sessionId: "sess-1",
+      prompt: "help me",
+      projectPath: "/project",
+      projectConfig: { provider: "copilot" } as any,
+      webContents: webContents as any,
+    });
+
+    expect(copilotRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({ noTools: false })
+    );
+  });
 });

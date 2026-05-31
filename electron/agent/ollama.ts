@@ -658,11 +658,16 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   const client = await loadClient();
   const history = loadHistory(params.db, params.sessionId, params.messageId);
   const model = await resolveModel(client, params.projectConfig.model);
-  const managedMcpBridge = await createManagedMcpBridge(
-    loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
-    params.projectPath,
-  );
-  const tools = [...makeToolDefinitions(), ...managedMcpBridge.tools];
+
+  // When noTools is true (text-only generation turns), skip all tool definitions
+  // and MCP bridge startup to prevent any filesystem/shell side-effects.
+  const managedMcpBridge = params.noTools
+    ? null
+    : await createManagedMcpBridge(
+        loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
+        params.projectPath,
+      );
+  const tools = params.noTools ? [] : [...makeToolDefinitions(), ...(managedMcpBridge?.tools ?? [])];
   const ctx: ToolExecutionContext = {
     db: params.db,
     sessionId: params.sessionId,
@@ -695,7 +700,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
       });
 
       for (const toolCall of toolCalls) {
-        const output = await executeTool(ctx, toolCall, managedMcpBridge);
+        const output = await executeTool(ctx, toolCall, managedMcpBridge ?? { hasTool: () => false, callTool: async () => `Error: tools are disabled` });
         messages.push({
           role: "tool",
           content: output,
@@ -704,7 +709,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
       }
     }
   } finally {
-    await managedMcpBridge.close();
+    await managedMcpBridge?.close();
   }
 
   throw new Error(`Ollama tool loop exceeded ${MAX_TOOL_ROUNDS} rounds`);
