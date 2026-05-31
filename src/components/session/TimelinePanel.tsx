@@ -519,8 +519,6 @@ function InputBarInner({
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
   const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
-  const skillsSupported = true;
-
   const [gitBranch, setGitBranch] = useState<string | null>(null);
 
   // Slash-command state
@@ -555,23 +553,13 @@ function InputBarInner({
 
   // Load skills lazily when the user first types "/"
   const ensureSkillsLoaded = useCallback(() => {
-    if (skills !== null || loadingSkills || !sessionPath || !skillsSupported) return;
+    if (skills !== null || loadingSkills || !sessionPath) return;
     setLoadingSkills(true);
     ipc.listSkills(sessionPath)
       .then(setSkills)
       .catch(() => setSkills([]))
       .finally(() => setLoadingSkills(false));
-  }, [skills, loadingSkills, sessionPath, ipc, skillsSupported]);
-
-  useEffect(() => {
-    if (!skillsSupported) {
-      setSkills([]);
-      setSlashBadges([]);
-      setLoadingSkills(false);
-    } else {
-      setSkills(null);
-    }
-  }, [skillsSupported]);
+  }, [skills, loadingSkills, sessionPath, ipc]);
 
   // Watch textarea value for slash trigger
   const textValue = controller.textInput.value;
@@ -589,8 +577,8 @@ function InputBarInner({
   }, [textValue, ensureSkillsLoaded]);
 
   const filteredItems = useMemo(
-    () => buildSlashItems(slashQuery, skillsSupported ? (skills ?? []) : []),
-    [slashQuery, skills, skillsSupported]
+    () => buildSlashItems(slashQuery, skills ?? []),
+    [slashQuery, skills]
   );
 
   // Select an item from the popover
@@ -604,7 +592,6 @@ function InputBarInner({
       controller.textInput.setInput(stripped);
 
       if (item.type === "skill") {
-        if (!skillsSupported) return;
         setSlashBadges((prev) =>
           prev.some((b) => b.name === item.skill.name) ? prev : [...prev, item.skill]
         );
@@ -634,7 +621,7 @@ function InputBarInner({
         }
       }
     },
-    [controller, onNewSession, activeSessionId, clearSessionMessages, skills, skillsSupported]
+    [controller, onNewSession, activeSessionId, clearSessionMessages, skills]
   );
 
   // Keyboard navigation while popover is open (capture phase so we beat the textarea)

@@ -158,7 +158,7 @@ export function SkillsPanel() {
   }) ?? null;
 
   const loadSkills = useCallback(() => {
-    if (!projectPath || unsupportedProvider) {
+    if (!projectPath) {
       setSkills([]);
       return;
     }
@@ -167,7 +167,7 @@ export function SkillsPanel() {
       .listSkills(projectPath, provider ?? undefined)
       .then(setSkills)
       .catch(() => setSkills([]));
-  }, [projectPath, provider, ipc, unsupportedProvider]);
+  }, [projectPath, provider, ipc]);
 
   // Modal state — undefined means closed, null means "new", SkillInfo means "edit/view"
   const [editingSkill, setEditingSkill] = useState<SkillInfo | null | undefined>(undefined);
