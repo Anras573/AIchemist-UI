@@ -735,4 +735,58 @@ describe("ChangesPanel Open PR flow", () => {
 
     expect(window.electronAPI.agentSend).not.toHaveBeenCalled();
   });
+
+  it("shows error when Generate is clicked while a prior generation is still in flight", async () => {
+    window.electronAPI.agentSend = vi.fn().mockImplementation(
+      () => new Promise<void>(() => { /* never resolves */ })
+    );
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.on).toHaveBeenCalledWith("session:delta", expect.any(Function));
+    });
+
+    // Cancel restores description + isGenerating=false, but agentSend is still running
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    // Re-clicking Generate while agentSend is in flight should show an error
+    await waitFor(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /generate/i }));
+      expect(await screen.findByText(/generation is still in progress/i)).toBeInTheDocument();
+    });
+
+    expect(window.electronAPI.agentSend).toHaveBeenCalledOnce();
+  });
+
+  it("shows error when getGitDiff throws during prompt assembly", async () => {
+    window.electronAPI.getGitDiff = vi.fn().mockRejectedValue(new Error("IPC channel error"));
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    expect(await screen.findByText("IPC channel error")).toBeInTheDocument();
+    expect(window.electronAPI.agentSend).not.toHaveBeenCalled();
+  });
 });
