@@ -531,6 +531,29 @@ describe("ChangesPanel Open PR flow", () => {
     });
   });
 
+  it("uses the selected session agent for PR draft generation", async () => {
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setSessionAgent("sess-pr", "planner");
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.agentSend).toHaveBeenCalledWith(expect.objectContaining({
+        agent: "planner",
+      }));
+    });
+  });
+
   it("prevents submitting and locks description edits while generation is in progress", async () => {
     let resolveSend: (() => void) | undefined;
     window.electronAPI.agentSend = vi.fn().mockImplementation(

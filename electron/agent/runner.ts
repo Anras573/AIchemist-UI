@@ -86,9 +86,13 @@ export async function runAgentTurn(params: {
     webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "idle" });
     updateSessionStatus(db, sessionId, "idle");
   } catch (err) {
-    const toolCalls = loadToolCallsForMessage(db, placeholderMsg.id);
-    if (toolCalls.length === 0) {
+    if (skipPersistence) {
       db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);
+    } else {
+      const toolCalls = loadToolCallsForMessage(db, placeholderMsg.id);
+      if (toolCalls.length === 0) {
+        db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);
+      }
     }
     webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "error" });
     updateSessionStatus(db, sessionId, "error");

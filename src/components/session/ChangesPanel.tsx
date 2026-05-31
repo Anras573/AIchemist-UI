@@ -322,12 +322,14 @@ function OpenPrSection({
   projectPath,
   sessionTitle,
   activeSessionId,
+  activeSessionAgent,
   sessionMessages,
   sessionStatus,
 }: {
   projectPath: string;
   sessionTitle: string | null;
   activeSessionId: string | null;
+  activeSessionAgent: string | null;
   sessionMessages: Message[];
   sessionStatus: SessionStatus | undefined;
 }) {
@@ -575,7 +577,7 @@ function OpenPrSection({
         await ipc.agentSend({
           sessionId: activeSessionId,
           prompt,
-          agent: undefined,
+          agent: activeSessionAgent ?? undefined,
           skipPersistence: true,
         });
         if (!cancelGenerateRef.current) {
@@ -762,11 +764,14 @@ function OpenPrSection({
 // ── ChangesPanel ──────────────────────────────────────────────────────────────
 
 export function ChangesPanel() {
-  const { sessions, activeSessionId, sessionFileChanges } = useSessionStore();
+  const { sessions, activeSessionId, sessionFileChanges, sessionAgents } = useSessionStore();
   const { activeProjectId, projects } = useProjectStore();
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const activeSessionTitle = activeSession?.title ?? null;
+  const activeSessionAgent = activeSessionId
+    ? (sessionAgents[activeSessionId] ?? activeSession?.agent ?? null)
+    : null;
   const workspacePath = activeSession?.workspace_path ?? activeProject?.path ?? "";
 
   const changes: FileChange[] = activeSessionId
@@ -810,6 +815,7 @@ export function ChangesPanel() {
             projectPath={workspacePath}
             sessionTitle={activeSessionTitle}
             activeSessionId={activeSessionId}
+            activeSessionAgent={activeSessionAgent}
             sessionMessages={activeSession?.messages ?? []}
             sessionStatus={activeSession?.status}
           />
