@@ -7,8 +7,7 @@ import { buildSkillsContext } from "./skills";
 import { readAgentFileSystemPrompt } from "./claude";
 import { requestApproval, requiresApproval } from "./approval";
 import { requestQuestion } from "./question";
-import { loadManagedMcpServers } from "./mcp-managed";
-import { createManagedMcpBridge } from "./mcp-bridge";
+import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
 import {
   loadToolCallsForMessage,
   saveToolCall,

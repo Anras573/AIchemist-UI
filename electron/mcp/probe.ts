@@ -16,8 +16,8 @@
  * Concurrency: stdio probes are capped at 4 parallel by default to avoid a
  * spawn-storm of `docker run` / `uvx` / `npx` children when the panel opens.
  */
-import type { McpServerEntry, McpServersMap } from "../mcp-config";
-import { fingerprintManaged, RESERVED_MCP_NAME } from "./mcp-managed";
+import type { McpServerEntry, McpServersMap } from "./config";
+import { fingerprintManaged, RESERVED_MCP_NAME } from "./managed";
 
 export interface ProbeResult {
   /** True when the transport connected and `tools/list` responded successfully. */

@@ -20,7 +20,7 @@ import {
   loadManagedMcpServers,
   toCopilotMcpServers,
   fingerprintManaged,
-} from "./mcp-managed";
+} from "../mcp";
 import { saveToolCall, updateToolCallStatus, getDisabledMcpServers } from "../sessions";
 import {
   implWriteFileWithChange,

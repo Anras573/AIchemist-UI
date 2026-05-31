@@ -10,9 +10,9 @@
  * `enableConfigDiscovery`) — we deliberately don't introduce a parallel
  * project-level AIchemist file.
  */
-import type { McpServerEntry, McpServersMap } from "../mcp-config";
+import type { McpServerEntry, McpServersMap } from "./config";
 import type { MCPServerConfig } from "@github/copilot-sdk";
-import { readMcpServers } from "../mcp-config";
+import { readMcpServers } from "./config";
 
 /**
  * Reserved name for our in-process approval-gated MCP server (see

@@ -6,7 +6,7 @@ import {
   toCopilotMcpServers,
   fingerprintManaged,
   RESERVED_MCP_NAME,
-} from "./mcp-managed";
+} from "./managed";
 
 vi.mock("fs");
 vi.mock("os", () => ({

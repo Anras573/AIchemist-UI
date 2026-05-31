@@ -75,11 +75,11 @@ export interface ElectronAPI {
   listMcpServers: () => Promise<Array<import("../src/types").McpServerInfo>>;
   mcpProbeManaged: () => Promise<Array<import("../src/types").McpServerInfo>>;
   probeProviders: (args?: { projectId?: string; force?: boolean }) => Promise<import("../src/types").ProviderProbes>;
-  mcpReadConfig: (args: { scope: import("./mcp-config").McpScope; projectPath?: string }) =>
-    Promise<import("./mcp-config").McpServersMap>;
-  mcpWriteConfig: (args: { scope: import("./mcp-config").McpScope; servers: import("./mcp-config").McpServersMap; projectPath?: string }) =>
+  mcpReadConfig: (args: { scope: import("./mcp").McpScope; projectPath?: string }) =>
+    Promise<import("./mcp").McpServersMap>;
+  mcpWriteConfig: (args: { scope: import("./mcp").McpScope; servers: import("./mcp").McpServersMap; projectPath?: string }) =>
     Promise<void>;
-  mcpDeleteServer: (args: { scope: import("./mcp-config").McpScope; name: string; projectPath?: string }) =>
+  mcpDeleteServer: (args: { scope: import("./mcp").McpScope; name: string; projectPath?: string }) =>
     Promise<void>;
 
   // ── Agent / Skill file management ─────────────────────────────────────────

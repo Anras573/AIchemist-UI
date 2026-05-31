@@ -6,7 +6,7 @@ import {
   writeMcpServers,
   upsertMcpServer,
   deleteMcpServer,
-} from "./mcp-config";
+} from "./config";
 
 vi.mock("fs");
 vi.mock("os", () => ({
