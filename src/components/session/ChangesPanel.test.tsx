@@ -651,6 +651,49 @@ describe("ChangesPanel Open PR flow", () => {
     expect(textarea).toHaveValue("Keep this text");
   });
 
+  it("parses title/body correctly when model emits preamble before Title:", async () => {
+    let resolveSend: (() => void) | undefined;
+    window.electronAPI.agentSend = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        })
+    );
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.on).toHaveBeenCalledWith("session:delta", expect.any(Function));
+    });
+    const deltaListener = vi
+      .mocked(window.electronAPI.on)
+      .mock.calls
+      .filter(([channel]) => channel === "session:delta")
+      .at(-1)?.[1] as ((payload: { session_id: string; text_delta: string }) => void) | undefined;
+
+    deltaListener?.({
+      session_id: "sess-pr",
+      text_delta: "Sure! Here is your PR draft.\n\nTitle: Fix the bug\n\nBody:\n- solved it",
+    });
+
+    resolveSend?.();
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("PR title")).toHaveValue("Fix the bug");
+      expect(screen.getByPlaceholderText("Optional PR description")).toHaveValue("- solved it");
+    });
+  });
+
   it("disables Generate button and shows error when session is running", async () => {
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
     useSessionStore.getState().addSession(makeSession("sess-pr", {
