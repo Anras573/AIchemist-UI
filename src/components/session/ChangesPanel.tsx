@@ -493,6 +493,7 @@ function OpenPrSection({
       return;
     }
     generateInFlightRef.current = true;
+    let lockedUi = false;
     try {
       if (!activeSessionId) {
         setGenerateError("Select an active session before generating a PR description.");
@@ -506,18 +507,29 @@ function OpenPrSection({
       setGenerateError(null);
       setError(null);
 
+      // Lock UI immediately — before any async work — so the user cannot submit
+      // or edit the description while the prompt is being assembled.
+      initialDescriptionRef.current = description;
+      generatedDescriptionRef.current = "";
+      cancelGenerateRef.current = false;
+      setDescription("");
+      setIsGenerating(true);
+      lockedUi = true;
+
       let gitDiffText: string;
       let pullRequestTemplate: string | null;
       try {
         const gitDiffResult = await ipc.getGitDiff(projectPath);
+        if (cancelGenerateRef.current) return;
         if (typeof gitDiffResult !== "string") {
           setGenerateError(gitDiffResult.error);
           return;
         }
         gitDiffText = gitDiffResult;
         pullRequestTemplate = await readPullRequestTemplate(ipc, projectPath);
+        if (cancelGenerateRef.current) return;
       } catch (e) {
-        setGenerateError(e instanceof Error ? e.message : String(e));
+        if (!cancelGenerateRef.current) setGenerateError(e instanceof Error ? e.message : String(e));
         return;
       }
 
@@ -552,12 +564,6 @@ function OpenPrSection({
         `${diffLabel}\n\n\`\`\`diff\n${gitDiffForPrompt}\n\`\`\`${diffTruncationNote}`,
       ].join("\n\n---\n\n");
 
-      initialDescriptionRef.current = description;
-      generatedDescriptionRef.current = "";
-      cancelGenerateRef.current = false;
-      setDescription("");
-      setIsGenerating(true);
-
       streamUnsubscribeRef.current?.();
       streamUnsubscribeRef.current = onSessionEvent<SessionDeltaEvent>(IPC_CHANNELS.SESSION_DELTA, (payload) => {
         if (payload.session_id !== activeSessionId || cancelGenerateRef.current) return;
@@ -585,10 +591,18 @@ function OpenPrSection({
       } finally {
         streamUnsubscribeRef.current?.();
         streamUnsubscribeRef.current = null;
-        setIsGenerating(false);
+        if (!cancelGenerateRef.current) setIsGenerating(false);
+        lockedUi = false;
       }
     } finally {
       generateInFlightRef.current = false;
+      // If the UI was locked but the inner try/finally never ran (prompt assembly
+      // failed or was cancelled before agentSend), clean up isGenerating and restore
+      // the description the user had before clicking Generate.
+      if (lockedUi && !cancelGenerateRef.current) {
+        setIsGenerating(false);
+        setDescription(initialDescriptionRef.current);
+      }
     }
   };
 
