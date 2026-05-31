@@ -692,6 +692,9 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
       if (toolCalls.length === 0) {
         return fullText;
       }
+      if (params.noTools) {
+        throw new Error("Ollama returned tool calls while tools are disabled");
+      }
 
       messages.push({
         role: "assistant",

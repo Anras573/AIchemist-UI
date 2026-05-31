@@ -479,4 +479,28 @@ describe("ollama provider", () => {
     expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({ tool_name: toolName }));
     expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({ tool_name: toolName, output: "bridge result" }));
   });
+
+  it("rejects provider tool calls when noTools is enabled", async () => {
+    ollamaMocks.chat.mockResolvedValue(streamChunks([
+      {
+        message: {
+          content: "",
+          tool_calls: [{ function: { name: "read_file", arguments: { path: "secret.txt" } } }],
+        },
+      },
+    ]));
+
+    await expect(
+      runOllamaAgentTurn({
+        db: makeDb([]) as never,
+        sessionId: "s-no-tools",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest" } as never,
+        webContents: { send: vi.fn() } as never,
+        noTools: true,
+      } as never),
+    ).rejects.toThrow("tools are disabled");
+
+    expect(ollamaMocks.bridge).not.toHaveBeenCalled();
+  });
 });

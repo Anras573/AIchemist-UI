@@ -167,7 +167,7 @@ describe("ChangesPanel empty states", () => {
 
 describe("ChangesPanel Open PR flow", () => {
   beforeEach(() => {
-    useSessionStore.setState({ activeSessionId: null, sessions: {}, sessionFileChanges: {} });
+    useSessionStore.setState({ activeSessionId: null, sessions: {}, sessionFileChanges: {}, sessionAgents: {} });
     useProjectStore.setState({ projects: [], activeProjectId: null });
     window.localStorage.removeItem("aichemist.prDescriptionHistoryLimit");
     window.electronAPI.getGitBranch = vi.fn().mockResolvedValue("feature/open-pr");
