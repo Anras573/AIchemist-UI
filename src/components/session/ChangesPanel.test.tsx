@@ -396,12 +396,10 @@ describe("ChangesPanel Open PR flow", () => {
     });
   });
 
-  it("ignores rapid duplicate generate clicks while a request is in flight", async () => {
-    let resolveGitDiff: ((value: string) => void) | undefined;
-    const gitDiffPromise = new Promise<string>((resolve) => {
-      resolveGitDiff = resolve;
-    });
-    window.electronAPI.getGitDiff = vi.fn().mockImplementation(() => gitDiffPromise);
+  it("immediately shows Cancel and locks UI during prompt assembly (before getGitDiff returns)", async () => {
+    window.electronAPI.getGitDiff = vi.fn().mockImplementation(
+      () => new Promise<string>(() => { /* never resolves */ })
+    );
     window.electronAPI.agentSend = vi.fn().mockResolvedValue(undefined);
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
     useSessionStore.getState().addSession(makeSession("sess-pr", {
@@ -415,14 +413,41 @@ describe("ChangesPanel Open PR flow", () => {
 
     renderWithProviders(<ChangesPanel />);
     fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
-    const generateButton = await screen.findByRole("button", { name: /generate/i });
-    fireEvent.click(generateButton);
-    fireEvent.click(generateButton);
+    fireEvent.click(await screen.findByRole("button", { name: /generate/i }));
 
-    resolveGitDiff?.("diff --git a/file.ts b/file.ts\n+new line");
+    // Button switches to Cancel immediately — before getGitDiff resolves
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Optional PR description")).toHaveProperty("readOnly", true);
+    expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
+  });
+
+  it("cancelling during prompt assembly aborts generation before agentSend fires", async () => {
+    window.electronAPI.getGitDiff = vi.fn().mockImplementation(
+      () => new Promise<string>(() => { /* never resolves */ })
+    );
+    window.electronAPI.agentSend = vi.fn().mockResolvedValue(undefined);
+    window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
+    useSessionStore.getState().addSession(makeSession("sess-pr", {
+      title: "Session title",
+      workspace_path: "/worktrees/sess-pr",
+      branch: "aichemist/sess-pr",
+    }));
+    useSessionStore.getState().setActiveSession("sess-pr");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /open pr form/i }));
+    const textarea = await screen.findByPlaceholderText("Optional PR description");
+    fireEvent.change(textarea, { target: { value: "Original text" } });
+    fireEvent.click(screen.getByRole("button", { name: /generate/i }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /cancel/i }));
+
     await waitFor(() => {
-      expect(window.electronAPI.getGitDiff).toHaveBeenCalledOnce();
-      expect(window.electronAPI.agentSend).toHaveBeenCalledOnce();
+      expect(window.electronAPI.agentSend).not.toHaveBeenCalled();
+      expect(textarea).toHaveValue("Original text");
+      expect(screen.getByRole("button", { name: /generate/i })).toBeInTheDocument();
     });
   });
 
