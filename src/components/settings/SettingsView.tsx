@@ -15,12 +15,17 @@ import {
   parseDisabledProviders,
   serializeDisabledProviders,
 } from "../../../electron/providers";
+import { useProjectStore } from "@/lib/store/useProjectStore";
+import { ProjectSettingsContent } from "@/components/settings/ProjectSettingsContent";
 
 interface SettingsViewProps {
   onClose: () => void;
 }
 
 type Section = "api-keys" | "model-overrides" | "defaults" | "providers" | "appearance";
+type ActiveItem =
+  | { kind: "section"; section: Section }
+  | { kind: "project"; projectId: string };
 
 const NAV: { id: Section; label: string }[] = [
   { id: "api-keys", label: "API Keys" },
@@ -181,10 +186,22 @@ function ProvidersSection({
   );
 }
 
+const VALID_APPROVAL_MODES = ["none", "custom", "all"] as const;
+
+function normalizeProvider(v: string | undefined): string {
+  const normalized = v?.trim().toLowerCase() ?? "";
+  return (PROVIDER_IDS as readonly string[]).includes(normalized) ? normalized : "anthropic";
+}
+function normalizeApprovalMode(v: string | undefined): string {
+  const normalized = v?.trim().toLowerCase() ?? "";
+  return VALID_APPROVAL_MODES.includes(normalized as typeof VALID_APPROVAL_MODES[number]) ? normalized : "custom";
+}
+
 // ── Main view ─────────────────────────────────────────────────────────────────
 export function SettingsView({ onClose }: SettingsViewProps) {
   const ipc = useIpc();
-  const [activeSection, setActiveSection] = useState<Section>("api-keys");
+  const { projects } = useProjectStore();
+  const [activeItem, setActiveItem] = useState<ActiveItem>({ kind: "section", section: "api-keys" });
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [draft, setDraft] = useState<Partial<SettingsMap>>({});
   const [saveStatus, setSaveStatus] = useState<Record<Section, SaveStatus>>({
@@ -223,7 +240,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         ],
         defaults: ["AICHEMIST_DEFAULT_PROVIDER", "AICHEMIST_DEFAULT_APPROVAL_MODE"],
         providers: ["AICHEMIST_DISABLED_PROVIDERS"],
-        appearance: [], // theme is auto-saved via useTheme, no batch save needed
+        appearance: [],
       };
 
       const updates: Partial<SettingsMap> = {};
@@ -243,6 +260,13 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     [draft, settings]
   );
 
+  const getTitle = (): string => {
+    if (activeItem.kind === "section") {
+      return NAV.find((n) => n.id === activeItem.section)?.label ?? "";
+    }
+    return projects.find((p) => p.id === activeItem.projectId)?.name ?? "Project";
+  };
+
   if (!settings) {
     return (
       <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
@@ -254,33 +278,64 @@ export function SettingsView({ onClose }: SettingsViewProps) {
   return (
     <div className="flex flex-1 overflow-hidden bg-background">
       {/* Left nav */}
-      <nav className="w-52 flex-shrink-0 border-r border-border flex flex-col pt-14 px-2 gap-1">
-        <p className="px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-          Settings
-        </p>
-        {NAV.map(({ id, label }) => (
-          <button
-            key={id}
-            onClick={() => setActiveSection(id)}
-            className={cn(
-              "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors",
-              activeSection === id
-                ? "bg-accent text-accent-foreground font-medium"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+      <nav className="w-52 flex-shrink-0 border-r border-border flex flex-col overflow-hidden">
+        {/* Settings tabs */}
+        <div className="flex-none pt-12 px-2 pb-3">
+          <p className="px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+            Settings
+          </p>
+          {NAV.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setActiveItem({ kind: "section", section: id })}
+              className={cn(
+                "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors",
+                activeItem.kind === "section" && activeItem.section === id
+                  ? "bg-accent text-accent-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-border mx-2" />
+
+        {/* Projects */}
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden pt-3 pb-2">
+          <p className="px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex-none">
+            Projects
+          </p>
+          <div className="flex-1 overflow-y-auto px-2">
+            {projects.length === 0 ? (
+              <p className="px-3 py-1.5 text-xs text-muted-foreground">No projects yet.</p>
+            ) : (
+              projects.map((project) => (
+                <button
+                  key={project.id}
+                  onClick={() => setActiveItem({ kind: "project", projectId: project.id })}
+                  className={cn(
+                    "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors truncate",
+                    activeItem.kind === "project" && activeItem.projectId === project.id
+                      ? "bg-accent text-accent-foreground font-medium"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                  )}
+                >
+                  {project.name}
+                </button>
+              ))
             )}
-          >
-            {label}
-          </button>
-        ))}
+          </div>
+        </div>
       </nav>
 
       {/* Right panel */}
-      <div className="flex flex-1 flex-col overflow-y-auto">
+      <div className="flex flex-1 flex-col overflow-hidden">
         {/* Toolbar */}
         <div className="flex items-center justify-between h-12 px-6 border-b border-border flex-shrink-0">
-          <h1 className="text-base font-semibold">
-            {NAV.find((n) => n.id === activeSection)?.label}
-          </h1>
+          <h1 className="text-base font-semibold">{getTitle()}</h1>
           <WithTooltip label="Close settings (Esc)">
             <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close settings">
               <X className="h-4 w-4" />
@@ -288,185 +343,197 @@ export function SettingsView({ onClose }: SettingsViewProps) {
           </WithTooltip>
         </div>
 
-        <div className="flex-1 px-8 py-6 max-w-xl space-y-6">
-          {/* ── API Keys ── */}
-          {activeSection === "api-keys" && (
-            <>
-              <div className="space-y-4">
-                <SecretField
-                  id="anthropic-key"
-                  label="Anthropic API Key"
-                  value={draft.ANTHROPIC_API_KEY ?? ""}
-                  placeholder="sk-ant-…"
-                  onChange={(v) => set("ANTHROPIC_API_KEY", v)}
-                />
-                <SecretField
-                  id="anthropic-auth-token"
-                  label="Anthropic Auth Token (fallback)"
-                  value={draft.ANTHROPIC_AUTH_TOKEN ?? ""}
-                  placeholder="Only needed when ANTHROPIC_API_KEY is absent"
-                  onChange={(v) => set("ANTHROPIC_AUTH_TOKEN", v)}
-                />
-                <SecretField
-                  id="github-token"
-                  label="GitHub Token (Copilot)"
-                  value={draft.GITHUB_TOKEN ?? ""}
-                  placeholder="ghp_…"
-                  onChange={(v) => set("GITHUB_TOKEN", v)}
-                />
-              </div>
-              <SaveRow status={saveStatus["api-keys"]} onSave={() => saveSection("api-keys")} />
-            </>
-          )}
+        {/* Section content */}
+        {activeItem.kind === "section" && (
+          <div className="flex-1 overflow-y-auto px-8 py-6 max-w-xl space-y-6">
+            {/* ── API Keys ── */}
+            {activeItem.section === "api-keys" && (
+              <>
+                <div className="space-y-4">
+                  <SecretField
+                    id="anthropic-key"
+                    label="Anthropic API Key"
+                    value={draft.ANTHROPIC_API_KEY ?? ""}
+                    placeholder="sk-ant-…"
+                    onChange={(v) => set("ANTHROPIC_API_KEY", v)}
+                  />
+                  <SecretField
+                    id="anthropic-auth-token"
+                    label="Anthropic Auth Token (fallback)"
+                    value={draft.ANTHROPIC_AUTH_TOKEN ?? ""}
+                    placeholder="Only needed when ANTHROPIC_API_KEY is absent"
+                    onChange={(v) => set("ANTHROPIC_AUTH_TOKEN", v)}
+                  />
+                  <SecretField
+                    id="github-token"
+                    label="GitHub Token (Copilot)"
+                    value={draft.GITHUB_TOKEN ?? ""}
+                    placeholder="ghp_…"
+                    onChange={(v) => set("GITHUB_TOKEN", v)}
+                  />
+                </div>
+                <SaveRow status={saveStatus["api-keys"]} onSave={() => saveSection("api-keys")} />
+              </>
+            )}
 
-          {/* ── Model Overrides ── */}
-          {activeSection === "model-overrides" && (
-            <>
-              <p className="text-sm text-muted-foreground">
-                Override the Anthropic model used for each tier. Leave blank to use the
-                SDK default.
-              </p>
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label htmlFor="base-url" className="text-sm font-medium leading-none">Anthropic Base URL</label>
-                  <Input
-                    id="base-url"
-                    value={draft.ANTHROPIC_BASE_URL ?? ""}
-                    onChange={(e) => set("ANTHROPIC_BASE_URL", e.target.value)}
-                    placeholder="https://api.anthropic.com (default)"
-                    className="font-mono text-sm"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="sonnet-model" className="text-sm font-medium leading-none">Sonnet Model Override</label>
-                  <Input
-                    id="sonnet-model"
-                    value={draft.ANTHROPIC_DEFAULT_SONNET_MODEL ?? ""}
-                    onChange={(e) => set("ANTHROPIC_DEFAULT_SONNET_MODEL", e.target.value)}
-                    placeholder="claude-sonnet-4-5"
-                    className="font-mono text-sm"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="haiku-model" className="text-sm font-medium leading-none">Haiku Model Override</label>
-                  <Input
-                    id="haiku-model"
-                    value={draft.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? ""}
-                    onChange={(e) => set("ANTHROPIC_DEFAULT_HAIKU_MODEL", e.target.value)}
-                    placeholder="claude-haiku-4-5"
-                    className="font-mono text-sm"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="opus-model" className="text-sm font-medium leading-none">Opus Model Override</label>
-                  <Input
-                    id="opus-model"
-                    value={draft.ANTHROPIC_DEFAULT_OPUS_MODEL ?? ""}
-                    onChange={(e) => set("ANTHROPIC_DEFAULT_OPUS_MODEL", e.target.value)}
-                    placeholder="claude-opus-4-5"
-                    className="font-mono text-sm"
-                  />
-                </div>
-              </div>
-              <SaveRow
-                status={saveStatus["model-overrides"]}
-                onSave={() => saveSection("model-overrides")}
-              />
-            </>
-          )}
-
-          {/* ── Defaults ── */}
-          {activeSection === "defaults" && (
-            <>
-              <p className="text-sm text-muted-foreground">
-                Global defaults applied to new projects. Per-project settings always take
-                precedence.
-              </p>
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label htmlFor="default-provider" className="text-sm font-medium leading-none">Default Provider</label>
-                  <select
-                    id="default-provider"
-                    value={draft.AICHEMIST_DEFAULT_PROVIDER ?? "anthropic"}
-                    onChange={(e) => set("AICHEMIST_DEFAULT_PROVIDER", e.target.value)}
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    <option value="anthropic">Anthropic (Claude)</option>
-                    <option value="copilot">GitHub Copilot</option>
-                    <option value="ollama">Ollama</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="default-approval" className="text-sm font-medium leading-none">Default Approval Mode</label>
-                  <select
-                    id="default-approval"
-                    value={draft.AICHEMIST_DEFAULT_APPROVAL_MODE ?? "custom"}
-                    onChange={(e) => set("AICHEMIST_DEFAULT_APPROVAL_MODE", e.target.value)}
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    <option value="none">None — never ask for approval</option>
-                    <option value="custom">Custom — approve risky tools only</option>
-                    <option value="all">All — approve every tool call</option>
-                  </select>
-                </div>
-              </div>
-              <SaveRow
-                status={saveStatus["defaults"]}
-                onSave={() => saveSection("defaults")}
-              />
-            </>
-          )}
-          {/* ── Providers ── */}
-          {activeSection === "providers" && (
-            <ProvidersSection
-              value={draft.AICHEMIST_DISABLED_PROVIDERS ?? ""}
-              onChange={(v) => set("AICHEMIST_DISABLED_PROVIDERS", v)}
-              status={saveStatus["providers"]}
-              onSave={() => saveSection("providers")}
-            />
-          )}
-          {/* ── Appearance ── */}
-          {activeSection === "appearance" && (
-            <>
-              <p className="text-sm text-muted-foreground">
-                Choose how AIchemist looks. System follows your OS setting.
-              </p>
-              <fieldset className="space-y-2">
-                <legend className="text-sm font-medium leading-none mb-3">Theme</legend>
-                {(
-                  [
-                    { value: "system", label: "System", description: "Matches your OS preference" },
-                    { value: "light",  label: "Light",  description: "Always use light mode" },
-                    { value: "dark",   label: "Dark",   description: "Always use dark mode" },
-                  ] as { value: Theme; label: string; description: string }[]
-                ).map(({ value, label, description }) => (
-                  <label
-                    key={value}
-                    className={cn(
-                      "flex items-center gap-3 rounded-lg border p-3.5 cursor-pointer transition-colors",
-                      theme === value
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:bg-accent/50"
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      name="theme"
-                      value={value}
-                      checked={theme === value}
-                      onChange={() => setTheme(value)}
-                      className="no-drag-region accent-primary"
+            {/* ── Model Overrides ── */}
+            {activeItem.section === "model-overrides" && (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Override the Anthropic model used for each tier. Leave blank to use the
+                  SDK default.
+                </p>
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label htmlFor="base-url" className="text-sm font-medium leading-none">Anthropic Base URL</label>
+                    <Input
+                      id="base-url"
+                      value={draft.ANTHROPIC_BASE_URL ?? ""}
+                      onChange={(e) => set("ANTHROPIC_BASE_URL", e.target.value)}
+                      placeholder="https://api.anthropic.com (default)"
+                      className="font-mono text-sm"
                     />
-                    <div>
-                      <p className="text-sm font-medium">{label}</p>
-                      <p className="text-xs text-muted-foreground">{description}</p>
-                    </div>
-                  </label>
-                ))}
-              </fieldset>
-            </>
-          )}
-        </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="sonnet-model" className="text-sm font-medium leading-none">Sonnet Model Override</label>
+                    <Input
+                      id="sonnet-model"
+                      value={draft.ANTHROPIC_DEFAULT_SONNET_MODEL ?? ""}
+                      onChange={(e) => set("ANTHROPIC_DEFAULT_SONNET_MODEL", e.target.value)}
+                      placeholder="claude-sonnet-4-6"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="haiku-model" className="text-sm font-medium leading-none">Haiku Model Override</label>
+                    <Input
+                      id="haiku-model"
+                      value={draft.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? ""}
+                      onChange={(e) => set("ANTHROPIC_DEFAULT_HAIKU_MODEL", e.target.value)}
+                      placeholder="claude-haiku-4-5-20251001"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="opus-model" className="text-sm font-medium leading-none">Opus Model Override</label>
+                    <Input
+                      id="opus-model"
+                      value={draft.ANTHROPIC_DEFAULT_OPUS_MODEL ?? ""}
+                      onChange={(e) => set("ANTHROPIC_DEFAULT_OPUS_MODEL", e.target.value)}
+                      placeholder="claude-opus-4-8"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                </div>
+                <SaveRow
+                  status={saveStatus["model-overrides"]}
+                  onSave={() => saveSection("model-overrides")}
+                />
+              </>
+            )}
+
+            {/* ── Defaults ── */}
+            {activeItem.section === "defaults" && (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Global defaults applied to new projects. Per-project settings always take
+                  precedence.
+                </p>
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label htmlFor="default-provider" className="text-sm font-medium leading-none">Default Provider</label>
+                    <select
+                      id="default-provider"
+                      value={normalizeProvider(draft.AICHEMIST_DEFAULT_PROVIDER)}
+                      onChange={(e) => set("AICHEMIST_DEFAULT_PROVIDER", e.target.value)}
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="anthropic">Anthropic (Claude)</option>
+                      <option value="copilot">GitHub Copilot</option>
+                      <option value="ollama">Ollama</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="default-approval" className="text-sm font-medium leading-none">Default Approval Mode</label>
+                    <select
+                      id="default-approval"
+                      value={normalizeApprovalMode(draft.AICHEMIST_DEFAULT_APPROVAL_MODE)}
+                      onChange={(e) => set("AICHEMIST_DEFAULT_APPROVAL_MODE", e.target.value)}
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="none">None — never ask for approval</option>
+                      <option value="custom">Custom — approve risky tools only</option>
+                      <option value="all">All — approve every tool call</option>
+                    </select>
+                  </div>
+                </div>
+                <SaveRow
+                  status={saveStatus["defaults"]}
+                  onSave={() => saveSection("defaults")}
+                />
+              </>
+            )}
+
+            {/* ── Providers ── */}
+            {activeItem.section === "providers" && (
+              <ProvidersSection
+                value={draft.AICHEMIST_DISABLED_PROVIDERS ?? ""}
+                onChange={(v) => set("AICHEMIST_DISABLED_PROVIDERS", v)}
+                status={saveStatus["providers"]}
+                onSave={() => saveSection("providers")}
+              />
+            )}
+
+            {/* ── Appearance ── */}
+            {activeItem.section === "appearance" && (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Choose how AIchemist looks. System follows your OS setting.
+                </p>
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium leading-none mb-3">Theme</legend>
+                  {(
+                    [
+                      { value: "system", label: "System", description: "Matches your OS preference" },
+                      { value: "light",  label: "Light",  description: "Always use light mode" },
+                      { value: "dark",   label: "Dark",   description: "Always use dark mode" },
+                    ] as { value: Theme; label: string; description: string }[]
+                  ).map(({ value, label, description }) => (
+                    <label
+                      key={value}
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg border p-3.5 cursor-pointer transition-colors",
+                        theme === value
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:bg-accent/50"
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="theme"
+                        value={value}
+                        checked={theme === value}
+                        onChange={() => setTheme(value)}
+                        className="no-drag-region accent-primary"
+                      />
+                      <div>
+                        <p className="text-sm font-medium">{label}</p>
+                        <p className="text-xs text-muted-foreground">{description}</p>
+                      </div>
+                    </label>
+                  ))}
+                </fieldset>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Project settings content */}
+        {activeItem.kind === "project" && (
+          <div className="flex-1 overflow-hidden">
+            <ProjectSettingsContent projectId={activeItem.projectId} />
+          </div>
+        )}
       </div>
     </div>
   );
