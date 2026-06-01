@@ -186,6 +186,17 @@ function ProvidersSection({
   );
 }
 
+const VALID_DEFAULT_PROVIDERS = ["anthropic", "copilot", "ollama"] as const;
+const VALID_APPROVAL_MODES = ["none", "custom", "all"] as const;
+
+function normalizeProvider(v: string | undefined): string {
+  return VALID_DEFAULT_PROVIDERS.includes(v as typeof VALID_DEFAULT_PROVIDERS[number]) ? v! : "anthropic";
+}
+function normalizeApprovalMode(v: string | undefined): string {
+  const trimmed = v?.trim();
+  return VALID_APPROVAL_MODES.includes(trimmed as typeof VALID_APPROVAL_MODES[number]) ? trimmed! : "custom";
+}
+
 // ── Main view ─────────────────────────────────────────────────────────────────
 export function SettingsView({ onClose }: SettingsViewProps) {
   const ipc = useIpc();
@@ -433,7 +444,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                     <label htmlFor="default-provider" className="text-sm font-medium leading-none">Default Provider</label>
                     <select
                       id="default-provider"
-                      value={draft.AICHEMIST_DEFAULT_PROVIDER ?? "anthropic"}
+                      value={normalizeProvider(draft.AICHEMIST_DEFAULT_PROVIDER)}
                       onChange={(e) => set("AICHEMIST_DEFAULT_PROVIDER", e.target.value)}
                       className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
@@ -446,7 +457,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                     <label htmlFor="default-approval" className="text-sm font-medium leading-none">Default Approval Mode</label>
                     <select
                       id="default-approval"
-                      value={draft.AICHEMIST_DEFAULT_APPROVAL_MODE ?? "custom"}
+                      value={normalizeApprovalMode(draft.AICHEMIST_DEFAULT_APPROVAL_MODE)}
                       onChange={(e) => set("AICHEMIST_DEFAULT_APPROVAL_MODE", e.target.value)}
                       className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >

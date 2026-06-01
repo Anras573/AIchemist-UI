@@ -293,6 +293,7 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
   useEffect(() => {
     return () => {
       if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+      loadGenRef.current++;
     };
   }, []);
 
@@ -322,6 +323,10 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
 
   async function handleSave() {
     if (!config) return;
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
     setSaveStatus("saving");
     setSaveError("");
     try {
