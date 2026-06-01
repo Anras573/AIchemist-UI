@@ -389,7 +389,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                       id="sonnet-model"
                       value={draft.ANTHROPIC_DEFAULT_SONNET_MODEL ?? ""}
                       onChange={(e) => set("ANTHROPIC_DEFAULT_SONNET_MODEL", e.target.value)}
-                      placeholder="claude-sonnet-4-5"
+                      placeholder="claude-sonnet-4-6"
                       className="font-mono text-sm"
                     />
                   </div>
@@ -399,7 +399,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                       id="haiku-model"
                       value={draft.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? ""}
                       onChange={(e) => set("ANTHROPIC_DEFAULT_HAIKU_MODEL", e.target.value)}
-                      placeholder="claude-haiku-4-5"
+                      placeholder="claude-haiku-4-5-20251001"
                       className="font-mono text-sm"
                     />
                   </div>
@@ -409,7 +409,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                       id="opus-model"
                       value={draft.ANTHROPIC_DEFAULT_OPUS_MODEL ?? ""}
                       onChange={(e) => set("ANTHROPIC_DEFAULT_OPUS_MODEL", e.target.value)}
-                      placeholder="claude-opus-4-5"
+                      placeholder="claude-opus-4-8"
                       className="font-mono text-sm"
                     />
                   </div>

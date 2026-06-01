@@ -288,6 +288,7 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
   const [saveError, setSaveError] = useState("");
   const { probes } = useProviderProbes(projectId);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadGenRef = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -295,20 +296,23 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
     };
   }, []);
 
-  useEffect(() => {
-    setTab("general");
+  function loadConfig() {
+    const gen = ++loadGenRef.current;
     setConfig(null);
     setLoadError(null);
+    ipc.getProjectConfig(projectId)
+      .then((c) => { if (loadGenRef.current === gen) setConfig(c); })
+      .catch((e) => { if (loadGenRef.current === gen) setLoadError(e instanceof Error ? e.message : String(e)); });
+  }
+
+  useEffect(() => {
+    setTab("general");
     setSaveStatus("idle");
     if (saveTimerRef.current !== null) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    let active = true;
-    ipc.getProjectConfig(projectId)
-      .then((c) => { if (active) setConfig(c); })
-      .catch((e) => { if (active) setLoadError(e instanceof Error ? e.message : String(e)); });
-    return () => { active = false; };
+    loadConfig();
   }, [projectId]);
 
   function patchConfig(patch: Partial<ProjectConfig>) {
@@ -369,12 +373,7 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
             <Button
               size="sm"
               variant="outline"
-              onClick={() => {
-                setLoadError(null);
-                ipc.getProjectConfig(projectId)
-                  .then((c) => setConfig(c))
-                  .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)));
-              }}
+              onClick={() => loadConfig()}
             >
               Retry
             </Button>
