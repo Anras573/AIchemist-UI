@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AlertCircle, Check } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProviderProbes } from "@/lib/hooks/useProviderProbes";
@@ -287,14 +287,28 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState("");
   const { probes } = useProviderProbes(projectId);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    return () => {
+      if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    setTab("general");
     setConfig(null);
     setLoadError(null);
     setSaveStatus("idle");
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    let active = true;
     ipc.getProjectConfig(projectId)
-      .then((c) => setConfig(c))
-      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)));
+      .then((c) => { if (active) setConfig(c); })
+      .catch((e) => { if (active) setLoadError(e instanceof Error ? e.message : String(e)); });
+    return () => { active = false; };
   }, [projectId]);
 
   function patchConfig(patch: Partial<ProjectConfig>) {
@@ -316,7 +330,8 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
       }
       await ipc.saveProjectConfig(projectId, normalizedConfig);
       setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 2500);
+      if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => setSaveStatus("idle"), 2500);
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));
       setSaveStatus("error");
