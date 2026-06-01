@@ -193,8 +193,8 @@ function normalizeProvider(v: string | undefined): string {
   return (PROVIDER_IDS as readonly string[]).includes(normalized) ? normalized : "anthropic";
 }
 function normalizeApprovalMode(v: string | undefined): string {
-  const trimmed = v?.trim();
-  return VALID_APPROVAL_MODES.includes(trimmed as typeof VALID_APPROVAL_MODES[number]) ? trimmed! : "custom";
+  const normalized = v?.trim().toLowerCase() ?? "";
+  return VALID_APPROVAL_MODES.includes(normalized as typeof VALID_APPROVAL_MODES[number]) ? normalized : "custom";
 }
 
 // ── Main view ─────────────────────────────────────────────────────────────────
