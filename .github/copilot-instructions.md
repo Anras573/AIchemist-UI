@@ -22,7 +22,7 @@ Package manager is **bun** — never use npm or yarn. TypeScript strict mode is 
 Every new IPC channel must be wired in exactly four places:
 
 1. **`electron/ipc-channels.ts`** — add a channel name constant
-2. **`electron/main.ts`** — register `ipcMain.handle(CH.YOUR_CHANNEL, handler)`
+2. **`electron/ipc/<domain>-handlers.ts`** — add the handler inside the relevant `register*()` function (e.g. `session-handlers.ts` for session channels, `agent-handlers.ts` for agent channels). If no existing module fits, create a new one and call its register function from `registerAllHandlers()` in `electron/main.ts`.
 3. **`electron/preload.ts`** — expose the method via `contextBridge.exposeInMainWorld`
 4. **`src/lib/ipc.ts`** — add a typed wrapper function
 
@@ -80,7 +80,7 @@ const effectiveProvider = session.provider ?? project.config.provider;
 
 Never gate on `session.provider` alone — legacy sessions have `provider: null` and inherit the project's provider.
 
-Apply gating on **both sides** of the IPC boundary: in the renderer hook/component and in the `AGENT_SEND` handler in `main.ts`.
+Apply gating on **both sides** of the IPC boundary: in the renderer hook/component and in the `AGENT_SEND` handler in `electron/ipc/agent-handlers.ts`.
 
 ### Streaming vs Extended Thinking (Claude SDK)
 

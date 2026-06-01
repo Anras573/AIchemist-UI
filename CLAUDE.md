@@ -41,13 +41,15 @@ This is an **Electron** desktop application with a React + TypeScript renderer a
 - **Renderer → Main:** `window.electronAPI.<method>(args)` — a typed bridge defined in `electron/preload.ts` via `contextBridge.exposeInMainWorld`. Use the `ipc` wrapper in `src/lib/ipc.ts` rather than calling `window.electronAPI` directly.
 - **Main → Renderer (push events):** `webContents.send(channel, payload)` — subscribed to via `window.electronAPI.on(channel, listener)` / `onSessionEvent()` in `src/lib/ipc.ts`.
 - **IPC channel constants** live in `electron/ipc-channels.ts` — always use those instead of raw strings.
-- **Adding a new IPC handler:** add the channel constant to `ipc-channels.ts`, add `ipcMain.handle(CH.*, handler)` in `electron/main.ts`, expose the method in `electron/preload.ts`, and add the wrapper to `src/lib/ipc.ts`.
+- **Adding a new IPC handler:** add the channel constant to `ipc-channels.ts`, add the handler to the relevant `electron/ipc/*-handlers.ts` module (pick by domain: sessions, agent, fs, mcp, etc.), call the register function from `registerAllHandlers()` in `electron/main.ts` if you created a new module, expose the method in `electron/preload.ts`, and add the wrapper to `src/lib/ipc.ts`.
 
 ### Electron main process modules (`electron/`)
 
 | Module | Role |
 |---|---|
-| `main.ts` | App entry, creates `BrowserWindow`, registers all `ipcMain` handlers |
+| `main.ts` | App entry, creates `BrowserWindow`, calls `registerAllHandlers()` |
+| `ipc/` | Domain-specific IPC handler modules (`*-handlers.ts`) — add new handlers here |
+| `ipc/handle.ts` | Shared error-wrapping `handle()` wrapper around `ipcMain.handle()` |
 | `preload.ts` | `contextBridge` — exposes typed `window.electronAPI` to the renderer |
 | `ipc-channels.ts` | Shared IPC channel name constants |
 | `config.ts` | Loads `~/.aichemist/.env` via `dotenv`; resolves API keys |
@@ -155,7 +157,7 @@ The Traces tab does **not** use an in-memory tracer. Instead, both providers wri
 
 ### IPC surface
 
-- **`GET_TRACES({ sessionId })`** in `electron/main.ts` — dispatches by provider: looks up `sessions.sdk_session_id` (Claude) or `sessions.copilot_session_id` (Copilot) and parses the corresponding file.
+- **`GET_TRACES({ sessionId })`** in `electron/ipc/trace-handlers.ts` — dispatches by provider: looks up `sessions.sdk_session_id` (Claude) or `sessions.copilot_session_id` (Copilot) and parses the corresponding file.
 - **`TRACE_BIND_TRANSCRIPT({ sessionId })`** — sets up a `chokidar` watcher on the transcript file and streams incremental spans via `SESSION_TRACE_UPDATE`. The `TracesPanel` calls this when the tab opens.
 
 ### Copilot turn grouping — anchor on `interactionId`, not `turnId`
@@ -259,7 +261,7 @@ The info (i) tooltip describing skill discovery paths lives on the right-panel h
 
 ### Skill discovery implementation
 
-`scanSkillsDir()` in `electron/main.ts` reads skill descriptions from `SKILL.md` frontmatter first (falls back to `README.md`). `scanPluginSkills()` reads `~/.claude/plugins/installed_plugins.json`, picks the most-recently-updated install per plugin, and walks `<installPath>/skills/*/SKILL.md`. `scanCopilotPluginSkills()` walks `~/.copilot/installed-plugins/<scope>/<plugin>/skills/*/SKILL.md` directly (no manifest file).
+`scanSkillsDir()` in `electron/ipc/agent-handlers.ts` reads skill descriptions from `SKILL.md` frontmatter first (falls back to `README.md`). `scanPluginSkills()` reads `~/.claude/plugins/installed_plugins.json`, picks the most-recently-updated install per plugin, and walks `<installPath>/skills/*/SKILL.md`. `scanCopilotPluginSkills()` walks `~/.copilot/installed-plugins/<scope>/<plugin>/skills/*/SKILL.md` directly (no manifest file).
 
 `LIST_SKILLS` accepts `{ projectPath, provider }` (or a bare `projectPath` string for back-compat — treated as Claude). The handler branches on `provider` to choose between the Claude and Copilot global/plugin scanners. The renderer (`SkillsPanel`) passes `useActiveSessionProvider()` so the listing always matches the active session's provider lock.
 
@@ -360,7 +362,7 @@ The right-side context panels (Skills, MCP, Memory) filter their content to the 
 
 **Test seams:** `_setFetch`, `_setCopilotListModels`, `_setAcpProbe`, `_resetProviderProbeCache`. Tests in `electron/agent/provider-probe.test.ts`.
 
-**IPC:** `PROBE_PROVIDERS` channel, handler in `electron/main.ts`, exposed as `ipc.probeProviders({ projectId?, force? })`. Renderer hook `useProviderProbes(projectId?)` fetches on mount + on window focus and exposes `{ probes, checking, refresh }`.
+**IPC:** `PROBE_PROVIDERS` channel, handler in `electron/ipc/settings-handlers.ts`, exposed as `ipc.probeProviders({ projectId?, force? })`. Renderer hook `useProviderProbes(projectId?)` fetches on mount + on window focus and exposes `{ probes, checking, refresh }`.
 
 **User-disabled providers:** the `AICHEMIST_DISABLED_PROVIDERS` setting (comma-separated list of `anthropic` / `copilot` / `acp`, edited in **Settings → Providers**) lets the user hide providers app-wide. The IPC handler reads it via `parseDisabledProviders(...)` and passes a `Set` to `probeAll(..., { disabled })`, which short-circuits the underlying probe and returns `{ ok: false, reason: "Disabled in settings" }`. All three gating UI surfaces pick it up automatically. Existing sessions keep working — sessions are provider-locked at creation, so disabling a provider only hides it from the new-session pickers.
 
@@ -493,7 +495,7 @@ If you add a new IPC handler that starts an agent turn, always call `updateSessi
 
 ### LIST_DIRECTORY — filtering and cap
 
-The `LIST_DIRECTORY` IPC handler in `main.ts` applies two safeguards before returning entries:
+The `LIST_DIRECTORY` IPC handler in `electron/ipc/fs-handlers.ts` applies two safeguards before returning entries:
 
 1. **`IGNORED_DIR_NAMES`** — a `Set` of directory names (`node_modules`, `.git`, `dist`, `build`, `.next`, `coverage`, `.turbo`) that are filtered out before counting or returning.
 2. **`MAX_DIR_ENTRIES = 500`** — if more than 500 entries remain after filtering, the list is truncated and `{ entries, truncated: true }` is returned. The caller (agent tool) should surface this to the model so it doesn't assume the listing is complete.
@@ -507,7 +509,7 @@ Always check the `truncated` flag in any code that consumes `LIST_DIRECTORY` res
 - When adding a provider to `ProjectSettingsSheet`, reset `model` to a provider-appropriate default whenever the provider field changes — never preserve the previous provider's model string in the new provider's config.
 - Never hardcode an Ollama model name (e.g. `llama3.2`) — always resolve from `listModels()` at session/config creation time; no Ollama model is guaranteed to be installed.
 - Chat-only providers (Ollama) must gate skills, agents, and slash commands via `effectiveProvider` (`session.provider ?? project.config.provider`), not just `session.provider` — legacy `null`-provider sessions inherit the project provider and must be caught.
-- Apply chat-only gating on both sides of the IPC boundary — the `AGENT_SEND` handler in `main.ts` must strip `skills`/`agent` for Ollama, not just the renderer hooks.
+- Apply chat-only gating on both sides of the IPC boundary — the `AGENT_SEND` handler in `electron/ipc/agent-handlers.ts` must strip `skills`/`agent` for Ollama, not just the renderer hooks.
 - Use `null` as the "not yet loaded" sentinel for the `skills` array; `[]` means "empty list" and blocks `ensureSkillsLoaded` from re-fetching after switching back to a supported provider.
 - `defaultProjectConfig` and `ProjectConfigSchema.model` must stay in sync — Zod defaults are provider-agnostic, so apply provider-aware defaults post-parse in `parseProjectConfig`.
 - When wiring a new provider into global settings (`AICHEMIST_DEFAULT_PROVIDER`), also wire it through to `defaultProjectConfig` and `addProject` in the same commit.
