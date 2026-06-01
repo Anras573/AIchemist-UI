@@ -186,11 +186,11 @@ function ProvidersSection({
   );
 }
 
-const VALID_DEFAULT_PROVIDERS = ["anthropic", "copilot", "ollama"] as const;
 const VALID_APPROVAL_MODES = ["none", "custom", "all"] as const;
 
 function normalizeProvider(v: string | undefined): string {
-  return VALID_DEFAULT_PROVIDERS.includes(v as typeof VALID_DEFAULT_PROVIDERS[number]) ? v! : "anthropic";
+  const normalized = v?.trim().toLowerCase() ?? "";
+  return (PROVIDER_IDS as readonly string[]).includes(normalized) ? normalized : "anthropic";
 }
 function normalizeApprovalMode(v: string | undefined): string {
   const trimmed = v?.trim();
