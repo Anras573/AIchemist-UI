@@ -445,8 +445,10 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
 
   function handleQueueRecovery(action: "retry" | "skip" | "clear") {
     if (!activeSessionId) return;
-    clearQueuePaused(activeSessionId);
-    ipc.agentQueueRecovery(activeSessionId, action).catch(console.error);
+    const sid = activeSessionId;
+    ipc.agentQueueRecovery(sid, action)
+      .then(() => clearQueuePaused(sid))
+      .catch(console.error);
   }
 
 

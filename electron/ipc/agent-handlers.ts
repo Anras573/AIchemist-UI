@@ -382,11 +382,11 @@ function drainNextQueued(
     return;
   }
 
-  const next = queue.shift()!;
-  if (queue.length === 0) sessionQueues.delete(sessionId);
-
   const win = getMainWindow();
   if (!win) return;
+
+  const next = queue.shift()!;
+  if (queue.length === 0) sessionQueues.delete(sessionId);
 
   win.webContents.send(CH.SESSION_QUEUE_TURN_START, {
     session_id: sessionId,
@@ -407,7 +407,7 @@ function drainNextQueued(
       const remaining = [...(sessionQueues.get(sessionId) ?? [])];
       sessionQueues.delete(sessionId);
       const w = getMainWindow();
-      if (remaining.length > 0 && w) {
+      if (w) {
         pausedQueues.set(sessionId, { failed: next, remaining });
         w.webContents.send(CH.SESSION_QUEUE_RECOVERY_REQUIRED, {
           session_id: sessionId,
@@ -479,6 +479,8 @@ export function registerAgentHandlers(
         : paused.remaining;
 
     if (nextQueue.length === 0) return;
+
+    if (activeTurns.has(args.sessionId)) return;
 
     sessionQueues.set(args.sessionId, nextQueue);
     drainNextQueued(db, args.sessionId, activeTurns, getMainWindow);
