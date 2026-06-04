@@ -436,8 +436,11 @@ export function registerAgentHandlers(
       messageId: args.messageId,
     };
 
-    if (activeTurns.has(args.sessionId)) {
-      // Session is busy — enqueue and return immediately.
+    const isBusy = activeTurns.has(args.sessionId)
+      || sessionQueues.has(args.sessionId)
+      || pausedQueues.has(args.sessionId);
+    if (isBusy) {
+      // Session is busy or paused — enqueue and return immediately.
       const existing = sessionQueues.get(args.sessionId) ?? [];
       sessionQueues.set(args.sessionId, [...existing, turn]);
       return { queued: true };

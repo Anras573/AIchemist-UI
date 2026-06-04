@@ -394,7 +394,7 @@ export function EmptyStateNewSession({
 
 export function TimelinePanel({ onSendMessage, onNewSession, createSessionError, projectPath }: TimelinePanelProps) {
   const ipc = useIpc();
-  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking, queuedMessageIds, queuePaused, clearQueuePaused } = useSessionStore();
+  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking, queuedMessageIds, queuePaused, clearQueuePaused, clearQueuedMessages } = useSessionStore();
   const { activeProjectId, projects } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
   const defaultProvider = activeProject?.config.provider ?? null;
@@ -447,7 +447,10 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
     if (!activeSessionId) return;
     const sid = activeSessionId;
     ipc.agentQueueRecovery(sid, action)
-      .then(() => clearQueuePaused(sid))
+      .then(() => {
+        clearQueuePaused(sid);
+        if (action === "clear") clearQueuedMessages(sid);
+      })
       .catch(console.error);
   }
 

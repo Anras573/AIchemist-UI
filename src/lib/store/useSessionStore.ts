@@ -116,6 +116,7 @@ interface SessionStore {
   // Queue actions
   addQueuedMessage: (sessionId: string, messageId: string) => void;
   dequeueMessage: (sessionId: string, messageId: string) => void;
+  clearQueuedMessages: (sessionId: string) => void;
   setQueuePaused: (sessionId: string, remainingCount: number) => void;
   clearQueuePaused: (sessionId: string) => void;
 }
@@ -524,6 +525,12 @@ export const useSessionStore = create<SessionStore>()(
             [sessionId]: { remainingCount },
           },
         })),
+
+      clearQueuedMessages: (sessionId) =>
+        set((state) => {
+          const { [sessionId]: _cleared, ...rest } = state.queuedMessageIds;
+          return { queuedMessageIds: rest };
+        }),
 
       clearQueuePaused: (sessionId) =>
         set((state) => {
