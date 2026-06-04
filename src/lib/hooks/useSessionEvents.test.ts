@@ -469,6 +469,61 @@ describe("SESSION_THINKING_DONE", () => {
   });
 });
 
+// ─── session:queue_turn_start ─────────────────────────────────────────────────
+
+describe("session:queue_turn_start event", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ queuedMessageIds: {}, queuePaused: {}, liveToolCalls: {} });
+  });
+
+  it("clears live tool calls for the session", () => {
+    useSessionStore.getState().addLiveToolCall("sess-1", {
+      toolCallId: "tc-1",
+      toolName: "execute_bash",
+      args: {},
+    });
+    renderHook(() => useSessionEvents());
+
+    getCb(IPC_CHANNELS.SESSION_QUEUE_TURN_START)({ session_id: "sess-1" });
+
+    expect(useSessionStore.getState().liveToolCalls["sess-1"]).toBeUndefined();
+  });
+
+  it("dequeues the message id from queuedMessageIds", () => {
+    useSessionStore.getState().addQueuedMessage("sess-1", "msg-1");
+    renderHook(() => useSessionEvents());
+
+    getCb(IPC_CHANNELS.SESSION_QUEUE_TURN_START)({ session_id: "sess-1", message_id: "msg-1" });
+
+    expect(useSessionStore.getState().queuedMessageIds["sess-1"]).not.toContain("msg-1");
+  });
+
+  it("clears queuePaused for the session", () => {
+    useSessionStore.getState().setQueuePaused("sess-1", 2);
+    renderHook(() => useSessionEvents());
+
+    getCb(IPC_CHANNELS.SESSION_QUEUE_TURN_START)({ session_id: "sess-1" });
+
+    expect(useSessionStore.getState().queuePaused["sess-1"]).toBeUndefined();
+  });
+});
+
+// ─── session:queue_recovery_required ─────────────────────────────────────────
+
+describe("session:queue_recovery_required event", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ queuePaused: {} });
+  });
+
+  it("sets queuePaused with the remaining count", () => {
+    renderHook(() => useSessionEvents());
+
+    getCb(IPC_CHANNELS.SESSION_QUEUE_RECOVERY_REQUIRED)({ session_id: "sess-1", remaining_count: 3 });
+
+    expect(useSessionStore.getState().queuePaused["sess-1"]).toEqual({ remainingCount: 3 });
+  });
+});
+
 // ─── clearThinking on new turn ────────────────────────────────────────────────
 
 describe("clearThinking on SESSION_STATUS running", () => {

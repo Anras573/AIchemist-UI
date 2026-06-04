@@ -469,24 +469,31 @@ export function registerAgentHandlers(
     const paused = pausedQueues.get(args.sessionId);
     if (!paused) return;
 
-    pausedQueues.delete(args.sessionId);
-
     if (args.action === "clear") {
+      pausedQueues.delete(args.sessionId);
       sessionQueues.delete(args.sessionId);
       return;
     }
 
-    const nextQueue: QueuedTurn[] =
+    const recoveryTurns: QueuedTurn[] =
       args.action === "retry"
         ? [paused.failed, ...paused.remaining]
         : paused.remaining;
 
-    if (nextQueue.length === 0) return;
+    // Preserve any new turns enqueued while the queue was paused.
+    const newlyQueued = sessionQueues.get(args.sessionId) ?? [];
+    const mergedQueue = [...recoveryTurns, ...newlyQueued];
 
-    if (activeTurns.has(args.sessionId)) return;
+    pausedQueues.delete(args.sessionId);
 
-    sessionQueues.set(args.sessionId, nextQueue);
-    drainNextQueued(db, args.sessionId, activeTurns, getMainWindow);
+    if (mergedQueue.length === 0) return;
+
+    sessionQueues.set(args.sessionId, mergedQueue);
+
+    if (!activeTurns.has(args.sessionId)) {
+      drainNextQueued(db, args.sessionId, activeTurns, getMainWindow);
+    }
+    // If a turn is somehow already running, drainNextQueued fires when it finishes.
   });
 
   handle(CH.GET_COPILOT_MODELS, () => getProvider("copilot").listModels?.());

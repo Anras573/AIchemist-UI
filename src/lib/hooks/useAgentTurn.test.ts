@@ -251,4 +251,58 @@ describe("useAgentTurn", () => {
       expect.objectContaining({ oneshotSkills: ["ai-sdk"] })
     );
   });
+
+  it("adds the message to queuedMessageIds when agentSend returns { queued: true }", async () => {
+    setupActiveSession();
+    const msg = makeMessage({ id: "msg-queued" });
+    vi.mocked(window.electronAPI.saveMessage).mockResolvedValue(msg);
+    vi.mocked(window.electronAPI.agentSend).mockResolvedValue({ queued: true });
+    const { result } = renderHook(() => useAgentTurn());
+
+    await act(async () => {
+      await result.current.sendMessage("queue me");
+    });
+
+    expect(useSessionStore.getState().queuedMessageIds["sess-1"]).toContain("msg-queued");
+  });
+
+  it("does not clear in-flight live tool calls when the response is queued", async () => {
+    // Session already running (a turn is in progress) — new message gets queued.
+    setupActiveSession({ status: "running" });
+    vi.mocked(window.electronAPI.saveMessage).mockResolvedValue(makeMessage());
+    vi.mocked(window.electronAPI.agentSend).mockResolvedValue({ queued: true });
+    useSessionStore.getState().addLiveToolCall("sess-1", {
+      toolCallId: "tc-1",
+      toolName: "execute_bash",
+      args: {},
+    });
+    const { result } = renderHook(() => useAgentTurn());
+
+    await act(async () => {
+      await result.current.sendMessage("queue me");
+    });
+
+    expect(useSessionStore.getState().liveToolCalls["sess-1"]).toHaveLength(1);
+  });
+
+  it("does not clear in-flight pending approvals when the response is queued", async () => {
+    // Session already running (a turn is in progress) — new message gets queued.
+    setupActiveSession({ status: "running" });
+    vi.mocked(window.electronAPI.saveMessage).mockResolvedValue(makeMessage());
+    vi.mocked(window.electronAPI.agentSend).mockResolvedValue({ queued: true });
+    useSessionStore.getState().addPendingApproval("sess-1", {
+      approvalId: "appr-1",
+      toolCallId: "tc-1",
+      toolName: "execute_bash",
+      args: {},
+      resolve: vi.fn(),
+    });
+    const { result } = renderHook(() => useAgentTurn());
+
+    await act(async () => {
+      await result.current.sendMessage("queue me");
+    });
+
+    expect(useSessionStore.getState().pendingApprovals["sess-1"]).toHaveLength(1);
+  });
 });

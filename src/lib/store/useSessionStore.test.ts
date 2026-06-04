@@ -490,6 +490,80 @@ describe("doneThinking", () => {
   });
 });
 
+// ─── queue actions ────────────────────────────────────────────────────────────
+
+describe("addQueuedMessage / dequeueMessage / clearQueuedMessages", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ queuedMessageIds: {} });
+  });
+
+  it("addQueuedMessage appends a message id", () => {
+    get().addQueuedMessage("sess-1", "msg-1");
+    expect(get().queuedMessageIds["sess-1"]).toContain("msg-1");
+  });
+
+  it("addQueuedMessage accumulates multiple ids", () => {
+    get().addQueuedMessage("sess-1", "msg-1");
+    get().addQueuedMessage("sess-1", "msg-2");
+    expect(get().queuedMessageIds["sess-1"]).toHaveLength(2);
+  });
+
+  it("dequeueMessage removes only the specified id", () => {
+    get().addQueuedMessage("sess-1", "msg-1");
+    get().addQueuedMessage("sess-1", "msg-2");
+    get().dequeueMessage("sess-1", "msg-1");
+    expect(get().queuedMessageIds["sess-1"]).not.toContain("msg-1");
+    expect(get().queuedMessageIds["sess-1"]).toContain("msg-2");
+  });
+
+  it("clearQueuedMessages removes all ids for the session", () => {
+    get().addQueuedMessage("sess-1", "msg-1");
+    get().addQueuedMessage("sess-1", "msg-2");
+    get().clearQueuedMessages("sess-1");
+    expect(get().queuedMessageIds["sess-1"]).toBeUndefined();
+  });
+
+  it("clearQueuedMessages does not affect other sessions", () => {
+    get().addQueuedMessage("sess-1", "msg-1");
+    get().addQueuedMessage("sess-2", "msg-2");
+    get().clearQueuedMessages("sess-1");
+    expect(get().queuedMessageIds["sess-2"]).toContain("msg-2");
+  });
+});
+
+describe("setQueuePaused / clearQueuePaused", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ queuePaused: {} });
+  });
+
+  it("setQueuePaused stores the remaining count", () => {
+    get().setQueuePaused("sess-1", 3);
+    expect(get().queuePaused["sess-1"]).toEqual({ remainingCount: 3 });
+  });
+
+  it("clearQueuePaused removes the paused state", () => {
+    get().setQueuePaused("sess-1", 2);
+    get().clearQueuePaused("sess-1");
+    expect(get().queuePaused["sess-1"]).toBeUndefined();
+  });
+
+  it("clearQueuePaused does not affect other sessions", () => {
+    get().setQueuePaused("sess-1", 2);
+    get().setQueuePaused("sess-2", 4);
+    get().clearQueuePaused("sess-1");
+    expect(get().queuePaused["sess-2"]).toEqual({ remainingCount: 4 });
+  });
+
+  it("removeSession cleans up queue state", () => {
+    get().addSession(makeSession());
+    get().addQueuedMessage("sess-1", "msg-1");
+    get().setQueuePaused("sess-1", 1);
+    get().removeSession("sess-1");
+    expect(get().queuedMessageIds["sess-1"]).toBeUndefined();
+    expect(get().queuePaused["sess-1"]).toBeUndefined();
+  });
+});
+
 describe("clearThinking", () => {
   beforeEach(() => {
     useSessionStore.setState({
