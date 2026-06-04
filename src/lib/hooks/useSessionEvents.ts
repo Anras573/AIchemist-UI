@@ -214,10 +214,10 @@ export function useSessionEvents() {
         }
       ),
 
-      onSessionEvent<{ session_id: string; remaining_count: number }>(
+      onSessionEvent<{ session_id: string; remaining_count: number; failed_message_id?: string }>(
         IPC_CHANNELS.SESSION_QUEUE_RECOVERY_REQUIRED,
         (payload) => {
-          setQueuePaused(payload.session_id, payload.remaining_count);
+          setQueuePaused(payload.session_id, payload.remaining_count, payload.failed_message_id);
         }
       ),
     ];

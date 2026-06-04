@@ -538,7 +538,12 @@ describe("setQueuePaused / clearQueuePaused", () => {
 
   it("setQueuePaused stores the remaining count", () => {
     get().setQueuePaused("sess-1", 3);
-    expect(get().queuePaused["sess-1"]).toEqual({ remainingCount: 3 });
+    expect(get().queuePaused["sess-1"]).toEqual({ remainingCount: 3, failedMessageId: undefined });
+  });
+
+  it("setQueuePaused stores a failedMessageId when provided", () => {
+    get().setQueuePaused("sess-1", 2, "msg-failed");
+    expect(get().queuePaused["sess-1"]).toEqual({ remainingCount: 2, failedMessageId: "msg-failed" });
   });
 
   it("clearQueuePaused removes the paused state", () => {

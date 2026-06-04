@@ -65,7 +65,7 @@ interface SessionStore {
   // Message IDs waiting in the backend queue (not yet being processed)
   queuedMessageIds: Record<string, string[]>;
   // Set when a queued turn fails and needs user recovery action
-  queuePaused: Record<string, { remainingCount: number } | null>;
+  queuePaused: Record<string, { remainingCount: number; failedMessageId?: string } | null>;
 
   mergeSessions: (sessions: Session[]) => void;
   setActiveSession: (id: string | null) => void;
@@ -117,7 +117,7 @@ interface SessionStore {
   addQueuedMessage: (sessionId: string, messageId: string) => void;
   dequeueMessage: (sessionId: string, messageId: string) => void;
   clearQueuedMessages: (sessionId: string) => void;
-  setQueuePaused: (sessionId: string, remainingCount: number) => void;
+  setQueuePaused: (sessionId: string, remainingCount: number, failedMessageId?: string) => void;
   clearQueuePaused: (sessionId: string) => void;
 }
 
@@ -518,11 +518,11 @@ export const useSessionStore = create<SessionStore>()(
           },
         })),
 
-      setQueuePaused: (sessionId, remainingCount) =>
+      setQueuePaused: (sessionId, remainingCount, failedMessageId?) =>
         set((state) => ({
           queuePaused: {
             ...state.queuePaused,
-            [sessionId]: { remainingCount },
+            [sessionId]: { remainingCount, failedMessageId },
           },
         })),
 

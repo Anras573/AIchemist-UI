@@ -394,7 +394,7 @@ export function EmptyStateNewSession({
 
 export function TimelinePanel({ onSendMessage, onNewSession, createSessionError, projectPath }: TimelinePanelProps) {
   const ipc = useIpc();
-  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking, queuedMessageIds, queuePaused, clearQueuePaused, clearQueuedMessages } = useSessionStore();
+  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking, queuedMessageIds, queuePaused, clearQueuePaused, clearQueuedMessages, dequeueMessage } = useSessionStore();
   const { activeProjectId, projects } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
   const defaultProvider = activeProject?.config.provider ?? null;
@@ -446,10 +446,15 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
   function handleQueueRecovery(action: "retry" | "skip" | "clear") {
     if (!activeSessionId) return;
     const sid = activeSessionId;
+    const failedMsgId = queuePaused[sid]?.failedMessageId;
     ipc.agentQueueRecovery(sid, action)
       .then(() => {
         clearQueuePaused(sid);
-        if (action === "clear") clearQueuedMessages(sid);
+        if (action === "clear") {
+          clearQueuedMessages(sid);
+        } else if (action === "skip" && failedMsgId) {
+          dequeueMessage(sid, failedMsgId);
+        }
       })
       .catch(console.error);
   }

@@ -520,7 +520,22 @@ describe("session:queue_recovery_required event", () => {
 
     getCb(IPC_CHANNELS.SESSION_QUEUE_RECOVERY_REQUIRED)({ session_id: "sess-1", remaining_count: 3 });
 
-    expect(useSessionStore.getState().queuePaused["sess-1"]).toEqual({ remainingCount: 3 });
+    expect(useSessionStore.getState().queuePaused["sess-1"]).toMatchObject({ remainingCount: 3 });
+  });
+
+  it("stores the failed message id when provided", () => {
+    renderHook(() => useSessionEvents());
+
+    getCb(IPC_CHANNELS.SESSION_QUEUE_RECOVERY_REQUIRED)({
+      session_id: "sess-1",
+      remaining_count: 1,
+      failed_message_id: "msg-failed",
+    });
+
+    expect(useSessionStore.getState().queuePaused["sess-1"]).toEqual({
+      remainingCount: 1,
+      failedMessageId: "msg-failed",
+    });
   });
 });
 

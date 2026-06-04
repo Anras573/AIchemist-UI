@@ -401,8 +401,9 @@ function drainNextQueued(
       activeTurns.delete(sessionId);
       drainNextQueued(db, sessionId, activeTurns, getMainWindow);
     })
-    .catch(() => {
+    .catch((err: unknown) => {
       activeTurns.delete(sessionId);
+      console.error(`[queue] queued turn failed for session ${sessionId} (messageId=${next.messageId ?? "none"}):`, err);
       // Queued turn failed — pause the queue and surface a recovery prompt.
       const remaining = [...(sessionQueues.get(sessionId) ?? [])];
       sessionQueues.delete(sessionId);
@@ -412,6 +413,7 @@ function drainNextQueued(
         w.webContents.send(CH.SESSION_QUEUE_RECOVERY_REQUIRED, {
           session_id: sessionId,
           remaining_count: remaining.length,
+          failed_message_id: next.messageId,
         });
       }
     });
