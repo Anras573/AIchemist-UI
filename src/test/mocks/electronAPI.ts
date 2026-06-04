@@ -55,7 +55,8 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     openGitHubUrl: vi.fn().mockResolvedValue(undefined),
 
     // Agent
-    agentSend: vi.fn().mockResolvedValue(undefined),
+    agentSend: vi.fn().mockResolvedValue({ queued: false }),
+    agentQueueRecovery: vi.fn().mockResolvedValue(undefined),
     approveToolCall: vi.fn().mockResolvedValue(undefined),
     answerQuestion: vi.fn().mockResolvedValue(undefined),
     getCopilotModels: vi.fn().mockResolvedValue([]),

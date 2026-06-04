@@ -300,6 +300,123 @@ function scanCopilotPluginSkills(): Array<{ name: string; description: string; p
   return results;
 }
 
+// ── Message queue ─────────────────────────────────────────────────────────────
+
+interface QueuedTurn {
+  prompt: string;
+  agent?: string;
+  oneshotSkills?: string[];
+  skipPersistence?: boolean;
+  messageId?: string;
+}
+
+// Per-session FIFO queues for turns submitted while a turn is already running
+const sessionQueues = new Map<string, QueuedTurn[]>();
+// Per-session paused queues — set when a queued turn fails, cleared on recovery
+const pausedQueues = new Map<string, { failed: QueuedTurn; remaining: QueuedTurn[] }>();
+
+async function executeAgentTurn(
+  db: Database,
+  sessionId: string,
+  turn: QueuedTurn,
+  win: BrowserWindow
+): Promise<void> {
+  const session = getSession(db, sessionId);
+  const project = listProjects(db).find((p) => p.id === session.project_id);
+  if (!project) throw new Error(`Project not found for session ${sessionId}`);
+
+  const effectiveConfig = {
+    ...project.config,
+    provider: session.provider ?? project.config.provider,
+    model: session.model ?? project.config.model,
+  };
+  const sessionSkills = session.skills ?? [];
+  const oneshotSkills = turn.oneshotSkills ?? [];
+  const allSkills = [...new Set([...sessionSkills, ...oneshotSkills])];
+  const agent = turn.agent ?? session.agent ?? undefined;
+  const skills = allSkills.length > 0 ? allSkills : undefined;
+
+  let prompt = turn.prompt;
+  if (session.github_issue_number != null && session.messages.length === 1) {
+    const projectPath = session.workspace_path ?? project.path;
+    try {
+      const result = await getIssue({ projectPath, issueNumber: session.github_issue_number });
+      if ("issue" in result) {
+        const { issue } = result;
+        const labelStr = issue.labels?.length ? issue.labels.join(", ") : "none";
+        const bodyStr = issue.body ? `\n\n${issue.body}` : "";
+        prompt = `GitHub Issue #${issue.number}: ${issue.title}\nLabels: ${labelStr}${bodyStr}\n\n---\n\n${turn.prompt}`;
+      } else {
+        console.warn(`[issue-context] Issue #${session.github_issue_number} context unavailable: ${result.error}`);
+      }
+    } catch (err) {
+      console.warn(`[issue-context] Failed to fetch issue #${session.github_issue_number}:`, err);
+    }
+  }
+
+  await runAgentTurn({
+    db,
+    sessionId,
+    prompt,
+    projectPath: session.workspace_path ?? project.path,
+    projectConfig: effectiveConfig,
+    webContents: win.webContents,
+    agent,
+    skills,
+    skipPersistence: turn.skipPersistence,
+  });
+}
+
+// Starts draining the next queued turn. Must be called only when activeTurns
+// does NOT contain sessionId — this function re-adds it synchronously before
+// any await so no concurrent AGENT_SEND can slip through.
+function drainNextQueued(
+  db: Database,
+  sessionId: string,
+  activeTurns: Set<string>,
+  getMainWindow: () => BrowserWindow | null
+): void {
+  const queue = sessionQueues.get(sessionId);
+  if (!queue || queue.length === 0) {
+    sessionQueues.delete(sessionId);
+    return;
+  }
+
+  const next = queue.shift()!;
+  if (queue.length === 0) sessionQueues.delete(sessionId);
+
+  const win = getMainWindow();
+  if (!win) return;
+
+  win.webContents.send(CH.SESSION_QUEUE_TURN_START, {
+    session_id: sessionId,
+    message_id: next.messageId,
+  });
+
+  // Re-claim activeTurns synchronously before any await to prevent races.
+  activeTurns.add(sessionId);
+
+  executeAgentTurn(db, sessionId, next, win)
+    .then(() => {
+      activeTurns.delete(sessionId);
+      drainNextQueued(db, sessionId, activeTurns, getMainWindow);
+    })
+    .catch(() => {
+      activeTurns.delete(sessionId);
+      // Queued turn failed — pause the queue and surface a recovery prompt.
+      const remaining = [...(sessionQueues.get(sessionId) ?? [])];
+      sessionQueues.delete(sessionId);
+      const w = getMainWindow();
+      if (remaining.length > 0 && w) {
+        pausedQueues.set(sessionId, { failed: next, remaining });
+        w.webContents.send(CH.SESSION_QUEUE_RECOVERY_REQUIRED, {
+          session_id: sessionId,
+          remaining_count: remaining.length,
+        });
+      }
+    });
+}
+
 // ── Handler registration ──────────────────────────────────────────────────────
 
 export function registerAgentHandlers(
@@ -307,62 +424,64 @@ export function registerAgentHandlers(
   activeTurns: Set<string>,
   getMainWindow: () => BrowserWindow | null
 ): void {
-  handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[]; skipPersistence?: boolean }) => {
+  handle(CH.AGENT_SEND, async (_event, args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[]; skipPersistence?: boolean; messageId?: string }) => {
     const win = getMainWindow();
     if (!win) throw new Error("No window available");
 
-    if (activeTurns.has(args.sessionId)) {
-      throw new Error("A turn is already in progress for this session. Please wait for it to complete.");
-    }
-
-    const session = getSession(db, args.sessionId);
-    const project = listProjects(db).find((p) => p.id === session.project_id);
-    if (!project) throw new Error(`Project not found for session ${args.sessionId}`);
-    const effectiveConfig = {
-      ...project.config,
-      provider: session.provider ?? project.config.provider,
-      model: session.model ?? project.config.model,
+    const turn: QueuedTurn = {
+      prompt: args.prompt,
+      agent: args.agent,
+      oneshotSkills: args.oneshotSkills,
+      skipPersistence: args.skipPersistence,
+      messageId: args.messageId,
     };
-    const sessionSkills = session.skills ?? [];
-    const oneshotSkills = args.oneshotSkills ?? [];
-    const allSkills = [...new Set([...sessionSkills, ...oneshotSkills])];
-    const agent = args.agent ?? session.agent ?? undefined;
-    const skills = allSkills.length > 0 ? allSkills : undefined;
+
+    if (activeTurns.has(args.sessionId)) {
+      // Session is busy — enqueue and return immediately.
+      const existing = sessionQueues.get(args.sessionId) ?? [];
+      sessionQueues.set(args.sessionId, [...existing, turn]);
+      return { queued: true };
+    }
 
     activeTurns.add(args.sessionId);
+    let succeeded = false;
     try {
-      let prompt = args.prompt;
-      if (session.github_issue_number != null && session.messages.length === 1) {
-        const projectPath = session.workspace_path ?? project.path;
-        try {
-          const result = await getIssue({ projectPath, issueNumber: session.github_issue_number });
-          if ("issue" in result) {
-            const { issue } = result;
-            const labelStr = issue.labels?.length ? issue.labels.join(", ") : "none";
-            const bodyStr = issue.body ? `\n\n${issue.body}` : "";
-            prompt = `GitHub Issue #${issue.number}: ${issue.title}\nLabels: ${labelStr}${bodyStr}\n\n---\n\n${args.prompt}`;
-          } else {
-            console.warn(`[issue-context] Issue #${session.github_issue_number} context unavailable: ${result.error}`);
-          }
-        } catch (err) {
-          console.warn(`[issue-context] Failed to fetch issue #${session.github_issue_number}:`, err);
-        }
-      }
-
-      await runAgentTurn({
-        db,
-        sessionId: args.sessionId,
-        prompt,
-        projectPath: session.workspace_path ?? project.path,
-        projectConfig: effectiveConfig,
-        webContents: win.webContents,
-        agent,
-        skills,
-        skipPersistence: args.skipPersistence,
-      });
+      await executeAgentTurn(db, args.sessionId, turn, win);
+      succeeded = true;
     } finally {
       activeTurns.delete(args.sessionId);
+      if (succeeded) {
+        // Drain queued turns (re-adds to activeTurns synchronously if queue is non-empty).
+        drainNextQueued(db, args.sessionId, activeTurns, getMainWindow);
+      } else {
+        // Direct turn failed — clear the queue rather than continuing blindly.
+        sessionQueues.delete(args.sessionId);
+      }
     }
+
+    return { queued: false };
+  });
+
+  handle(CH.AGENT_QUEUE_RECOVERY, (_event, args: { sessionId: string; action: "retry" | "skip" | "clear" }) => {
+    const paused = pausedQueues.get(args.sessionId);
+    if (!paused) return;
+
+    pausedQueues.delete(args.sessionId);
+
+    if (args.action === "clear") {
+      sessionQueues.delete(args.sessionId);
+      return;
+    }
+
+    const nextQueue: QueuedTurn[] =
+      args.action === "retry"
+        ? [paused.failed, ...paused.remaining]
+        : paused.remaining;
+
+    if (nextQueue.length === 0) return;
+
+    sessionQueues.set(args.sessionId, nextQueue);
+    drainNextQueued(db, args.sessionId, activeTurns, getMainWindow);
   });
 
   handle(CH.GET_COPILOT_MODELS, () => getProvider("copilot").listModels?.());

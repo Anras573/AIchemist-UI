@@ -113,6 +113,11 @@ export const SESSION_THINKING_DONE  = "session:thinking-done";
 export const SESSION_QUESTION_REQUIRED = "session:question_required";
 export const ANSWER_QUESTION           = "agent:answer-question";
 
+// ── Message queue (push: main → renderer + renderer → main) ──────────────────
+export const SESSION_QUEUE_TURN_START        = "session:queue_turn_start";
+export const SESSION_QUEUE_RECOVERY_REQUIRED = "session:queue_recovery_required";
+export const AGENT_QUEUE_RECOVERY            = "agent:queue-recovery";
+
 // ── Startup warnings (push: main → renderer) ──────────────────────────────────
 export const CONFIG_WARNING            = "config:warning";
 export const WORKTREE_WARNING          = "worktree:warning";

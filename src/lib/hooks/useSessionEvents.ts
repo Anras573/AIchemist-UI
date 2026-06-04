@@ -80,6 +80,7 @@ export function useSessionEvents() {
     appendStreamingDelta,
     clearStreamingText,
     addLiveToolCall,
+    clearLiveToolCalls,
     appendTerminalOutput,
     addPendingApproval,
     addOrUpdateTraceSpan,
@@ -91,6 +92,9 @@ export function useSessionEvents() {
     clearThinking,
     addPendingQuestion,
     clearPendingQuestions,
+    dequeueMessage,
+    setQueuePaused,
+    clearQueuePaused,
   } = useSessionStore();
 
   useEffect(() => {
@@ -198,6 +202,24 @@ export function useSessionEvents() {
           addPendingQuestion(payload.session_id, q);
         }
       ),
+
+      onSessionEvent<{ session_id: string; message_id?: string }>(
+        IPC_CHANNELS.SESSION_QUEUE_TURN_START,
+        (payload) => {
+          clearLiveToolCalls(payload.session_id);
+          clearQueuePaused(payload.session_id);
+          if (payload.message_id) {
+            dequeueMessage(payload.session_id, payload.message_id);
+          }
+        }
+      ),
+
+      onSessionEvent<{ session_id: string; remaining_count: number }>(
+        IPC_CHANNELS.SESSION_QUEUE_RECOVERY_REQUIRED,
+        (payload) => {
+          setQueuePaused(payload.session_id, payload.remaining_count);
+        }
+      ),
     ];
 
     return () => unsubs.forEach((fn) => fn());
@@ -218,5 +240,9 @@ export function useSessionEvents() {
     clearThinking,
     addPendingQuestion,
     clearPendingQuestions,
+    dequeueMessage,
+    setQueuePaused,
+    clearQueuePaused,
+    clearLiveToolCalls,
   ]);
 }

@@ -119,6 +119,7 @@ describe("useAgentTurn", () => {
     vi.mocked(window.electronAPI.agentSend).mockImplementation(async () => {
       statusDuringAgentSend =
         useSessionStore.getState().sessions["sess-1"].status;
+      return { queued: false };
     });
 
     const { result } = renderHook(() => useAgentTurn());
