@@ -383,7 +383,12 @@ function drainNextQueued(
   }
 
   const win = getMainWindow();
-  if (!win) return;
+  if (!win) {
+    // Window is unavailable (shutdown/reload) — clear the queue so subsequent
+    // AGENT_SEND calls are not permanently wedged by sessionQueues.has().
+    sessionQueues.delete(sessionId);
+    return;
+  }
 
   const next = queue.shift()!;
   if (queue.length === 0) sessionQueues.delete(sessionId);

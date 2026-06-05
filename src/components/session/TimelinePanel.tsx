@@ -410,7 +410,10 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
   const thinkingText = activeSessionId ? (sessionThinking[activeSessionId] ?? "") : "";
   const isThinking = activeSessionId ? (sessionIsThinking[activeSessionId] ?? false) : false;
   const isRunning = session?.status === "running" || session?.status === "waiting_approval";
-  const queuedIds = activeSessionId ? (queuedMessageIds[activeSessionId] ?? []) : [];
+  const queuedIdsSet = useMemo(
+    () => new Set(activeSessionId ? (queuedMessageIds[activeSessionId] ?? []) : []),
+    [queuedMessageIds, activeSessionId]
+  );
   const queuePausedState = activeSessionId ? (queuePaused[activeSessionId] ?? null) : null;
 
   const messages = session?.messages ?? [];
@@ -500,7 +503,7 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
               <MessageBubble
                 key={item.data.id}
                 message={item.data}
-                isQueued={queuedIds.includes(item.data.id)}
+                isQueued={queuedIdsSet.has(item.data.id)}
               />
             ) : (
               <CompactionMarker key={item.data.id} event={item.data} />
