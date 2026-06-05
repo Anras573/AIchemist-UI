@@ -409,19 +409,21 @@ function drainNextQueued(
     .catch((err: unknown) => {
       activeTurns.delete(sessionId);
       console.error(`[queue] queued turn failed for session ${sessionId} (messageId=${next.messageId ?? "none"}):`, err);
-      // Queued turn failed — always persist paused state so recovery is possible
-      // even if the window is temporarily unavailable.
       const remaining = [...(sessionQueues.get(sessionId) ?? [])];
       sessionQueues.delete(sessionId);
-      pausedQueues.set(sessionId, { failed: next, remaining });
       const w = getMainWindow();
       if (w) {
+        // Pause the queue and surface a recovery prompt.
+        pausedQueues.set(sessionId, { failed: next, remaining });
         w.webContents.send(CH.SESSION_QUEUE_RECOVERY_REQUIRED, {
           session_id: sessionId,
           remaining_count: remaining.length,
           failed_message_id: next.messageId,
         });
       }
+      // If no window: don't set pausedQueues — that would wedge future sends behind
+      // a paused state the renderer can never recover from. Queued items are lost but
+      // the session is unblocked. Badges clear on next renderer load (store resets).
     });
 }
 
@@ -454,11 +456,11 @@ export function registerAgentHandlers(
       || sessionQueues.has(args.sessionId)
       || pausedQueues.has(args.sessionId);
     if (isBusy) {
-      // Only real chat messages (with a persisted messageId) are safe to queue.
-      // Other callers (e.g. PR description generator with skipPersistence=true)
-      // don't handle a queued response — they'd lose their streaming listener.
-      if (!args.messageId) {
-        throw new Error(`Session ${args.sessionId} is busy`);
+      // Only real chat messages (already saved to SQLite, not skipPersistence) are
+      // safe to queue. Other callers (e.g. PR description generator) expect the IPC
+      // call to represent the full lifetime of the turn and don't handle { queued: true }.
+      if (!args.messageId || args.skipPersistence) {
+        throw new Error(`Session ${args.sessionId} is busy — cannot queue non-chat turns`);
       }
       // Enqueue and return immediately.
       const existing = sessionQueues.get(args.sessionId) ?? [];
