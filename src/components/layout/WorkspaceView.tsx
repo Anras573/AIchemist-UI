@@ -4,7 +4,6 @@ import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useAgentTurn } from "@/lib/hooks/useAgentTurn";
 import { useIpc } from "@/lib/ipc";
 import { SplitPane } from "@/components/layout/SplitPane";
-import { SessionTabBar } from "@/components/session/SessionTabBar";
 import { TimelinePanel } from "@/components/session/TimelinePanel";
 import { ContextPanel, type ContextTab } from "@/components/session/ContextPanel";
 import { ToolStrip } from "@/components/session/ToolStrip";
@@ -94,13 +93,6 @@ export function WorkspaceView() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Tab bar */}
-      <div className="drag-region flex items-center border-b bg-background flex-shrink-0">
-        <div className="no-drag-region flex-1 overflow-hidden">
-          <SessionTabBar projectId={activeProject.id} />
-        </div>
-      </div>
-
       {/* Main content: chat | context panel | tool strip */}
       <div className="flex flex-1 overflow-hidden">
         <SplitPane
