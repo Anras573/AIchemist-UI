@@ -484,17 +484,17 @@ export function registerAgentHandlers(
         const queued = [...(sessionQueues.get(args.sessionId) ?? [])];
         sessionQueues.delete(args.sessionId);
         if (queued.length > 0) {
-          // Always persist paused state so recovery is possible even if the
-          // window is temporarily unavailable.
-          pausedQueues.set(args.sessionId, { failed: turn, remaining: queued });
           const w = getMainWindow();
           if (w) {
+            pausedQueues.set(args.sessionId, { failed: turn, remaining: queued });
             w.webContents.send(CH.SESSION_QUEUE_RECOVERY_REQUIRED, {
               session_id: args.sessionId,
               remaining_count: queued.length,
               failed_message_id: turn.messageId,
             });
           }
+          // If no window: don't set pausedQueues — that would wedge future sends
+          // behind a paused state the renderer can never recover from.
         }
       }
     }
