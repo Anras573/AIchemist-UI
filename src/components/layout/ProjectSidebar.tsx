@@ -102,6 +102,11 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
       e.stopPropagation();
       await ipc.removeProject(id).catch(console.error);
       removeProject(id);
+      setExpandedProjects((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     },
     [ipc, removeProject]
   );
