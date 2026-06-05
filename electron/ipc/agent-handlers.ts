@@ -404,12 +404,13 @@ function drainNextQueued(
     .catch((err: unknown) => {
       activeTurns.delete(sessionId);
       console.error(`[queue] queued turn failed for session ${sessionId} (messageId=${next.messageId ?? "none"}):`, err);
-      // Queued turn failed — pause the queue and surface a recovery prompt.
+      // Queued turn failed — always persist paused state so recovery is possible
+      // even if the window is temporarily unavailable.
       const remaining = [...(sessionQueues.get(sessionId) ?? [])];
       sessionQueues.delete(sessionId);
+      pausedQueues.set(sessionId, { failed: next, remaining });
       const w = getMainWindow();
       if (w) {
-        pausedQueues.set(sessionId, { failed: next, remaining });
         w.webContents.send(CH.SESSION_QUEUE_RECOVERY_REQUIRED, {
           session_id: sessionId,
           remaining_count: remaining.length,
@@ -417,6 +418,12 @@ function drainNextQueued(
         });
       }
     });
+}
+
+/** Called by DELETE_SESSION to purge all queue state for a deleted session. */
+export function cleanupSessionQueueState(sessionId: string): void {
+  sessionQueues.delete(sessionId);
+  pausedQueues.delete(sessionId);
 }
 
 // ── Handler registration ──────────────────────────────────────────────────────
@@ -464,9 +471,11 @@ export function registerAgentHandlers(
         const queued = [...(sessionQueues.get(args.sessionId) ?? [])];
         sessionQueues.delete(args.sessionId);
         if (queued.length > 0) {
+          // Always persist paused state so recovery is possible even if the
+          // window is temporarily unavailable.
+          pausedQueues.set(args.sessionId, { failed: turn, remaining: queued });
           const w = getMainWindow();
           if (w) {
-            pausedQueues.set(args.sessionId, { failed: turn, remaining: queued });
             w.webContents.send(CH.SESSION_QUEUE_RECOVERY_REQUIRED, {
               session_id: args.sessionId,
               remaining_count: queued.length,
