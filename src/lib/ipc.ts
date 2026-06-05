@@ -62,8 +62,10 @@ export const ipc = {
     window.electronAPI.settingsWrite(updates),
 
   // Agent
-  agentSend: (args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[]; skipPersistence?: boolean }) =>
+  agentSend: (args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[]; skipPersistence?: boolean; messageId?: string }) =>
     window.electronAPI.agentSend(args),
+  agentQueueRecovery: (sessionId: string, action: "retry" | "skip" | "clear") =>
+    window.electronAPI.agentQueueRecovery(sessionId, action),
   approveToolCall: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) =>
     window.electronAPI.approveToolCall(sessionId, approvalId, approved, options),
   answerQuestion: (questionId: string, answer: string) =>
@@ -150,6 +152,8 @@ export const IPC_CHANNELS = {
   SESSION_THINKING_DELTA: "session:thinking-delta",
   SESSION_THINKING_DONE: "session:thinking-done",
   SESSION_QUESTION_REQUIRED: "session:question_required",
+  SESSION_QUEUE_TURN_START: "session:queue_turn_start",
+  SESSION_QUEUE_RECOVERY_REQUIRED: "session:queue_recovery_required",
   CONFIG_WARNING: "config:warning",
   WORKTREE_WARNING: "worktree:warning",
 } as const;

@@ -27,6 +27,7 @@ import { cancelSessionQuestions } from "../agent/question";
 import { cleanupCopilotSession } from "../agent/copilot";
 import { getProvider } from "../agent/runner";
 import { OLLAMA_NO_MODELS_ERROR } from "../agent/ollama";
+import { cleanupSessionQueueState } from "./agent-handlers";
 import type { Provider } from "../../src/types/index";
 import { handle } from "./handle";
 
@@ -136,6 +137,7 @@ export function registerSessionHandlers(
     cancelSessionQuestions(sessionId);
     cleanupCopilotSession(sessionId);
     activeTurns.delete(sessionId);
+    cleanupSessionQueueState(sessionId);
     return deleteSession(db, sessionId);
   });
   handle(

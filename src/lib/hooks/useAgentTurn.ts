@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { useIpc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import type { Message } from "@/types";
+import type { Message, SessionStatus } from "@/types";
 
 /**
  * Provides a stable `sendMessage` callback for the active session.
@@ -22,6 +22,7 @@ export function useAgentTurn() {
     clearStreamingText,
     clearLiveToolCalls,
     clearPendingApprovals,
+    addQueuedMessage,
   } = useSessionStore();
 
   const { projects, activeProjectId } = useProjectStore();
@@ -57,21 +58,32 @@ export function useAgentTurn() {
       }
 
       // 3. Run the agent turn via IPC — main process handles LLM dispatch
-      updateSessionStatus(activeSessionId, "running");
-      clearLiveToolCalls(activeSessionId);
       const sessionIdAtStart = activeSessionId;
       const activeAgent = sessionAgents[activeSessionId] ?? undefined;
+      const isAlreadyRunning = (session.status as SessionStatus) === "running"
+        || (session.status as SessionStatus) === "waiting_approval";
+
+      if (!isAlreadyRunning) {
+        updateSessionStatus(activeSessionId, "running");
+        clearLiveToolCalls(activeSessionId);
+      }
 
       try {
-        await ipc.agentSend({
+        const result = await ipc.agentSend({
           sessionId: activeSessionId,
           prompt: text,
           agent: activeAgent,
           oneshotSkills,
+          messageId: userMsg.id,
         });
-        clearLiveToolCalls(sessionIdAtStart);
-        clearPendingApprovals(sessionIdAtStart);
-        // Status is updated via session:status push event from runner
+        if (result?.queued) {
+          // The turn was queued — mark the message so the UI shows a "Queued" badge.
+          addQueuedMessage(sessionIdAtStart, userMsg.id);
+        } else {
+          clearLiveToolCalls(sessionIdAtStart);
+          clearPendingApprovals(sessionIdAtStart);
+          // Status is updated via session:status push event from runner
+        }
       } catch (err) {
         console.error("agentSend failed:", err);
         clearStreamingText(sessionIdAtStart);
@@ -92,6 +104,7 @@ export function useAgentTurn() {
       clearStreamingText,
       clearLiveToolCalls,
       clearPendingApprovals,
+      addQueuedMessage,
     ]
   );
 

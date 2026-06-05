@@ -53,7 +53,13 @@ const EMPTY_COMPACTIONS: CompactionEvent[] = [];
 
 // ─── Individual message bubble ────────────────────────────────────────────────
 
-const MessageBubble = memo(function MessageBubble({ message }: { message: MessageRecord }) {
+const MessageBubble = memo(function MessageBubble({
+  message,
+  isQueued,
+}: {
+  message: MessageRecord;
+  isQueued?: boolean;
+}) {
   const isUser = message.role === "user";
   return (
     <Message from={message.role as "user" | "assistant"}>
@@ -69,6 +75,11 @@ const MessageBubble = memo(function MessageBubble({ message }: { message: Messag
           <MessageResponse className="text-sm">{message.content}</MessageResponse>
         )}
       </MessageContent>
+      {isQueued && (
+        <span className="self-end text-[10px] font-medium text-muted-foreground/60 px-1 py-0.5 rounded bg-muted/60 border border-border/50 select-none">
+          Queued
+        </span>
+      )}
     </Message>
   );
 });
@@ -211,6 +222,38 @@ const CompactionMarker = memo(function CompactionMarker({ event }: { event: Comp
   );
 });
 
+// ─── Queue recovery card ──────────────────────────────────────────────────────
+
+function QueueRecoveryCard({
+  remainingCount,
+  onAction,
+}: {
+  remainingCount: number;
+  onAction: (action: "retry" | "skip" | "clear") => void;
+}) {
+  return (
+    <div className="flex w-full justify-start">
+      <div className="max-w-[85%] rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm space-y-2">
+        <p className="font-medium text-destructive">A queued message failed to send.</p>
+        <p className="text-xs text-muted-foreground">
+          {remainingCount} message{remainingCount !== 1 ? "s" : ""} still in queue. Choose how to continue:
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => onAction("retry")}>
+            Retry
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => onAction("skip")}>
+            Skip
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => onAction("clear")}>
+            Clear queue
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 
 interface TimelinePanelProps {
@@ -350,7 +393,8 @@ export function EmptyStateNewSession({
 }
 
 export function TimelinePanel({ onSendMessage, onNewSession, createSessionError, projectPath }: TimelinePanelProps) {
-  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking } = useSessionStore();
+  const ipc = useIpc();
+  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking, queuedMessageIds, queuePaused, clearQueuePaused, clearQueuedMessages, dequeueMessage } = useSessionStore();
   const { activeProjectId, projects } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
   const defaultProvider = activeProject?.config.provider ?? null;
@@ -366,6 +410,11 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
   const thinkingText = activeSessionId ? (sessionThinking[activeSessionId] ?? "") : "";
   const isThinking = activeSessionId ? (sessionIsThinking[activeSessionId] ?? false) : false;
   const isRunning = session?.status === "running" || session?.status === "waiting_approval";
+  const queuedIdsSet = useMemo(
+    () => new Set(activeSessionId ? (queuedMessageIds[activeSessionId] ?? []) : []),
+    [queuedMessageIds, activeSessionId]
+  );
+  const queuePausedState = activeSessionId ? (queuePaused[activeSessionId] ?? null) : null;
 
   const messages = session?.messages ?? [];
 
@@ -395,6 +444,22 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
     // Remove the card after a brief feedback window
     const sid = activeSessionId;
     setTimeout(() => removeApproval(sid, approvalId), 1500);
+  }
+
+  function handleQueueRecovery(action: "retry" | "skip" | "clear") {
+    if (!activeSessionId) return;
+    const sid = activeSessionId;
+    const failedMsgId = queuePaused[sid]?.failedMessageId;
+    ipc.agentQueueRecovery(sid, action)
+      .then(() => {
+        clearQueuePaused(sid);
+        if (action === "clear") {
+          clearQueuedMessages(sid);
+        } else if (action === "skip" && failedMsgId) {
+          dequeueMessage(sid, failedMsgId);
+        }
+      })
+      .catch(console.error);
   }
 
 
@@ -435,7 +500,11 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
           )}
           {timelineItems.map((item) =>
             item.kind === "message" ? (
-              <MessageBubble key={item.data.id} message={item.data} />
+              <MessageBubble
+                key={item.data.id}
+                message={item.data}
+                isQueued={queuedIdsSet.has(item.data.id)}
+              />
             ) : (
               <CompactionMarker key={item.data.id} event={item.data} />
             )
@@ -472,14 +541,25 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
             </div>
           )}
           {session?.status === "running" && <StreamingBubble text={streaming} />}
+          {queuePausedState && (
+            <QueueRecoveryCard
+              remainingCount={queuePausedState.remainingCount}
+              onAction={handleQueueRecovery}
+            />
+          )}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
 
+      {/* Queue hint — shown when agent is busy so user knows messages will be queued */}
+      {isRunning && (
+        <div className="px-4 py-1.5 text-xs text-muted-foreground border-t bg-muted/30 select-none">
+          Agent is busy — your message will be queued
+        </div>
+      )}
       {/* Input bar */}
       <InputBar
-        disabled={isRunning}
-        placeholder={isRunning ? "Waiting for response…" : "Send a message…"}
+        placeholder="Send a message…"
         onSend={onSendMessage}
         onNewSession={onNewSession}
       />

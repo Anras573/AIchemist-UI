@@ -184,7 +184,7 @@ describe("ChangesPanel Open PR flow", () => {
       },
     });
     window.electronAPI.getGitDiff = vi.fn().mockResolvedValue("diff --git a/file.ts b/file.ts\n+new line");
-    window.electronAPI.agentSend = vi.fn().mockResolvedValue(undefined);
+    window.electronAPI.agentSend = vi.fn().mockResolvedValue({ queued: false });
     window.electronAPI.readFile = vi.fn().mockResolvedValue({ error: "not found" });
     window.electronAPI.openGitHubUrl = vi.fn().mockResolvedValue(undefined);
   });
@@ -290,8 +290,8 @@ describe("ChangesPanel Open PR flow", () => {
     let resolveSend: (() => void) | undefined;
     window.electronAPI.agentSend = vi.fn().mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          resolveSend = resolve;
+        new Promise<{ queued: boolean }>((resolve) => {
+          resolveSend = () => resolve({ queued: false });
         })
     );
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
@@ -353,8 +353,8 @@ describe("ChangesPanel Open PR flow", () => {
     let resolveSend: (() => void) | undefined;
     window.electronAPI.agentSend = vi.fn().mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          resolveSend = resolve;
+        new Promise<{ queued: boolean }>((resolve) => {
+          resolveSend = () => resolve({ queued: false });
         })
     );
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
@@ -400,7 +400,7 @@ describe("ChangesPanel Open PR flow", () => {
     window.electronAPI.getGitDiff = vi.fn().mockImplementation(
       () => new Promise<string>(() => { /* never resolves */ })
     );
-    window.electronAPI.agentSend = vi.fn().mockResolvedValue(undefined);
+    window.electronAPI.agentSend = vi.fn().mockResolvedValue({ queued: false });
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
     useSessionStore.getState().addSession(makeSession("sess-pr", {
       title: "Session title",
@@ -425,7 +425,7 @@ describe("ChangesPanel Open PR flow", () => {
     window.electronAPI.getGitDiff = vi.fn().mockImplementation(
       () => new Promise<string>(() => { /* never resolves */ })
     );
-    window.electronAPI.agentSend = vi.fn().mockResolvedValue(undefined);
+    window.electronAPI.agentSend = vi.fn().mockResolvedValue({ queued: false });
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
     useSessionStore.getState().addSession(makeSession("sess-pr", {
       title: "Session title",
@@ -558,8 +558,8 @@ describe("ChangesPanel Open PR flow", () => {
     let resolveSend: (() => void) | undefined;
     window.electronAPI.agentSend = vi.fn().mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          resolveSend = resolve;
+        new Promise<{ queued: boolean }>((resolve) => {
+          resolveSend = () => resolve({ queued: false });
         })
     );
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
@@ -594,8 +594,8 @@ describe("ChangesPanel Open PR flow", () => {
     let resolveSend: (() => void) | undefined;
     window.electronAPI.agentSend = vi.fn().mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          resolveSend = resolve;
+        new Promise<{ queued: boolean }>((resolve) => {
+          resolveSend = () => resolve({ queued: false });
         })
     );
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
@@ -632,8 +632,8 @@ describe("ChangesPanel Open PR flow", () => {
     let resolveSend: (() => void) | undefined;
     window.electronAPI.agentSend = vi.fn().mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          resolveSend = resolve;
+        new Promise<{ queued: boolean }>((resolve) => {
+          resolveSend = () => resolve({ queued: false });
         })
     );
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
@@ -703,8 +703,8 @@ describe("ChangesPanel Open PR flow", () => {
     let resolveSend: (() => void) | undefined;
     window.electronAPI.agentSend = vi.fn().mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          resolveSend = resolve;
+        new Promise<{ queued: boolean }>((resolve) => {
+          resolveSend = () => resolve({ queued: false });
         })
     );
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
@@ -746,8 +746,8 @@ describe("ChangesPanel Open PR flow", () => {
     let resolveSend: (() => void) | undefined;
     window.electronAPI.agentSend = vi.fn().mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
-          resolveSend = resolve;
+        new Promise<{ queued: boolean }>((resolve) => {
+          resolveSend = () => resolve({ queued: false });
         })
     );
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
@@ -830,7 +830,7 @@ describe("ChangesPanel Open PR flow", () => {
 
   it("shows error when Generate is clicked while a prior generation is still in flight", async () => {
     window.electronAPI.agentSend = vi.fn().mockImplementation(
-      () => new Promise<void>(() => { /* never resolves */ })
+      () => new Promise<{ queued: boolean }>(() => { /* never resolves */ })
     );
     window.electronAPI.getApiKey = vi.fn().mockResolvedValue("ghp_test");
     useSessionStore.getState().addSession(makeSession("sess-pr", {

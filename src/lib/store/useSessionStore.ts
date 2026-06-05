@@ -62,6 +62,10 @@ interface SessionStore {
   sessionThinking: Record<string, string>;
   // Whether a thinking block is actively streaming per session (NOT persisted)
   sessionIsThinking: Record<string, boolean>;
+  // Message IDs waiting in the backend queue (not yet being processed)
+  queuedMessageIds: Record<string, string[]>;
+  // Set when a queued turn fails and needs user recovery action
+  queuePaused: Record<string, { remainingCount: number; failedMessageId?: string } | null>;
 
   mergeSessions: (sessions: Session[]) => void;
   setActiveSession: (id: string | null) => void;
@@ -109,6 +113,12 @@ interface SessionStore {
   clearPendingQuestions: (sessionId: string) => void;
   /** Clears all messages from the session's timeline (UI-only, does not touch the DB). */
   clearSessionMessages: (sessionId: string) => void;
+  // Queue actions
+  addQueuedMessage: (sessionId: string, messageId: string) => void;
+  dequeueMessage: (sessionId: string, messageId: string) => void;
+  clearQueuedMessages: (sessionId: string) => void;
+  setQueuePaused: (sessionId: string, remainingCount: number, failedMessageId?: string) => void;
+  clearQueuePaused: (sessionId: string) => void;
 }
 
 export const useSessionStore = create<SessionStore>()(
@@ -129,6 +139,8 @@ export const useSessionStore = create<SessionStore>()(
       sessionCompactions: {},
       sessionThinking: {},
       sessionIsThinking: {},
+      queuedMessageIds: {},
+      queuePaused: {},
       tabSwitchRequest: null,
 
       // Merge new sessions into the store without wiping sessions from other projects.
@@ -200,6 +212,8 @@ export const useSessionStore = create<SessionStore>()(
           const { [id]: _thinking, ...thinkingRest } = state.sessionThinking;
           const { [id]: _isThinking, ...isThinkingRest } = state.sessionIsThinking;
           const { [id]: _terminalOutput, ...terminalOutputRest } = state.terminalOutput;
+          const { [id]: _queuedMessages, ...queuedMessagesRest } = state.queuedMessageIds;
+          const { [id]: _queuePaused, ...queuePausedRest } = state.queuePaused;
           return {
             sessions: rest,
             streamingText: streamingRest,
@@ -215,6 +229,8 @@ export const useSessionStore = create<SessionStore>()(
             sessionThinking: thinkingRest,
             sessionIsThinking: isThinkingRest,
             terminalOutput: terminalOutputRest,
+            queuedMessageIds: queuedMessagesRest,
+            queuePaused: queuePausedRest,
             activeSessionId:
               state.activeSessionId === id ? null : state.activeSessionId,
           };
@@ -482,6 +498,44 @@ export const useSessionStore = create<SessionStore>()(
               [sessionId]: { ...session, messages: [] },
             },
           };
+        }),
+
+      addQueuedMessage: (sessionId, messageId) =>
+        set((state) => ({
+          queuedMessageIds: {
+            ...state.queuedMessageIds,
+            [sessionId]: [...(state.queuedMessageIds[sessionId] ?? []), messageId],
+          },
+        })),
+
+      dequeueMessage: (sessionId, messageId) =>
+        set((state) => ({
+          queuedMessageIds: {
+            ...state.queuedMessageIds,
+            [sessionId]: (state.queuedMessageIds[sessionId] ?? []).filter(
+              (id) => id !== messageId
+            ),
+          },
+        })),
+
+      setQueuePaused: (sessionId, remainingCount, failedMessageId?) =>
+        set((state) => ({
+          queuePaused: {
+            ...state.queuePaused,
+            [sessionId]: { remainingCount, failedMessageId },
+          },
+        })),
+
+      clearQueuedMessages: (sessionId) =>
+        set((state) => {
+          const { [sessionId]: _cleared, ...rest } = state.queuedMessageIds;
+          return { queuedMessageIds: rest };
+        }),
+
+      clearQueuePaused: (sessionId) =>
+        set((state) => {
+          const { [sessionId]: _cleared, ...rest } = state.queuePaused;
+          return { queuePaused: rest };
         }),
     }),
     {

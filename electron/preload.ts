@@ -52,7 +52,8 @@ export interface ElectronAPI {
   openGitHubUrl: (url: string) => Promise<void>;
 
   // ── Agent ─────────────────────────────────────────────────────────────────
-  agentSend: (args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[]; skipPersistence?: boolean }) => Promise<void>;
+  agentSend: (args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[]; skipPersistence?: boolean; messageId?: string }) => Promise<{ queued: boolean }>;
+  agentQueueRecovery: (sessionId: string, action: "retry" | "skip" | "clear") => Promise<void>;
   approveToolCall: (sessionId: string, approvalId: string, approved: boolean, options?: { scope?: "once" | "session" | "project"; projectId?: string }) => Promise<void>;
   answerQuestion: (questionId: string, answer: string) => Promise<void>;
   getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
@@ -152,6 +153,8 @@ const api: ElectronAPI = {
   openGitHubUrl: (url) => ipcRenderer.invoke(CH.OPEN_GITHUB_URL, url),
 
   agentSend: (args) => ipcRenderer.invoke(CH.AGENT_SEND, args),
+  agentQueueRecovery: (sessionId, action) =>
+    ipcRenderer.invoke(CH.AGENT_QUEUE_RECOVERY, { sessionId, action }),
   approveToolCall: (sessionId, approvalId, approved, options) =>
     ipcRenderer.invoke(CH.APPROVE_TOOL_CALL, { sessionId, approvalId, approved, ...options }),
   answerQuestion: (questionId, answer) =>
