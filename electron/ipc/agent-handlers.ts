@@ -454,7 +454,13 @@ export function registerAgentHandlers(
       || sessionQueues.has(args.sessionId)
       || pausedQueues.has(args.sessionId);
     if (isBusy) {
-      // Session is busy or paused — enqueue and return immediately.
+      // Only real chat messages (with a persisted messageId) are safe to queue.
+      // Other callers (e.g. PR description generator with skipPersistence=true)
+      // don't handle a queued response — they'd lose their streaming listener.
+      if (!args.messageId) {
+        throw new Error(`Session ${args.sessionId} is busy`);
+      }
+      // Enqueue and return immediately.
       const existing = sessionQueues.get(args.sessionId) ?? [];
       sessionQueues.set(args.sessionId, [...existing, turn]);
       return { queued: true };
