@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 import { StatusDot } from "@/components/session/StatusDot";
 import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
+import { ProviderMenuItem } from "@/components/session/ProviderMenuItem";
 import { getModelLabel, getLogoProvider } from "@/lib/models";
 import { SessionDeleteDialog } from "@/components/session/SessionDeleteDialog";
 import { NewSessionWithIssueDialog } from "@/components/session/NewSessionWithIssueDialog";
@@ -296,36 +297,3 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
   );
 }
 
-function ProviderMenuItem({
-  probe,
-  onSelect,
-  isDefault,
-  label,
-  icon,
-}: {
-  provider: "anthropic" | "copilot" | "ollama";
-  probe: import("@/types").ProviderProbeResult | undefined;
-  onSelect: () => void;
-  isDefault: boolean;
-  label: string;
-  icon: React.ReactNode;
-}) {
-  // probe === undefined means "still checking" — leave the item enabled.
-  const disabled = probe ? !probe.ok : false;
-  return (
-    <DropdownMenuItem
-      disabled={disabled}
-      onClick={() => { if (!disabled) onSelect(); }}
-      title={disabled ? `Unavailable: ${probe?.reason ?? "unknown"}` : undefined}
-    >
-      {icon}
-      <span className={cn(disabled && "text-muted-foreground")}>{label}</span>
-      {disabled && (
-        <span className="ml-1 text-[10px] text-muted-foreground">(unavailable)</span>
-      )}
-      {isDefault && (
-        <span className="ml-auto text-[10px] text-muted-foreground">default</span>
-      )}
-    </DropdownMenuItem>
-  );
-}

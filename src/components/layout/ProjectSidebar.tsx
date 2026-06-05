@@ -9,9 +9,10 @@ import { Button } from "@/components/ui/button";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 import { StatusDot } from "@/components/session/StatusDot";
 import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
+import { ProviderMenuItem } from "@/components/session/ProviderMenuItem";
 import { SessionDeleteDialog } from "@/components/session/SessionDeleteDialog";
 import { NewSessionWithIssueDialog } from "@/components/session/NewSessionWithIssueDialog";
-import type { Project, Session, ProviderProbeResult } from "@/types";
+import type { Project, Session } from "@/types";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -237,7 +238,6 @@ function ProjectSessionGroup({
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const { sessions, activeSessionId, sessionAgents, addSession, removeSession, setActiveSession } =
     useSessionStore();
-  const { probes } = useProviderProbes(project.id);
 
   const isActiveProject = project.id === activeProjectId;
   const defaultProvider = project.config.provider ?? null;
@@ -291,10 +291,11 @@ function ProjectSessionGroup({
     (s) => s.status === "running" || s.status === "waiting_approval"
   );
 
-  // When collapsed, clicking the folder icon expands the sidebar
+  // Fix 1: clicking a project row always sets it as active, then toggles expand (expanded)
+  // or expands the sidebar (collapsed).
   const handleProjectClick = collapsed
     ? () => { onSetActiveProject(project.id); onExpandSidebar(); }
-    : onToggleExpand;
+    : () => { onSetActiveProject(project.id); onToggleExpand(); };
 
   return (
     <div className="mb-0.5">
@@ -329,7 +330,8 @@ function ProjectSessionGroup({
 
         {/* Hover actions — only when expanded */}
         {!collapsed && (
-          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          // Fix 3: group-focus-within so actions appear when keyboard-focused too
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
             {isActiveProject && (
               <WithTooltip label="Project settings">
                 <button
@@ -352,47 +354,13 @@ function ProjectSessionGroup({
               </button>
             </WithTooltip>
 
-            <DropdownMenu>
-              <WithTooltip label="New session with specific provider">
-                <DropdownMenuTrigger
-                  className="h-5 px-0.5 flex items-center text-muted-foreground hover:text-foreground hover:bg-accent rounded border-none bg-transparent cursor-pointer"
-                  aria-label="New session with specific provider"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <ChevronDown className="size-3" />
-                </DropdownMenuTrigger>
-              </WithTooltip>
-              <DropdownMenuContent align="end">
-                <ProviderMenuItem
-                  provider="anthropic"
-                  probe={probes?.anthropic}
-                  onSelect={() => void handleNewSession("anthropic")}
-                  isDefault={defaultProvider === "anthropic"}
-                  label="New Claude session"
-                  icon={<ModelSelectorLogo provider="anthropic" className="size-3.5" />}
-                />
-                <ProviderMenuItem
-                  provider="copilot"
-                  probe={probes?.copilot}
-                  onSelect={() => void handleNewSession("copilot")}
-                  isDefault={defaultProvider === "copilot"}
-                  label="New Copilot session"
-                  icon={<ModelSelectorLogo provider="github-copilot" className="size-3.5" />}
-                />
-                <ProviderMenuItem
-                  provider="ollama"
-                  probe={probes?.ollama}
-                  onSelect={() => void handleNewSession("ollama")}
-                  isDefault={defaultProvider === "ollama"}
-                  label="New Ollama session"
-                  icon={<ModelSelectorLogo provider="ollama" className="size-3.5" />}
-                />
-                <DropdownMenuItem onClick={() => setIssueDialogOpen(true)}>
-                  <Link className="size-3.5" />
-                  <span>New session linked to issue…</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* Fix 2: ProviderDropdown mounts useProviderProbes lazily on first open */}
+            <ProviderDropdown
+              projectId={project.id}
+              defaultProvider={defaultProvider}
+              onNewSession={(provider) => void handleNewSession(provider)}
+              onIssueDialog={() => setIssueDialogOpen(true)}
+            />
 
             <WithTooltip label="Remove project">
               <button
@@ -436,15 +404,102 @@ function ProjectSessionGroup({
         onOpenChange={(open) => !open && setDeleteDialogSession(null)}
         onConfirm={confirmDeleteSession}
       />
+      {/* probes=null: the issue dialog shows all providers enabled (no availability check needed
+          here since we lazy-load probes only inside the dropdown). */}
       <NewSessionWithIssueDialog
         open={issueDialogOpen}
         onOpenChange={setIssueDialogOpen}
         projectPath={project.path}
         defaultProvider={defaultProvider}
-        probes={probes}
+        probes={null}
         onCreate={(providerOverride, issueNumber) => void handleNewSession(providerOverride, issueNumber)}
       />
     </div>
+  );
+}
+
+// Fix 2: Controlled dropdown that only mounts useProviderProbes when first opened.
+function ProviderDropdown({
+  projectId,
+  defaultProvider,
+  onNewSession,
+  onIssueDialog,
+}: {
+  projectId: string;
+  defaultProvider: string | null;
+  onNewSession: (provider: string) => void;
+  onIssueDialog: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <WithTooltip label="New session with specific provider">
+        <DropdownMenuTrigger
+          className="h-5 px-0.5 flex items-center text-muted-foreground hover:text-foreground hover:bg-accent rounded border-none bg-transparent cursor-pointer"
+          aria-label="New session with specific provider"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ChevronDown className="size-3" />
+        </DropdownMenuTrigger>
+      </WithTooltip>
+      <DropdownMenuContent align="end">
+        {open && (
+          <LazyProviderMenuItems
+            projectId={projectId}
+            defaultProvider={defaultProvider}
+            onNewSession={onNewSession}
+            onIssueDialog={onIssueDialog}
+          />
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// Mounts useProviderProbes only while the dropdown is open.
+function LazyProviderMenuItems({
+  projectId,
+  defaultProvider,
+  onNewSession,
+  onIssueDialog,
+}: {
+  projectId: string;
+  defaultProvider: string | null;
+  onNewSession: (provider: string) => void;
+  onIssueDialog: () => void;
+}) {
+  const { probes } = useProviderProbes(projectId);
+  return (
+    <>
+      <ProviderMenuItem
+        provider="anthropic"
+        probe={probes?.anthropic}
+        onSelect={() => onNewSession("anthropic")}
+        isDefault={defaultProvider === "anthropic"}
+        label="New Claude session"
+        icon={<ModelSelectorLogo provider="anthropic" className="size-3.5" />}
+      />
+      <ProviderMenuItem
+        provider="copilot"
+        probe={probes?.copilot}
+        onSelect={() => onNewSession("copilot")}
+        isDefault={defaultProvider === "copilot"}
+        label="New Copilot session"
+        icon={<ModelSelectorLogo provider="github-copilot" className="size-3.5" />}
+      />
+      <ProviderMenuItem
+        provider="ollama"
+        probe={probes?.ollama}
+        onSelect={() => onNewSession("ollama")}
+        isDefault={defaultProvider === "ollama"}
+        label="New Ollama session"
+        icon={<ModelSelectorLogo provider="ollama" className="size-3.5" />}
+      />
+      <DropdownMenuItem onClick={onIssueDialog}>
+        <Link className="size-3.5" />
+        <span>New session linked to issue…</span>
+      </DropdownMenuItem>
+    </>
   );
 }
 
@@ -458,6 +513,7 @@ interface SessionRowProps {
 
 function SessionRow({ session, isActive, sessionAgent, onClick, onDelete }: SessionRowProps) {
   return (
+    // Fix 3: group-focus-within reveals the delete button on keyboard focus too
     <div className="group relative mx-1">
       <button
         onClick={onClick}
@@ -487,45 +543,12 @@ function SessionRow({ session, isActive, sessionAgent, onClick, onDelete }: Sess
       <WithTooltip label="Delete session">
         <button
           onClick={onDelete}
-          className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity text-sm leading-none"
+          className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-muted-foreground hover:text-destructive transition-opacity text-sm leading-none"
           aria-label="Delete session"
         >
           ×
         </button>
       </WithTooltip>
     </div>
-  );
-}
-
-function ProviderMenuItem({
-  probe,
-  onSelect,
-  isDefault,
-  label,
-  icon,
-}: {
-  provider: "anthropic" | "copilot" | "ollama";
-  probe: ProviderProbeResult | undefined;
-  onSelect: () => void;
-  isDefault: boolean;
-  label: string;
-  icon: React.ReactNode;
-}) {
-  const disabled = probe ? !probe.ok : false;
-  return (
-    <DropdownMenuItem
-      disabled={disabled}
-      onClick={() => { if (!disabled) onSelect(); }}
-      title={disabled ? `Unavailable: ${probe?.reason ?? "unknown"}` : undefined}
-    >
-      {icon}
-      <span className={cn(disabled && "text-muted-foreground")}>{label}</span>
-      {disabled && (
-        <span className="ml-1 text-[10px] text-muted-foreground">(unavailable)</span>
-      )}
-      {isDefault && (
-        <span className="ml-auto text-[10px] text-muted-foreground">default</span>
-      )}
-    </DropdownMenuItem>
   );
 }
