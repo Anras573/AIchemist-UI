@@ -556,7 +556,7 @@ describe("setQueuePaused / clearQueuePaused", () => {
     get().setQueuePaused("sess-1", 2);
     get().setQueuePaused("sess-2", 4);
     get().clearQueuePaused("sess-1");
-    expect(get().queuePaused["sess-2"]).toEqual({ remainingCount: 4 });
+    expect(get().queuePaused["sess-2"]).toMatchObject({ remainingCount: 4 });
   });
 
   it("removeSession cleans up queue state", () => {

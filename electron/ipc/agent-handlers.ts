@@ -459,8 +459,21 @@ export function registerAgentHandlers(
         // Drain queued turns (re-adds to activeTurns synchronously if queue is non-empty).
         drainNextQueued(db, args.sessionId, activeTurns, getMainWindow);
       } else {
-        // Direct turn failed — clear the queue rather than continuing blindly.
+        // Direct turn failed — if messages were queued behind it, surface a recovery
+        // prompt instead of silently dropping them (which leaves permanent "Queued" badges).
+        const queued = [...(sessionQueues.get(args.sessionId) ?? [])];
         sessionQueues.delete(args.sessionId);
+        if (queued.length > 0) {
+          const w = getMainWindow();
+          if (w) {
+            pausedQueues.set(args.sessionId, { failed: turn, remaining: queued });
+            w.webContents.send(CH.SESSION_QUEUE_RECOVERY_REQUIRED, {
+              session_id: args.sessionId,
+              remaining_count: queued.length,
+              failed_message_id: turn.messageId,
+            });
+          }
+        }
       }
     }
 
