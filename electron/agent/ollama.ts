@@ -77,6 +77,8 @@ interface ToolExecutionContext {
   projectPath: string;
   projectConfig: AgentProviderParams["projectConfig"];
   webContents: Electron.WebContents;
+  client: OllamaClientLike;
+  delegationDepth: number;
 }
 
 export const OLLAMA_NO_MODELS_ERROR =
@@ -476,7 +478,83 @@ function makeToolDefinitions(): OllamaToolDefinition[] {
         },
       },
     },
+    {
+      type: "function",
+      function: {
+        name: "delegate_task",
+        description:
+          "Delegate a self-contained sub-task to a different locally-installed Ollama model. " +
+          "Use when the task suits a specialist model (e.g. a code model for refactoring, a " +
+          "reasoning model for planning). The sub-agent receives a fresh context with no " +
+          "conversation history and may use filesystem, shell, and web tools. Returns the " +
+          "sub-agent's complete response.",
+        parameters: {
+          type: "object",
+          properties: {
+            model: {
+              type: "string",
+              description: "Name of the installed Ollama model to delegate to (e.g. 'codellama', 'mistral')",
+            },
+            prompt: {
+              type: "string",
+              description:
+                "Complete, self-contained prompt for the sub-agent. Include all context it needs; " +
+                "it has no access to the current conversation history.",
+            },
+          },
+          required: ["model", "prompt"],
+        },
+      },
+    },
   ];
+}
+
+const MAX_DELEGATION_DEPTH = 2;
+const SUB_AGENT_MAX_ROUNDS = 4;
+const SUB_AGENT_SYSTEM_PROMPT = [
+  "You are a specialised sub-agent delegated a task by an orchestrating AI assistant.",
+  "Complete the task using the available tools.",
+  "Never invent file contents or command output — use tools to gather real data.",
+  "Return a clear, concise result the orchestrating agent can act on directly.",
+].join(" ");
+
+async function runDelegatedTurn(
+  ctx: ToolExecutionContext,
+  subModel: string,
+  subPrompt: string,
+): Promise<string> {
+  const subCtx: ToolExecutionContext = { ...ctx, delegationDepth: ctx.delegationDepth + 1 };
+  // Sub-agents do not get ask_user (questions must be resolved by the orchestrator)
+  // or delegate_task (no further nesting beyond what the depth guard already enforces).
+  const subTools = makeToolDefinitions().filter(
+    (t) => t.function.name !== "ask_user" && t.function.name !== "delegate_task",
+  );
+  const noop = {
+    hasTool: () => false as const,
+    callTool: async () => "Error: MCP tools not available in delegated turns",
+  };
+
+  const messages: OllamaMessage[] = [
+    { role: "system", content: SUB_AGENT_SYSTEM_PROMPT },
+    { role: "user", content: subPrompt },
+  ];
+
+  let fullText = "";
+  for (let round = 0; round < SUB_AGENT_MAX_ROUNDS; round++) {
+    const { text, toolCalls } = await runChatRound(ctx.client, subModel, messages, subTools, subCtx);
+    fullText += text;
+
+    if (toolCalls.length === 0) return fullText;
+
+    messages.push({ role: "assistant", content: text, tool_calls: toolCalls });
+
+    for (const toolCall of toolCalls) {
+      const output = await executeTool(subCtx, toolCall, noop);
+      messages.push({ role: "tool", content: output, tool_name: toolCall.function.name });
+    }
+  }
+
+  return fullText || "(sub-agent reached tool round limit without producing a final response)";
 }
 
 async function runTool(
@@ -591,6 +669,23 @@ async function executeTool(
           typeof args.placeholder === "string" ? args.placeholder : undefined,
         ).then((answer) => answer || "(no answer provided)")
       );
+    case "delegate_task": {
+      if (ctx.delegationDepth >= MAX_DELEGATION_DEPTH) {
+        return `Error: delegation depth limit (${MAX_DELEGATION_DEPTH}) reached — sub-agents cannot delegate further`;
+      }
+      const subModel = String(args.model ?? "").trim();
+      const subPrompt = String(args.prompt ?? "").trim();
+      if (!subModel) return `Error: delegate_task requires a "model" argument`;
+      if (!subPrompt) return `Error: delegate_task requires a "prompt" argument`;
+      return runTool(ctx, name, args, "custom", async () => {
+        const available = await getOllamaModels();
+        if (!available.some((m) => m.id === subModel)) {
+          const list = available.map((m) => m.id).join(", ") || "none installed";
+          return `Error: model "${subModel}" is not installed. Available: ${list}`;
+        }
+        return runDelegatedTurn(ctx, subModel, subPrompt);
+      });
+    }
     default:
       if (managedMcpBridge.hasTool(name)) {
         // Managed MCP tools can do anything, so gate them with the strictest
@@ -674,6 +769,8 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
     projectPath: params.projectPath,
     projectConfig: params.projectConfig,
     webContents: params.webContents,
+    client,
+    delegationDepth: 0,
   };
 
   const systemPrompt = buildSystemPrompt(params);
