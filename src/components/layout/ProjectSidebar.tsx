@@ -444,17 +444,44 @@ function ProjectSessionGroup({
         onOpenChange={(open) => !open && setDeleteDialogSession(null)}
         onConfirm={confirmDeleteSession}
       />
-      {/* probes=null: the issue dialog shows all providers enabled (no availability check needed
-          here since we lazy-load probes only inside the dropdown). */}
-      <NewSessionWithIssueDialog
-        open={issueDialogOpen}
-        onOpenChange={setIssueDialogOpen}
-        projectPath={project.path}
-        defaultProvider={defaultProvider}
-        probes={null}
-        onCreate={(providerOverride, issueNumber) => void handleNewSession(providerOverride, issueNumber)}
-      />
+      {issueDialogOpen && (
+        <IssueDialogWithProbes
+          projectId={project.id}
+          projectPath={project.path}
+          defaultProvider={defaultProvider}
+          onOpenChange={setIssueDialogOpen}
+          onCreate={(providerOverride, issueNumber) => void handleNewSession(providerOverride, issueNumber)}
+        />
+      )}
     </div>
+  );
+}
+
+// Mounts useProviderProbes only while the issue dialog is open so probes are
+// fetched lazily (same pattern as LazyProviderMenuItems for the dropdown).
+function IssueDialogWithProbes({
+  projectId,
+  projectPath,
+  defaultProvider,
+  onOpenChange,
+  onCreate,
+}: {
+  projectId: string;
+  projectPath: string;
+  defaultProvider: Provider | null;
+  onOpenChange: (open: boolean) => void;
+  onCreate: (providerOverride: Provider, issueNumber?: number) => void;
+}) {
+  const { probes } = useProviderProbes(projectId);
+  return (
+    <NewSessionWithIssueDialog
+      open={true}
+      onOpenChange={onOpenChange}
+      projectPath={projectPath}
+      defaultProvider={defaultProvider}
+      probes={probes}
+      onCreate={onCreate}
+    />
   );
 }
 

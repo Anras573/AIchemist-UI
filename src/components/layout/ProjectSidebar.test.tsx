@@ -168,6 +168,98 @@ describe("ProjectSidebar — project interaction", () => {
   });
 });
 
+describe("ProjectSidebar — provider dropdown", () => {
+  it("passes 'anthropic' to createSession when New Claude session is picked", async () => {
+    vi.mocked(window.electronAPI.listProjects).mockResolvedValue([makeProject({ id: "proj-1", name: "alpha" })]);
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([]);
+    vi.mocked(window.electronAPI.createSession).mockResolvedValue(
+      makeSession({ id: "sess-new", title: "New session" })
+    );
+
+    renderSidebar();
+    await screen.findByText("alpha");
+
+    await userEvent.click(screen.getByLabelText("New session with specific provider"));
+    await userEvent.click(await screen.findByText("New Claude session"));
+
+    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "anthropic", undefined);
+  });
+
+  it("passes 'copilot' to createSession when New Copilot session is picked", async () => {
+    vi.mocked(window.electronAPI.listProjects).mockResolvedValue([makeProject({ id: "proj-1", name: "alpha" })]);
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([]);
+    vi.mocked(window.electronAPI.createSession).mockResolvedValue(
+      makeSession({ id: "sess-new", title: "New session" })
+    );
+
+    renderSidebar();
+    await screen.findByText("alpha");
+
+    await userEvent.click(screen.getByLabelText("New session with specific provider"));
+    await userEvent.click(await screen.findByText("New Copilot session"));
+
+    expect(window.electronAPI.createSession).toHaveBeenCalledWith("proj-1", "copilot", undefined);
+  });
+
+  it("disables a provider menu item when its probe reports unavailable", async () => {
+    vi.mocked(window.electronAPI.probeProviders).mockResolvedValue({
+      anthropic: { ok: true },
+      copilot: { ok: false, reason: "GITHUB_TOKEN not set" },
+      ollama: { ok: true },
+    });
+    vi.mocked(window.electronAPI.listProjects).mockResolvedValue([makeProject({ id: "proj-1", name: "alpha" })]);
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([]);
+
+    renderSidebar();
+    await screen.findByText("alpha");
+
+    await userEvent.click(screen.getByLabelText("New session with specific provider"));
+    const copilotItem = await screen.findByText("New Copilot session");
+    // Wait for the probe result to propagate — the item re-renders disabled after the
+    // async probeProviders call resolves.
+    await waitFor(() => {
+      expect(copilotItem.closest("[data-disabled]")).toBeTruthy();
+    });
+  });
+});
+
+describe("ProjectSidebar — session badges", () => {
+  it("shows a #N issue badge for sessions with github_issue_number set", async () => {
+    vi.mocked(window.electronAPI.listProjects).mockResolvedValue([makeProject({ id: "proj-1" })]);
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([
+      makeSession({ id: "sess-1", title: "Issue session", github_issue_number: 42 }),
+    ]);
+
+    renderSidebar();
+    await screen.findByText("Issue session");
+    expect(screen.getByText("42")).toBeInTheDocument();
+  });
+
+  it("does not show an issue badge when github_issue_number is null", async () => {
+    vi.mocked(window.electronAPI.listProjects).mockResolvedValue([makeProject({ id: "proj-1" })]);
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([
+      makeSession({ id: "sess-1", title: "Plain session", github_issue_number: null }),
+    ]);
+
+    renderSidebar();
+    await screen.findByText("Plain session");
+    // No hash badge — the # icon element would be nearby a number if present
+    expect(screen.queryByText(/^4/)).not.toBeInTheDocument();
+  });
+
+  it("shows an agent badge when a session has a selected agent", async () => {
+    vi.mocked(window.electronAPI.listProjects).mockResolvedValue([makeProject({ id: "proj-1" })]);
+    vi.mocked(window.electronAPI.listSessions).mockResolvedValue([
+      makeSession({ id: "sess-1", title: "Agent session" }),
+    ]);
+    useSessionStore.setState({ sessionAgents: { "sess-1": "my-agent" } });
+
+    renderSidebar();
+    await screen.findByText("Agent session");
+    expect(screen.getByText("my-agent")).toBeInTheDocument();
+  });
+});
+
 describe("ProjectSidebar — session interaction", () => {
   it("switches active session when a session row is clicked", async () => {
     vi.mocked(window.electronAPI.listProjects).mockResolvedValue([
