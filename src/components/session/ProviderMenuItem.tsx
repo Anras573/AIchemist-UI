@@ -19,13 +19,15 @@ export function ProviderMenuItem({
 }) {
   const disabled = probe ? !probe.ok : false;
 
-  // Don't pass `disabled` to DropdownMenuItem — Base UI applies pointer-events-none
-  // which would hide the tooltip. Use aria-disabled + manual guarding instead.
+  // Pass `disabled` so Base UI skips the item in roving focus and prevents
+  // selection. Override the resulting data-disabled:pointer-events-none with
+  // !pointer-events-auto so hover events still reach the element and
+  // WithTooltip can surface the reason.
   const item = (
     <DropdownMenuItem
-      aria-disabled={disabled}
+      disabled={disabled}
+      className={cn(disabled && "!pointer-events-auto")}
       onClick={() => { if (!disabled) onSelect(); }}
-      className={cn(disabled && "opacity-50 cursor-not-allowed")}
     >
       {icon}
       <span>{label}</span>
