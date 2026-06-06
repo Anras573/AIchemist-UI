@@ -29,7 +29,7 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
   const ipc = useIpc();
   const { projects, activeProjectId, setProjects, setActiveProject, addProject, removeProject, openSettings, openProjectSettings } =
     useProjectStore();
-  const { mergeSessions } = useSessionStore();
+  const mergeSessions = useSessionStore((s) => s.mergeSessions);
 
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   // Guard so React StrictMode's double-invoke in dev doesn't fire two parallel
