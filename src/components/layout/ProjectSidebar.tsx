@@ -49,7 +49,7 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
         }
         setExpandedProjects(new Set(list.map((p) => p.id)));
         const allSessions = await Promise.all(
-          list.map((p) => ipc.listSessions(p.id).catch(() => [] as Session[]))
+          list.map((p) => ipc.listSessions(p.id).catch((err) => { console.error(`listSessions failed for project ${p.id}:`, err); return [] as Session[]; }))
         );
         mergeSessions(allSessions.flat());
         // Restore active session or pick the first for the active project
