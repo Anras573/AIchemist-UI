@@ -105,7 +105,18 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
   const handleRemoveProject = useCallback(
     async (e: React.MouseEvent, id: string) => {
       e.stopPropagation();
-      await ipc.removeProject(id).catch(console.error);
+      try {
+        await ipc.removeProject(id);
+      } catch (err) {
+        console.error("removeProject failed:", err);
+        return;
+      }
+      // Clear the project's sessions from the store so orphaned entries
+      // don't remain visible or selectable (e.g. in the command palette).
+      const { sessions, removeSession } = useSessionStore.getState();
+      Object.values(sessions)
+        .filter((s) => s.project_id === id)
+        .forEach((s) => removeSession(s.id));
       removeProject(id);
       setExpandedProjects((prev) => {
         const next = new Set(prev);
