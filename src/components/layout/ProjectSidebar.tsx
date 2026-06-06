@@ -92,6 +92,11 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
       setExpandedProjects((prev) => new Set([...prev, project.id]));
       const list = await ipc.listSessions(project.id);
       mergeSessions(list);
+      // The useEffect([activeProjectId]) sync already ran (before sessions
+      // loaded) and set activeSessionId to null. Explicitly pick the first
+      // session so it doesn't stay null if the project has existing sessions.
+      const first = [...list].sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+      if (first) useSessionStore.getState().setActiveSession(first.id);
     } catch (err) {
       console.error("addProject failed:", err);
     }
