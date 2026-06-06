@@ -372,7 +372,7 @@ function ProjectSessionGroup({
         {/* Hover actions — only when expanded */}
         {!collapsed && (
           // Fix 3: group-focus-within so actions appear when keyboard-focused too
-          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto transition-opacity">
             {isActiveProject && (
               <WithTooltip label="Project settings">
                 <button
@@ -608,7 +608,7 @@ function SessionRow({ session, isActive, sessionAgent, onClick, onDelete }: Sess
       <WithTooltip label="Delete session">
         <button
           onClick={onDelete}
-          className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-muted-foreground hover:text-destructive transition-opacity text-sm leading-none"
+          className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto text-muted-foreground hover:text-destructive transition-opacity text-sm leading-none"
           aria-label="Delete session"
         >
           ×

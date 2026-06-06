@@ -243,8 +243,7 @@ describe("ProjectSidebar — session badges", () => {
 
     renderSidebar();
     await screen.findByText("Plain session");
-    // No hash badge — the # icon element would be nearby a number if present
-    expect(screen.queryByText(/^4/)).not.toBeInTheDocument();
+    expect(screen.queryByText("42")).not.toBeInTheDocument();
   });
 
   it("shows an agent badge when a session has a selected agent", async () => {
