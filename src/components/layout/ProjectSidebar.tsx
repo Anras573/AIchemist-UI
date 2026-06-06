@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef, useMemo } from "react";
+import { useEffect, useCallback, useState, useMemo } from "react";
 import { Bot, ChevronDown, ChevronRight, Hash, Link, Plus, Settings, Settings2 } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -32,14 +32,9 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
   const mergeSessions = useSessionStore((s) => s.mergeSessions);
 
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
-  // Guard so React StrictMode's double-invoke in dev doesn't fire two parallel
-  // IPC fetches (listProjects + N × listSessions) on the initial mount.
-  const initDone = useRef(false);
 
   // Load all projects and their sessions on mount
   useEffect(() => {
-    if (initDone.current) return;
-    initDone.current = true;
     ipc.listProjects()
       .then(async (list) => {
         setProjects(list);
@@ -52,10 +47,13 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
           list.map((p) => ipc.listSessions(p.id).catch((err) => { console.error(`listSessions failed for project ${p.id}:`, err); return [] as Session[]; }))
         );
         mergeSessions(allSessions.flat());
-        // Restore active session or pick the first for the active project
+        // Restore active session or pick the first for the active project.
+        // Read activeProjectId from the store here (not the closure) to avoid
+        // using a value that may have changed while the async fetches were in flight.
         const { activeSessionId, sessions, setActiveSession } = useSessionStore.getState();
-        const effectiveProjectId = list.some((p) => p.id === activeProjectId)
-          ? activeProjectId
+        const currentActiveProjectId = useProjectStore.getState().activeProjectId;
+        const effectiveProjectId = list.some((p) => p.id === currentActiveProjectId)
+          ? currentActiveProjectId
           : list[0]?.id ?? null;
         const sessionBelongs = activeSessionId
           ? (sessions[activeSessionId]?.project_id === effectiveProjectId)
