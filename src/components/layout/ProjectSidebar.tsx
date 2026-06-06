@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef, useMemo } from "react";
 import { Bot, ChevronDown, ChevronRight, Hash, Link, Plus, Settings, Settings2 } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -32,9 +32,14 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
   const { mergeSessions } = useSessionStore();
 
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  // Guard so React StrictMode's double-invoke in dev doesn't fire two parallel
+  // IPC fetches (listProjects + N × listSessions) on the initial mount.
+  const initDone = useRef(false);
 
   // Load all projects and their sessions on mount
   useEffect(() => {
+    if (initDone.current) return;
+    initDone.current = true;
     ipc.listProjects()
       .then(async (list) => {
         setProjects(list);
@@ -266,9 +271,13 @@ function ProjectSessionGroup({
 
   const isActiveProject = project.id === activeProjectId;
   const defaultProvider = project.config.provider ?? null;
-  const projectSessions = Object.values(sessions)
-    .filter((s) => s.project_id === project.id)
-    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const projectSessions = useMemo(
+    () =>
+      Object.values(sessions)
+        .filter((s) => s.project_id === project.id)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    [sessions, project.id]
+  );
 
   const [deleteDialogSession, setDeleteDialogSession] = useState<Session | null>(null);
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
