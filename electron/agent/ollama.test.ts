@@ -542,10 +542,10 @@ describe("ollama provider", () => {
       expect(subAgentCall.model).toBe("codellama");
       expect(subAgentCall.messages[0].role).toBe("system");
       expect(subAgentCall.messages[1]).toEqual({ role: "user", content: "Write a hello world in Python" });
-      // Sub-agent must not have ask_user or delegate_task in its tools
+      // Sub-agent must not have ask_user but must have delegate_task (depth guard enforces the limit)
       const subToolNames = subAgentCall.tools.map((t: { function: { name: string } }) => t.function.name);
       expect(subToolNames).not.toContain("ask_user");
-      expect(subToolNames).not.toContain("delegate_task");
+      expect(subToolNames).toContain("delegate_task");
       // delegate_task tool call should be recorded in IPC events
       expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({ tool_name: "delegate_task" }));
       expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({
@@ -587,10 +587,9 @@ describe("ollama provider", () => {
       }));
     });
 
-    it("blocks delegation beyond MAX_DELEGATION_DEPTH", async () => {
+    it("excludes ask_user from the sub-agent tool list", async () => {
       const send = vi.fn();
       ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });
-      // Orchestrator → delegates to phi4
       ollamaMocks.chat
         .mockResolvedValueOnce(
           streamChunks([
@@ -602,10 +601,55 @@ describe("ollama provider", () => {
             },
           ]),
         )
-        // phi4 (depth 1) tries to delegate again — but delegate_task is NOT in its tool list,
-        // so it cannot call it. It just returns a response.
         .mockResolvedValueOnce({ message: { content: "phi4 response" } })
-        // Orchestrator final reply
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-no-ask-user",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      const subAgentCall = ollamaMocks.chat.mock.calls[1][0];
+      const subToolNames = subAgentCall.tools.map((t: { function: { name: string } }) => t.function.name);
+      expect(subToolNames).not.toContain("ask_user");
+      expect(subToolNames).toContain("delegate_task");
+    });
+
+    it("blocks delegation at MAX_DELEGATION_DEPTH via the depth guard, emitting IPC events for the error", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });
+      ollamaMocks.chat
+        // Orchestrator (depth 0) → delegate_task("phi4", "level-1 task")
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "level-1 task" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 sub-agent (depth 1) → tries to delegate further, depth guard fires inside runTool
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "level-2 task" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 (depth 1) gets the depth-limit error as a tool result, produces final text
+        .mockResolvedValueOnce({ message: { content: "phi4 finished with depth error" } })
+        // Orchestrator (depth 0) gets phi4's response as tool result, produces final text
         .mockResolvedValueOnce({ message: { content: "done" } });
 
       const text = await runOllamaAgentTurn({
@@ -613,15 +657,24 @@ describe("ollama provider", () => {
           { id: "m-placeholder", role: "user", content: "placeholder" },
           { id: "m-user", role: "user", content: "delegate" },
         ]) as never,
-        sessionId: "s-depth",
+        sessionId: "s-depth-guard",
         messageId: "m-placeholder",
         projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
         webContents: { send } as never,
       } as never);
 
       expect(text).toBe("done");
-      // Only two chat calls should have happened (orchestrator + one sub-agent)
-      expect(ollamaMocks.chat).toHaveBeenCalledTimes(3);
+      // 4 chat calls: orchestrator round 1, phi4 round 1, phi4 round 2 (after error), orchestrator round 2
+      expect(ollamaMocks.chat).toHaveBeenCalledTimes(4);
+      // The depth-guard error must appear in IPC as a normal tool result (not a silent early return)
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({
+        tool_name: "delegate_task",
+        input: expect.objectContaining({ model: "phi4", prompt: "level-2 task" }),
+      }));
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({
+        tool_name: "delegate_task",
+        output: expect.stringContaining("depth limit"),
+      }));
     });
   });
 });

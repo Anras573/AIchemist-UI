@@ -493,7 +493,7 @@ function makeToolDefinitions(): OllamaToolDefinition[] {
           properties: {
             model: {
               type: "string",
-              description: "Name of the installed Ollama model to delegate to (e.g. 'codellama', 'mistral')",
+              description: "Name of the installed Ollama model to delegate to. Tag suffix is optional — 'codellama' matches 'codellama:latest'.",
             },
             prompt: {
               type: "string",
@@ -509,7 +509,18 @@ function makeToolDefinitions(): OllamaToolDefinition[] {
   ];
 }
 
-const MAX_DELEGATION_DEPTH = 2;
+const MAX_DELEGATION_DEPTH = 1;
+
+function resolveInstalledModel(
+  available: Array<{ id: string }>,
+  requested: string,
+): string | undefined {
+  if (available.some((m) => m.id === requested)) return requested;
+  const withLatest = `${requested}:latest`;
+  if (available.some((m) => m.id === withLatest)) return withLatest;
+  return undefined;
+}
+
 const SUB_AGENT_MAX_ROUNDS = 4;
 const SUB_AGENT_SYSTEM_PROMPT = [
   "You are a specialised sub-agent delegated a task by an orchestrating AI assistant.",
@@ -524,11 +535,9 @@ async function runDelegatedTurn(
   subPrompt: string,
 ): Promise<string> {
   const subCtx: ToolExecutionContext = { ...ctx, delegationDepth: ctx.delegationDepth + 1 };
-  // Sub-agents do not get ask_user (questions must be resolved by the orchestrator)
-  // or delegate_task (no further nesting beyond what the depth guard already enforces).
-  const subTools = makeToolDefinitions().filter(
-    (t) => t.function.name !== "ask_user" && t.function.name !== "delegate_task",
-  );
+  // Sub-agents do not get ask_user — questions must be resolved by the orchestrator.
+  // delegate_task is kept in the list; the depth guard inside runTool blocks further nesting.
+  const subTools = makeToolDefinitions().filter((t) => t.function.name !== "ask_user");
   const noop = {
     hasTool: () => false as const,
     callTool: async () => "Error: MCP tools not available in delegated turns",
@@ -669,23 +678,23 @@ async function executeTool(
           typeof args.placeholder === "string" ? args.placeholder : undefined,
         ).then((answer) => answer || "(no answer provided)")
       );
-    case "delegate_task": {
-      if (ctx.delegationDepth >= MAX_DELEGATION_DEPTH) {
-        return `Error: delegation depth limit (${MAX_DELEGATION_DEPTH}) reached — sub-agents cannot delegate further`;
-      }
-      const subModel = String(args.model ?? "").trim();
-      const subPrompt = String(args.prompt ?? "").trim();
-      if (!subModel) return `Error: delegate_task requires a "model" argument`;
-      if (!subPrompt) return `Error: delegate_task requires a "prompt" argument`;
+    case "delegate_task":
       return runTool(ctx, name, args, "custom", async () => {
+        if (ctx.delegationDepth >= MAX_DELEGATION_DEPTH) {
+          return `Error: delegation depth limit (${MAX_DELEGATION_DEPTH}) reached — sub-agents cannot delegate further`;
+        }
+        const subModel = String(args.model ?? "").trim();
+        const subPrompt = String(args.prompt ?? "").trim();
+        if (!subModel) return `Error: delegate_task requires a "model" argument`;
+        if (!subPrompt) return `Error: delegate_task requires a "prompt" argument`;
         const available = await getOllamaModels();
-        if (!available.some((m) => m.id === subModel)) {
+        const resolvedModel = resolveInstalledModel(available, subModel);
+        if (!resolvedModel) {
           const list = available.map((m) => m.id).join(", ") || "none installed";
           return `Error: model "${subModel}" is not installed. Available: ${list}`;
         }
-        return runDelegatedTurn(ctx, subModel, subPrompt);
+        return runDelegatedTurn(ctx, resolvedModel, subPrompt);
       });
-    }
     default:
       if (managedMcpBridge.hasTool(name)) {
         // Managed MCP tools can do anything, so gate them with the strictest
