@@ -12,7 +12,7 @@ import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
 import { ProviderMenuItem } from "@/components/session/ProviderMenuItem";
 import { SessionDeleteDialog } from "@/components/session/SessionDeleteDialog";
 import { NewSessionWithIssueDialog } from "@/components/session/NewSessionWithIssueDialog";
-import type { Project, Session } from "@/types";
+import type { Project, Session, Provider } from "@/types";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -288,7 +288,7 @@ function ProjectSessionGroup({
   }, [project.id]);
 
   const handleNewSession = useCallback(
-    async (providerOverride?: string, issueNumber?: number) => {
+    async (providerOverride?: Provider, issueNumber?: number) => {
       setCreateError(null);
       try {
         const session = await ipc.createSession(project.id, providerOverride, issueNumber);
@@ -467,8 +467,8 @@ function ProviderDropdown({
   onIssueDialog,
 }: {
   projectId: string;
-  defaultProvider: string | null;
-  onNewSession: (provider: string) => void;
+  defaultProvider: Provider | null;
+  onNewSession: (provider: Provider) => void;
   onIssueDialog: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -505,8 +505,8 @@ function LazyProviderMenuItems({
   onIssueDialog,
 }: {
   projectId: string;
-  defaultProvider: string | null;
-  onNewSession: (provider: string) => void;
+  defaultProvider: Provider | null;
+  onNewSession: (provider: Provider) => void;
   onIssueDialog: () => void;
 }) {
   const { probes } = useProviderProbes(projectId);
