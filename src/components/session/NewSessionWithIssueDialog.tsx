@@ -9,18 +9,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { ProviderProbes } from "@/types";
+import type { Provider, ProviderProbes } from "@/types";
 
 interface NewSessionWithIssueDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectPath: string;
-  defaultProvider: string | null;
+  defaultProvider: Provider | null;
   probes?: ProviderProbes | null;
-  onCreate: (providerOverride: string, issueNumber?: number) => void;
+  onCreate: (providerOverride: Provider, issueNumber?: number) => void;
 }
 
-type Provider = "anthropic" | "copilot" | "ollama";
 const PROVIDERS: Provider[] = ["anthropic", "copilot", "ollama"];
 
 function providerLabel(p: Provider): string {
