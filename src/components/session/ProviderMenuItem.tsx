@@ -10,7 +10,6 @@ export function ProviderMenuItem({
   label,
   icon,
 }: {
-  provider: "anthropic" | "copilot" | "ollama";
   probe: ProviderProbeResult | undefined;
   onSelect: () => void;
   isDefault: boolean;

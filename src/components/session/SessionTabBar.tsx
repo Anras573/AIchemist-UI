@@ -237,7 +237,6 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
           </WithTooltip>
           <DropdownMenuContent align="end">
             <ProviderMenuItem
-              provider="anthropic"
               probe={probes?.anthropic}
               onSelect={() => handleNewSession("anthropic")}
               isDefault={defaultProvider === "anthropic"}
@@ -245,7 +244,6 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
               icon={<ModelSelectorLogo provider="anthropic" className="size-3.5" />}
             />
             <ProviderMenuItem
-              provider="copilot"
               probe={probes?.copilot}
               onSelect={() => handleNewSession("copilot")}
               isDefault={defaultProvider === "copilot"}
@@ -253,7 +251,6 @@ export function SessionTabBar({ projectId }: SessionTabBarProps) {
               icon={<ModelSelectorLogo provider="github-copilot" className="size-3.5" />}
             />
             <ProviderMenuItem
-              provider="ollama"
               probe={probes?.ollama}
               onSelect={() => handleNewSession("ollama")}
               isDefault={defaultProvider === "ollama"}

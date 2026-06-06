@@ -382,7 +382,6 @@ function ProjectSessionGroup({
               </button>
             </WithTooltip>
 
-            {/* Fix 2: ProviderDropdown mounts useProviderProbes lazily on first open */}
             <ProviderDropdown
               projectId={project.id}
               defaultProvider={defaultProvider}
@@ -501,7 +500,6 @@ function LazyProviderMenuItems({
   return (
     <>
       <ProviderMenuItem
-        provider="anthropic"
         probe={probes?.anthropic}
         onSelect={() => onNewSession("anthropic")}
         isDefault={defaultProvider === "anthropic"}
@@ -509,7 +507,6 @@ function LazyProviderMenuItems({
         icon={<ModelSelectorLogo provider="anthropic" className="size-3.5" />}
       />
       <ProviderMenuItem
-        provider="copilot"
         probe={probes?.copilot}
         onSelect={() => onNewSession("copilot")}
         isDefault={defaultProvider === "copilot"}
@@ -517,7 +514,6 @@ function LazyProviderMenuItems({
         icon={<ModelSelectorLogo provider="github-copilot" className="size-3.5" />}
       />
       <ProviderMenuItem
-        provider="ollama"
         probe={probes?.ollama}
         onSelect={() => onNewSession("ollama")}
         isDefault={defaultProvider === "ollama"}
