@@ -46,7 +46,7 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
         const allSessions = await Promise.all(
           list.map((p) => ipc.listSessions(p.id).catch(() => [] as Session[]))
         );
-        allSessions.forEach((s) => mergeSessions(s));
+        mergeSessions(allSessions.flat());
         // Restore active session or pick the first for the active project
         const { activeSessionId, sessions, setActiveSession } = useSessionStore.getState();
         const effectiveProjectId = list.some((p) => p.id === activeProjectId)
@@ -257,8 +257,12 @@ function ProjectSessionGroup({
 }: ProjectSessionGroupProps) {
   const ipc = useIpc();
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
-  const { sessions, activeSessionId, sessionAgents, addSession, removeSession, setActiveSession } =
-    useSessionStore();
+  const sessions = useSessionStore((s) => s.sessions);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const sessionAgents = useSessionStore((s) => s.sessionAgents);
+  const addSession = useSessionStore((s) => s.addSession);
+  const removeSession = useSessionStore((s) => s.removeSession);
+  const setActiveSession = useSessionStore((s) => s.setActiveSession);
 
   const isActiveProject = project.id === activeProjectId;
   const defaultProvider = project.config.provider ?? null;
