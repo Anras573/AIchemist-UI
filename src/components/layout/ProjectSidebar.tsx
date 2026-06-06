@@ -301,11 +301,18 @@ function ProjectSessionGroup({
   const confirmDeleteSession = useCallback(
     async (cleanupWorktree: boolean) => {
       if (!deleteDialogSession) return;
+      const wasActive = useSessionStore.getState().activeSessionId === deleteDialogSession.id;
       await ipc.deleteSession(deleteDialogSession.id, { cleanupWorktree });
       removeSession(deleteDialogSession.id);
+      if (wasActive) {
+        const next = Object.values(useSessionStore.getState().sessions)
+          .filter((s) => s.project_id === project.id)
+          .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+        setActiveSession(next?.id ?? null);
+      }
       setDeleteDialogSession(null);
     },
-    [deleteDialogSession, ipc, removeSession]
+    [deleteDialogSession, ipc, removeSession, project.id, setActiveSession]
   );
 
   const hasActiveSession = projectSessions.some(
@@ -439,7 +446,8 @@ function ProjectSessionGroup({
   );
 }
 
-// Fix 2: Controlled dropdown that only mounts useProviderProbes when first opened.
+// Controlled dropdown: LazyProviderMenuItems (and its useProviderProbes call) mounts
+// while the menu is open and unmounts when it closes, keeping probe IPC calls deferred.
 function ProviderDropdown({
   projectId,
   defaultProvider,
