@@ -493,7 +493,7 @@ function makeToolDefinitions(): OllamaToolDefinition[] {
           properties: {
             model: {
               type: "string",
-              description: "Name of the installed Ollama model to delegate to. Tag suffix is optional — 'codellama' matches 'codellama:latest'.",
+              description: "Name of the installed Ollama model to delegate to. Tag suffix is optional — 'codellama' matches any installed codellama variant, preferring ':latest'.",
             },
             prompt: {
               type: "string",
@@ -515,15 +515,26 @@ function resolveInstalledModel(
   available: Array<{ id: string }>,
   requested: string,
 ): string | undefined {
+  // Exact match first
   if (available.some((m) => m.id === requested)) return requested;
-  // "codellama" requested, "codellama:latest" installed
-  const withLatest = `${requested}:latest`;
-  if (available.some((m) => m.id === withLatest)) return withLatest;
-  // "codellama:latest" requested, "codellama" installed (untagged)
+
+  if (!requested.includes(":")) {
+    // Untagged request (e.g. "codellama"): match any installed "codellama:*" variant,
+    // preferring ":latest" when multiple tags are present.
+    const prefix = `${requested}:`;
+    const variants = available.filter((m) => m.id.startsWith(prefix));
+    if (variants.length === 0) return undefined;
+    const latest = variants.find((m) => m.id === `${requested}:latest`);
+    return (latest ?? variants[0]).id;
+  }
+
+  // Tagged request ending in ":latest" (e.g. "codellama:latest"): fall back to
+  // the untagged variant if ":latest" itself isn't installed.
   if (requested.endsWith(":latest")) {
     const withoutLatest = requested.slice(0, -":latest".length);
     if (available.some((m) => m.id === withoutLatest)) return withoutLatest;
   }
+
   return undefined;
 }
 
