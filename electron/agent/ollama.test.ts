@@ -834,6 +834,53 @@ describe("ollama provider", () => {
       expect(send).not.toHaveBeenCalledWith(CH.SESSION_QUESTION_REQUIRED, expect.anything());
     });
 
+    it("suppresses SESSION_DELTA from the sub-agent so its text does not interleave with the orchestrator output", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });
+      ollamaMocks.chat
+        // Orchestrator: emits text then calls delegate_task
+        .mockResolvedValueOnce(
+          streamChunks([
+            { message: { content: "orchestrator prefix " } },
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "sub-task" } } }],
+              },
+            },
+          ]),
+        )
+        // Sub-agent (phi4) streams text — should be suppressed
+        .mockResolvedValueOnce(
+          streamChunks([
+            { message: { content: "sub-agent text" } },
+          ]),
+        )
+        // Orchestrator final round
+        .mockResolvedValueOnce(
+          streamChunks([
+            { message: { content: "orchestrator final" } },
+          ]),
+        );
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-delta-suppress",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      // Orchestrator text is forwarded
+      expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, expect.objectContaining({ text_delta: "orchestrator prefix " }));
+      expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, expect.objectContaining({ text_delta: "orchestrator final" }));
+      // Sub-agent text is suppressed
+      expect(send).not.toHaveBeenCalledWith(CH.SESSION_DELTA, expect.objectContaining({ text_delta: "sub-agent text" }));
+    });
+
     it("routes unknown/MCP tool calls from a sub-agent through runTool so they appear in the timeline", async () => {
       const send = vi.fn();
       ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });

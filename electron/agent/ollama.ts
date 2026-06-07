@@ -553,7 +553,17 @@ async function runDelegatedTurn(
   subModel: string,
   subPrompt: string,
 ): Promise<string> {
-  const subCtx: ToolExecutionContext = { ...ctx, delegationDepth: ctx.delegationDepth + 1 };
+  const subCtx: ToolExecutionContext = {
+    ...ctx,
+    delegationDepth: ctx.delegationDepth + 1,
+    // Suppress SESSION_DELTA from sub-agents so their streaming text does not
+    // interleave with the orchestrator's StreamingBubble in the UI.
+    webContents: {
+      send: (channel: string, ...args: unknown[]) => {
+        if (channel !== CH.SESSION_DELTA) ctx.webContents.send(channel, ...args);
+      },
+    } as unknown as Electron.WebContents,
+  };
   // Sub-agents do not get ask_user — questions must be resolved by the orchestrator.
   // delegate_task is kept in the list; the depth guard inside runTool blocks further nesting.
   const subTools = makeToolDefinitions().filter((t) => t.function.name !== "ask_user");
@@ -689,9 +699,9 @@ async function executeTool(
       return runTool(ctx, name, args, "web", async () => implWebFetch({ url: String(args.url ?? "") }));
     case "ask_user":
       if (ctx.delegationDepth > 0) {
-        return runTool(ctx, name, args, "custom", async () =>
-          "Error: ask_user is not available in delegated turns — the orchestrating agent must handle user interaction."
-        );
+        return runTool(ctx, name, args, "custom", async () => {
+          throw new Error("ask_user is not available in delegated turns — the orchestrating agent must handle user interaction.");
+        });
       }
       return runTool(ctx, name, args, "custom", async () =>
         requestQuestion(
@@ -705,17 +715,17 @@ async function executeTool(
     case "delegate_task":
       return runTool(ctx, name, args, "custom", async () => {
         if (ctx.delegationDepth >= MAX_DELEGATION_DEPTH) {
-          return `Error: delegation depth limit (${MAX_DELEGATION_DEPTH}) reached — sub-agents cannot delegate further`;
+          throw new Error(`Delegation depth limit (${MAX_DELEGATION_DEPTH}) reached — sub-agents cannot delegate further`);
         }
         const subModel = String(args.model ?? "").trim();
         const subPrompt = String(args.prompt ?? "").trim();
-        if (!subModel) return `Error: delegate_task requires a "model" argument`;
-        if (!subPrompt) return `Error: delegate_task requires a "prompt" argument`;
+        if (!subModel) throw new Error(`delegate_task requires a "model" argument`);
+        if (!subPrompt) throw new Error(`delegate_task requires a "prompt" argument`);
         const available = await listInstalledModels(ctx.client);
         const resolvedModel = resolveInstalledModel(available, subModel);
         if (!resolvedModel) {
           const list = available.map((m) => m.id).join(", ") || "none installed";
-          return `Error: model "${subModel}" is not installed. Available: ${list}`;
+          throw new Error(`model "${subModel}" is not installed. Available: ${list}`);
         }
         return runDelegatedTurn(ctx, resolvedModel, subPrompt);
       });
@@ -727,7 +737,7 @@ async function executeTool(
       }
       // Route through runTool so the attempt is visible in the UI timeline
       // and persisted to tool_calls — including calls from misbehaving sub-agents.
-      return runTool(ctx, name, args, "custom", async () => `Error: Unsupported tool "${name}"`);
+      return runTool(ctx, name, args, "custom", async () => { throw new Error(`Unsupported tool "${name}"`); });
   }
 }
 
