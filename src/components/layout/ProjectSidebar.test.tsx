@@ -214,11 +214,11 @@ describe("ProjectSidebar — provider dropdown", () => {
     await screen.findByText("alpha");
 
     await userEvent.click(screen.getByLabelText("New session with specific provider"));
-    const copilotItem = await screen.findByText("New Copilot session");
-    // Wait for the probe result to propagate — the item re-renders disabled after the
-    // async probeProviders call resolves.
+    await screen.findByText("New Copilot session");
+    // Re-query inside waitFor to avoid a stale reference if Base UI mutates the DOM
+    // node when applying data-disabled after the async probe resolves.
     await waitFor(() => {
-      expect(copilotItem.closest("[data-disabled]")).toBeTruthy();
+      expect(screen.getByText("New Copilot session").closest("[data-disabled]")).toBeTruthy();
     });
   });
 });

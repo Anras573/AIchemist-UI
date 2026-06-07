@@ -503,4 +503,434 @@ describe("ollama provider", () => {
 
     expect(ollamaMocks.bridge).not.toHaveBeenCalled();
   });
+
+  describe("delegate_task tool", () => {
+    it("delegates a sub-task to another installed model and returns its response", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "codellama" }] });
+      ollamaMocks.chat
+        // Orchestrator turn: calls delegate_task
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "codellama", prompt: "Write a hello world in Python" } } }],
+              },
+            },
+          ]),
+        )
+        // Sub-agent turn: returns a plain text response
+        .mockResolvedValueOnce({ message: { content: "print('Hello, world!')" } })
+        // Orchestrator second round: produces final reply
+        .mockResolvedValueOnce({ message: { content: "Here is the result from codellama." } });
+
+      const text = await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate to codellama" },
+        ]) as never,
+        sessionId: "s-delegate",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      expect(text).toBe("Here is the result from codellama.");
+      // Sub-agent should have been called with the delegated model
+      const subAgentCall = ollamaMocks.chat.mock.calls[1][0];
+      expect(subAgentCall.model).toBe("codellama");
+      expect(subAgentCall.messages[0].role).toBe("system");
+      expect(subAgentCall.messages[1]).toEqual({ role: "user", content: "Write a hello world in Python" });
+      // Sub-agent must not have ask_user but must have delegate_task (depth guard enforces the limit)
+      const subToolNames = subAgentCall.tools.map((t: { function: { name: string } }) => t.function.name);
+      expect(subToolNames).not.toContain("ask_user");
+      expect(subToolNames).toContain("delegate_task");
+      // delegate_task tool call should be recorded in IPC events
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({ tool_name: "delegate_task" }));
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({
+        tool_name: "delegate_task",
+        output: "print('Hello, world!')",
+      }));
+    });
+
+    it("returns an error when the requested model is not installed", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }] });
+      ollamaMocks.chat
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "notinstalled", prompt: "do something" } } }],
+              },
+            },
+          ]),
+        )
+        .mockResolvedValueOnce({ message: { content: "Got the error." } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-delegate-missing",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({
+        tool_name: "delegate_task",
+        output: expect.stringContaining('model "notinstalled" is not installed'),
+      }));
+    });
+
+    it("resolves tagged→untagged: 'codellama:latest' matches installed 'codellama'", async () => {
+      const send = vi.fn();
+      // ollama list returns untagged "codellama"; orchestrator requests "codellama:latest"
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "codellama" }] });
+      ollamaMocks.chat
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "codellama:latest", prompt: "hello" } } }],
+              },
+            },
+          ]),
+        )
+        // Sub-agent (resolved to "codellama") returns plain text
+        .mockResolvedValueOnce({ message: { content: "sub result" } })
+        // Orchestrator final reply
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-tag-strip",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      // Sub-agent chat call must use the untagged id that was actually installed
+      expect(ollamaMocks.chat.mock.calls[1][0].model).toBe("codellama");
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({
+        tool_name: "delegate_task",
+        output: "sub result",
+      }));
+    });
+
+    it("resolves untagged request to a non-:latest installed variant (e.g. 'codellama' → 'codellama:13b')", async () => {
+      const send = vi.fn();
+      // Only codellama:13b is installed — no :latest variant
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "codellama:13b" }] });
+      ollamaMocks.chat
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "codellama", prompt: "hello" } } }],
+              },
+            },
+          ]),
+        )
+        .mockResolvedValueOnce({ message: { content: "sub result" } })
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-tag-fallback",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      expect(ollamaMocks.chat.mock.calls[1][0].model).toBe("codellama:13b");
+    });
+
+    it("prefers :latest over untagged exact match when both are installed", async () => {
+      const send = vi.fn();
+      // Both "codellama" (untagged) and "codellama:latest" are installed
+      ollamaMocks.list.mockResolvedValue({
+        models: [{ model: "qwen2.5:latest" }, { model: "codellama" }, { model: "codellama:latest" }],
+      });
+      ollamaMocks.chat
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "codellama", prompt: "hello" } } }],
+              },
+            },
+          ]),
+        )
+        .mockResolvedValueOnce({ message: { content: "sub result" } })
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-prefer-latest",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      expect(ollamaMocks.chat.mock.calls[1][0].model).toBe("codellama:latest");
+    });
+
+    it("excludes ask_user from the sub-agent tool list", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });
+      ollamaMocks.chat
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "sub-task" } } }],
+              },
+            },
+          ]),
+        )
+        .mockResolvedValueOnce({ message: { content: "phi4 response" } })
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-no-ask-user",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      const subAgentCall = ollamaMocks.chat.mock.calls[1][0];
+      const subToolNames = subAgentCall.tools.map((t: { function: { name: string } }) => t.function.name);
+      expect(subToolNames).not.toContain("ask_user");
+      expect(subToolNames).toContain("delegate_task");
+    });
+
+    it("blocks delegation at MAX_DELEGATION_DEPTH via the depth guard, emitting IPC events for the error", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });
+      ollamaMocks.chat
+        // Orchestrator (depth 0) → delegate_task("phi4", "level-1 task")
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "level-1 task" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 sub-agent (depth 1) → tries to delegate further, depth guard fires inside runTool
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "level-2 task" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 (depth 1) gets the depth-limit error as a tool result, produces final text
+        .mockResolvedValueOnce({ message: { content: "phi4 finished with depth error" } })
+        // Orchestrator (depth 0) gets phi4's response as tool result, produces final text
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      const text = await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-depth-guard",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      expect(text).toBe("done");
+      // 4 chat calls: orchestrator round 1, phi4 round 1, phi4 round 2 (after error), orchestrator round 2
+      expect(ollamaMocks.chat).toHaveBeenCalledTimes(4);
+      // The depth-guard error must appear in IPC as a normal tool result (not a silent early return)
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({
+        tool_name: "delegate_task",
+        input: expect.objectContaining({ model: "phi4", prompt: "level-2 task" }),
+      }));
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({
+        tool_name: "delegate_task",
+        output: expect.stringContaining("depth limit"),
+      }));
+    });
+
+    it("hard-blocks ask_user in a delegated turn via a guard in executeTool, emitting IPC events", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });
+      ollamaMocks.chat
+        // Orchestrator → delegate_task("phi4", "sub-task")
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "ask something" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 (depth 1) emits ask_user even though it isn't in its tool list
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "ask_user", arguments: { question: "What colour?" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 gets the hard-block error, produces final text
+        .mockResolvedValueOnce({ message: { content: "phi4 done" } })
+        // Orchestrator final
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-ask-user-guard",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      // The ask_user call inside the delegated turn must be blocked and surfaced via IPC
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({ tool_name: "ask_user" }));
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({
+        tool_name: "ask_user",
+        output: expect.stringContaining("not available in delegated turns"),
+      }));
+      // requestQuestion must NOT have been called (the real question flow is bypassed)
+      expect(send).not.toHaveBeenCalledWith(CH.SESSION_QUESTION_REQUIRED, expect.anything());
+    });
+
+    it("suppresses SESSION_DELTA from the sub-agent so its text does not interleave with the orchestrator output", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });
+      ollamaMocks.chat
+        // Orchestrator: emits text then calls delegate_task
+        .mockResolvedValueOnce(
+          streamChunks([
+            { message: { content: "orchestrator prefix " } },
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "sub-task" } } }],
+              },
+            },
+          ]),
+        )
+        // Sub-agent (phi4) streams text — should be suppressed
+        .mockResolvedValueOnce(
+          streamChunks([
+            { message: { content: "sub-agent text" } },
+          ]),
+        )
+        // Orchestrator final round
+        .mockResolvedValueOnce(
+          streamChunks([
+            { message: { content: "orchestrator final" } },
+          ]),
+        );
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-delta-suppress",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      // Orchestrator text is forwarded
+      expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, expect.objectContaining({ text_delta: "orchestrator prefix " }));
+      expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, expect.objectContaining({ text_delta: "orchestrator final" }));
+      // Sub-agent text is suppressed
+      expect(send).not.toHaveBeenCalledWith(CH.SESSION_DELTA, expect.objectContaining({ text_delta: "sub-agent text" }));
+    });
+
+    it("routes unknown/MCP tool calls from a sub-agent through runTool so they appear in the timeline", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });
+      ollamaMocks.chat
+        // Orchestrator → delegate_task("phi4", "sub-task")
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "do work" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 calls an MCP tool that the noop bridge doesn't know about
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "mcp__context7__lookup", arguments: { query: "needle" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 gets the "unsupported" error, produces final text
+        .mockResolvedValueOnce({ message: { content: "phi4 done" } })
+        // Orchestrator final
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-mcp-noop",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      // The MCP call must be visible in the UI timeline via proper IPC events
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({
+        tool_name: "mcp__context7__lookup",
+      }));
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({
+        tool_name: "mcp__context7__lookup",
+        output: expect.stringContaining("Unsupported tool"),
+      }));
+    });
+  });
 });
