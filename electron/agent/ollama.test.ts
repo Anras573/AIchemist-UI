@@ -676,5 +676,57 @@ describe("ollama provider", () => {
         output: expect.stringContaining("depth limit"),
       }));
     });
+
+    it("hard-blocks ask_user in a delegated turn via a guard in executeTool, emitting IPC events", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });
+      ollamaMocks.chat
+        // Orchestrator → delegate_task("phi4", "sub-task")
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "ask something" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 (depth 1) emits ask_user even though it isn't in its tool list
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "ask_user", arguments: { question: "What colour?" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 gets the hard-block error, produces final text
+        .mockResolvedValueOnce({ message: { content: "phi4 done" } })
+        // Orchestrator final
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-ask-user-guard",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      // The ask_user call inside the delegated turn must be blocked and surfaced via IPC
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({ tool_name: "ask_user" }));
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({
+        tool_name: "ask_user",
+        output: expect.stringContaining("not available in delegated turns"),
+      }));
+      // requestQuestion must NOT have been called (the real question flow is bypassed)
+      expect(send).not.toHaveBeenCalledWith(CH.SESSION_QUESTION_REQUIRED, expect.anything());
+    });
   });
 });

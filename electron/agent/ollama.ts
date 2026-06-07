@@ -669,6 +669,11 @@ async function executeTool(
     case "web_fetch":
       return runTool(ctx, name, args, "web", async () => implWebFetch({ url: String(args.url ?? "") }));
     case "ask_user":
+      if (ctx.delegationDepth > 0) {
+        return runTool(ctx, name, args, "custom", async () =>
+          "Error: ask_user is not available in delegated turns — the orchestrating agent must handle user interaction."
+        );
+      }
       return runTool(ctx, name, args, "custom", async () =>
         requestQuestion(
           ctx.webContents,
@@ -687,7 +692,7 @@ async function executeTool(
         const subPrompt = String(args.prompt ?? "").trim();
         if (!subModel) return `Error: delegate_task requires a "model" argument`;
         if (!subPrompt) return `Error: delegate_task requires a "prompt" argument`;
-        const available = await getOllamaModels();
+        const available = await listInstalledModels(ctx.client);
         const resolvedModel = resolveInstalledModel(available, subModel);
         if (!resolvedModel) {
           const list = available.map((m) => m.id).join(", ") || "none installed";
