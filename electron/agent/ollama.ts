@@ -515,21 +515,23 @@ function resolveInstalledModel(
   available: Array<{ id: string }>,
   requested: string,
 ): string | undefined {
-  // Exact match first
-  if (available.some((m) => m.id === requested)) return requested;
-
   if (!requested.includes(":")) {
-    // Untagged request (e.g. "codellama"): match any installed "codellama:*" variant,
-    // preferring ":latest" when multiple tags are present.
+    // Untagged request (e.g. "codellama"): prefer :latest over other tagged variants,
+    // then fall back to the untagged exact form last — so "codellama" picks
+    // "codellama:latest" even when bare "codellama" is also installed.
     const prefix = `${requested}:`;
     const variants = available.filter((m) => m.id.startsWith(prefix));
-    if (variants.length === 0) return undefined;
     const latest = variants.find((m) => m.id === `${requested}:latest`);
-    return (latest ?? variants[0]).id;
+    if (latest) return latest.id;
+    if (variants.length > 0) return variants[0].id;
+    if (available.some((m) => m.id === requested)) return requested;
+    return undefined;
   }
 
-  // Tagged request ending in ":latest" (e.g. "codellama:latest"): fall back to
-  // the untagged variant if ":latest" itself isn't installed.
+  // Tagged request: exact match first.
+  if (available.some((m) => m.id === requested)) return requested;
+
+  // "codellama:latest" requested but only the untagged "codellama" is installed.
   if (requested.endsWith(":latest")) {
     const withoutLatest = requested.slice(0, -":latest".length);
     if (available.some((m) => m.id === withoutLatest)) return withoutLatest;

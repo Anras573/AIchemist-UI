@@ -658,6 +658,40 @@ describe("ollama provider", () => {
       expect(ollamaMocks.chat.mock.calls[1][0].model).toBe("codellama:13b");
     });
 
+    it("prefers :latest over untagged exact match when both are installed", async () => {
+      const send = vi.fn();
+      // Both "codellama" (untagged) and "codellama:latest" are installed
+      ollamaMocks.list.mockResolvedValue({
+        models: [{ model: "qwen2.5:latest" }, { model: "codellama" }, { model: "codellama:latest" }],
+      });
+      ollamaMocks.chat
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "codellama", prompt: "hello" } } }],
+              },
+            },
+          ]),
+        )
+        .mockResolvedValueOnce({ message: { content: "sub result" } })
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-prefer-latest",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      expect(ollamaMocks.chat.mock.calls[1][0].model).toBe("codellama:latest");
+    });
+
     it("excludes ask_user from the sub-agent tool list", async () => {
       const send = vi.fn();
       ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });
