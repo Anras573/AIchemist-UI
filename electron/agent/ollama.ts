@@ -712,7 +712,9 @@ async function executeTool(
         // existing approval category instead of treating them as file edits.
         return runTool(ctx, name, args, "shell", async () => managedMcpBridge.callTool(name, args));
       }
-      return `Error: Unsupported tool "${name}"`;
+      // Route through runTool so the attempt is visible in the UI timeline
+      // and persisted to tool_calls — including calls from misbehaving sub-agents.
+      return runTool(ctx, name, args, "custom", async () => `Error: Unsupported tool "${name}"`);
   }
 }
 

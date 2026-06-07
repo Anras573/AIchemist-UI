@@ -767,5 +767,57 @@ describe("ollama provider", () => {
       // requestQuestion must NOT have been called (the real question flow is bypassed)
       expect(send).not.toHaveBeenCalledWith(CH.SESSION_QUESTION_REQUIRED, expect.anything());
     });
+
+    it("routes unknown/MCP tool calls from a sub-agent through runTool so they appear in the timeline", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });
+      ollamaMocks.chat
+        // Orchestrator → delegate_task("phi4", "sub-task")
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "do work" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 calls an MCP tool that the noop bridge doesn't know about
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "mcp__context7__lookup", arguments: { query: "needle" } } }],
+              },
+            },
+          ]),
+        )
+        // phi4 gets the "unsupported" error, produces final text
+        .mockResolvedValueOnce({ message: { content: "phi4 done" } })
+        // Orchestrator final
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-mcp-noop",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      // The MCP call must be visible in the UI timeline via proper IPC events
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({
+        tool_name: "mcp__context7__lookup",
+      }));
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({
+        tool_name: "mcp__context7__lookup",
+        output: expect.stringContaining("Unsupported tool"),
+      }));
+    });
   });
 });
