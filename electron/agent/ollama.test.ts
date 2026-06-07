@@ -587,6 +587,45 @@ describe("ollama provider", () => {
       }));
     });
 
+    it("resolves tagged→untagged: 'codellama:latest' matches installed 'codellama'", async () => {
+      const send = vi.fn();
+      // ollama list returns untagged "codellama"; orchestrator requests "codellama:latest"
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "codellama" }] });
+      ollamaMocks.chat
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "codellama:latest", prompt: "hello" } } }],
+              },
+            },
+          ]),
+        )
+        // Sub-agent (resolved to "codellama") returns plain text
+        .mockResolvedValueOnce({ message: { content: "sub result" } })
+        // Orchestrator final reply
+        .mockResolvedValueOnce({ message: { content: "done" } });
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-tag-strip",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      // Sub-agent chat call must use the untagged id that was actually installed
+      expect(ollamaMocks.chat.mock.calls[1][0].model).toBe("codellama");
+      expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({
+        tool_name: "delegate_task",
+        output: "sub result",
+      }));
+    });
+
     it("excludes ask_user from the sub-agent tool list", async () => {
       const send = vi.fn();
       ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "phi4" }] });

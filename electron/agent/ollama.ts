@@ -516,8 +516,14 @@ function resolveInstalledModel(
   requested: string,
 ): string | undefined {
   if (available.some((m) => m.id === requested)) return requested;
+  // "codellama" requested, "codellama:latest" installed
   const withLatest = `${requested}:latest`;
   if (available.some((m) => m.id === withLatest)) return withLatest;
+  // "codellama:latest" requested, "codellama" installed (untagged)
+  if (requested.endsWith(":latest")) {
+    const withoutLatest = requested.slice(0, -":latest".length);
+    if (available.some((m) => m.id === withoutLatest)) return withoutLatest;
+  }
   return undefined;
 }
 
