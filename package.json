@@ -42,7 +42,7 @@
     "motion": "^12.38.0",
     "nanoid": "^5.1.11",
     "node-pty": "^1.1.0",
-    "ollama": "^0.5.18",
+    "ollama": "0.6.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-jsx-parser": "^2.4.1",
@@ -57,9 +57,9 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.140",
+    "@anthropic-ai/claude-agent-sdk": "0.3.169",
     "@electron/rebuild": "^4.0.4",
-    "@github/copilot-sdk": "1.0.0-beta.4",
+    "@github/copilot-sdk": "1.0.0",
     "@tailwindcss/vite": "^4.3.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
