@@ -62,7 +62,7 @@ export function Context({ maxTokens, usedTokens, usage, children, ...props }: Co
 
   return (
     <ContextCtx.Provider value={value}>
-      <HoverCard openDelay={200} closeDelay={100} {...props}>
+      <HoverCard {...props}>
         {children}
       </HoverCard>
     </ContextCtx.Provider>

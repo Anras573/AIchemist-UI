@@ -593,7 +593,7 @@ function SessionContextUsage({
   const raw = sessionUsage[sessionId];
   if (!raw) return null;
 
-  const { inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens } = raw;
+  const { inputTokens, outputTokens, cacheReadInputTokens } = raw;
   const hasAnyTokens = inputTokens > 0 || outputTokens > 0;
   if (!hasAnyTokens) return null;
 
