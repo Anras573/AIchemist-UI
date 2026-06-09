@@ -48,6 +48,18 @@ import {
 import { QuestionCard } from "./QuestionCard";
 import { IssueLinkPicker } from "./IssueLinkPicker";
 import { useIpc } from "@/lib/ipc";
+import {
+  Context,
+  ContextTrigger,
+  ContextContent,
+  ContextContentHeader,
+  ContextContentBody,
+  ContextInputUsage,
+  ContextOutputUsage,
+  ContextReasoningUsage,
+  ContextCacheUsage,
+} from "@/components/ai-elements/context";
+import { getModelContextWindow } from "@/lib/models";
 
 const EMPTY_COMPACTIONS: CompactionEvent[] = [];
 
@@ -567,6 +579,52 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
   );
 }
 
+// ─── Session context window usage indicator ───────────────────────────────────
+
+function SessionContextUsage({
+  sessionId,
+  model,
+  sessionUsage,
+}: {
+  sessionId: string;
+  model: string;
+  sessionUsage: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }>;
+}) {
+  const raw = sessionUsage[sessionId];
+  if (!raw) return null;
+
+  const { inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens } = raw;
+  const hasAnyTokens = inputTokens > 0 || outputTokens > 0;
+  if (!hasAnyTokens) return null;
+
+  // inputTokens from Anthropic already includes the full context (all previous turns)
+  const usedTokens = inputTokens > 0 ? inputTokens + outputTokens : outputTokens;
+  const maxTokens = model ? getModelContextWindow(model) ?? undefined : undefined;
+
+  const usage = {
+    inputTokens,
+    outputTokens,
+    cachedInputTokens: cacheReadInputTokens,
+    reasoningTokens: 0,
+    totalTokens: usedTokens,
+  };
+
+  return (
+    <Context maxTokens={maxTokens} usedTokens={usedTokens} usage={usage}>
+      <ContextTrigger />
+      <ContextContent>
+        <ContextContentHeader />
+        <ContextContentBody>
+          <ContextInputUsage />
+          <ContextOutputUsage />
+          <ContextReasoningUsage />
+          <ContextCacheUsage />
+        </ContextContentBody>
+      </ContextContent>
+    </Context>
+  );
+}
+
 // ─── Input bar ────────────────────────────────────────────────────────────────
 
 interface InputBarProps {
@@ -594,7 +652,7 @@ function InputBarInner({
 }: InputBarProps) {
   const controller = usePromptInputController();
   const ipc = useIpc();
-  const { sessions, activeSessionId, clearSessionMessages } = useSessionStore();
+  const { sessions, activeSessionId, clearSessionMessages, sessionUsage } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
@@ -795,6 +853,7 @@ function InputBarInner({
               />
             )}
             <AgentPickerButton />
+            {activeSession && <SessionContextUsage sessionId={activeSession.id} model={activeSession.model ?? ""} sessionUsage={sessionUsage} />}
             {(activeSession?.branch ?? gitBranch) && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground/60">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

@@ -148,6 +148,7 @@ export const IPC_CHANNELS = {
   SESSION_TRACE: "session:trace",
   SESSION_FILE_CHANGE: "session:file_change",
   SESSION_COMPACTION: "session:compaction",
+  SESSION_USAGE: "session:usage",
   TERMINAL_OUTPUT: "terminal:output",
   SESSION_THINKING_DELTA: "session:thinking-delta",
   SESSION_THINKING_DONE: "session:thinking-done",

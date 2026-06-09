@@ -49,6 +49,9 @@ interface OllamaListResult {
 
 interface OllamaChatChunk {
   message?: Partial<OllamaMessage>;
+  done?: boolean;
+  prompt_eval_count?: number;
+  eval_count?: number;
 }
 
 interface OllamaClientLike {
@@ -760,7 +763,9 @@ async function runChatRound(
   const seenToolCalls = new Set<string>();
 
   if (isAsyncIterable<OllamaChatChunk>(response)) {
+    let lastChunk: OllamaChatChunk | null = null;
     for await (const chunk of response) {
+      lastChunk = chunk;
       const delta = chunk.message?.content ?? "";
       if (delta) {
         fullText += delta;
@@ -777,6 +782,17 @@ async function runChatRound(
           toolCalls.push(toolCall);
         }
       }
+    }
+    if (lastChunk?.done) {
+      ctx.webContents.send(CH.SESSION_USAGE, {
+        session_id: ctx.sessionId,
+        usage: {
+          inputTokens: lastChunk.prompt_eval_count ?? 0,
+          outputTokens: lastChunk.eval_count ?? 0,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        },
+      });
     }
     return { text: fullText, toolCalls };
   }

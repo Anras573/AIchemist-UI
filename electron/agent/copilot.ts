@@ -595,17 +595,31 @@ export async function runCopilotAgentTurn(params: {
   const toolCallIdToName = new Map<string, string>();
 
   let fullText = "";
+  let turnOutputTokens = 0;
   const done = new Promise<void>((resolve, reject) => {
     // The SDK emits "assistant.message" each time the accumulated text grows
     // (streaming). Track previous length to compute incremental deltas.
     session.on("assistant.message", (event) => {
-      const newText: string = (event.data as { content: string }).content ?? "";
+      const data = event.data as { content: string; outputTokens?: number };
+      const newText: string = data.content ?? "";
       const delta = newText.slice(fullText.length);
       fullText = newText;
       if (delta) {
         webContents.send(CH.SESSION_DELTA, {
           session_id: sessionId,
           text_delta: delta,
+        });
+      }
+      if (data.outputTokens != null) {
+        turnOutputTokens = data.outputTokens;
+        webContents.send(CH.SESSION_USAGE, {
+          session_id: sessionId,
+          usage: {
+            inputTokens: 0,
+            outputTokens: turnOutputTokens,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+          },
         });
       }
     });
