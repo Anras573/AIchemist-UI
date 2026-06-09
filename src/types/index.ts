@@ -315,6 +315,18 @@ export interface SessionCompactionEvent {
   compaction: CompactionEvent;
 }
 
+export interface SessionUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+}
+
+export interface SessionUsageEvent {
+  session_id: string;
+  usage: SessionUsage;
+}
+
 
 export interface TraceSpan {
   id: string;

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { Provider, Session, SessionStatus, Message, TraceSpan, FileChange, CompactionEvent } from "@/types";
+import { Provider, Session, SessionStatus, Message, TraceSpan, FileChange, CompactionEvent, SessionUsage } from "@/types";
 
 export interface LiveToolCall {
   toolCallId: string;
@@ -59,8 +59,8 @@ interface SessionStore {
   sessionCompactions: Record<string, CompactionEvent[]>;
   addCompactionEvent: (sessionId: string, event: CompactionEvent) => void;
   // Latest observed SESSION_USAGE event per session — ephemeral, not persisted, updated mid-turn
-  sessionUsage: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }>;
-  updateSessionUsage: (sessionId: string, usage: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }) => void;
+  sessionUsage: Record<string, SessionUsage>;
+  updateSessionUsage: (sessionId: string, usage: SessionUsage) => void;
   // Accumulated extended thinking text per session (NOT persisted)
   sessionThinking: Record<string, string>;
   // Whether a thinking block is actively streaming per session (NOT persisted)

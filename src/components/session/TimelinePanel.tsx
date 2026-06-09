@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import { Message as MessageRecord, CompactionEvent, SkillInfo } from "@/types";
+import { Message as MessageRecord, CompactionEvent, SkillInfo, SessionUsage } from "@/types";
 import { cn } from "@/lib/utils";
 import { useProviderProbes } from "@/lib/hooks/useProviderProbes";
 import { MessageResponse, Message, MessageContent } from "@/components/ai-elements/message";
@@ -588,7 +588,7 @@ function SessionContextUsage({
 }: {
   sessionId: string;
   model: string;
-  sessionUsage: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }>;
+  sessionUsage: Record<string, SessionUsage>;
 }) {
   const raw = sessionUsage[sessionId];
   if (!raw) return null;

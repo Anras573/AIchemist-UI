@@ -5,6 +5,7 @@ import type {
   SessionStatusEvent,
   SessionDeltaEvent,
   SessionMessageEvent,
+  SessionUsageEvent,
 } from "@/types";
 
 // Actual payload shapes from the main process
@@ -181,7 +182,7 @@ export function useSessionEvents() {
         }
       ),
 
-      onSessionEvent<{ session_id: string; usage: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number } }>(
+      onSessionEvent<SessionUsageEvent>(
         IPC_CHANNELS.SESSION_USAGE,
         (payload) => {
           updateSessionUsage(payload.session_id, payload.usage);
