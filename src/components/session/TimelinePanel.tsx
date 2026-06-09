@@ -593,7 +593,7 @@ function SessionContextUsage({
   const raw = sessionUsage[sessionId];
   if (!raw) return null;
 
-  const { inputTokens, outputTokens, cacheReadInputTokens } = raw;
+  const { inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens } = raw;
   const hasAnyTokens = inputTokens > 0 || outputTokens > 0;
   if (!hasAnyTokens) return null;
 
@@ -603,10 +603,13 @@ function SessionContextUsage({
   const usedTokens = inputTokens > 0 ? inputTokens + outputTokens : outputTokens;
   const maxTokens = inputTokens > 0 && model ? getModelContextWindow(model) ?? undefined : undefined;
 
+  // Combine cache read + cache creation into a single "cached" total for the breakdown row.
+  const cachedInputTokens = cacheReadInputTokens + cacheCreationInputTokens;
+
   const usage = {
     inputTokens,
     outputTokens,
-    cachedInputTokens: cacheReadInputTokens,
+    cachedInputTokens,
     reasoningTokens: 0,
     totalTokens: usedTokens,
   };

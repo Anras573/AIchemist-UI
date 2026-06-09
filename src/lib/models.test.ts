@@ -88,4 +88,9 @@ describe("getModelContextWindow", () => {
     expect(getModelContextWindow("unknown-model-xyz")).toBeNull();
     expect(getModelContextWindow("")).toBeNull();
   });
+
+  it("trims leading/trailing whitespace before matching", () => {
+    expect(getModelContextWindow("  claude-sonnet-4-6  ")).toBe(200_000);
+    expect(getModelContextWindow(" gpt-4o ")).toBe(128_000);
+  });
 });

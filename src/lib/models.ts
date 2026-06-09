@@ -62,7 +62,7 @@ const MODEL_CONTEXT_WINDOWS: Array<[string, number]> = [
 
 /** Returns the context window size in tokens for a known model, or null if unknown. */
 export function getModelContextWindow(modelId: string): number | null {
-  const lower = modelId.toLowerCase();
+  const lower = modelId.trim().toLowerCase();
   for (const [substr, size] of MODEL_CONTEXT_WINDOWS) {
     if (lower.includes(substr.toLowerCase())) return size;
   }

@@ -763,9 +763,7 @@ async function runChatRound(
   const seenToolCalls = new Set<string>();
 
   if (isAsyncIterable<OllamaChatChunk>(response)) {
-    let lastChunk: OllamaChatChunk | null = null;
     for await (const chunk of response) {
-      lastChunk = chunk;
       const delta = chunk.message?.content ?? "";
       if (delta) {
         fullText += delta;
@@ -782,17 +780,19 @@ async function runChatRound(
           toolCalls.push(toolCall);
         }
       }
-    }
-    if (lastChunk?.done) {
-      ctx.webContents.send(CH.SESSION_USAGE, {
-        session_id: ctx.sessionId,
-        usage: {
-          inputTokens: lastChunk.prompt_eval_count ?? 0,
-          outputTokens: lastChunk.eval_count ?? 0,
-          cacheReadInputTokens: 0,
-          cacheCreationInputTokens: 0,
-        },
-      });
+      // Emit as soon as token counts appear on any chunk (Ollama includes them on the done chunk,
+      // but emit eagerly so the indicator updates the moment the data is available).
+      if (chunk.prompt_eval_count != null || chunk.eval_count != null) {
+        ctx.webContents.send(CH.SESSION_USAGE, {
+          session_id: ctx.sessionId,
+          usage: {
+            inputTokens: chunk.prompt_eval_count ?? 0,
+            outputTokens: chunk.eval_count ?? 0,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+          },
+        });
+      }
     }
     return { text: fullText, toolCalls };
   }
