@@ -597,9 +597,11 @@ function SessionContextUsage({
   const hasAnyTokens = inputTokens > 0 || outputTokens > 0;
   if (!hasAnyTokens) return null;
 
-  // inputTokens from Anthropic already includes the full context (all previous turns)
+  // inputTokens from Anthropic already includes the full context (all previous turns).
+  // Only compute a context-window % when we have a reliable full-context token count —
+  // Copilot only exposes outputTokens (inputTokens === 0), which would give a misleading %.
   const usedTokens = inputTokens > 0 ? inputTokens + outputTokens : outputTokens;
-  const maxTokens = model ? getModelContextWindow(model) ?? undefined : undefined;
+  const maxTokens = inputTokens > 0 && model ? getModelContextWindow(model) ?? undefined : undefined;
 
   const usage = {
     inputTokens,
@@ -853,7 +855,7 @@ function InputBarInner({
               />
             )}
             <AgentPickerButton />
-            {activeSession && <SessionContextUsage sessionId={activeSession.id} model={activeSession.model ?? ""} sessionUsage={sessionUsage} />}
+            {activeSession && activeSession.messages.length > 0 && <SessionContextUsage sessionId={activeSession.id} model={activeSession.model ?? ""} sessionUsage={sessionUsage} />}
             {(activeSession?.branch ?? gitBranch) && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground/60">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

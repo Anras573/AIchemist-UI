@@ -58,7 +58,7 @@ interface SessionStore {
   // Compaction events received during a session (from SESSION_COMPACTION events)
   sessionCompactions: Record<string, CompactionEvent[]>;
   addCompactionEvent: (sessionId: string, event: CompactionEvent) => void;
-  // Token usage from the last completed turn per session (NOT persisted)
+  // Latest observed SESSION_USAGE event per session — ephemeral, not persisted, updated mid-turn
   sessionUsage: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }>;
   updateSessionUsage: (sessionId: string, usage: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }) => void;
   // Accumulated extended thinking text per session (NOT persisted)

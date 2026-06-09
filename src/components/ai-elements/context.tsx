@@ -103,7 +103,7 @@ export function ContextTrigger({ children, className, ...props }: ContextTrigger
         "hover:text-foreground hover:bg-muted/50 transition-colors cursor-default select-none",
         className
       )}
-      aria-label={`Context window usage${pct != null ? `: ${pct}%` : ""}`}
+      aria-label={pct != null ? `Context window usage: ${pct}%` : usedTokens != null ? `Context window usage: ${formatTokens(usedTokens)} tokens` : "Context window usage"}
       {...props}
     >
       <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true" className="shrink-0">
@@ -121,8 +121,8 @@ export function ContextTrigger({ children, className, ...props }: ContextTrigger
           transform="rotate(-90 10 10)"
           className={cn(
             "transition-all duration-500",
-            percentage > 0.9 && "text-destructive",
-            percentage > 0.7 && percentage <= 0.9 && "text-yellow-500"
+            percentage >= 0.9 && "text-destructive",
+            percentage >= 0.7 && percentage < 0.9 && "text-yellow-500"
           )}
         />
       </svg>
@@ -191,7 +191,7 @@ export function ContextContentHeader({ children, className, ...props }: ContextC
           <div
             className={cn(
               "h-full rounded-full transition-all duration-500",
-              percentage > 0.9 ? "bg-destructive" : percentage > 0.7 ? "bg-yellow-500" : "bg-primary"
+              percentage >= 0.9 ? "bg-destructive" : percentage >= 0.7 ? "bg-yellow-500" : "bg-primary"
             )}
             style={{ width: `${Math.round(percentage * 100)}%` }}
           />
