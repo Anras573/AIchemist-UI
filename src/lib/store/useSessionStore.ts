@@ -503,11 +503,13 @@ export const useSessionStore = create<SessionStore>()(
         set((state) => {
           const session = state.sessions[sessionId];
           if (!session) return state;
+          const { [sessionId]: _usage, ...usageRest } = state.sessionUsage;
           return {
             sessions: {
               ...state.sessions,
               [sessionId]: { ...session, messages: [] },
             },
+            sessionUsage: usageRest,
           };
         }),
 
