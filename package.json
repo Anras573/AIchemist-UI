@@ -11,11 +11,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "acp:mock": "bun run scripts/mock-acp-agent.ts"
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "0.21.0",
     "@base-ui/react": "^1.4.1",
     "@fontsource-variable/geist": "^5.2.8",
     "@octokit/rest": "^22.0.1",
@@ -81,8 +79,5 @@
     "typescript": "^6.0.3",
     "vite": "^7.3.3",
     "vitest": "^4.1.6"
-  },
-  "patchedDependencies": {
-    "vscode-jsonrpc@8.2.1": "patches/vscode-jsonrpc@8.2.1.patch"
   }
 }

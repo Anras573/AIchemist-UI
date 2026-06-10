@@ -127,7 +127,7 @@ useEffect(() => {
 
 ### Provider lock
 
-Sessions are locked to a single provider (`"anthropic"`, `"copilot"`, `"acp"`, or `"ollama"`) at creation. Never allow mid-session provider switching — each provider has its own session ID and cannot resume the other's state.
+Sessions are locked to a single provider (`"anthropic"`, `"copilot"`, or `"ollama"`) at creation. Never allow mid-session provider switching — each provider has its own session ID and cannot resume the other's state.
 
 ### Session status persistence
 
