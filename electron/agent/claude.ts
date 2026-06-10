@@ -407,6 +407,12 @@ export async function runClaudeAgentTurn(params: {
   // Map tool_use_id → { filePath, beforeContent } for native Write/Edit tracking
   const pendingFileChanges = new Map<string, { filePath: string; before: Buffer | null }>();
 
+  // Accumulated token usage for this turn (emitted after message_delta)
+  let turnInputTokens = 0;
+  let turnOutputTokens = 0;
+  let turnCacheReadTokens = 0;
+  let turnCacheCreationTokens = 0;
+
   try {
     for await (const msg of queryStream) {
       if (msg.type === "stream_event") {
@@ -424,6 +430,24 @@ export async function runClaudeAgentTurn(params: {
               });
             }
           }
+        } else if (event["type"] === "message_start") {
+          // input_tokens in message_start includes the full conversation context
+          const msgUsage = ((event["message"] as Record<string, unknown>)?.["usage"]) as Record<string, number> | undefined;
+          turnInputTokens = msgUsage?.["input_tokens"] ?? 0;
+          turnCacheReadTokens = msgUsage?.["cache_read_input_tokens"] ?? 0;
+          turnCacheCreationTokens = msgUsage?.["cache_creation_input_tokens"] ?? 0;
+        } else if (event["type"] === "message_delta") {
+          const deltaUsage = (event["usage"]) as { output_tokens?: number } | undefined;
+          turnOutputTokens = deltaUsage?.["output_tokens"] ?? 0;
+          webContents.send(CH.SESSION_USAGE, {
+            session_id: sessionId,
+            usage: {
+              input_tokens: turnInputTokens,
+              output_tokens: turnOutputTokens,
+              cache_read_input_tokens: turnCacheReadTokens,
+              cache_creation_input_tokens: turnCacheCreationTokens,
+            },
+          });
         }
       } else if (msg.type === "assistant") {
         // Completed assistant turn — emit tool_use blocks for native SDK tools.

@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import { Message as MessageRecord, CompactionEvent, SkillInfo } from "@/types";
+import { Message as MessageRecord, CompactionEvent, SkillInfo, SessionUsage } from "@/types";
 import { cn } from "@/lib/utils";
 import { useProviderProbes } from "@/lib/hooks/useProviderProbes";
 import { MessageResponse, Message, MessageContent } from "@/components/ai-elements/message";
@@ -48,6 +48,18 @@ import {
 import { QuestionCard } from "./QuestionCard";
 import { IssueLinkPicker } from "./IssueLinkPicker";
 import { useIpc } from "@/lib/ipc";
+import {
+  Context,
+  ContextTrigger,
+  ContextContent,
+  ContextContentHeader,
+  ContextContentBody,
+  ContextInputUsage,
+  ContextOutputUsage,
+  ContextReasoningUsage,
+  ContextCacheUsage,
+} from "@/components/ai-elements/context";
+import { getModelContextWindow } from "@/lib/models";
 
 const EMPTY_COMPACTIONS: CompactionEvent[] = [];
 
@@ -567,6 +579,57 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
   );
 }
 
+// ─── Session context window usage indicator ───────────────────────────────────
+
+function SessionContextUsage({
+  sessionId,
+  model,
+  sessionUsage,
+}: {
+  sessionId: string;
+  model: string;
+  sessionUsage: Record<string, SessionUsage>;
+}) {
+  const raw = sessionUsage[sessionId];
+  if (!raw) return null;
+
+  const { input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens } = raw;
+  const hasAnyTokens = input_tokens > 0 || output_tokens > 0;
+  if (!hasAnyTokens) return null;
+
+  // input_tokens from Anthropic already includes the full context (all previous turns).
+  // Only compute a context-window % when we have a reliable full-context token count —
+  // Copilot only exposes output_tokens (input_tokens === 0), which would give a misleading %.
+  const usedTokens = input_tokens > 0 ? input_tokens + output_tokens : output_tokens;
+  const maxTokens = input_tokens > 0 && model ? getModelContextWindow(model) ?? undefined : undefined;
+
+  // Combine cache read + cache creation into a single "cached" total for the breakdown row.
+  const cachedInputTokens = cache_read_input_tokens + cache_creation_input_tokens;
+
+  const usage = {
+    inputTokens: input_tokens,
+    outputTokens: output_tokens,
+    cachedInputTokens,
+    reasoningTokens: 0,
+    totalTokens: usedTokens,
+  };
+
+  return (
+    <Context maxTokens={maxTokens} usedTokens={usedTokens} usage={usage}>
+      <ContextTrigger />
+      <ContextContent>
+        <ContextContentHeader />
+        <ContextContentBody>
+          <ContextInputUsage />
+          <ContextOutputUsage />
+          <ContextReasoningUsage />
+          <ContextCacheUsage />
+        </ContextContentBody>
+      </ContextContent>
+    </Context>
+  );
+}
+
 // ─── Input bar ────────────────────────────────────────────────────────────────
 
 interface InputBarProps {
@@ -594,7 +657,7 @@ function InputBarInner({
 }: InputBarProps) {
   const controller = usePromptInputController();
   const ipc = useIpc();
-  const { sessions, activeSessionId, clearSessionMessages } = useSessionStore();
+  const { sessions, activeSessionId, clearSessionMessages, sessionUsage } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
@@ -795,6 +858,7 @@ function InputBarInner({
               />
             )}
             <AgentPickerButton />
+            {activeSession && activeSession.messages.length > 0 && <SessionContextUsage sessionId={activeSession.id} model={activeSession.model ?? ""} sessionUsage={sessionUsage} />}
             {(activeSession?.branch ?? gitBranch) && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground/60">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

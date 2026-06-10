@@ -95,6 +95,7 @@ export const TRACE_UNBIND_TRANSCRIPT = "traces:unbind-transcript";
 // ── Changes (session file writes + git diff) ──────────────────────────────────
 export const SESSION_FILE_CHANGE    = "session:file_change";
 export const SESSION_COMPACTION     = "session:compaction";
+export const SESSION_USAGE          = "session:usage";
 export const GET_GIT_DIFF           = "fs:git-diff";
 export const GET_GIT_BRANCH         = "fs:git-branch";
 

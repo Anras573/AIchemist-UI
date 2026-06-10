@@ -5,6 +5,7 @@ import type {
   SessionStatusEvent,
   SessionDeltaEvent,
   SessionMessageEvent,
+  SessionUsageEvent,
 } from "@/types";
 
 // Actual payload shapes from the main process
@@ -86,6 +87,7 @@ export function useSessionEvents() {
     addOrUpdateTraceSpan,
     addFileChange,
     addCompactionEvent,
+    updateSessionUsage,
     requestTabSwitch,
     appendThinking,
     doneThinking,
@@ -180,6 +182,13 @@ export function useSessionEvents() {
         }
       ),
 
+      onSessionEvent<SessionUsageEvent>(
+        IPC_CHANNELS.SESSION_USAGE,
+        (payload) => {
+          updateSessionUsage(payload.session_id, payload.usage);
+        }
+      ),
+
       onThinkingDelta((payload) => {
         appendThinking(payload.session_id, payload.text_delta);
       }),
@@ -234,6 +243,7 @@ export function useSessionEvents() {
     addOrUpdateTraceSpan,
     addFileChange,
     addCompactionEvent,
+    updateSessionUsage,
     requestTabSwitch,
     appendThinking,
     doneThinking,

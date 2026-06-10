@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   getModelLabel,
   getLogoProvider,
+  getModelContextWindow,
   ANTHROPIC_MODELS,
 } from "@/lib/models";
 
@@ -49,5 +50,47 @@ describe("getLogoProvider", () => {
 
   it("passes an unknown provider through unchanged", () => {
     expect(getLogoProvider("openai")).toBe("openai");
+  });
+});
+
+describe("getModelContextWindow", () => {
+  it("returns 200_000 for all known Anthropic claude- models", () => {
+    expect(getModelContextWindow("claude-opus-4-6")).toBe(200_000);
+    expect(getModelContextWindow("claude-sonnet-4-6")).toBe(200_000);
+    expect(getModelContextWindow("claude-haiku-4-5-20251001")).toBe(200_000);
+  });
+
+  it("matches gpt-4o-mini before gpt-4o (more specific prefix wins)", () => {
+    // gpt-4o-mini should match the gpt-4o-mini entry (128K), not gpt-4o
+    expect(getModelContextWindow("gpt-4o-mini")).toBe(128_000);
+  });
+
+  it("matches gpt-4o to 128K", () => {
+    expect(getModelContextWindow("gpt-4o")).toBe(128_000);
+  });
+
+  it("returns 200_000 for o1, o3 models", () => {
+    expect(getModelContextWindow("o1")).toBe(200_000);
+    expect(getModelContextWindow("o3")).toBe(200_000);
+    expect(getModelContextWindow("o3-mini")).toBe(200_000);
+  });
+
+  it("returns 1_000_000 for gemini-2.0-flash", () => {
+    expect(getModelContextWindow("gemini-2.0-flash")).toBe(1_000_000);
+  });
+
+  it("is case-insensitive", () => {
+    expect(getModelContextWindow("Claude-Sonnet-4-6")).toBe(200_000);
+    expect(getModelContextWindow("GPT-4O")).toBe(128_000);
+  });
+
+  it("returns null for an unknown model ID", () => {
+    expect(getModelContextWindow("unknown-model-xyz")).toBeNull();
+    expect(getModelContextWindow("")).toBeNull();
+  });
+
+  it("trims leading/trailing whitespace before matching", () => {
+    expect(getModelContextWindow("  claude-sonnet-4-6  ")).toBe(200_000);
+    expect(getModelContextWindow(" gpt-4o ")).toBe(128_000);
   });
 });

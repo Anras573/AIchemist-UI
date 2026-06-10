@@ -49,6 +49,9 @@ interface OllamaListResult {
 
 interface OllamaChatChunk {
   message?: Partial<OllamaMessage>;
+  done?: boolean;
+  prompt_eval_count?: number;
+  eval_count?: number;
 }
 
 interface OllamaClientLike {
@@ -776,6 +779,19 @@ async function runChatRound(
           seenToolCalls.add(key);
           toolCalls.push(toolCall);
         }
+      }
+      // Emit as soon as token counts appear on any chunk (Ollama includes them on the done chunk,
+      // but emit eagerly so the indicator updates the moment the data is available).
+      if (chunk.prompt_eval_count != null || chunk.eval_count != null) {
+        ctx.webContents.send(CH.SESSION_USAGE, {
+          session_id: ctx.sessionId,
+          usage: {
+            input_tokens: chunk.prompt_eval_count ?? 0,
+            output_tokens: chunk.eval_count ?? 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+        });
       }
     }
     return { text: fullText, toolCalls };

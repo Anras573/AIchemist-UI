@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { Provider, Session, SessionStatus, Message, TraceSpan, FileChange, CompactionEvent } from "@/types";
+import { Provider, Session, SessionStatus, Message, TraceSpan, FileChange, CompactionEvent, SessionUsage } from "@/types";
 
 export interface LiveToolCall {
   toolCallId: string;
@@ -58,6 +58,9 @@ interface SessionStore {
   // Compaction events received during a session (from SESSION_COMPACTION events)
   sessionCompactions: Record<string, CompactionEvent[]>;
   addCompactionEvent: (sessionId: string, event: CompactionEvent) => void;
+  // Latest observed SESSION_USAGE event per session — ephemeral, not persisted, updated mid-turn
+  sessionUsage: Record<string, SessionUsage>;
+  updateSessionUsage: (sessionId: string, usage: SessionUsage) => void;
   // Accumulated extended thinking text per session (NOT persisted)
   sessionThinking: Record<string, string>;
   // Whether a thinking block is actively streaming per session (NOT persisted)
@@ -137,6 +140,7 @@ export const useSessionStore = create<SessionStore>()(
       sessionTraces: {},
       sessionFileChanges: {},
       sessionCompactions: {},
+      sessionUsage: {},
       sessionThinking: {},
       sessionIsThinking: {},
       queuedMessageIds: {},
@@ -209,6 +213,7 @@ export const useSessionStore = create<SessionStore>()(
           const { [id]: _t, ...tracesRest } = state.sessionTraces;
           const { [id]: _fileChanges, ...fileChangesRest } = state.sessionFileChanges;
           const { [id]: _compactions, ...compactionsRest } = state.sessionCompactions;
+          const { [id]: _usage, ...usageRest } = state.sessionUsage;
           const { [id]: _thinking, ...thinkingRest } = state.sessionThinking;
           const { [id]: _isThinking, ...isThinkingRest } = state.sessionIsThinking;
           const { [id]: _terminalOutput, ...terminalOutputRest } = state.terminalOutput;
@@ -226,6 +231,7 @@ export const useSessionStore = create<SessionStore>()(
             sessionTraces: tracesRest,
             sessionFileChanges: fileChangesRest,
             sessionCompactions: compactionsRest,
+            sessionUsage: usageRest,
             sessionThinking: thinkingRest,
             sessionIsThinking: isThinkingRest,
             terminalOutput: terminalOutputRest,
@@ -430,6 +436,11 @@ export const useSessionStore = create<SessionStore>()(
           },
         })),
 
+      updateSessionUsage: (sessionId, usage) =>
+        set((state) => ({
+          sessionUsage: { ...state.sessionUsage, [sessionId]: usage },
+        })),
+
       requestTabSwitch: (tab) => set({ tabSwitchRequest: tab }),
       clearTabSwitchRequest: () => set({ tabSwitchRequest: null }),
 
@@ -492,11 +503,13 @@ export const useSessionStore = create<SessionStore>()(
         set((state) => {
           const session = state.sessions[sessionId];
           if (!session) return state;
+          const { [sessionId]: _usage, ...usageRest } = state.sessionUsage;
           return {
             sessions: {
               ...state.sessions,
               [sessionId]: { ...session, messages: [] },
             },
+            sessionUsage: usageRest,
           };
         }),
 

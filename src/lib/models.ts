@@ -40,3 +40,31 @@ export function getLogoProvider(provider: string): string {
   if (provider === "copilot") return "github-copilot";
   return provider; // "anthropic" passes through as-is
 }
+
+/** Known context window sizes (in tokens) by model ID substring or exact match. */
+const MODEL_CONTEXT_WINDOWS: Array<[string, number]> = [
+  // Anthropic — all current models have 200K
+  ["claude-", 200_000],
+  // OpenAI
+  ["gpt-4o-mini", 128_000],
+  ["gpt-4o", 128_000],
+  ["gpt-4", 128_000],
+  ["o1-mini", 128_000],
+  ["o1-preview", 128_000],
+  ["o1", 200_000],
+  ["o3-mini", 200_000],
+  ["o3", 200_000],
+  // Google
+  ["gemini-2.0-flash", 1_000_000],
+  ["gemini-1.5-pro", 2_000_000],
+  ["gemini-1.5-flash", 1_000_000],
+];
+
+/** Returns the context window size in tokens for a known model, or null if unknown. */
+export function getModelContextWindow(modelId: string): number | null {
+  const lower = modelId.trim().toLowerCase();
+  for (const [substr, size] of MODEL_CONTEXT_WINDOWS) {
+    if (lower.includes(substr.toLowerCase())) return size;
+  }
+  return null;
+}
