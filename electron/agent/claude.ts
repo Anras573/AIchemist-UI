@@ -442,10 +442,10 @@ export async function runClaudeAgentTurn(params: {
           webContents.send(CH.SESSION_USAGE, {
             session_id: sessionId,
             usage: {
-              inputTokens: turnInputTokens,
-              outputTokens: turnOutputTokens,
-              cacheReadInputTokens: turnCacheReadTokens,
-              cacheCreationInputTokens: turnCacheCreationTokens,
+              input_tokens: turnInputTokens,
+              output_tokens: turnOutputTokens,
+              cache_read_input_tokens: turnCacheReadTokens,
+              cache_creation_input_tokens: turnCacheCreationTokens,
             },
           });
         }

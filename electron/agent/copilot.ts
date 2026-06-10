@@ -615,10 +615,10 @@ export async function runCopilotAgentTurn(params: {
         webContents.send(CH.SESSION_USAGE, {
           session_id: sessionId,
           usage: {
-            inputTokens: 0,
-            outputTokens: turnOutputTokens,
-            cacheReadInputTokens: 0,
-            cacheCreationInputTokens: 0,
+            input_tokens: 0,
+            output_tokens: turnOutputTokens,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
           },
         });
       }

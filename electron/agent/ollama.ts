@@ -786,10 +786,10 @@ async function runChatRound(
         ctx.webContents.send(CH.SESSION_USAGE, {
           session_id: ctx.sessionId,
           usage: {
-            inputTokens: chunk.prompt_eval_count ?? 0,
-            outputTokens: chunk.eval_count ?? 0,
-            cacheReadInputTokens: 0,
-            cacheCreationInputTokens: 0,
+            input_tokens: chunk.prompt_eval_count ?? 0,
+            output_tokens: chunk.eval_count ?? 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
           },
         });
       }

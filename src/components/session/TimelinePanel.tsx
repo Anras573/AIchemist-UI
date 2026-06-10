@@ -593,22 +593,22 @@ function SessionContextUsage({
   const raw = sessionUsage[sessionId];
   if (!raw) return null;
 
-  const { inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens } = raw;
-  const hasAnyTokens = inputTokens > 0 || outputTokens > 0;
+  const { input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens } = raw;
+  const hasAnyTokens = input_tokens > 0 || output_tokens > 0;
   if (!hasAnyTokens) return null;
 
-  // inputTokens from Anthropic already includes the full context (all previous turns).
+  // input_tokens from Anthropic already includes the full context (all previous turns).
   // Only compute a context-window % when we have a reliable full-context token count —
-  // Copilot only exposes outputTokens (inputTokens === 0), which would give a misleading %.
-  const usedTokens = inputTokens > 0 ? inputTokens + outputTokens : outputTokens;
-  const maxTokens = inputTokens > 0 && model ? getModelContextWindow(model) ?? undefined : undefined;
+  // Copilot only exposes output_tokens (input_tokens === 0), which would give a misleading %.
+  const usedTokens = input_tokens > 0 ? input_tokens + output_tokens : output_tokens;
+  const maxTokens = input_tokens > 0 && model ? getModelContextWindow(model) ?? undefined : undefined;
 
   // Combine cache read + cache creation into a single "cached" total for the breakdown row.
-  const cachedInputTokens = cacheReadInputTokens + cacheCreationInputTokens;
+  const cachedInputTokens = cache_read_input_tokens + cache_creation_input_tokens;
 
   const usage = {
-    inputTokens,
-    outputTokens,
+    inputTokens: input_tokens,
+    outputTokens: output_tokens,
     cachedInputTokens,
     reasoningTokens: 0,
     totalTokens: usedTokens,
