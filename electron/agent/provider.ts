@@ -39,6 +39,14 @@ export interface AgentProvider {
   /** List available sub-agents (e.g. Claude sub-agents). */
   listAgents?(projectPath: string): Promise<AgentInfo[]>;
 
-  /** Graceful shutdown — called on app-quit if present. */
+  /**
+   * Availability probe for the new-session UI. When present, `probeAll()` in
+   * provider-probe.ts uses it instead of a built-in probe — implement it on a
+   * new provider so no provider-probe.ts changes are needed. Caching is the
+   * provider's responsibility.
+   */
+  probe?(opts?: { force?: boolean }): Promise<{ ok: boolean; reason?: string; durationMs?: number }>;
+
+  /** Graceful shutdown — called on app-quit for every registered provider. */
   stop?(): Promise<void>;
 }

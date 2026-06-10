@@ -1,12 +1,12 @@
 import type { Database } from "better-sqlite3";
 import type { ProjectConfig } from "../../src/types/index";
 
-import * as CH from "../ipc-channels";
 import { createPlaceholderMessage, updateMessageContent, loadToolCallsForMessage, updateSessionStatus } from "../sessions";
 import { claudeProvider } from "./claude";
 import { copilotProvider } from "./copilot";
 import { ollamaProvider } from "./ollama";
 import type { AgentProvider, AgentProviderParams } from "./provider";
+import { TurnEmitter } from "./turn-emitter";
 
 // ── Provider registry ─────────────────────────────────────────────────────────
 
@@ -28,6 +28,11 @@ export function registerProvider(name: string, provider: AgentProvider): void {
   PROVIDERS[name] = provider;
 }
 
+/** Names of all registered providers (e.g. to iterate stop()/probe() hooks). */
+export function getProviderNames(): string[] {
+  return Object.keys(PROVIDERS);
+}
+
 // ── Agent turn dispatcher ─────────────────────────────────────────────────────
 
 export async function runAgentTurn(params: {
@@ -43,7 +48,8 @@ export async function runAgentTurn(params: {
 }): Promise<void> {
   const { db, sessionId, prompt, projectPath, projectConfig, webContents, agent, skills, skipPersistence } = params;
 
-  webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "running" });
+  const emitter = new TurnEmitter(webContents, sessionId);
+  emitter.status("running");
   updateSessionStatus(db, sessionId, "running");
 
   // Create a placeholder assistant message that tool calls can FK-reference
@@ -77,16 +83,13 @@ export async function runAgentTurn(params: {
       const toolCalls = loadToolCallsForMessage(db, placeholderMsg.id);
       if (fullText.trim() || toolCalls.length > 0) {
         updateMessageContent(db, placeholderMsg.id, fullText);
-        webContents.send(CH.SESSION_MESSAGE, {
-          session_id: sessionId,
-          message: { ...placeholderMsg, content: fullText, tool_calls: toolCalls },
-        });
+        emitter.message({ ...placeholderMsg, content: fullText, tool_calls: toolCalls });
       } else {
         db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);
       }
     }
 
-    webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "idle" });
+    emitter.status("idle");
     updateSessionStatus(db, sessionId, "idle");
   } catch (err) {
     if (skipPersistence) {
@@ -97,7 +100,7 @@ export async function runAgentTurn(params: {
         db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);
       }
     }
-    webContents.send(CH.SESSION_STATUS, { session_id: sessionId, status: "error" });
+    emitter.status("error");
     updateSessionStatus(db, sessionId, "error");
     throw err;
   }

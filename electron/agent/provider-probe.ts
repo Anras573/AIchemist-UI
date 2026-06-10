@@ -16,7 +16,8 @@ import * as os from "os";
 import * as path from "path";
 import { copilotProvider } from "./copilot";
 import { ollamaProvider } from "./ollama";
-import type { ProjectConfig } from "../../src/types/index";
+import { getProvider } from "./runner";
+import type { ProjectConfig, Provider } from "../../src/types/index";
 import { getApiKey } from "../config";
 
 export interface ProviderProbeResult {
@@ -299,24 +300,46 @@ export async function probeOllama(opts?: { force?: boolean }): Promise<ProviderP
   }
 }
 
+/**
+ * Built-in probe per provider. A provider can instead implement
+ * `AgentProvider.probe()` on its registry entry, which takes precedence —
+ * new providers need no changes in this module.
+ */
+const BUILTIN_PROBES: Record<Provider, (opts?: { force?: boolean }) => Promise<ProviderProbeResult>> = {
+  anthropic: probeAnthropic,
+  copilot: probeCopilot,
+  ollama: probeOllama,
+};
+
+function probeOne(name: Provider, opts?: { force?: boolean }): Promise<ProviderProbeResult> {
+  try {
+    const registered = getProvider(name).probe;
+    if (registered) return registered(opts);
+  } catch {
+    // Provider not in the registry — fall through to the built-in probe.
+  }
+  return BUILTIN_PROBES[name](opts);
+}
+
 /** Probe all providers in parallel. */
 export async function probeAll(
   _project?: { path: string; config: ProjectConfig },
-  opts?: { force?: boolean; disabled?: ReadonlySet<"anthropic" | "copilot" | "ollama"> },
+  opts?: { force?: boolean; disabled?: ReadonlySet<Provider> },
 ): Promise<ProviderProbes> {
-  const disabled = opts?.disabled ?? new Set<"anthropic" | "copilot" | "ollama">();
+  const disabled = opts?.disabled ?? new Set<Provider>();
   const userDisabled = (): ProviderProbeResult => ({
     ok: false,
     reason: "Disabled in settings",
     durationMs: 0,
   });
 
-  const [anthropic, copilot, ollama] = await Promise.all([
-    disabled.has("anthropic") ? Promise.resolve(userDisabled()) : probeAnthropic(opts),
-    disabled.has("copilot") ? Promise.resolve(userDisabled()) : probeCopilot(opts),
-    disabled.has("ollama") ? Promise.resolve(userDisabled()) : probeOllama(opts),
-  ]);
-  return { anthropic, copilot, ollama };
+  const names = Object.keys(BUILTIN_PROBES) as Provider[];
+  const results = await Promise.all(
+    names.map((name) =>
+      disabled.has(name) ? Promise.resolve(userDisabled()) : probeOne(name, opts),
+    ),
+  );
+  return Object.fromEntries(names.map((name, i) => [name, results[i]])) as unknown as ProviderProbes;
 }
 
 // ── Internals ─────────────────────────────────────────────────────────────────

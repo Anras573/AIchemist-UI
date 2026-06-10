@@ -8,8 +8,9 @@ import * as os from "os";
 import * as path from "path";
 import { createPatch } from "diff";
 
-import * as CH from "../ipc-channels";
+import { parseAgentMarkdown } from "./agent-file";
 import { createApprovalMcpServer } from "./mcp-tools";
+import { TurnEmitter } from "./turn-emitter";
 import {
   loadManagedMcpServers,
   toClaudeMcpServers,
@@ -123,25 +124,13 @@ function getPluginKeyMap(): Map<string, string> {
  * Exported for testing.
  */
 export function parseAgentFrontmatter(content: string): AgentEntry | null {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) return null;
-  const fm = match[1];
-
-  const nameMatch = fm.match(/^name:\s*(.+)$/m);
-  if (!nameMatch) return null;
-  const name = nameMatch[1].trim().replace(/^['"]|['"]$/g, "");
-
-  const descMatch = fm.match(/^description:\s*(.+)$/m);
-  const description = descMatch
-    ? descMatch[1].trim().replace(/^['"]|['"]$/g, "")
-    : "";
-
-  const modelMatch = fm.match(/^model:\s*(.+)$/m);
-  const model = modelMatch
-    ? modelMatch[1].trim().replace(/^['"]|['"]$/g, "")
-    : undefined;
-
-  return { name, description, ...(model ? { model } : {}) };
+  const parsed = parseAgentMarkdown(content);
+  if (!parsed?.name) return null;
+  return {
+    name: parsed.name,
+    description: parsed.description,
+    ...(parsed.model ? { model: parsed.model } : {}),
+  };
 }
 
 /** Scans ~/.claude/agents/ and returns parsed agent entries. */
@@ -180,16 +169,9 @@ export function readAgentFileSystemPrompt(
   const filePath = path.join(os.homedir(), ".claude", "agents", `${agentName}.md`);
   try {
     const content = fs.readFileSync(filePath, "utf8");
-    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/);
-    if (!match) return { body: content.trim() };
-
-    const fm = match[1];
-    const body = (match[2] ?? "").trim();
-    const modelMatch = fm.match(/^model:\s*(.+)$/m);
-    const agentModel = modelMatch
-      ? modelMatch[1].trim().replace(/^['"]|['"]$/g, "")
-      : undefined;
-    return { body, model: agentModel };
+    const parsed = parseAgentMarkdown(content);
+    if (!parsed) return { body: content.trim() };
+    return { body: parsed.body, ...(parsed.model ? { model: parsed.model } : {}) };
   } catch {
     return null;
   }
@@ -272,11 +254,13 @@ export async function runClaudeAgentTurn(params: {
   const { db, sessionId, messageId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent, skills, noTools } =
     params;
 
+  const emitter = new TurnEmitter(webContents, sessionId);
+
   // 1. Create the in-process MCP server (approval-gated custom tools).
   //    Skipped when noTools is true (text-only generation turns).
   const mcpServer: McpSdkServerConfigWithInstance | null = noTools
     ? null
-    : await createApprovalMcpServer(webContents, sessionId, projectConfig, projectPath, db, messageId);
+    : await createApprovalMcpServer({ db, sessionId, messageId, projectPath, projectConfig, emitter });
 
   // 2. Resolve model — agent file can override the project model
   let effectiveModel = resolveModel(projectConfig.model);
@@ -424,10 +408,7 @@ export async function runClaudeAgentTurn(params: {
             const text = delta["text"];
             if (typeof text === "string" && text.length > 0) {
               fullText += text;
-              webContents.send(CH.SESSION_DELTA, {
-                session_id: sessionId,
-                text_delta: text,
-              });
+              emitter.delta(text);
             }
           }
         } else if (event["type"] === "message_start") {
@@ -439,14 +420,11 @@ export async function runClaudeAgentTurn(params: {
         } else if (event["type"] === "message_delta") {
           const deltaUsage = (event["usage"]) as { output_tokens?: number } | undefined;
           turnOutputTokens = deltaUsage?.["output_tokens"] ?? 0;
-          webContents.send(CH.SESSION_USAGE, {
-            session_id: sessionId,
-            usage: {
-              input_tokens: turnInputTokens,
-              output_tokens: turnOutputTokens,
-              cache_read_input_tokens: turnCacheReadTokens,
-              cache_creation_input_tokens: turnCacheCreationTokens,
-            },
+          emitter.usage({
+            input_tokens: turnInputTokens,
+            output_tokens: turnOutputTokens,
+            cache_read_input_tokens: turnCacheReadTokens,
+            cache_creation_input_tokens: turnCacheCreationTokens,
           });
         }
       } else if (msg.type === "assistant") {
@@ -481,12 +459,7 @@ export async function runClaudeAgentTurn(params: {
             if (!isMcp) {
               const toolCallId = crypto.randomUUID();
               if (b.id) toolUseIdToDbId.set(b.id, toolCallId);
-              webContents.send(CH.SESSION_TOOL_CALL, {
-                session_id: sessionId,
-                tool_name: displayName,
-                tool_call_id: toolCallId,
-                input: b.input ?? {},
-              });
+              emitter.toolCall(toolCallId, displayName, b.input ?? {});
               saveToolCall(db, {
                 id: toolCallId,
                 messageId,
@@ -506,11 +479,7 @@ export async function runClaudeAgentTurn(params: {
           if (b.type === "tool_result" && b.tool_use_id) {
             const toolName = toolUseIdToName.get(b.tool_use_id) ?? "unknown";
             const output = extractToolResultText(b.content);
-            webContents.send(CH.SESSION_TOOL_RESULT, {
-              session_id: sessionId,
-              tool_name: toolName,
-              output,
-            });
+            emitter.toolResult(toolName, output);
 
             // Persist tool call completion to DB
             const dbId = toolUseIdToDbId.get(b.tool_use_id);
@@ -531,18 +500,12 @@ export async function runClaudeAgentTurn(params: {
                   || (afterBuf !== null && isBinaryBuffer(afterBuf));
 
                 if (isBinary) {
-                  webContents.send(CH.SESSION_FILE_CHANGE, {
-                    session_id: sessionId,
-                    file_change: { path: pending.filePath, relativePath: relPath, diff: "", operation: "write" as const, isBinary: true },
-                  });
+                  emitter.fileChange({ path: pending.filePath, relativePath: relPath, diff: "", operation: "write", isBinary: true });
                 } else {
                   const before = pending.before ? pending.before.toString("utf8") : "";
                   const after = afterBuf ? afterBuf.toString("utf8") : "";
                   const diff = createPatch(relPath, before, after, "", "");
-                  webContents.send(CH.SESSION_FILE_CHANGE, {
-                    session_id: sessionId,
-                    file_change: { path: pending.filePath, relativePath: relPath, diff, operation: "write" as const },
-                  });
+                  emitter.fileChange({ path: pending.filePath, relativePath: relPath, diff, operation: "write" });
                 }
               }
             }
@@ -554,15 +517,11 @@ export async function runClaudeAgentTurn(params: {
         const sysMsg = msg as { type: "system"; subtype: string; [key: string]: unknown };
         if (sysMsg.subtype === "compact_boundary") {
           const meta = sysMsg["compact_metadata"] as { trigger: "auto" | "manual"; pre_tokens: number } | undefined;
-          webContents.send(CH.SESSION_COMPACTION, {
-            session_id: sessionId,
-            compaction: {
-              id: (sysMsg["uuid"] as string | undefined) ?? `${sessionId}-${Date.now()}`,
-              session_id: sessionId,
-              trigger: meta?.trigger ?? "auto",
-              pre_tokens: meta?.pre_tokens ?? 0,
-              timestamp: new Date().toISOString(),
-            },
+          emitter.compaction({
+            id: (sysMsg["uuid"] as string | undefined) ?? `${sessionId}-${Date.now()}`,
+            trigger: meta?.trigger ?? "auto",
+            pre_tokens: meta?.pre_tokens ?? 0,
+            timestamp: new Date().toISOString(),
           });
         }
       }
