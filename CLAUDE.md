@@ -258,7 +258,7 @@ The info (i) tooltip describing skill discovery paths lives on the right-panel h
 
 ### Skill discovery implementation
 
-`scanSkillsDir()` in `electron/ipc/agent-handlers.ts` reads skill descriptions from `SKILL.md` frontmatter first (falls back to `README.md`). `scanPluginSkills()` reads `~/.claude/plugins/installed_plugins.json`, picks the most-recently-updated install per plugin, and walks `<installPath>/skills/*/SKILL.md`. `scanCopilotPluginSkills()` walks `~/.copilot/installed-plugins/<scope>/<plugin>/skills/*/SKILL.md` directly (no manifest file).
+`scanSkillsDir()` in `electron/skills-discovery.ts` reads skill descriptions from `SKILL.md` frontmatter first (falls back to `README.md`). `scanPluginSkills()` reads `~/.claude/plugins/installed_plugins.json`, picks the most-recently-updated install per plugin, and walks `<installPath>/skills/*/SKILL.md`. `scanCopilotPluginSkills()` walks `~/.copilot/installed-plugins/<scope>/<plugin>/skills/*/SKILL.md` directly (no manifest file).
 
 `LIST_SKILLS` accepts `{ projectPath, provider }` (or a bare `projectPath` string for back-compat — treated as Claude). The handler branches on `provider` to choose between the Claude and Copilot global/plugin scanners. The renderer (`SkillsPanel`) passes `useActiveSessionProvider()` so the listing always matches the active session's provider lock.
 
@@ -266,7 +266,7 @@ The info (i) tooltip describing skill discovery paths lives on the right-panel h
 
 ### Slash command palette
 
-Typing `/` in the message input opens a floating popover listing skills and built-in actions. Selecting a skill adds a one-shot badge (applied to that message only, not persisted to the session). Built-in actions: `/new`, `/clear`, `/help`, `/agent`. See `src/components/session/SlashCommandPopover.tsx` and `InputBarInner` in `src/components/session/TimelinePanel.tsx`.
+Typing `/` in the message input opens a floating popover listing skills and built-in actions. Selecting a skill adds a one-shot badge (applied to that message only, not persisted to the session). Built-in actions: `/new`, `/clear`, `/help`, `/agent`. See `src/components/session/SlashCommandPopover.tsx` and `InputBarInner` in `src/components/session/InputBar.tsx`.
 
 ### SkillEditorModal / AgentEditorModal — readOnly prop
 

@@ -13,6 +13,7 @@ import { registerProjectHandlers } from "./ipc/project-handlers";
 import { registerSessionHandlers } from "./ipc/session-handlers";
 import { registerFsHandlers } from "./ipc/fs-handlers";
 import { registerAgentHandlers } from "./ipc/agent-handlers";
+import { registerLibraryHandlers } from "./ipc/library-handlers";
 import { registerGitHubHandlers } from "./ipc/github-handlers";
 import { registerMcpHandlers } from "./ipc/mcp-handlers";
 
@@ -68,6 +69,7 @@ function registerAllHandlers(): void {
   registerSessionHandlers(db, activeTurns, () => mainWin);
   registerFsHandlers();
   registerAgentHandlers(db, activeTurns, () => mainWin);
+  registerLibraryHandlers();
   registerGitHubHandlers();
   registerMcpHandlers();
 }
