@@ -15,8 +15,13 @@ function makeConfig(approvalMode: "all" | "none"): ProjectConfig {
   } as unknown as ProjectConfig;
 }
 
+// Unique per-test session id keeps the module-level session allowlist in
+// approval.ts from leaking between tests.
+let sessionSeq = 0;
+
 function makeCtx(approvalMode: "all" | "none") {
   const send = vi.fn();
+  const sessionId = `s-gate-${++sessionSeq}`;
   const statusUpdates: Array<{ status: string; result: unknown }> = [];
   const db = {
     prepare: vi.fn().mockImplementation((sql: string) => ({
@@ -32,10 +37,10 @@ function makeCtx(approvalMode: "all" | "none") {
   };
   const ctx = {
     db: db as never,
-    sessionId: `s-${crypto.randomUUID()}`,
+    sessionId,
     messageId: "m-1",
     projectConfig: makeConfig(approvalMode),
-    emitter: new TurnEmitter({ send } as never, "s-1"),
+    emitter: new TurnEmitter({ send } as never, sessionId),
   };
   return { ctx, send, statusUpdates };
 }
