@@ -64,12 +64,19 @@ export function registerLibraryHandlers(): void {
         projectPath: string;
         scope: "global" | "project";
         content: string;
+        /** Determines the global skills dir — Copilot scans ~/.agents/skills,
+         *  everything else uses ~/.claude/skills (must match listSkills()). */
+        provider?: string;
       }
     ) => {
+      const globalSkillsDir =
+        args.provider === "copilot"
+          ? path.join(os.homedir(), ".agents", "skills")
+          : path.join(os.homedir(), ".claude", "skills");
       const skillPath =
         args.scope === "project"
           ? path.join(args.projectPath, ".agents", "skills", args.name)
-          : path.join(os.homedir(), ".claude", "skills", args.name);
+          : path.join(globalSkillsDir, args.name);
       fs.mkdirSync(skillPath, { recursive: true });
       fs.writeFileSync(path.join(skillPath, "SKILL.md"), args.content, "utf8");
       return { skillPath };

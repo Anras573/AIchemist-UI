@@ -1,8 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { SkillEditorModal } from "@/components/session/SkillEditorModal";
+import { useSessionStore } from "@/lib/store/useSessionStore";
+import { useProjectStore } from "@/lib/store/useProjectStore";
 import type { SkillInfo } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -103,6 +105,60 @@ describe("SkillEditorModal — new skill", () => {
       expect(window.electronAPI.createSkill).toHaveBeenCalledWith(
         expect.objectContaining({ scope: "global" })
       );
+    });
+  });
+
+  describe("provider pass-through", () => {
+    beforeEach(() => {
+      useSessionStore.setState({ sessions: {}, activeSessionId: null });
+      useProjectStore.setState({ projects: [], activeProjectId: null });
+    });
+
+    it("passes the active session's provider so global skills land in the right dir", async () => {
+      useSessionStore.setState({
+        activeSessionId: "sess-cop",
+        sessions: {
+          "sess-cop": {
+            id: "sess-cop",
+            project_id: "proj-1",
+            title: "copilot session",
+            status: "idle",
+            created_at: "2024-01-01T00:00:00Z",
+            messages: [],
+            provider: "copilot",
+            model: null,
+            branch: null,
+            workspace_path: null,
+            agent: null,
+            skills: null,
+          },
+        },
+      });
+      vi.mocked(window.electronAPI.createSkill).mockResolvedValue({ skillPath: "" });
+
+      renderModal({ skill: null });
+      await userEvent.type(screen.getByPlaceholderText("my-skill"), "copilot-skill");
+      await userEvent.click(screen.getByRole("button", { name: /create/i }));
+
+      await waitFor(() => {
+        expect(window.electronAPI.createSkill).toHaveBeenCalledWith(
+          expect.objectContaining({ provider: "copilot" })
+        );
+      });
+    });
+
+    it("omits the provider when no session or project is active", async () => {
+      vi.mocked(window.electronAPI.createSkill).mockResolvedValue({ skillPath: "" });
+
+      renderModal({ skill: null });
+      await userEvent.type(screen.getByPlaceholderText("my-skill"), "plain-skill");
+      await userEvent.click(screen.getByRole("button", { name: /create/i }));
+
+      await waitFor(() => {
+        expect(window.electronAPI.createSkill).toHaveBeenCalledWith(
+          expect.objectContaining({ provider: undefined })
+        );
+      });
     });
   });
 });
