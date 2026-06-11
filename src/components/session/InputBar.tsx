@@ -3,6 +3,7 @@ import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { SkillInfo, SessionUsage } from "@/types";
 import { useIpc } from "@/lib/ipc";
+import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { AgentPickerButton } from "./AgentPickerButton";
 import { ModelPickerButton } from "./ModelPickerButton";
 import {
@@ -113,6 +114,9 @@ function InputBarInner({
   const ipc = useIpc();
   const { sessions, activeSessionId, clearSessionMessages, sessionUsage } = useSessionStore();
   const { projects, activeProjectId } = useProjectStore();
+  // Skill discovery is provider-dependent (global/plugin scan paths differ),
+  // so the slash palette must list the same skills the Skills panel shows.
+  const provider = useActiveSessionProvider();
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
   const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
@@ -142,21 +146,22 @@ function InputBarInner({
     };
   }, [sessionPath]);
 
-  // Reset skills cache and one-shot badges when switching projects
+  // Reset skills cache and one-shot badges when switching projects or when the
+  // active session's provider changes (provider determines the scan paths)
   useEffect(() => {
     setSkills(null);
     setSlashBadges([]);
-  }, [activeProject?.path]);
+  }, [activeProject?.path, provider]);
 
   // Load skills lazily when the user first types "/"
   const ensureSkillsLoaded = useCallback(() => {
     if (skills !== null || loadingSkills || !sessionPath) return;
     setLoadingSkills(true);
-    ipc.listSkills(sessionPath)
+    ipc.listSkills(sessionPath, provider ?? undefined)
       .then(setSkills)
       .catch(() => setSkills([]))
       .finally(() => setLoadingSkills(false));
-  }, [skills, loadingSkills, sessionPath, ipc]);
+  }, [skills, loadingSkills, sessionPath, provider, ipc]);
 
   // Watch textarea value for slash trigger
   const textValue = controller.textInput.value;

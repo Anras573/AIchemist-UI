@@ -477,13 +477,17 @@ export async function runClaudeAgentTurn(params: {
         for (const block of content) {
           const b = block as { type: string; tool_use_id?: string; content?: unknown };
           if (b.type === "tool_result" && b.tool_use_id) {
+            // Only native tools are persisted in toolUseIdToDbId. MCP tools
+            // (mcp__aichemist-tools__*, managed servers) emit and persist
+            // their own results via runGatedTool — emitting here again would
+            // duplicate SESSION_TOOL_RESULT (e.g. doubled terminal output).
+            const dbId = toolUseIdToDbId.get(b.tool_use_id);
+            if (!dbId) continue;
+
             const toolName = toolUseIdToName.get(b.tool_use_id) ?? "unknown";
             const output = extractToolResultText(b.content);
             emitter.toolResult(toolName, output);
-
-            // Persist tool call completion to DB
-            const dbId = toolUseIdToDbId.get(b.tool_use_id);
-            if (dbId) updateToolCallStatus(db, dbId, "complete", output);
+            updateToolCallStatus(db, dbId, "complete", output);
 
             // Emit file change event for native write/edit tools
             const pending = pendingFileChanges.get(b.tool_use_id);

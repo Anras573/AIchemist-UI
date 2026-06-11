@@ -298,6 +298,19 @@ function scanCopilotPluginSkills(): PluginSkill[] {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
+ * Global skills directory for a provider (Copilot scans `~/.agents/skills`,
+ * everything else uses `~/.claude/skills`). Single source of truth shared by
+ * discovery (`listSkills`) and creation (`CREATE_SKILL`) so the two paths
+ * cannot diverge — a skill created for a provider must be found by the same
+ * provider's scan.
+ */
+export function globalSkillsDir(provider?: string): string {
+  return provider === "copilot"
+    ? path.join(os.homedir(), ".agents", "skills")
+    : path.join(os.homedir(), ".claude", "skills");
+}
+
+/**
  * List skills for a project, merging the three source tiers in priority order
  * (project → global → plugin). A higher-priority source suppresses same-named
  * skills from lower tiers. The provider selects the global/plugin scan paths;
@@ -308,10 +321,7 @@ export function listSkills(projectPath: string, provider?: string): SkillInfo[] 
   const projectSkills = scanSkillsDir(projectSkillsDir, "project");
 
   const isCopilot = provider === "copilot";
-  const globalSkillsDir = isCopilot
-    ? path.join(os.homedir(), ".agents", "skills")
-    : path.join(os.homedir(), ".claude", "skills");
-  const globalSkills = scanSkillsDir(globalSkillsDir, "global");
+  const globalSkills = scanSkillsDir(globalSkillsDir(provider), "global");
   const pluginSkills = isCopilot ? scanCopilotPluginSkills() : scanPluginSkills();
 
   const projectNames = new Set(projectSkills.map((s) => s.name));

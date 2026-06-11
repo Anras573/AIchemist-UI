@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as CH from "../ipc-channels";
+import { globalSkillsDir } from "../skills-discovery";
 import { handle } from "./handle";
 
 /**
@@ -69,14 +70,10 @@ export function registerLibraryHandlers(): void {
         provider?: string;
       }
     ) => {
-      const globalSkillsDir =
-        args.provider === "copilot"
-          ? path.join(os.homedir(), ".agents", "skills")
-          : path.join(os.homedir(), ".claude", "skills");
       const skillPath =
         args.scope === "project"
           ? path.join(args.projectPath, ".agents", "skills", args.name)
-          : path.join(globalSkillsDir, args.name);
+          : path.join(globalSkillsDir(args.provider), args.name);
       fs.mkdirSync(skillPath, { recursive: true });
       fs.writeFileSync(path.join(skillPath, "SKILL.md"), args.content, "utf8");
       return { skillPath };
