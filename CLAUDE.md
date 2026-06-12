@@ -131,15 +131,15 @@ Each session is locked to a single provider (`"anthropic"`, `"copilot"`, or `"ol
 - **In-session:** `ModelPickerButton` filters its groups to the session's provider.
 - **Runtime:** `AGENT_SEND` resolves `session.provider ?? project.config.provider` before dispatching to the matching runner in `electron/agent/runner.ts`.
 
-### Ollama provider (chat-only)
+### Ollama provider
 
-`electron/agent/ollama.ts` implements a native chat-only provider against a locally running Ollama instance (via the `ollama` npm client).
+`electron/agent/ollama.ts` implements a native provider against a locally running Ollama instance (via the `ollama` npm client).
 
 - **No SDK session state:** every turn replays the full message history from SQLite (`loadHistory`) — there is no resume id to persist.
 - **Turn loop:** streaming `chat()` with an in-process tool-calling loop (`MAX_TOOL_ROUNDS = 8`). Tools are implemented locally (`tool-impls.ts`: write_file, delete_file, execute_bash, web_fetch, plus read/list/ask_user) and approval-gated through the same `requiresApproval()` / `requestApproval()` path as the other providers. Managed MCP servers are reachable through `createManagedMcpBridge()`.
 - **Model resolution:** never hardcode a model name — `resolveModel()` falls back to the first installed model from `listModels()`, and `OLLAMA_NO_MODELS_ERROR` is surfaced when none are installed.
 - **`delegate_task` tool:** lets the model delegate a self-contained sub-task to another installed Ollama model (fresh context, depth-limited; `ask_user` and MCP tools are unavailable in delegated turns).
-- **Chat-only gating:** skills, agents, and slash commands are not supported. Gate on `effectiveProvider` (`session.provider ?? project.config.provider`) on **both** sides of the IPC boundary — the renderer hooks and the `AGENT_SEND` handler (which strips `skills`/`agent` for Ollama).
+- **Skills & agents:** supported since Ollama became a first-class provider (PR #31) — `buildSystemPrompt()` appends the selected agent's file body (`readAgentFileSystemPrompt`) and the active skills context (`buildSkillsContext`) to the base system prompt. `AGENT_SEND` passes `skills`/`agent` through unchanged, and `AgentPickerButton` loads agents for Ollama sessions like the other providers.
 
 ---
 
@@ -501,12 +501,12 @@ Always check the `truncated` flag in any code that consumes `LIST_DIRECTORY` res
 
 ## Code Review Lessons
 
-> Extracted from PR #23 (Add Ollama as a native chat-only provider)
+> Extracted from PR #23 (which introduced Ollama as a chat-only provider; Ollama has since become first-class — PR #31 added skills/agent support, so the chat-only gating described below no longer exists)
 
 - When adding a provider to `ProjectSettingsSheet`, reset `model` to a provider-appropriate default whenever the provider field changes — never preserve the previous provider's model string in the new provider's config.
 - Never hardcode an Ollama model name (e.g. `llama3.2`) — always resolve from `listModels()` at session/config creation time; no Ollama model is guaranteed to be installed.
-- Chat-only providers (Ollama) must gate skills, agents, and slash commands via `effectiveProvider` (`session.provider ?? project.config.provider`), not just `session.provider` — legacy `null`-provider sessions inherit the project provider and must be caught.
-- Apply chat-only gating on both sides of the IPC boundary — the `AGENT_SEND` handler in `electron/ipc/agent-handlers.ts` must strip `skills`/`agent` for Ollama, not just the renderer hooks.
+- When a capability is provider-gated, gate via `effectiveProvider` (`session.provider ?? project.config.provider`), not just `session.provider` — legacy `null`-provider sessions inherit the project provider and must be caught.
+- Apply provider gating on both sides of the IPC boundary — the `AGENT_SEND` handler in `electron/ipc/agent-handlers.ts`, not just the renderer hooks.
 - Use `null` as the "not yet loaded" sentinel for the `skills` array; `[]` means "empty list" and blocks `ensureSkillsLoaded` from re-fetching after switching back to a supported provider.
 - `defaultProjectConfig` and `ProjectConfigSchema.model` must stay in sync — Zod defaults are provider-agnostic, so apply provider-aware defaults post-parse in `parseProjectConfig`.
 - When wiring a new provider into global settings (`AICHEMIST_DEFAULT_PROVIDER`), also wire it through to `defaultProjectConfig` and `addProject` in the same commit.
