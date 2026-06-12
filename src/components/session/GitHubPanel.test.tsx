@@ -78,6 +78,29 @@ describe("GitHubPanel", () => {
     expect(window.electronAPI.githubListIssues).not.toHaveBeenCalled();
   });
 
+  it("shows the panel for OpenAI-compatible sessions", async () => {
+    useProjectStore.getState().addProject(makeProject({
+      id: "proj-oai",
+      config: {
+        provider: "openai-compatible",
+        model: "lmstudio/qwen2.5-coder",
+        approval_mode: "custom",
+        approval_rules: [],
+        custom_tools: [],
+        allowed_tools: [],
+        create_worktree_per_session: false,
+      },
+    }));
+    useProjectStore.getState().setActiveProject("proj-oai");
+    window.electronAPI.githubListPrs = vi.fn().mockResolvedValue({ prs: [] });
+    window.electronAPI.githubListIssues = vi.fn().mockResolvedValue({ issues: [] });
+
+    renderWithProviders(<GitHubPanel />);
+
+    expect(await screen.findByText("No open pull requests")).toBeInTheDocument();
+    expect(screen.queryByText(/not available for/i)).not.toBeInTheDocument();
+  });
+
   it("renders empty states and refreshes data", async () => {
     useProjectStore.getState().addProject(makeProject());
     useProjectStore.getState().setActiveProject("proj-1");

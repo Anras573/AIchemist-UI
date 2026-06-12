@@ -55,8 +55,13 @@ const CI_BADGE_META: Record<
 
 function isGitHubProvider(
   provider: string | null
-): provider is "anthropic" | "copilot" | null {
-  return provider === null || provider === "anthropic" || provider === "copilot";
+): provider is "anthropic" | "copilot" | "openai-compatible" | null {
+  return (
+    provider === null ||
+    provider === "anthropic" ||
+    provider === "copilot" ||
+    provider === "openai-compatible"
+  );
 }
 
 function normalizeCiState(rawState: string | undefined): CiBadgeState {
