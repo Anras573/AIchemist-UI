@@ -5,7 +5,13 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({ ipcMain: { handle: vi.fn() } }));
 
-import { agentFilePathFor, assertSafeName, skillPathFor } from "./library-handlers";
+import {
+  agentFilePathFor,
+  assertDirectChildOfRoots,
+  assertSafeName,
+  libraryRootsFor,
+  skillPathFor,
+} from "./library-handlers";
 
 describe("assertSafeName", () => {
   it.each(["my-skill", "code_reviewer", "skill.v2"])("accepts plain name %s", (name) => {
@@ -67,5 +73,66 @@ describe("skillPathFor", () => {
     expect(skillPathFor({ ...base, scope: "global", provider: "copilot" })).toBe(
       path.join(os.homedir(), ".agents", "skills", "my-skill")
     );
+  });
+});
+
+describe("libraryRootsFor", () => {
+  it("includes the fixed per-user dirs and per-project library dirs", () => {
+    const roots = libraryRootsFor(["/project-a", "/worktrees/feature-x"]);
+    expect(roots.agents).toEqual([
+      path.join(os.homedir(), ".claude", "agents"),
+      path.join(os.homedir(), ".github-copilot", "agents"),
+      path.join("/project-a", ".agents", "copilot-agents"),
+      path.join("/worktrees/feature-x", ".agents", "copilot-agents"),
+    ]);
+    expect(roots.skills).toEqual([
+      path.join(os.homedir(), ".claude", "skills"),
+      path.join(os.homedir(), ".agents", "skills"),
+      path.join("/project-a", ".agents", "skills"),
+      path.join("/worktrees/feature-x", ".agents", "skills"),
+    ]);
+  });
+});
+
+describe("assertDirectChildOfRoots", () => {
+  const roots = [path.join("/home/u", ".claude", "agents"), path.join("/project", ".agents", "skills")];
+
+  it("accepts a direct child of a root and returns the resolved path", () => {
+    expect(assertDirectChildOfRoots("/home/u/.claude/agents/reviewer.md", roots, "agent file")).toBe(
+      path.resolve("/home/u/.claude/agents/reviewer.md")
+    );
+    expect(assertDirectChildOfRoots("/project/.agents/skills/my-skill", roots, "skill directory")).toBe(
+      path.resolve("/project/.agents/skills/my-skill")
+    );
+  });
+
+  it("normalizes .. segments before checking containment", () => {
+    expect(() =>
+      assertDirectChildOfRoots("/home/u/.claude/agents/../../.ssh/authorized_keys", roots, "agent file")
+    ).toThrow(/outside the library directories/i);
+  });
+
+  it("rejects paths outside every root", () => {
+    expect(() => assertDirectChildOfRoots("/etc/passwd", roots, "agent file")).toThrow(
+      /outside the library directories/i
+    );
+    expect(() => assertDirectChildOfRoots("/project/src/index.ts", roots, "skill directory")).toThrow(
+      /outside the library directories/i
+    );
+  });
+
+  it("rejects the root itself and nested grandchildren", () => {
+    expect(() => assertDirectChildOfRoots("/home/u/.claude/agents", roots, "agent file")).toThrow(
+      /outside the library directories/i
+    );
+    expect(() =>
+      assertDirectChildOfRoots("/project/.agents/skills/my-skill/nested", roots, "skill directory")
+    ).toThrow(/outside the library directories/i);
+  });
+
+  it("still accepts a direct child reached through a redundant traversal", () => {
+    expect(
+      assertDirectChildOfRoots("/project/.agents/skills/../skills/my-skill", roots, "skill directory")
+    ).toBe(path.resolve("/project/.agents/skills/my-skill"));
   });
 });

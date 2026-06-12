@@ -69,7 +69,7 @@ function registerAllHandlers(): void {
   registerSessionHandlers(db, activeTurns, () => mainWin);
   registerFsHandlers();
   registerAgentHandlers(db, activeTurns, () => mainWin);
-  registerLibraryHandlers();
+  registerLibraryHandlers(db);
   registerGitHubHandlers();
   registerMcpHandlers();
 }
