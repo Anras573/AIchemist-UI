@@ -146,12 +146,13 @@ function InputBarInner({
     };
   }, [sessionPath]);
 
-  // Reset skills cache and one-shot badges when switching projects or when the
-  // active session's provider changes (provider determines the scan paths)
+  // Reset the skill cache and one-shot badges when the effective skill scope
+  // changes: the session path (sessions can have per-worktree workspace_path
+  // within one project) or the provider (which determines the scan paths).
   useEffect(() => {
     setSkills(null);
     setSlashBadges([]);
-  }, [activeProject?.path, provider]);
+  }, [sessionPath, provider]);
 
   // Load skills lazily when the user first types "/"
   const ensureSkillsLoaded = useCallback(() => {
