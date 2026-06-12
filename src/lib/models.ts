@@ -27,6 +27,10 @@ export function getModelLabel(provider: string, modelId: string): string {
   );
   if (known) return known.label;
 
+  // OpenAI-compatible model ids are composite ("<endpoint>/<modelId>") — show
+  // them verbatim so the endpoint stays visible and the id isn't mangled.
+  if (provider === "openai-compatible") return modelId;
+
   // For dynamic Copilot models or other unknown IDs, produce a tidy label
   return modelId
     .replace(/-(\d)/g, " $1")   // dash before number → space (gpt-4o → gpt 4o)
@@ -36,10 +40,7 @@ export function getModelLabel(provider: string, modelId: string): string {
 }
 
 /** Logo provider string for use with ModelSelectorLogo. */
-export function getLogoProvider(provider: string): string {
-  if (provider === "copilot") return "github-copilot";
-  return provider; // "anthropic" passes through as-is
-}
+export { getProviderLogo as getLogoProvider } from "@/lib/providers";
 
 /** Known context window sizes (in tokens) by model ID substring or exact match. */
 const MODEL_CONTEXT_WINDOWS: Array<[string, number]> = [

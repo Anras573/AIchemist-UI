@@ -27,6 +27,7 @@ import { cancelSessionQuestions } from "../agent/question";
 import { cleanupCopilotSession } from "../agent/copilot";
 import { getProvider } from "../agent/runner";
 import { OLLAMA_NO_MODELS_ERROR } from "../agent/ollama";
+import { OPENAI_COMPAT_NO_MODELS_ERROR } from "../agent/openai-compat";
 import { cleanupSessionQueueState } from "./agent-handlers";
 import type { Provider } from "../../src/types/index";
 import { handle } from "./handle";
@@ -44,27 +45,32 @@ export function registerSessionHandlers(
     const project = listProjects(db).find((p) => p.id === projectId);
     const provider = providerOverride ?? project?.config.provider ?? null;
 
+    // Providers without a static default model — resolve the first available
+    // model at session creation so the session never starts model-less.
+    const dynamicModelErrors: Partial<Record<string, string>> = {
+      ollama: OLLAMA_NO_MODELS_ERROR,
+      "openai-compatible": OPENAI_COMPAT_NO_MODELS_ERROR,
+    };
+    const resolveDynamicModel = async (p: string): Promise<string> => {
+      const models = await getProvider(p).listModels?.();
+      const first = models?.[0]?.id ?? null;
+      if (!first) throw new Error(dynamicModelErrors[p] ?? `No models available for provider "${p}"`);
+      return first;
+    };
+
     let model: string | null;
     if (providerOverride && providerOverride !== project?.config.provider) {
       if (provider === "anthropic") {
         model = "claude-sonnet-4-6";
-      } else if (provider === "ollama") {
-        const models = await getProvider("ollama").listModels?.();
-        model = models?.[0]?.id ?? null;
-        if (!model) {
-          throw new Error(OLLAMA_NO_MODELS_ERROR);
-        }
+      } else if (provider && provider in dynamicModelErrors) {
+        model = await resolveDynamicModel(provider);
       } else {
         model = null;
       }
     } else {
       model = project?.config.model ?? null;
-      if (provider === "ollama" && !model?.trim()) {
-        const models = await getProvider("ollama").listModels?.();
-        model = models?.[0]?.id ?? null;
-        if (!model) {
-          throw new Error(OLLAMA_NO_MODELS_ERROR);
-        }
+      if (provider && provider in dynamicModelErrors && !model?.trim()) {
+        model = await resolveDynamicModel(provider);
       }
     }
 

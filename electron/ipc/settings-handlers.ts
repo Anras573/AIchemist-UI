@@ -6,6 +6,13 @@ import { getApiKey, getAnthropicConfig } from "../config";
 import { probeAll } from "../agent/provider-probe";
 import { parseDisabledProviders } from "../providers";
 import { getProjectConfig, listProjects } from "../projects";
+import {
+  deleteOpenAiEndpoint,
+  readOpenAiEndpoints,
+  upsertOpenAiEndpoint,
+} from "../openai-endpoints";
+import type { OpenAiEndpointEntry } from "../openai-endpoints";
+import { _resetOpenAiCompatProbeCache } from "../agent/openai-compat";
 import type { ProjectConfig } from "../../src/types/index";
 import { handle } from "./handle";
 
@@ -30,5 +37,17 @@ export function registerSettingsHandlers(db: Database): void {
     }
     const disabled = parseDisabledProviders(process.env.AICHEMIST_DISABLED_PROVIDERS);
     return probeAll(project, { force: args?.force, disabled });
+  });
+
+  handle(CH.OPENAI_ENDPOINTS_READ, () => readOpenAiEndpoints());
+  handle(CH.OPENAI_ENDPOINT_UPSERT, (_event, name: string, entry: OpenAiEndpointEntry) => {
+    upsertOpenAiEndpoint(name, entry);
+    _resetOpenAiCompatProbeCache();
+    return readOpenAiEndpoints();
+  });
+  handle(CH.OPENAI_ENDPOINT_DELETE, (_event, name: string) => {
+    deleteOpenAiEndpoint(name);
+    _resetOpenAiCompatProbeCache();
+    return readOpenAiEndpoints();
   });
 }

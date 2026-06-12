@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { PROVIDERS, PROVIDER_SHORT_LABELS, getProviderLogo, isProvider } from "@/lib/providers";
 import type { Provider, ProviderProbes } from "@/types";
 
 interface NewSessionWithIssueDialogProps {
@@ -20,22 +21,12 @@ interface NewSessionWithIssueDialogProps {
   onCreate: (providerOverride: Provider, issueNumber?: number) => void;
 }
 
-const PROVIDERS: Provider[] = ["anthropic", "copilot", "ollama"];
-
 function providerLabel(p: Provider): string {
-  switch (p) {
-    case "anthropic": return "Claude";
-    case "copilot": return "Copilot";
-    case "ollama": return "Ollama";
-  }
+  return PROVIDER_SHORT_LABELS[p];
 }
 
 function providerIcon(p: Provider): React.ReactNode {
-  switch (p) {
-    case "anthropic": return <ModelSelectorLogo provider="anthropic" className="size-3.5" />;
-    case "copilot": return <ModelSelectorLogo provider="github-copilot" className="size-3.5" />;
-    case "ollama": return <ModelSelectorLogo provider="ollama" className="size-3.5" />;
-  }
+  return <ModelSelectorLogo provider={getProviderLogo(p)} className="size-3.5" />;
 }
 
 export function NewSessionWithIssueDialog({
@@ -56,13 +47,10 @@ export function NewSessionWithIssueDialog({
     return probes[p]?.ok ? undefined : probes[p]?.reason;
   };
 
-  const preferred =
-    defaultProvider === "copilot" ? "copilot"
-    : defaultProvider === "ollama" ? "ollama"
-    : "anthropic";
+  const preferred: Provider = isProvider(defaultProvider) ? defaultProvider : "anthropic";
 
-  const initial: Provider = isAvailable(preferred as Provider)
-    ? (preferred as Provider)
+  const initial: Provider = isAvailable(preferred)
+    ? preferred
     : PROVIDERS.find(isAvailable) ?? "anthropic";
 
   const [selected, setSelected] = useState<Provider>(initial);

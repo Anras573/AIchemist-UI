@@ -250,6 +250,7 @@ export function registerAgentHandlers(
 
   handle(CH.GET_COPILOT_MODELS, () => getProvider("copilot").listModels?.());
   handle(CH.GET_OLLAMA_MODELS, () => getProvider("ollama").listModels?.());
+  handle(CH.GET_OPENAI_COMPAT_MODELS, () => getProvider("openai-compatible").listModels?.());
   handle(CH.GET_CLAUDE_AGENTS, async (_event, projectPath: string) => {
     return getProvider("anthropic").listAgents?.(projectPath);
   });

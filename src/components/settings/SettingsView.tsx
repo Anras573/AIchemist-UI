@@ -186,6 +186,151 @@ function ProvidersSection({
   );
 }
 
+// ── OpenAI-compatible endpoints manager ───────────────────────────────────────
+type EndpointDraft = { name: string; baseURL: string; apiKey: string };
+
+function OpenAiEndpointsSection() {
+  const ipc = useIpc();
+  const [endpoints, setEndpoints] = useState<Record<string, { baseURL: string; apiKey?: string }>>({});
+  const [draft, setDraft] = useState<EndpointDraft | null>(null);
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    ipc.readOpenAiEndpoints().then(setEndpoints).catch(console.error);
+  }, []);
+
+  const startAdd = () => {
+    setEditingName(null);
+    setDraft({ name: "", baseURL: "", apiKey: "" });
+    setError(null);
+  };
+  const startEdit = (name: string) => {
+    const entry = endpoints[name];
+    setEditingName(name);
+    setDraft({ name, baseURL: entry?.baseURL ?? "", apiKey: entry?.apiKey ?? "" });
+    setError(null);
+  };
+  const cancel = () => {
+    setDraft(null);
+    setEditingName(null);
+    setError(null);
+  };
+
+  const save = async () => {
+    if (!draft) return;
+    const name = draft.name.trim();
+    try {
+      // Preserve fields the form doesn't edit (headers, queryParams, …).
+      const existing = editingName ? endpoints[editingName] : undefined;
+      const next = await ipc.upsertOpenAiEndpoint(name, {
+        ...existing,
+        baseURL: draft.baseURL.trim(),
+        ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : { apiKey: undefined }),
+      });
+      setEndpoints(next);
+      cancel();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const remove = async (name: string) => {
+    try {
+      setEndpoints(await ipc.deleteOpenAiEndpoint(name));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const names = Object.keys(endpoints);
+
+  return (
+    <div className="space-y-3 pt-4 border-t border-border">
+      <div>
+        <h2 className="text-sm font-medium leading-none">OpenAI-compatible endpoints</h2>
+        <p className="text-sm text-muted-foreground mt-1.5">
+          Connect any server that speaks the OpenAI API (LM Studio, vLLM, llama.cpp,
+          Together, …). Models from every endpoint appear in the model picker of
+          OpenAI-compatible sessions as <code className="font-mono text-xs">endpoint/model</code>.
+        </p>
+      </div>
+
+      {names.length === 0 && !draft && (
+        <p className="text-xs text-muted-foreground">No endpoints configured yet.</p>
+      )}
+
+      {names.map((name) => (
+        <div key={name} className="flex items-center gap-3 rounded-lg border border-border p-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">{name}</p>
+            <p className="text-xs text-muted-foreground font-mono truncate">
+              {endpoints[name].baseURL}
+              {endpoints[name].apiKey ? " · key set" : ""}
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => startEdit(name)}>Edit</Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => remove(name)}
+          >
+            Delete
+          </Button>
+        </div>
+      ))}
+
+      {draft ? (
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          <div className="space-y-1.5">
+            <label htmlFor="oai-ep-name" className="text-sm font-medium leading-none">Name</label>
+            <Input
+              id="oai-ep-name"
+              value={draft.name}
+              disabled={editingName !== null}
+              onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))}
+              placeholder="lmstudio"
+              className="font-mono text-sm"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="oai-ep-url" className="text-sm font-medium leading-none">Base URL</label>
+            <Input
+              id="oai-ep-url"
+              value={draft.baseURL}
+              onChange={(e) => setDraft((d) => (d ? { ...d, baseURL: e.target.value } : d))}
+              placeholder="http://localhost:1234/v1"
+              className="font-mono text-sm"
+            />
+          </div>
+          <SecretField
+            id="oai-ep-key"
+            label="API Key (optional)"
+            value={draft.apiKey}
+            placeholder="Leave blank for local servers"
+            onChange={(v) => setDraft((d) => (d ? { ...d, apiKey: v } : d))}
+          />
+          {error && (
+            <p className="flex items-start gap-1.5 text-xs text-destructive">
+              <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+              <span>{error}</span>
+            </p>
+          )}
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={save} disabled={!draft.name.trim() || !draft.baseURL.trim()}>
+              {editingName ? "Save endpoint" : "Add endpoint"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={cancel}>Cancel</Button>
+          </div>
+        </div>
+      ) : (
+        <Button size="sm" variant="outline" onClick={startAdd}>Add endpoint</Button>
+      )}
+    </div>
+  );
+}
+
 const VALID_APPROVAL_MODES = ["none", "custom", "all"] as const;
 
 function normalizeProvider(v: string | undefined): string {
@@ -448,9 +593,9 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                       onChange={(e) => set("AICHEMIST_DEFAULT_PROVIDER", e.target.value)}
                       className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
-                      <option value="anthropic">Anthropic (Claude)</option>
-                      <option value="copilot">GitHub Copilot</option>
-                      <option value="ollama">Ollama</option>
+                      {PROVIDER_IDS.map((p) => (
+                        <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="space-y-1.5">
@@ -476,12 +621,15 @@ export function SettingsView({ onClose }: SettingsViewProps) {
 
             {/* ── Providers ── */}
             {activeItem.section === "providers" && (
-              <ProvidersSection
-                value={draft.AICHEMIST_DISABLED_PROVIDERS ?? ""}
-                onChange={(v) => set("AICHEMIST_DISABLED_PROVIDERS", v)}
-                status={saveStatus["providers"]}
-                onSave={() => saveSection("providers")}
-              />
+              <>
+                <ProvidersSection
+                  value={draft.AICHEMIST_DISABLED_PROVIDERS ?? ""}
+                  onChange={(v) => set("AICHEMIST_DISABLED_PROVIDERS", v)}
+                  status={saveStatus["providers"]}
+                  onSave={() => saveSection("providers")}
+                />
+                <OpenAiEndpointsSection />
+              </>
             )}
 
             {/* ── Appearance ── */}

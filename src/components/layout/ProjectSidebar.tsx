@@ -4,6 +4,7 @@ import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProviderProbes } from "@/lib/hooks/useProviderProbes";
+import { PROVIDERS, PROVIDER_SHORT_LABELS, getProviderLogo } from "@/lib/providers";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { WithTooltip } from "@/components/ui/with-tooltip";
@@ -537,27 +538,16 @@ function LazyProviderMenuItems({
   const { probes } = useProviderProbes(projectId);
   return (
     <>
-      <ProviderMenuItem
-        probe={probes?.anthropic}
-        onSelect={() => onNewSession("anthropic")}
-        isDefault={defaultProvider === "anthropic"}
-        label="New Claude session"
-        icon={<ModelSelectorLogo provider="anthropic" className="size-3.5" />}
-      />
-      <ProviderMenuItem
-        probe={probes?.copilot}
-        onSelect={() => onNewSession("copilot")}
-        isDefault={defaultProvider === "copilot"}
-        label="New Copilot session"
-        icon={<ModelSelectorLogo provider="github-copilot" className="size-3.5" />}
-      />
-      <ProviderMenuItem
-        probe={probes?.ollama}
-        onSelect={() => onNewSession("ollama")}
-        isDefault={defaultProvider === "ollama"}
-        label="New Ollama session"
-        icon={<ModelSelectorLogo provider="ollama" className="size-3.5" />}
-      />
+      {PROVIDERS.map((p) => (
+        <ProviderMenuItem
+          key={p}
+          probe={probes?.[p]}
+          onSelect={() => onNewSession(p)}
+          isDefault={defaultProvider === p}
+          label={`New ${PROVIDER_SHORT_LABELS[p]} session`}
+          icon={<ModelSelectorLogo provider={getProviderLogo(p)} className="size-3.5" />}
+        />
+      ))}
       <DropdownMenuItem onClick={onIssueDialog}>
         <Link className="size-3.5" />
         <span>New session linked to issue…</span>

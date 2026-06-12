@@ -79,8 +79,7 @@ export function AgentPickerButton() {
     : null;
 
   const loadAgents = useCallback(() => {
-    if (!projectPath) return;
-    if (provider !== "anthropic" && provider !== "copilot" && provider !== "ollama") return;
+    if (!projectPath || !provider) return;
     setLoadingAgents(true);
     const fetch =
       provider === "copilot"
@@ -94,8 +93,7 @@ export function AgentPickerButton() {
 
   // Lazy-load agents the first time the dropdown opens
   useEffect(() => {
-    if (!open || !projectPath || agents.length > 0) return;
-    if (provider !== "anthropic" && provider !== "copilot" && provider !== "ollama") return;
+    if (!open || !projectPath || agents.length > 0 || !provider) return;
     loadAgents();
   }, [open, projectPath, provider, agents.length, loadAgents]);
 

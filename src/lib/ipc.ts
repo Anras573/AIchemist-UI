@@ -72,6 +72,7 @@ export const ipc = {
     window.electronAPI.answerQuestion(questionId, answer),
   getCopilotModels: () => window.electronAPI.getCopilotModels(),
   getOllamaModels: () => window.electronAPI.getOllamaModels(),
+  getOpenAiCompatModels: () => window.electronAPI.getOpenAiCompatModels(),
   getClaudeAgents: (projectPath: string) => window.electronAPI.getClaudeAgents(projectPath),
   getCopilotAgents: (projectPath: string) => window.electronAPI.getCopilotAgents(projectPath),
   githubCreatePr: (args: GitHubCreatePrArgs) => window.electronAPI.githubCreatePr(args),
@@ -86,6 +87,10 @@ export const ipc = {
   mcpProbeManaged: () => window.electronAPI.mcpProbeManaged(),
   probeProviders: (args?: { projectId?: string; force?: boolean }) =>
     window.electronAPI.probeProviders(args),
+  readOpenAiEndpoints: () => window.electronAPI.readOpenAiEndpoints(),
+  upsertOpenAiEndpoint: (name: string, entry: Parameters<typeof window.electronAPI.upsertOpenAiEndpoint>[1]) =>
+    window.electronAPI.upsertOpenAiEndpoint(name, entry),
+  deleteOpenAiEndpoint: (name: string) => window.electronAPI.deleteOpenAiEndpoint(name),
   mcpReadConfig: (args: Parameters<typeof window.electronAPI.mcpReadConfig>[0]) =>
     window.electronAPI.mcpReadConfig(args),
   mcpWriteConfig: (args: Parameters<typeof window.electronAPI.mcpWriteConfig>[0]) =>
