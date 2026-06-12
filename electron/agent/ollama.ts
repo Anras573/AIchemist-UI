@@ -176,6 +176,20 @@ function stringifyToolResult(result: unknown): string {
   return safeJson(result);
 }
 
+/**
+ * Ensure the turn's prompt is the final user message. The renderer saves the
+ * user message before AGENT_SEND, so it is usually already last in history —
+ * but it may differ from `prompt` (GitHub-issue context augmentation) or be
+ * missing entirely (skipPersistence turns such as PR draft generation).
+ */
+function withCurrentPrompt(history: OllamaMessage[], prompt: string): OllamaMessage[] {
+  const last = history[history.length - 1];
+  if (last && last.role === "user") {
+    return [...history.slice(0, -1), { role: "user", content: prompt }];
+  }
+  return [...history, { role: "user", content: prompt }];
+}
+
 function makeToolDefinitions(): OllamaToolDefinition[] {
   return [
     {
@@ -591,7 +605,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   const systemPrompt = buildSystemPrompt(params);
   const messages: OllamaMessage[] = [
     { role: "system", content: systemPrompt },
-    ...history,
+    ...(params.prompt?.trim() ? withCurrentPrompt(history, params.prompt) : history),
   ];
 
   let fullText = "";

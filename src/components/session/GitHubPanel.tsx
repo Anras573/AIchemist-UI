@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
-import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 import { Badge } from "@/components/ui/badge";
 import type { GitHubPR, GitHubIssue } from "@/types";
@@ -53,16 +52,6 @@ const CI_BADGE_META: Record<
   },
 };
 
-function isGitHubProvider(
-  provider: string | null
-): provider is "anthropic" | "copilot" | "openai-compatible" | null {
-  return (
-    provider === null ||
-    provider === "anthropic" ||
-    provider === "copilot" ||
-    provider === "openai-compatible"
-  );
-}
 
 function normalizeCiState(rawState: string | undefined): CiBadgeState {
   switch (rawState) {
@@ -113,7 +102,8 @@ function mapGitHubError(rawError: unknown): string {
 /**
  * Lists open GitHub PRs and issues for the project's repository.
  * Fetches on mount and provides a refresh button.
- * Shows "not available" placeholder for non-GitHub sessions.
+ * Available for every provider — GitHub access only needs GITHUB_TOKEN, and
+ * PR draft generation runs as a tool-free text turn on any session.
  */
 export function GitHubPanel({}: GitHubPanelProps) {
   const ipc = useIpc();
@@ -122,8 +112,6 @@ export function GitHubPanel({}: GitHubPanelProps) {
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const projectPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
-  const provider = useActiveSessionProvider();
-  const githubAvailable = isGitHubProvider(provider);
   const [data, setData] = useState<GitHubData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -143,7 +131,7 @@ export function GitHubPanel({}: GitHubPanelProps) {
 
   const fetchCiStatus = useCallback(
     async (pr: GitHubPR, options?: { force?: boolean }) => {
-      if (!projectPath || !githubAvailable) return;
+      if (!projectPath) return;
 
       const key = getCiCacheKey(pr);
       if (!options?.force && (ciByKey[key] || ciLoadingByKey[key])) return;
@@ -200,13 +188,12 @@ export function GitHubPanel({}: GitHubPanelProps) {
         });
       }
     },
-    [projectPath, ciByKey, ciLoadingByKey, githubAvailable, ipc]
+    [projectPath, ciByKey, ciLoadingByKey, ipc]
   );
 
   const fetchData = useCallback(async () => {
     const requestId = ++requestIdRef.current;
     if (!projectPath) return;
-    if (!githubAvailable) return;
 
     setData(null);
     setIsLoading(true);
@@ -242,7 +229,7 @@ export function GitHubPanel({}: GitHubPanelProps) {
       if (requestId !== requestIdRef.current) return;
       setIsLoading(false);
     }
-  }, [projectPath, githubAvailable, ipc, resetCiState]);
+  }, [projectPath, ipc, resetCiState]);
 
   const openGitHubUrl = useCallback(
     async (url: string) => {
@@ -260,14 +247,14 @@ export function GitHubPanel({}: GitHubPanelProps) {
   }, [fetchData]);
 
   useEffect(() => {
-    if (!data?.prs.length || !githubAvailable) return;
+    if (!data?.prs.length) return;
 
     data.prs.forEach((pr) => {
       const key = getCiCacheKey(pr);
       if (ciByKey[key] || ciLoadingByKey[key]) return;
       void fetchCiStatus(pr);
     });
-  }, [ciByKey, ciLoadingByKey, data?.prs, fetchCiStatus, githubAvailable]);
+  }, [ciByKey, ciLoadingByKey, data?.prs, fetchCiStatus]);
 
   useEffect(() => {
     return () => {
@@ -275,15 +262,6 @@ export function GitHubPanel({}: GitHubPanelProps) {
       ciGenerationRef.current += 1;
     };
   }, []);
-
-  if (!githubAvailable) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs px-3 text-center">
-        <GitBranch className="h-8 w-8 opacity-30" />
-        <span>GitHub PRs and issues are not available for {provider} sessions.</span>
-      </div>
-    );
-  }
 
   if (error) {
     return (

@@ -144,6 +144,54 @@ describe("ollama provider", () => {
     });
   });
 
+  it("appends the prompt when it is not already the last user message (skipPersistence turns)", async () => {
+    // PR draft generation sends a prompt that is never saved to the DB —
+    // the turn must still see it as the final user message.
+    const db = makeDb([
+      { id: "m-user", role: "user", content: "hello" },
+      { id: "m-assistant", role: "assistant", content: "hi" },
+    ]);
+    ollamaMocks.chat.mockResolvedValue({ message: { content: "Draft" } });
+
+    await runOllamaAgentTurn({
+      db: db as never,
+      sessionId: "s-pr",
+      messageId: "m-placeholder",
+      prompt: "Draft a PR description",
+      projectConfig: { model: "qwen2.5:latest" } as never,
+      webContents: { send: vi.fn() } as never,
+      noTools: true,
+    } as never);
+
+    const call = ollamaMocks.chat.mock.calls[0][0];
+    expect(call.messages[call.messages.length - 1]).toEqual({
+      role: "user",
+      content: "Draft a PR description",
+    });
+  });
+
+  it("replaces the last user message with the augmented prompt (issue context)", async () => {
+    const db = makeDb([
+      { id: "m-user", role: "user", content: "fix the bug" },
+    ]);
+    ollamaMocks.chat.mockResolvedValue({ message: { content: "ok" } });
+
+    await runOllamaAgentTurn({
+      db: db as never,
+      sessionId: "s-issue",
+      messageId: "m-placeholder",
+      prompt: "GitHub Issue #7: crash on save\n\n---\n\nfix the bug",
+      projectConfig: { model: "qwen2.5:latest" } as never,
+      webContents: { send: vi.fn() } as never,
+    } as never);
+
+    const call = ollamaMocks.chat.mock.calls[0][0];
+    const userMessages = call.messages.filter((m: { role: string }) => m.role === "user");
+    expect(userMessages).toEqual([
+      { role: "user", content: "GitHub Issue #7: crash on save\n\n---\n\nfix the bug" },
+    ]);
+  });
+
   it("falls back to the first installed model when none is configured", async () => {
     const send = vi.fn();
     ollamaMocks.list.mockResolvedValue({
