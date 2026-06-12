@@ -119,30 +119,27 @@ SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `me
 | `copilot_session_agent TEXT` | Agent active when the Copilot SDK session was created — used to detect agent changes across restarts and force a fresh session |
 | `copilot_session_mcp_fp TEXT` | Fingerprint of the AIchemist-managed MCP server map active when the Copilot SDK session was created — change forces a fresh session |
 | `disabled_mcp_servers TEXT` | JSON array of AIchemist-managed MCP server names disabled for this session. Filtered out by `loadManagedMcpServers({ excludeNames })` before injection. |
-| `acp_session_id TEXT` | ACP session id (returned by `session/new`). Persisted for diagnostics; v1 always creates a fresh ACP session per AIchemist session rather than calling `session/load`. |
 
 Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
 
 ### Session provider lock
 
-Each session is locked to a single provider (`"anthropic"`, `"copilot"`, or `"acp"`) at creation. Switching providers mid-session loses context because each provider has its own session id and cannot resume the other's state.
+Each session is locked to a single provider (`"anthropic"`, `"copilot"`, or `"ollama"`) at creation. Switching providers mid-session loses context because each provider has its own session id and cannot resume the other's state.
 
-- **Creation:** `SessionTabBar` shows a split button — the main `+` creates with the project default, and the chevron opens a menu to explicitly pick Claude, Copilot, or ACP. The renderer calls `ipc.createSession(projectId, providerOverride?)`.
-- **Empty state:** When a project has no sessions, `TimelinePanel` renders `EmptyStateNewSession` with three radio buttons (Claude / Copilot / ACP) plus a primary "Create a new session" button.
-- **In-session:** `ModelPickerButton` filters its groups to the session's provider. ACP sessions are not multi-model — the agent is the model.
+- **Creation:** `SessionTabBar` shows a split button — the main `+` creates with the project default, and the chevron opens a menu to explicitly pick a provider. The renderer calls `ipc.createSession(projectId, providerOverride?)`.
+- **Empty state:** When a project has no sessions, `TimelinePanel` renders `EmptyStateNewSession` with per-provider radio buttons plus a primary "Create a new session" button.
+- **In-session:** `ModelPickerButton` filters its groups to the session's provider.
 - **Runtime:** `AGENT_SEND` resolves `session.provider ?? project.config.provider` before dispatching to the matching runner in `electron/agent/runner.ts`.
 
-### ACP (Agent Client Protocol) provider
+### Ollama provider
 
-`electron/agent/acp.ts` implements the third provider. AIchemist-UI is the ACP **client**; the agent runs as a subprocess over stdio configured via `ProjectConfig.acp_agent` (`{ command, args?, env?, cwd?, auth_method_id? }`).
+`electron/agent/ollama.ts` implements a native provider against a locally running Ollama instance (via the `ollama` npm client).
 
-- **Connection lifecycle:** one subprocess per `(projectPath, agentConfigFingerprint)` keyed in an in-process `connections` map. Multiple AIchemist sessions for the same project+agent share the connection; each gets its own ACP session id from `session/new`.
-- **Event mapping:** `handleSessionUpdate` (exported, unit-tested in `acp.test.ts`) translates ACP `session/update` notifications into the same IPC events Claude/Copilot use — `agent_message_chunk` → `SESSION_DELTA`, `tool_call` → `saveToolCall` + `SESSION_TOOL_CALL`, `tool_call_update` → `updateToolCallStatus` + `SESSION_TOOL_RESULT`. ACP `ToolCallStatus` maps via `mapAcpStatus` (`pending → pending_approval`, `in_progress → approved`, `completed → complete`, `failed → error`).
-- **Approval gate:** ACP `session/request_permission` flows through a new option-based path (`requestPermissionChoice` in `electron/agent/approval.ts`); the renderer's `ApprovalGate` renders one button per option when `permissionOptions` is present in the `PendingApproval`. `fs/write_text_file` is treated as a synthetic `fs_write` tool call and gated through `requiresApproval()` like a native Write/Edit.
-- **Filesystem boundary:** `fs/read_text_file` is constrained to the project root via `realpathSync`. Both fs tools reject non-absolute paths.
-- **Auth:** `initialize` response's `authMethods` is captured on the connection. If `session/new` fails with an auth-required error, the runner surfaces it with the agent's method list — set `acp_agent.auth_method_id` manually (no auth flow UI in v1).
-- **Out of scope (v1):** `session/load` resume, terminal capability, image/resource content blocks in prompts, plan UI, traces, skills/MCP injection, agent picker, cancel button.
-- **Right-panel guards:** `SkillsPanel`, `MemoryPanel`, and `McpServersPanel` show "not available for ACP" placeholders when `useActiveSessionProvider() === "acp"`.
+- **No SDK session state:** every turn replays the full message history from SQLite (`loadHistory`) — there is no resume id to persist.
+- **Turn loop:** streaming `chat()` with an in-process tool-calling loop (`MAX_TOOL_ROUNDS = 8`). Tools are implemented locally (`tool-impls.ts`: write_file, delete_file, execute_bash, web_fetch, plus read/list/ask_user) and approval-gated through the same `requiresApproval()` / `requestApproval()` path as the other providers. Managed MCP servers are reachable through `createManagedMcpBridge()`.
+- **Model resolution:** never hardcode a model name — `resolveModel()` falls back to the first installed model from `listModels()`, and `OLLAMA_NO_MODELS_ERROR` is surfaced when none are installed.
+- **`delegate_task` tool:** lets the model delegate a self-contained sub-task to another installed Ollama model (fresh context, depth-limited; `ask_user` and MCP tools are unavailable in delegated turns).
+- **Skills & agents:** supported since Ollama became a first-class provider (PR #31) — `buildSystemPrompt()` appends the selected agent's file body (`readAgentFileSystemPrompt`) and the active skills context (`buildSkillsContext`) to the base system prompt. `AGENT_SEND` passes `skills`/`agent` through unchanged, and `AgentPickerButton` loads agents for Ollama sessions like the other providers.
 
 ---
 
@@ -261,7 +258,7 @@ The info (i) tooltip describing skill discovery paths lives on the right-panel h
 
 ### Skill discovery implementation
 
-`scanSkillsDir()` in `electron/ipc/agent-handlers.ts` reads skill descriptions from `SKILL.md` frontmatter first (falls back to `README.md`). `scanPluginSkills()` reads `~/.claude/plugins/installed_plugins.json`, picks the most-recently-updated install per plugin, and walks `<installPath>/skills/*/SKILL.md`. `scanCopilotPluginSkills()` walks `~/.copilot/installed-plugins/<scope>/<plugin>/skills/*/SKILL.md` directly (no manifest file).
+`scanSkillsDir()` in `electron/skills-discovery.ts` reads skill descriptions from `SKILL.md` frontmatter first (falls back to `README.md`). `scanPluginSkills()` reads `~/.claude/plugins/installed_plugins.json`, picks the most-recently-updated install per plugin, and walks `<installPath>/skills/*/SKILL.md`. `scanCopilotPluginSkills()` walks `~/.copilot/installed-plugins/<scope>/<plugin>/skills/*/SKILL.md` directly (no manifest file).
 
 `LIST_SKILLS` accepts `{ projectPath, provider }` (or a bare `projectPath` string for back-compat — treated as Claude). The handler branches on `provider` to choose between the Claude and Copilot global/plugin scanners. The renderer (`SkillsPanel`) passes `useActiveSessionProvider()` so the listing always matches the active session's provider lock.
 
@@ -269,7 +266,7 @@ The info (i) tooltip describing skill discovery paths lives on the right-panel h
 
 ### Slash command palette
 
-Typing `/` in the message input opens a floating popover listing skills and built-in actions. Selecting a skill adds a one-shot badge (applied to that message only, not persisted to the session). Built-in actions: `/new`, `/clear`, `/help`, `/agent`. See `src/components/session/SlashCommandPopover.tsx` and `InputBarInner` in `src/components/session/TimelinePanel.tsx`.
+Typing `/` in the message input opens a floating popover listing skills and built-in actions. Selecting a skill adds a one-shot badge (applied to that message only, not persisted to the session). Built-in actions: `/new`, `/clear`, `/help`, `/agent`. See `src/components/session/SlashCommandPopover.tsx` and `InputBarInner` in `src/components/session/InputBar.tsx`.
 
 ### SkillEditorModal / AgentEditorModal — readOnly prop
 
@@ -350,21 +347,21 @@ The right-side context panels (Skills, MCP, Memory) filter their content to the 
 
 ## Provider availability probes
 
-`electron/agent/provider-probe.ts` ships lightweight liveness checks per provider so the new-session UI can grey out providers that aren't usable on this machine (missing key, ACP subprocess broken, etc.) before the user picks them.
+`electron/agent/provider-probe.ts` ships lightweight liveness checks per provider so the new-session UI can grey out providers that aren't usable on this machine (missing key, Ollama not running, etc.) before the user picks them.
 
 | Provider | Probe |
 |---|---|
 | **anthropic** | `POST ${ANTHROPIC_BASE_URL ?? "https://api.anthropic.com"}/v1/messages` with `max_tokens: 1` and `anthropic-version: 2023-06-01`, 5 s timeout. This is the endpoint the SDK actually uses, so the probe also works behind enterprise proxies that only forward `/v1/messages`. Auth: tries `x-api-key` (`ANTHROPIC_API_KEY`) first; on 401 falls back to `Authorization: Bearer ${ANTHROPIC_AUTH_TOKEN}` if set. If no env vars are set but `~/.claude/.credentials.json` exists (Pro/Max OAuth login), reports ok. Status mapping: `400/406/429` = ok (auth processed); `401/403` = "invalid key"; `404` = "check ANTHROPIC_BASE_URL"; `5xx` = HTTP status; network error = error message. |
 | **copilot** | `GITHUB_TOKEN` set → wraps `copilotProvider.listModels()` with a 5 s timeout. Empty array or throw = not ok. |
-| **acp** | Per-project. Requires `projectConfig.acp_agent.command`. Reuses `getOrCreateConnection()` (`acpProbe()` in `electron/agent/acp.ts`) with a 3 s timeout — the warm subprocess is shared with the real session. |
+| **ollama** | Wraps `ollamaProvider.listModels()` with a 5 s timeout. Empty array or throw = not ok. |
 
-**Caching** mirrors `mcp-probe.ts`: 30 s in-memory, keyed by `"anthropic" | "copilot" | "acp:<projectPath>:<acp_agent fingerprint>"`. `force: true` bypasses. The hook re-probes on Electron `BrowserWindow.focus`; the cache absorbs spurious focus events.
+**Caching** mirrors `mcp-probe.ts`: 30 s in-memory, keyed by `"anthropic" | "copilot" | "ollama"`. `force: true` bypasses. The hook re-probes on Electron `BrowserWindow.focus`; the cache absorbs spurious focus events.
 
-**Test seams:** `_setFetch`, `_setCopilotListModels`, `_setAcpProbe`, `_resetProviderProbeCache`. Tests in `electron/agent/provider-probe.test.ts`.
+**Test seams:** `_setFetch`, `_setCopilotListModels`, `_setOllamaListModels`, `_resetProviderProbeCache`. Tests in `electron/agent/provider-probe.test.ts`.
 
 **IPC:** `PROBE_PROVIDERS` channel, handler in `electron/ipc/settings-handlers.ts`, exposed as `ipc.probeProviders({ projectId?, force? })`. Renderer hook `useProviderProbes(projectId?)` fetches on mount + on window focus and exposes `{ probes, checking, refresh }`.
 
-**User-disabled providers:** the `AICHEMIST_DISABLED_PROVIDERS` setting (comma-separated list of `anthropic` / `copilot` / `acp`, edited in **Settings → Providers**) lets the user hide providers app-wide. The IPC handler reads it via `parseDisabledProviders(...)` and passes a `Set` to `probeAll(..., { disabled })`, which short-circuits the underlying probe and returns `{ ok: false, reason: "Disabled in settings" }`. All three gating UI surfaces pick it up automatically. Existing sessions keep working — sessions are provider-locked at creation, so disabling a provider only hides it from the new-session pickers.
+**User-disabled providers:** the `AICHEMIST_DISABLED_PROVIDERS` setting (comma-separated list of `anthropic` / `copilot` / `ollama`, edited in **Settings → Providers**) lets the user hide providers app-wide. The IPC handler reads it via `parseDisabledProviders(...)` and passes a `Set` to `probeAll(..., { disabled })`, which short-circuits the underlying probe and returns `{ ok: false, reason: "Disabled in settings" }`. All three gating UI surfaces pick it up automatically. Existing sessions keep working — sessions are provider-locked at creation, so disabling a provider only hides it from the new-session pickers.
 
 **UX surfaces:**
 - `SessionTabBar` chevron menu — disabled items show `(unavailable)` and a `title` tooltip with the reason.
@@ -504,12 +501,12 @@ Always check the `truncated` flag in any code that consumes `LIST_DIRECTORY` res
 
 ## Code Review Lessons
 
-> Extracted from PR #23 (Add Ollama as a native chat-only provider)
+> Extracted from PR #23 (which introduced Ollama as a chat-only provider; Ollama has since become first-class — PR #31 added skills/agent support, so the chat-only gating described below no longer exists)
 
 - When adding a provider to `ProjectSettingsSheet`, reset `model` to a provider-appropriate default whenever the provider field changes — never preserve the previous provider's model string in the new provider's config.
 - Never hardcode an Ollama model name (e.g. `llama3.2`) — always resolve from `listModels()` at session/config creation time; no Ollama model is guaranteed to be installed.
-- Chat-only providers (Ollama) must gate skills, agents, and slash commands via `effectiveProvider` (`session.provider ?? project.config.provider`), not just `session.provider` — legacy `null`-provider sessions inherit the project provider and must be caught.
-- Apply chat-only gating on both sides of the IPC boundary — the `AGENT_SEND` handler in `electron/ipc/agent-handlers.ts` must strip `skills`/`agent` for Ollama, not just the renderer hooks.
+- When a capability is provider-gated, gate via `effectiveProvider` (`session.provider ?? project.config.provider`), not just `session.provider` — legacy `null`-provider sessions inherit the project provider and must be caught.
+- Apply provider gating on both sides of the IPC boundary — the `AGENT_SEND` handler in `electron/ipc/agent-handlers.ts`, not just the renderer hooks.
 - Use `null` as the "not yet loaded" sentinel for the `skills` array; `[]` means "empty list" and blocks `ensureSkillsLoaded` from re-fetching after switching back to a supported provider.
 - `defaultProjectConfig` and `ProjectConfigSchema.model` must stay in sync — Zod defaults are provider-agnostic, so apply provider-aware defaults post-parse in `parseProjectConfig`.
 - When wiring a new provider into global settings (`AICHEMIST_DEFAULT_PROVIDER`), also wire it through to `defaultProjectConfig` and `addProject` in the same commit.

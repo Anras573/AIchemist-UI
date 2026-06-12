@@ -5,17 +5,19 @@ import type {
   CustomAgentConfig,
 } from "@github/copilot-sdk";
 import type { Database } from "better-sqlite3";
-import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { AgentInfo, ProjectConfig } from "../../src/types/index";
 import { getApiKey } from "../config";
-import * as CH from "../ipc-channels";
+import { parseAgentMarkdown } from "./agent-file";
 import { requestApproval, requiresApproval } from "./approval";
 import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
 import { readAgentFileSystemPrompt } from "./claude";
+import { runGatedTool } from "./tool-gate";
+import type { GatedToolContext } from "./tool-gate";
+import { TurnEmitter } from "./turn-emitter";
 import {
   loadManagedMcpServers,
   toCopilotMcpServers,
@@ -100,25 +102,10 @@ type CopilotAgentParsed = Omit<CopilotAgentEntry, "filePath">;
 
 /** Parse a Copilot agent markdown file's YAML frontmatter + body. */
 function parseCopilotAgentFile(content: string): CopilotAgentParsed | null {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/);
-  if (!match) return null;
-
-  const fm = match[1];
-  const body = (match[2] ?? "").trim();
-
-  const nameMatch = fm.match(/^name:\s*(.+)$/m);
-  if (!nameMatch) return null;
-  const name = nameMatch[1].trim().replace(/^['"]|['"]$/g, "");
-
-  const descMatch = fm.match(/^description:\s*(.+)$/m);
-  const description = descMatch
-    ? descMatch[1].trim().replace(/^['"]|['"]$/g, "")
-    : "";
-
+  const parsed = parseAgentMarkdown(content);
   // The body becomes the agent's system prompt — must be non-empty
-  if (!body) return null;
-
-  return { name, description, prompt: body };
+  if (!parsed?.name || !parsed.body) return null;
+  return { name: parsed.name, description: parsed.description, prompt: parsed.body };
 }
 
 /** Scan a directory for `*.md` agent files and return parsed entries. */
@@ -223,48 +210,8 @@ export async function runCopilotAgentTurn(params: {
 
   const client = await getClient();
 
-  // ── Shared helper ───────────────────────────────────────────────────────────
-
-  async function runTool(
-    name: string,
-    args: unknown,
-    category: "filesystem" | "web",
-    impl: () => Promise<string>
-  ): Promise<string> {
-    const toolCallId = crypto.randomUUID();
-    const initialStatus = requiresApproval(sessionId, projectConfig, category, name, args)
-      ? "pending_approval" as const
-      : "approved" as const;
-    webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: name, tool_call_id: toolCallId, input: args });
-    saveToolCall(db, {
-      id: toolCallId,
-      messageId,
-      name,
-      args: args as Record<string, unknown>,
-      status: initialStatus,
-      category,
-    });
-
-    if (initialStatus === "pending_approval") {
-      const approved = await requestApproval(webContents, sessionId, name, args);
-      if (!approved) {
-        const msg = "Tool call denied by user.";
-        updateToolCallStatus(db, toolCallId, "rejected");
-        webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: name, output: msg });
-        return msg;
-      }
-    }
-
-    try {
-      const output = await impl();
-      updateToolCallStatus(db, toolCallId, "complete", output);
-      webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: name, output });
-      return output;
-    } catch (e) {
-      updateToolCallStatus(db, toolCallId, "error", String(e));
-      throw e;
-    }
-  }
+  const emitter = new TurnEmitter(webContents, sessionId);
+  const gateCtx: GatedToolContext = { db, sessionId, messageId, projectConfig, emitter };
 
   // ── Tool definitions ────────────────────────────────────────────────────────
 
@@ -280,11 +227,18 @@ export async function runCopilotAgentTurn(params: {
         },
         required: ["path", "content"],
       },
-      handler: (args) => runTool("write_file", args, "filesystem", async () => {
-      const { result, change } = await implWriteFileWithChange(args, projectPath);
-      if (change) webContents.send(CH.SESSION_FILE_CHANGE, { session_id: sessionId, file_change: change });
-      return result;
-    }),
+      handler: (args) =>
+        runGatedTool(gateCtx, {
+          name: "write_file",
+          args,
+          category: "filesystem",
+          onError: "throw",
+          impl: async () => {
+            const { result, change } = await implWriteFileWithChange(args, projectPath);
+            if (change) emitter.fileChange(change);
+            return result;
+          },
+        }),
     }
   );
 
@@ -297,11 +251,18 @@ export async function runCopilotAgentTurn(params: {
       },
       required: ["path"],
     },
-    handler: (args) => runTool("delete_file", args, "filesystem", async () => {
-      const { result, change } = await implDeleteFileWithChange(args, projectPath);
-      if (change) webContents.send(CH.SESSION_FILE_CHANGE, { session_id: sessionId, file_change: change });
-      return result;
-    }),
+    handler: (args) =>
+      runGatedTool(gateCtx, {
+        name: "delete_file",
+        args,
+        category: "filesystem",
+        onError: "throw",
+        impl: async () => {
+          const { result, change } = await implDeleteFileWithChange(args, projectPath);
+          if (change) emitter.fileChange(change);
+          return result;
+        },
+      }),
   });
 
   const executeBashTool = defineTool<{ command: string; cwd?: string }>(
@@ -316,36 +277,14 @@ export async function runCopilotAgentTurn(params: {
         },
         required: ["command"],
       },
-      handler: async (args) => {
-        const toolCallId = crypto.randomUUID();
-        const needsGate = requiresApproval(sessionId, projectConfig, "shell", "execute_bash", args);
-        webContents.send(CH.SESSION_TOOL_CALL, { session_id: sessionId, tool_name: "execute_bash", tool_call_id: toolCallId, input: args });
-        saveToolCall(db, {
-          id: toolCallId,
-          messageId,
+      handler: (args) =>
+        runGatedTool(gateCtx, {
           name: "execute_bash",
-          args: args as Record<string, unknown>,
-          status: needsGate ? "pending_approval" : "approved",
+          args,
           category: "shell",
-        });
-
-        if (needsGate) {
-          const approved = await requestApproval(webContents, sessionId, "execute_bash", args);
-          if (!approved) {
-            const msg = "Tool call denied by user.";
-            updateToolCallStatus(db, toolCallId, "rejected");
-            webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output: msg });
-            return msg;
-          }
-        } else {
-          updateToolCallStatus(db, toolCallId, "approved");
-        }
-
-        const output = await implExecuteBash({ ...args, projectPath });
-        updateToolCallStatus(db, toolCallId, "complete", output);
-        webContents.send(CH.SESSION_TOOL_RESULT, { session_id: sessionId, tool_name: "execute_bash", output });
-        return output;
-      },
+          onError: "throw",
+          impl: () => implExecuteBash({ ...args, projectPath }),
+        }),
     }
   );
 
@@ -361,7 +300,14 @@ export async function runCopilotAgentTurn(params: {
       },
       required: ["url"],
     },
-    handler: (args) => runTool("web_fetch", args, "web", () => implWebFetch(args)),
+    handler: (args) =>
+      runGatedTool(gateCtx, {
+        name: "web_fetch",
+        args,
+        category: "web",
+        onError: "throw",
+        impl: () => implWebFetch(args),
+      }),
   });
 
   const askUserTool = defineTool<{ question: string; options?: string[]; placeholder?: string }>(
@@ -605,21 +551,15 @@ export async function runCopilotAgentTurn(params: {
       const delta = newText.slice(fullText.length);
       fullText = newText;
       if (delta) {
-        webContents.send(CH.SESSION_DELTA, {
-          session_id: sessionId,
-          text_delta: delta,
-        });
+        emitter.delta(delta);
       }
       if (data.outputTokens != null) {
         turnOutputTokens = data.outputTokens;
-        webContents.send(CH.SESSION_USAGE, {
-          session_id: sessionId,
-          usage: {
-            input_tokens: 0,
-            output_tokens: turnOutputTokens,
-            cache_read_input_tokens: 0,
-            cache_creation_input_tokens: 0,
-          },
+        emitter.usage({
+          input_tokens: 0,
+          output_tokens: turnOutputTokens,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
         });
       }
     });
@@ -633,12 +573,7 @@ export async function runCopilotAgentTurn(params: {
       };
       toolCallIdToName.set(data.toolCallId, data.toolName);
       if (!customToolNames.has(data.toolName)) {
-        webContents.send(CH.SESSION_TOOL_CALL, {
-          session_id: sessionId,
-          tool_name: data.toolName,
-          tool_call_id: data.toolCallId,
-          input: data.arguments ?? {},
-        });
+        emitter.toolCall(data.toolCallId, data.toolName, data.arguments ?? {});
         saveToolCall(db, {
           id: data.toolCallId,
           messageId,
@@ -672,11 +607,7 @@ export async function runCopilotAgentTurn(params: {
           ? (terminalBlock as { type: "terminal"; text: string }).text
           : (data.result?.detailedContent ?? data.result?.content ?? "");
         updateToolCallStatus(db, data.toolCallId, data.success ? "complete" : "error", output);
-        webContents.send(CH.SESSION_TOOL_RESULT, {
-          session_id: sessionId,
-          tool_name: toolName,
-          output,
-        });
+        emitter.toolResult(toolName, output);
       }
     });
 
@@ -688,14 +619,11 @@ export async function runCopilotAgentTurn(params: {
         tokensRemoved?: number;
       };
       if (data.success) {
-        webContents.send(CH.SESSION_COMPACTION, {
-          session_id: sessionId,
-          compaction: {
-            id: `compaction-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            trigger: "auto" as const,
-            pre_tokens: data.preCompactionTokens ?? 0,
-          },
+        emitter.compaction({
+          id: `compaction-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          trigger: "auto",
+          pre_tokens: data.preCompactionTokens ?? 0,
         });
       }
     });
@@ -703,14 +631,11 @@ export async function runCopilotAgentTurn(params: {
     // Reasoning / extended thinking events
     session.on("assistant.reasoning_delta", (event) => {
       const data = event.data as { reasoningId: string; deltaContent: string };
-      webContents.send(CH.SESSION_THINKING_DELTA, {
-        session_id: sessionId,
-        text_delta: data.deltaContent,
-      });
+      emitter.thinkingDelta(data.deltaContent);
     });
 
     session.on("assistant.reasoning", () => {
-      webContents.send(CH.SESSION_THINKING_DONE, { session_id: sessionId });
+      emitter.thinkingDone();
     });
 
     session.on("session.idle", () => resolve());
@@ -723,23 +648,14 @@ export async function runCopilotAgentTurn(params: {
   // ── Send & wait ─────────────────────────────────────────────────────────────
 
   try {
-    webContents.send(CH.SESSION_STATUS, {
-      session_id: sessionId,
-      status: "running",
-    });
+    emitter.status("running");
 
     await session.send({ prompt });
     await done;
 
-    webContents.send(CH.SESSION_STATUS, {
-      session_id: sessionId,
-      status: "complete",
-    });
+    emitter.status("complete");
   } catch (err) {
-    webContents.send(CH.SESSION_STATUS, {
-      session_id: sessionId,
-      status: "error",
-    });
+    emitter.status("error");
     throw err;
   } finally {
     await session.disconnect();

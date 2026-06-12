@@ -89,7 +89,7 @@ export interface ElectronAPI {
   createAgent: (args: { provider: string; name: string; projectPath: string; scope: "global" | "project"; content: string }) => Promise<{ filePath: string }>;
   writeSkillFile: (args: { skillPath: string; content: string }) => Promise<void>;
   deleteSkillDir: (skillPath: string) => Promise<void>;
-  createSkill: (args: { name: string; projectPath: string; scope: "global" | "project"; content: string }) => Promise<{ skillPath: string }>;
+  createSkill: (args: { name: string; projectPath: string; scope: "global" | "project"; content: string; provider?: string }) => Promise<{ skillPath: string }>;
 
   // ── Traces ────────────────────────────────────────────────────────────────
   getTraces: (sessionId?: string) => Promise<import("../src/types").TraceSpan[]>;

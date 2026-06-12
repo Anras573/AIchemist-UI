@@ -16,7 +16,8 @@ import * as os from "os";
 import * as path from "path";
 import { copilotProvider } from "./copilot";
 import { ollamaProvider } from "./ollama";
-import type { ProjectConfig } from "../../src/types/index";
+import { getProvider, getProviderNames } from "./runner";
+import type { ProjectConfig, Provider } from "../../src/types/index";
 import { getApiKey } from "../config";
 
 export interface ProviderProbeResult {
@@ -299,24 +300,52 @@ export async function probeOllama(opts?: { force?: boolean }): Promise<ProviderP
   }
 }
 
+/**
+ * Built-in probe per provider. A provider can instead implement
+ * `AgentProvider.probe()` on its registry entry, which takes precedence —
+ * `probeAll()` iterates the provider registry, so new providers with their
+ * own `probe()` need no changes in this module.
+ */
+const BUILTIN_PROBES: Record<Provider, (opts?: { force?: boolean }) => Promise<ProviderProbeResult>> = {
+  anthropic: probeAnthropic,
+  copilot: probeCopilot,
+  ollama: probeOllama,
+};
+
+function probeOne(name: string, opts?: { force?: boolean }): Promise<ProviderProbeResult> {
+  try {
+    const registered = getProvider(name).probe;
+    if (registered) return registered(opts);
+  } catch {
+    // Provider not in the registry — fall through to the built-in probe.
+  }
+  const builtin = BUILTIN_PROBES[name as Provider];
+  if (builtin) return builtin(opts);
+  // Registered provider with no probe() and no built-in — assume available.
+  return Promise.resolve({ ok: true, durationMs: 0 });
+}
+
 /** Probe all providers in parallel. */
 export async function probeAll(
   _project?: { path: string; config: ProjectConfig },
-  opts?: { force?: boolean; disabled?: ReadonlySet<"anthropic" | "copilot" | "ollama"> },
+  opts?: { force?: boolean; disabled?: ReadonlySet<string> },
 ): Promise<ProviderProbes> {
-  const disabled = opts?.disabled ?? new Set<"anthropic" | "copilot" | "ollama">();
+  const disabled = opts?.disabled ?? new Set<string>();
   const userDisabled = (): ProviderProbeResult => ({
     ok: false,
     reason: "Disabled in settings",
     durationMs: 0,
   });
 
-  const [anthropic, copilot, ollama] = await Promise.all([
-    disabled.has("anthropic") ? Promise.resolve(userDisabled()) : probeAnthropic(opts),
-    disabled.has("copilot") ? Promise.resolve(userDisabled()) : probeCopilot(opts),
-    disabled.has("ollama") ? Promise.resolve(userDisabled()) : probeOllama(opts),
-  ]);
-  return { anthropic, copilot, ollama };
+  // Union of the built-in providers and everything in the runtime registry,
+  // so a provider registered with registerProvider() is probed automatically.
+  const names = [...new Set([...Object.keys(BUILTIN_PROBES), ...getProviderNames()])];
+  const results = await Promise.all(
+    names.map((name) =>
+      disabled.has(name) ? Promise.resolve(userDisabled()) : probeOne(name, opts),
+    ),
+  );
+  return Object.fromEntries(names.map((name, i) => [name, results[i]])) as unknown as ProviderProbes;
 }
 
 // ── Internals ─────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { Streamdown } from "streamdown";
 import { useIpc } from "@/lib/ipc";
+import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -59,6 +60,9 @@ export function SkillEditorModal({
   readOnly = false,
 }: SkillEditorModalProps) {
   const ipc = useIpc();
+  // Global-scope skills go in the provider-specific global dir (Copilot scans
+  // ~/.agents/skills, Claude ~/.claude/skills) so discovery can find them.
+  const provider = useActiveSessionProvider();
   const isNew = skill === null;
 
   const [name, setName] = useState("");
@@ -112,7 +116,7 @@ export function SkillEditorModal({
       }
       setSaving(true);
       try {
-        await ipc.createSkill({ name: trimmed, projectPath, scope, content });
+        await ipc.createSkill({ name: trimmed, projectPath, scope, content, provider: provider ?? undefined });
         onSaved();
         onClose();
       } catch (e) {

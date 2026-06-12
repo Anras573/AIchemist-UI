@@ -4,7 +4,7 @@ import * as CH from "./ipc-channels";
 import { loadEnv, checkApiKeys } from "./config";
 import { openDb } from "./db";
 import { recoverStaleSessionStatuses } from "./sessions";
-import { getProvider } from "./agent/runner";
+import { getProvider, getProviderNames } from "./agent/runner";
 
 import { registerTerminalHandlers } from "./ipc/terminal-handlers";
 import { registerSettingsHandlers } from "./ipc/settings-handlers";
@@ -13,6 +13,7 @@ import { registerProjectHandlers } from "./ipc/project-handlers";
 import { registerSessionHandlers } from "./ipc/session-handlers";
 import { registerFsHandlers } from "./ipc/fs-handlers";
 import { registerAgentHandlers } from "./ipc/agent-handlers";
+import { registerLibraryHandlers } from "./ipc/library-handlers";
 import { registerGitHubHandlers } from "./ipc/github-handlers";
 import { registerMcpHandlers } from "./ipc/mcp-handlers";
 
@@ -68,6 +69,7 @@ function registerAllHandlers(): void {
   registerSessionHandlers(db, activeTurns, () => mainWin);
   registerFsHandlers();
   registerAgentHandlers(db, activeTurns, () => mainWin);
+  registerLibraryHandlers(db);
   registerGitHubHandlers();
   registerMcpHandlers();
 }
@@ -107,12 +109,12 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   cleanupTerminals?.();
 
-  // Gracefully shut down all providers that implement stop()
-  for (const name of ["copilot", "anthropic"]) {
+  // Gracefully shut down all registered providers that implement stop()
+  for (const name of getProviderNames()) {
     try {
       void getProvider(name).stop?.();
     } catch {
-      // Provider may not be registered; ignore
+      // Provider shutdown is best-effort; ignore
     }
   }
 });

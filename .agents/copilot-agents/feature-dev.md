@@ -7,7 +7,7 @@ You are developing features for AIchemist-UI, an Electron + React + TypeScript d
 
 ## Before you write code
 
-1. Identify which provider(s) the change affects: `anthropic`, `copilot`, `acp`, `ollama`.
+1. Identify which provider(s) the change affects: `anthropic`, `copilot`, `ollama`.
 2. Check whether the change touches IPC — if so, all four locations must be updated (see checklist below).
 3. Check whether the change touches the approval/MCP flow — if so, read `electron/agent/approval.ts` and `electron/agent/mcp-bridge.ts` first.
 

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
-import { EmptyStateNewSession } from "@/components/session/TimelinePanel";
+import { EmptyStateNewSession } from "@/components/session/EmptyStateNewSession";
 
 vi.mock("@/components/ai-elements/model-selector", () => ({
   ModelSelectorLogo: () => null,

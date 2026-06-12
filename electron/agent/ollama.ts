@@ -1,18 +1,13 @@
 import type { Database } from "better-sqlite3";
-import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import * as CH from "../ipc-channels";
 import { buildSkillsContext } from "./skills";
 import { readAgentFileSystemPrompt } from "./claude";
-import { requestApproval, requiresApproval } from "./approval";
 import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
-import {
-  loadToolCallsForMessage,
-  saveToolCall,
-  updateToolCallStatus,
-} from "../sessions";
+import { loadToolCallsForMessage } from "../sessions";
+import { runGatedTool } from "./tool-gate";
+import { TurnEmitter } from "./turn-emitter";
 import {
   implDeleteFileWithChange,
   implExecuteBash,
@@ -79,7 +74,7 @@ interface ToolExecutionContext {
   messageId: string;
   projectPath: string;
   projectConfig: AgentProviderParams["projectConfig"];
-  webContents: Electron.WebContents;
+  emitter: TurnEmitter;
   client: OllamaClientLike;
   delegationDepth: number;
 }
@@ -561,11 +556,7 @@ async function runDelegatedTurn(
     delegationDepth: ctx.delegationDepth + 1,
     // Suppress SESSION_DELTA from sub-agents so their streaming text does not
     // interleave with the orchestrator's StreamingBubble in the UI.
-    webContents: {
-      send: (channel: string, ...args: unknown[]) => {
-        if (channel !== CH.SESSION_DELTA) ctx.webContents.send(channel, ...args);
-      },
-    } as unknown as Electron.WebContents,
+    emitter: ctx.emitter.withoutDeltas(),
   };
   // Sub-agents do not get ask_user — questions must be resolved by the orchestrator.
   // delegate_task is kept in the list; the depth guard inside runTool blocks further nesting.
@@ -598,64 +589,14 @@ async function runDelegatedTurn(
   return fullText || "(sub-agent reached tool round limit without producing a final response)";
 }
 
-async function runTool(
+function runTool(
   ctx: ToolExecutionContext,
   name: string,
   args: Record<string, unknown>,
   category: "filesystem" | "shell" | "web" | "custom",
   impl: () => Promise<string>,
 ): Promise<string> {
-  const toolCallId = crypto.randomUUID();
-  const needsGate = category !== "custom" && requiresApproval(ctx.sessionId, ctx.projectConfig, category, name, args);
-  ctx.webContents.send(CH.SESSION_TOOL_CALL, {
-    session_id: ctx.sessionId,
-    tool_name: name,
-    tool_call_id: toolCallId,
-    input: args,
-  });
-  saveToolCall(ctx.db, {
-    id: toolCallId,
-    messageId: ctx.messageId,
-    name,
-    args,
-    status: needsGate ? "pending_approval" : "approved",
-    category,
-  });
-
-  if (needsGate) {
-    const approved = await requestApproval(ctx.webContents, ctx.sessionId, name, args);
-    if (!approved) {
-      const denied = "Tool call denied by user.";
-      updateToolCallStatus(ctx.db, toolCallId, "rejected", denied);
-      ctx.webContents.send(CH.SESSION_TOOL_RESULT, {
-        session_id: ctx.sessionId,
-        tool_name: name,
-        output: denied,
-      });
-      return denied;
-    }
-    updateToolCallStatus(ctx.db, toolCallId, "approved");
-  }
-
-  try {
-    const output = await impl();
-    updateToolCallStatus(ctx.db, toolCallId, "complete", output);
-    ctx.webContents.send(CH.SESSION_TOOL_RESULT, {
-      session_id: ctx.sessionId,
-      tool_name: name,
-      output,
-    });
-    return output;
-  } catch (err) {
-    const output = err instanceof Error ? err.message : String(err);
-    updateToolCallStatus(ctx.db, toolCallId, "error", output);
-    ctx.webContents.send(CH.SESSION_TOOL_RESULT, {
-      session_id: ctx.sessionId,
-      tool_name: name,
-      output,
-    });
-    return output;
-  }
+  return runGatedTool(ctx, { name, args, category, impl });
 }
 
 async function executeTool(
@@ -680,7 +621,7 @@ async function executeTool(
           ctx.projectPath,
         );
         if (change) {
-          ctx.webContents.send(CH.SESSION_FILE_CHANGE, { session_id: ctx.sessionId, file_change: change });
+          ctx.emitter.fileChange(change);
         }
         return result;
       });
@@ -688,7 +629,7 @@ async function executeTool(
       return runTool(ctx, name, args, "filesystem", async () => {
         const { result, change } = await implDeleteFileWithChange({ path: String(args.path ?? "") }, ctx.projectPath);
         if (change) {
-          ctx.webContents.send(CH.SESSION_FILE_CHANGE, { session_id: ctx.sessionId, file_change: change });
+          ctx.emitter.fileChange(change);
         }
         return result;
       });
@@ -708,7 +649,7 @@ async function executeTool(
       }
       return runTool(ctx, name, args, "custom", async () =>
         requestQuestion(
-          ctx.webContents,
+          ctx.emitter.webContents,
           ctx.sessionId,
           String(args.question ?? ""),
           Array.isArray(args.options) ? args.options.filter((option): option is string => typeof option === "string") : undefined,
@@ -767,10 +708,7 @@ async function runChatRound(
       const delta = chunk.message?.content ?? "";
       if (delta) {
         fullText += delta;
-        ctx.webContents.send(CH.SESSION_DELTA, {
-          session_id: ctx.sessionId,
-          text_delta: delta,
-        });
+        ctx.emitter.delta(delta);
       }
       if (chunk.message?.tool_calls?.length) {
         for (const toolCall of chunk.message.tool_calls) {
@@ -783,14 +721,11 @@ async function runChatRound(
       // Emit as soon as token counts appear on any chunk (Ollama includes them on the done chunk,
       // but emit eagerly so the indicator updates the moment the data is available).
       if (chunk.prompt_eval_count != null || chunk.eval_count != null) {
-        ctx.webContents.send(CH.SESSION_USAGE, {
-          session_id: ctx.sessionId,
-          usage: {
-            input_tokens: chunk.prompt_eval_count ?? 0,
-            output_tokens: chunk.eval_count ?? 0,
-            cache_read_input_tokens: 0,
-            cache_creation_input_tokens: 0,
-          },
+        ctx.emitter.usage({
+          input_tokens: chunk.prompt_eval_count ?? 0,
+          output_tokens: chunk.eval_count ?? 0,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
         });
       }
     }
@@ -801,10 +736,7 @@ async function runChatRound(
   const text = message.content ?? "";
   if (text) {
     fullText += text;
-    ctx.webContents.send(CH.SESSION_DELTA, {
-      session_id: ctx.sessionId,
-      text_delta: text,
-    });
+    ctx.emitter.delta(text);
   }
   return { text: fullText, toolCalls: message.tool_calls ?? [] };
 }
@@ -829,7 +761,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
     messageId: params.messageId,
     projectPath: params.projectPath,
     projectConfig: params.projectConfig,
-    webContents: params.webContents,
+    emitter: new TurnEmitter(params.webContents, params.sessionId),
     client,
     delegationDepth: 0,
   };

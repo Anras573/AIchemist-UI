@@ -104,7 +104,7 @@ export const ipc = {
     window.electronAPI.writeSkillFile(args),
   deleteSkillDir: (skillPath: string) =>
     window.electronAPI.deleteSkillDir(skillPath),
-  createSkill: (args: { name: string; projectPath: string; scope: "global" | "project"; content: string }) =>
+  createSkill: (args: { name: string; projectPath: string; scope: "global" | "project"; content: string; provider?: string }) =>
     window.electronAPI.createSkill(args),
 
   // Traces
