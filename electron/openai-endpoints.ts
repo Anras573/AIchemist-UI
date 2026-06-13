@@ -58,16 +58,32 @@ export function isValidEndpointName(name: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name);
 }
 
+/** True for a plain object whose every value is a string (e.g. headers maps). */
+function isStringRecord(value: unknown): value is Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every((v) => typeof v === "string");
+}
+
+/**
+ * Validate the fields we later spread into request options. Unknown keys are
+ * still preserved on round-trip, but a malformed `apiKey`/`headers`/`queryParams`
+ * would crash model listing / client creation, so reject the whole entry — read
+ * drops it, write throws.
+ */
 function isValidEntry(entry: unknown): entry is OpenAiEndpointEntry {
   if (!entry || typeof entry !== "object") return false;
-  const baseURL = (entry as { baseURL?: unknown }).baseURL;
-  if (typeof baseURL !== "string") return false;
+  const e = entry as Record<string, unknown>;
+  if (typeof e.baseURL !== "string") return false;
   try {
-    const url = new URL(baseURL);
-    return url.protocol === "http:" || url.protocol === "https:";
+    const url = new URL(e.baseURL);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
   } catch {
     return false;
   }
+  if (e.apiKey !== undefined && typeof e.apiKey !== "string") return false;
+  if (e.headers !== undefined && !isStringRecord(e.headers)) return false;
+  if (e.queryParams !== undefined && !isStringRecord(e.queryParams)) return false;
+  return true;
 }
 
 // ── Read / write ──────────────────────────────────────────────────────────────
@@ -98,7 +114,7 @@ export function readOpenAiEndpoints(): OpenAiEndpointsMap {
       continue;
     }
     if (!isValidEntry(entry)) {
-      console.warn(`[openai-endpoints] Skipping endpoint "${name}" — missing or invalid "baseURL"`);
+      console.warn(`[openai-endpoints] Skipping endpoint "${name}" — invalid baseURL/apiKey/headers/queryParams`);
       continue;
     }
     out[name] = entry;
@@ -116,7 +132,7 @@ export function writeOpenAiEndpoints(endpoints: OpenAiEndpointsMap): void {
       throw new Error(`Invalid endpoint name "${name}" — use letters, digits, ".", "_" or "-" (no "/")`);
     }
     if (!isValidEntry(entry)) {
-      throw new Error(`Endpoint "${name}" needs a valid http(s) "baseURL"`);
+      throw new Error(`Endpoint "${name}" needs a valid http(s) baseURL and string apiKey/headers/queryParams`);
     }
   }
 

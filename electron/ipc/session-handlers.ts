@@ -46,15 +46,17 @@ export function registerSessionHandlers(
     const provider = providerOverride ?? project?.config.provider ?? null;
 
     // Providers without a static default model — resolve the first available
-    // model at session creation so the session never starts model-less.
-    const dynamicModelErrors: Partial<Record<string, string>> = {
-      ollama: OLLAMA_NO_MODELS_ERROR,
-      "openai-compatible": OPENAI_COMPAT_NO_MODELS_ERROR,
-    };
+    // model at session creation so the session never starts model-less. A Map
+    // (not an object) so a corrupted provider string like "toString" can't
+    // match an inherited key and slip into the dynamic-model path.
+    const dynamicModelErrors = new Map<string, string>([
+      ["ollama", OLLAMA_NO_MODELS_ERROR],
+      ["openai-compatible", OPENAI_COMPAT_NO_MODELS_ERROR],
+    ]);
     const resolveDynamicModel = async (p: string): Promise<string> => {
       const models = await getProvider(p).listModels?.();
       const first = models?.[0]?.id ?? null;
-      if (!first) throw new Error(dynamicModelErrors[p] ?? `No models available for provider "${p}"`);
+      if (!first) throw new Error(dynamicModelErrors.get(p) ?? `No models available for provider "${p}"`);
       return first;
     };
 
@@ -62,14 +64,14 @@ export function registerSessionHandlers(
     if (providerOverride && providerOverride !== project?.config.provider) {
       if (provider === "anthropic") {
         model = "claude-sonnet-4-6";
-      } else if (provider && provider in dynamicModelErrors) {
+      } else if (provider && dynamicModelErrors.has(provider)) {
         model = await resolveDynamicModel(provider);
       } else {
         model = null;
       }
     } else {
       model = project?.config.model ?? null;
-      if (provider && provider in dynamicModelErrors && !model?.trim()) {
+      if (provider && dynamicModelErrors.has(provider) && !model?.trim()) {
         model = await resolveDynamicModel(provider);
       }
     }

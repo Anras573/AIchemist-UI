@@ -86,9 +86,34 @@ describe("openai-endpoints config", () => {
     expect(Object.keys(readOpenAiEndpoints())).toEqual(["good"]);
   });
 
+  it("drops entries with malformed apiKey/headers/queryParams on read", () => {
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        endpoints: {
+          good: { baseURL: "http://a/v1", apiKey: "tok", headers: { X: "1" } },
+          "bad-key": { baseURL: "http://a/v1", apiKey: 123 },
+          "bad-headers": { baseURL: "http://a/v1", headers: { X: 1 } },
+          "headers-array": { baseURL: "http://a/v1", headers: ["nope"] },
+          "bad-query": { baseURL: "http://a/v1", queryParams: { v: true } },
+        },
+      }),
+    );
+    expect(Object.keys(readOpenAiEndpoints())).toEqual(["good"]);
+  });
+
   it("rejects writes with invalid endpoint names or baseURLs", () => {
     expect(() => writeOpenAiEndpoints({ "a/b": { baseURL: "http://x/v1" } })).toThrow(/Invalid endpoint name/);
     expect(() => writeOpenAiEndpoints({ ok: { baseURL: "not-a-url" } })).toThrow(/baseURL/);
+  });
+
+  it("rejects writes with malformed optional fields", () => {
+    expect(() =>
+      writeOpenAiEndpoints({ ok: { baseURL: "http://x/v1", apiKey: 5 as unknown as string } }),
+    ).toThrow(/apiKey/);
+    expect(() =>
+      writeOpenAiEndpoints({ ok: { baseURL: "http://x/v1", headers: { X: 1 as unknown as string } } }),
+    ).toThrow(/headers/);
   });
 
   it("upserts and deletes single endpoints", () => {
