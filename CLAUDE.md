@@ -124,7 +124,7 @@ Migrations in `electron/db.ts` are **append-only** — never modify existing SQL
 
 ### Session provider lock
 
-Each session is locked to a single provider (`"anthropic"`, `"copilot"`, or `"ollama"`) at creation. Switching providers mid-session loses context because each provider has its own session id and cannot resume the other's state.
+Each session is locked to a single provider (`"anthropic"`, `"copilot"`, `"ollama"`, or `"openai-compatible"`) at creation. Switching providers mid-session loses context because each provider has its own session id and cannot resume the other's state. The canonical provider list is `PROVIDER_IDS` in `electron/providers.ts` (renderer display metadata in `src/lib/providers.ts`) — the provider pickers, probes fallback, and settings dropdowns all iterate it, so a new provider needs no per-component list edits.
 
 - **Creation:** `SessionTabBar` shows a split button — the main `+` creates with the project default, and the chevron opens a menu to explicitly pick a provider. The renderer calls `ipc.createSession(projectId, providerOverride?)`.
 - **Empty state:** When a project has no sessions, `TimelinePanel` renders `EmptyStateNewSession` with per-provider radio buttons plus a primary "Create a new session" button.
@@ -140,6 +140,17 @@ Each session is locked to a single provider (`"anthropic"`, `"copilot"`, or `"ol
 - **Model resolution:** never hardcode a model name — `resolveModel()` falls back to the first installed model from `listModels()`, and `OLLAMA_NO_MODELS_ERROR` is surfaced when none are installed.
 - **`delegate_task` tool:** lets the model delegate a self-contained sub-task to another installed Ollama model (fresh context, depth-limited; `ask_user` and MCP tools are unavailable in delegated turns).
 - **Skills & agents:** supported since Ollama became a first-class provider (PR #31) — `buildSystemPrompt()` appends the selected agent's file body (`readAgentFileSystemPrompt`) and the active skills context (`buildSkillsContext`) to the base system prompt. `AGENT_SEND` passes `skills`/`agent` through unchanged, and `AgentPickerButton` loads agents for Ollama sessions like the other providers.
+
+### OpenAI-compatible provider
+
+`electron/agent/openai-compat.ts` runs turns against user-configured OpenAI-compatible endpoints (LM Studio, vLLM, llama.cpp, Together, …) via `@ai-sdk/openai-compatible` + the AI SDK's `streamText`.
+
+- **Endpoint registry:** `~/.aichemist/openai-providers.json` (`electron/openai-endpoints.ts`), shape `{ "endpoints": { "<name>": { baseURL, apiKey?, headers?, queryParams? } } }`. Written with mode 0600 (may contain keys). Endpoint names must not contain `/`. CRUD via `OPENAI_ENDPOINTS_READ` / `OPENAI_ENDPOINT_UPSERT` / `OPENAI_ENDPOINT_DELETE` (handlers in `settings-handlers.ts`, editor UI in **Settings → Providers**).
+- **Composite model ids:** `sessions.model` stores `<endpoint>/<modelId>`, split on the FIRST `/` (`parseCompositeModelId`) so model ids containing slashes survive (`together/meta-llama/Llama-3-70b`). A bare model id is accepted only when exactly one endpoint is configured. One provider id covers any number of endpoints — don't add per-endpoint provider ids.
+- **No SDK session state:** like Ollama, every turn replays the full history from SQLite into `ModelMessage[]`. `withCurrentPrompt()` ensures the turn's prompt is the final user message (it may differ from the saved row — GitHub-issue augmentation — or be missing entirely for `skipPersistence` turns).
+- **Turn loop:** one `streamText({ tools, stopWhen: stepCountIs(8) })` call; the AI SDK drives the multi-step tool loop. Built-in tools are zod-schema `tool()`s whose `execute` goes through `runGatedTool` (same approval gate + tool_call persistence as Ollama); managed MCP tools are wrapped with `dynamicTool` + `jsonSchema()`. `fullStream` parts map to the emitter: `text-delta` → `delta`, `reasoning-delta`/`reasoning-end` → thinking events, `finish.totalUsage` → `usage`, `error` → turn failure.
+- **Model listing & probe:** `GET {baseURL}/models` per endpoint (5 s timeout, best-effort across endpoints — one dead endpoint doesn't hide the rest). The provider implements `AgentProvider.probe()` itself (30 s cache, `_resetOpenAiCompatProbeCache()` invalidated on endpoint CRUD), so `provider-probe.ts` needed no changes.
+- **Test seams:** `_setFetch`, `_setClientFactory` (inject a `MockLanguageModelV3` from `ai/test` so the real `streamText` loop runs in tests), `_setEndpointsPathForTests`, `_resetOpenAiCompatProbeCache`. Tests in `electron/agent/openai-compat.test.ts` and `electron/openai-endpoints.test.ts`.
 
 ---
 
@@ -354,14 +365,15 @@ The right-side context panels (Skills, MCP, Memory) filter their content to the 
 | **anthropic** | `POST ${ANTHROPIC_BASE_URL ?? "https://api.anthropic.com"}/v1/messages` with `max_tokens: 1` and `anthropic-version: 2023-06-01`, 5 s timeout. This is the endpoint the SDK actually uses, so the probe also works behind enterprise proxies that only forward `/v1/messages`. Auth: tries `x-api-key` (`ANTHROPIC_API_KEY`) first; on 401 falls back to `Authorization: Bearer ${ANTHROPIC_AUTH_TOKEN}` if set. If no env vars are set but `~/.claude/.credentials.json` exists (Pro/Max OAuth login), reports ok. Status mapping: `400/406/429` = ok (auth processed); `401/403` = "invalid key"; `404` = "check ANTHROPIC_BASE_URL"; `5xx` = HTTP status; network error = error message. |
 | **copilot** | `GITHUB_TOKEN` set → wraps `copilotProvider.listModels()` with a 5 s timeout. Empty array or throw = not ok. |
 | **ollama** | Wraps `ollamaProvider.listModels()` with a 5 s timeout. Empty array or throw = not ok. |
+| **openai-compatible** | Provider-owned `probe()` on `openaiCompatProvider` (not in `provider-probe.ts`): no endpoints configured = not ok with guidance; otherwise `GET /models` across endpoints, ok when ≥1 model is reachable. Own 30 s cache, reset on endpoint CRUD. |
 
-**Caching** mirrors `mcp-probe.ts`: 30 s in-memory, keyed by `"anthropic" | "copilot" | "ollama"`. `force: true` bypasses. The hook re-probes on Electron `BrowserWindow.focus`; the cache absorbs spurious focus events.
+**Caching** mirrors `mcp-probe.ts`: 30 s in-memory, keyed by provider id. `force: true` bypasses. The hook re-probes on Electron `BrowserWindow.focus`; the cache absorbs spurious focus events. Providers can instead implement `AgentProvider.probe()` (takes precedence; caching is then the provider's responsibility).
 
 **Test seams:** `_setFetch`, `_setCopilotListModels`, `_setOllamaListModels`, `_resetProviderProbeCache`. Tests in `electron/agent/provider-probe.test.ts`.
 
 **IPC:** `PROBE_PROVIDERS` channel, handler in `electron/ipc/settings-handlers.ts`, exposed as `ipc.probeProviders({ projectId?, force? })`. Renderer hook `useProviderProbes(projectId?)` fetches on mount + on window focus and exposes `{ probes, checking, refresh }`.
 
-**User-disabled providers:** the `AICHEMIST_DISABLED_PROVIDERS` setting (comma-separated list of `anthropic` / `copilot` / `ollama`, edited in **Settings → Providers**) lets the user hide providers app-wide. The IPC handler reads it via `parseDisabledProviders(...)` and passes a `Set` to `probeAll(..., { disabled })`, which short-circuits the underlying probe and returns `{ ok: false, reason: "Disabled in settings" }`. All three gating UI surfaces pick it up automatically. Existing sessions keep working — sessions are provider-locked at creation, so disabling a provider only hides it from the new-session pickers.
+**User-disabled providers:** the `AICHEMIST_DISABLED_PROVIDERS` setting (comma-separated list of `PROVIDER_IDS` values, edited in **Settings → Providers**) lets the user hide providers app-wide. The IPC handler reads it via `parseDisabledProviders(...)` and passes a `Set` to `probeAll(..., { disabled })`, which short-circuits the underlying probe and returns `{ ok: false, reason: "Disabled in settings" }`. All three gating UI surfaces pick it up automatically. Existing sessions keep working — sessions are provider-locked at creation, so disabling a provider only hides it from the new-session pickers.
 
 **UX surfaces:**
 - `SessionTabBar` chevron menu — disabled items show `(unavailable)` and a `title` tooltip with the reason.

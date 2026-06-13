@@ -46,6 +46,7 @@ export const AGENT_SEND             = "agent:send";
 export const APPROVE_TOOL_CALL      = "agent:approve-tool-call";
 export const GET_COPILOT_MODELS     = "agent:get-copilot-models";
 export const GET_OLLAMA_MODELS      = "agent:get-ollama-models";
+export const GET_OPENAI_COMPAT_MODELS = "agent:get-openai-compat-models";
 export const GET_CLAUDE_AGENTS      = "agent:get-claude-agents";
 export const GET_COPILOT_AGENTS     = "agent:get-copilot-agents";
 export const LIST_SKILLS            = "agent:list-skills";
@@ -64,6 +65,11 @@ export const MCP_PROBE_MANAGED      = "mcp:probe-managed";
 
 // ── Provider availability probes ──────────────────────────────────────────────
 export const PROBE_PROVIDERS        = "providers:probe";
+
+// ── OpenAI-compatible endpoints (~/.aichemist/openai-providers.json) ──────────
+export const OPENAI_ENDPOINTS_READ   = "openai:read-endpoints";
+export const OPENAI_ENDPOINT_UPSERT  = "openai:upsert-endpoint";
+export const OPENAI_ENDPOINT_DELETE  = "openai:delete-endpoint";
 
 // ── Agent / Skill file management ────────────────────────────────────────────
 export const WRITE_AGENT_FILE   = "agents:write-file";

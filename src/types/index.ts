@@ -19,7 +19,7 @@ import type { ProjectConfig } from "./schemas";
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
-export type Provider = "anthropic" | "copilot" | "ollama";
+export type Provider = "anthropic" | "copilot" | "ollama" | "openai-compatible";
 
 // ─── Provider availability ───────────────────────────────────────────────────
 
@@ -29,11 +29,7 @@ export interface ProviderProbeResult {
   durationMs?: number;
 }
 
-export interface ProviderProbes {
-  anthropic: ProviderProbeResult;
-  copilot: ProviderProbeResult;
-  ollama: ProviderProbeResult;
-}
+export type ProviderProbes = Record<Provider, ProviderProbeResult>;
 
 // ─── GitHub integration ────────────────────────────────────────────────────────
 

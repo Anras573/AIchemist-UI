@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ProjectConfig, ApprovalRule, ApprovalPolicy, ToolCategory } from "@/types";
+import { PROVIDER_IDS, PROVIDER_LABELS } from "../../../electron/providers";
 
 type Tab = "general" | "approval";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -107,12 +108,12 @@ function GeneralTab({
 }) {
   const ipc = useIpc();
   const probeFor = (
-    p: "anthropic" | "copilot" | "ollama",
+    p: import("@/types").Provider,
   ): import("@/types").ProviderProbeResult | undefined => {
     if (!probes) return undefined;
     return probes[p];
   };
-  const opt = (value: "anthropic" | "copilot" | "ollama", baseLabel: string) => {
+  const opt = (value: import("@/types").Provider, baseLabel: string) => {
     const probe = probeFor(value);
     const unavailable = probe ? !probe.ok : false;
     return {
@@ -129,11 +130,7 @@ function GeneralTab({
         <SelectField
           id="ps-provider"
           value={config.provider}
-          options={[
-            opt("anthropic", "Anthropic (Claude)"),
-            opt("copilot", "GitHub Copilot"),
-            opt("ollama", "Ollama"),
-          ]}
+          options={PROVIDER_IDS.map((p) => opt(p, PROVIDER_LABELS[p]))}
           onChange={(v) => {
             const provider = v as import("@/types").Provider;
             if (v !== config.provider) {
@@ -144,7 +141,7 @@ function GeneralTab({
           }}
         />
         {probes && (() => {
-          const probe = probeFor(config.provider as "anthropic" | "copilot" | "ollama");
+          const probe = probeFor(config.provider);
           if (probe && !probe.ok) {
             return (
               <p className="text-xs text-destructive flex items-start gap-1">

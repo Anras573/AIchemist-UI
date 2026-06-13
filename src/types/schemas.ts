@@ -19,7 +19,7 @@ export const ToolDefinitionSchema = z.object({
 });
 
 export const ProjectConfigSchema = z.object({
-  provider: z.enum(["anthropic", "copilot", "ollama"]).default("anthropic"),
+  provider: z.enum(["anthropic", "copilot", "ollama", "openai-compatible"]).default("anthropic"),
   model: z.string().default(""),
   approval_mode: z.enum(["all", "none", "custom"]).default("custom"),
   approval_rules: z.array(ApprovalRuleSchema).default([]),

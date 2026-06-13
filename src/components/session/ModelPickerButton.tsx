@@ -30,12 +30,14 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
   const [open, setOpen] = useState(false);
   const [copilotModels, setCopilotModels] = useState<ModelOption[]>([]);
   const [ollamaModels, setOllamaModels] = useState<ModelOption[]>([]);
+  const [openAiCompatModels, setOpenAiCompatModels] = useState<ModelOption[]>([]);
 
   // Reset cached model lists when the session changes so a fresh fetch occurs
   // for the new session's provider.
   useEffect(() => {
     setCopilotModels([]);
     setOllamaModels([]);
+    setOpenAiCompatModels([]);
   }, [sessionId]);
 
   // Provider is locked at session creation time. Only load Copilot models if
@@ -73,11 +75,30 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
       .catch(() => {/* Ollama not configured — silently hide the group */});
   }, [open, provider, ollamaModels.length]);
 
+  useEffect(() => {
+    if (!open || provider !== "openai-compatible" || openAiCompatModels.length > 0) return;
+    ipc.getOpenAiCompatModels()
+      .then((models) => {
+        setOpenAiCompatModels(
+          // Composite ids (`<endpoint>/<modelId>`) — label keeps the endpoint
+          // visible so models from different endpoints stay distinguishable.
+          models.map((m) => ({
+            provider: "openai-compatible",
+            model: m.id,
+            label: m.id,
+            logoProvider: "openai",
+          }))
+        );
+      })
+      .catch(() => {/* No endpoints configured — silently hide the group */});
+  }, [open, provider, openAiCompatModels.length]);
+
   // Only show the group matching the session's locked provider.
   const visibleAnthropic = provider === "anthropic" ? ANTHROPIC_MODELS : [];
   const visibleCopilot = provider === "copilot" ? copilotModels : [];
   const visibleOllama = provider === "ollama" ? ollamaModels : [];
-  const allModels = [...visibleAnthropic, ...visibleCopilot, ...visibleOllama];
+  const visibleOpenAiCompat = provider === "openai-compatible" ? openAiCompatModels : [];
+  const allModels = [...visibleAnthropic, ...visibleCopilot, ...visibleOllama, ...visibleOpenAiCompat];
 
   const current =
     allModels.find((m) => m.provider === provider && m.model === model) ??
@@ -166,6 +187,25 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
           {visibleOllama.length > 0 && (
             <ModelSelectorGroup heading="Ollama">
               {visibleOllama.map((option) => {
+                const isActive = option.provider === provider && option.model === model;
+                return (
+                  <ModelSelectorItem
+                    key={option.model}
+                    value={`${option.label} ${option.provider}`}
+                    onSelect={() => handleSelect(option)}
+                  >
+                    <ModelSelectorLogo provider={option.logoProvider} />
+                    <ModelSelectorName>{option.label}</ModelSelectorName>
+                    {isActive && <span className="text-xs text-primary">✓</span>}
+                  </ModelSelectorItem>
+                );
+              })}
+            </ModelSelectorGroup>
+          )}
+
+          {visibleOpenAiCompat.length > 0 && (
+            <ModelSelectorGroup heading="OpenAI-compatible">
+              {visibleOpenAiCompat.map((option) => {
                 const isActive = option.provider === provider && option.model === model;
                 return (
                   <ModelSelectorItem

@@ -5,6 +5,7 @@ import { createPlaceholderMessage, updateMessageContent, loadToolCallsForMessage
 import { claudeProvider } from "./claude";
 import { copilotProvider } from "./copilot";
 import { ollamaProvider } from "./ollama";
+import { openaiCompatProvider } from "./openai-compat";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 import { TurnEmitter } from "./turn-emitter";
 
@@ -14,6 +15,7 @@ const PROVIDERS: Record<string, AgentProvider> = {
   anthropic: claudeProvider,
   copilot: copilotProvider,
   ollama: ollamaProvider,
+  "openai-compatible": openaiCompatProvider,
 };
 
 /** Look up a provider by name. Throws for unknown providers. */

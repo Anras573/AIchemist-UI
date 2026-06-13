@@ -29,11 +29,7 @@ export interface ProviderProbeResult {
   durationMs?: number;
 }
 
-export interface ProviderProbes {
-  anthropic: ProviderProbeResult;
-  copilot: ProviderProbeResult;
-  ollama: ProviderProbeResult;
-}
+export type ProviderProbes = Record<Provider, ProviderProbeResult>;
 
 const CACHE_TTL_MS = 30_000;
 const ANTHROPIC_TIMEOUT_MS = 5_000;
@@ -304,9 +300,9 @@ export async function probeOllama(opts?: { force?: boolean }): Promise<ProviderP
  * Built-in probe per provider. A provider can instead implement
  * `AgentProvider.probe()` on its registry entry, which takes precedence —
  * `probeAll()` iterates the provider registry, so new providers with their
- * own `probe()` need no changes in this module.
+ * own `probe()` (e.g. openai-compatible) need no changes in this module.
  */
-const BUILTIN_PROBES: Record<Provider, (opts?: { force?: boolean }) => Promise<ProviderProbeResult>> = {
+const BUILTIN_PROBES: Partial<Record<Provider, (opts?: { force?: boolean }) => Promise<ProviderProbeResult>>> = {
   anthropic: probeAnthropic,
   copilot: probeCopilot,
   ollama: probeOllama,

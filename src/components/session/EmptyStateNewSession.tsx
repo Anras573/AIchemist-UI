@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { PROVIDERS, PROVIDER_SHORT_LABELS, getProviderLogo, isProvider } from "@/lib/providers";
 import type { Provider, ProviderProbes } from "@/types";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 import { ModelSelectorLogo } from "@/components/ai-elements/model-selector";
@@ -29,15 +30,10 @@ export function EmptyStateNewSession({
     return probes[p]?.ok ? undefined : probes[p]?.reason;
   };
   // Pick a default that isn't disabled.
-  const preferred =
-    defaultProvider === "copilot"
-      ? "copilot"
-      : defaultProvider === "ollama"
-        ? "ollama"
-        : "anthropic";
-  const initial: Provider = isAvailable(preferred as Provider)
-    ? (preferred as Provider)
-    : (["anthropic", "copilot", "ollama"] as const).find(isAvailable) ?? "anthropic";
+  const preferred: Provider = isProvider(defaultProvider) ? defaultProvider : "anthropic";
+  const initial: Provider = isAvailable(preferred)
+    ? preferred
+    : PROVIDERS.find(isAvailable) ?? "anthropic";
   const [selected, setSelected] = useState<Provider>(initial);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
 
@@ -48,21 +44,20 @@ export function EmptyStateNewSession({
   useEffect(() => {
     if (!probes) return;
     if (isAvailable(selected)) return;
-    const fallback = (["anthropic", "copilot", "ollama"] as const).find(isAvailable);
+    const fallback = PROVIDERS.find(isAvailable);
     if (fallback && fallback !== selected) setSelected(fallback);
     // isAvailable is derived from `probes` which is in deps; selected is read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [probes, selected]);
 
-  const renderRadio = (
-    p: Provider,
-    label: string,
-    icon: React.ReactNode,
-  ) => {
+  const renderRadio = (p: Provider) => {
+    const label = `Use ${PROVIDER_SHORT_LABELS[p]}`;
+    const icon = <ModelSelectorLogo provider={getProviderLogo(p)} className="size-3.5" />;
     const available = isAvailable(p);
     const reason = reasonFor(p);
     const radio = (
       <label
+        key={p}
         className={cn(
           "flex items-center gap-1.5 text-sm",
           available ? "cursor-pointer" : "cursor-not-allowed opacity-50",
@@ -90,7 +85,7 @@ export function EmptyStateNewSession({
       </label>
     );
     if (!available) {
-      return <WithTooltip label={`Unavailable: ${reason ?? "unknown"}`}>{radio}</WithTooltip>;
+      return <WithTooltip key={p} label={`Unavailable: ${reason ?? "unknown"}`}>{radio}</WithTooltip>;
     }
     return radio;
   };
@@ -102,11 +97,9 @@ export function EmptyStateNewSession({
       <div
         role="radiogroup"
         aria-label="Session provider"
-        className="flex items-center gap-4"
+        className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5"
       >
-        {renderRadio("anthropic", "Use Claude", <ModelSelectorLogo provider="anthropic" className="size-3.5" />)}
-        {renderRadio("copilot", "Use Copilot", <ModelSelectorLogo provider="github-copilot" className="size-3.5" />)}
-        {renderRadio("ollama", "Use Ollama", <ModelSelectorLogo provider="ollama" className="size-3.5" />)}
+        {PROVIDERS.map(renderRadio)}
       </div>
       {projectPath && (
         <IssueLinkPicker

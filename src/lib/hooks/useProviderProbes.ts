@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ipc } from "@/lib/ipc";
+import { PROVIDERS } from "@/lib/providers";
 import type { ProviderProbes } from "@/types";
 
 /**
- * Fetches provider availability probes (Anthropic / Copilot / Ollama) and keeps
+ * Fetches provider availability probes for every provider and keeps
  * them fresh on:
  *  - mount
  *  - window focus (the 30 s backend cache absorbs spurious focus events)
@@ -32,11 +33,11 @@ export function useProviderProbes(projectId?: string): {
         // Surface as not-ok for everything so the UI doesn't lock the user out
         // forever; the cause is logged for debugging.
         console.error("[useProviderProbes] probe failed", err);
-        setProbes({
-          anthropic: { ok: false, reason: "Probe IPC failed" },
-          copilot: { ok: false, reason: "Probe IPC failed" },
-          ollama: { ok: false, reason: "Probe IPC failed" },
-        });
+        setProbes(
+          Object.fromEntries(
+            PROVIDERS.map((p) => [p, { ok: false, reason: "Probe IPC failed" }]),
+          ) as ProviderProbes,
+        );
       } finally {
         if (myGen === generation.current) setChecking(false);
       }

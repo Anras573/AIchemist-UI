@@ -58,6 +58,7 @@ export interface ElectronAPI {
   answerQuestion: (questionId: string, answer: string) => Promise<void>;
   getCopilotModels: () => Promise<Array<{ id: string; name: string }>>;
   getOllamaModels: () => Promise<Array<{ id: string; name: string }>>;
+  getOpenAiCompatModels: () => Promise<Array<{ id: string; name: string }>>;
   getClaudeAgents: (projectPath: string) => Promise<Array<{ name: string; description: string; model?: string }>>;
   getCopilotAgents: (projectPath: string) => Promise<Array<{ name: string; description: string }>>;
   githubCreatePr: (args: import("../src/types").GitHubCreatePrArgs) =>
@@ -76,6 +77,10 @@ export interface ElectronAPI {
   listMcpServers: () => Promise<Array<import("../src/types").McpServerInfo>>;
   mcpProbeManaged: () => Promise<Array<import("../src/types").McpServerInfo>>;
   probeProviders: (args?: { projectId?: string; force?: boolean }) => Promise<import("../src/types").ProviderProbes>;
+  readOpenAiEndpoints: () => Promise<import("./openai-endpoints").OpenAiEndpointsMap>;
+  upsertOpenAiEndpoint: (name: string, entry: import("./openai-endpoints").OpenAiEndpointEntry) =>
+    Promise<import("./openai-endpoints").OpenAiEndpointsMap>;
+  deleteOpenAiEndpoint: (name: string) => Promise<import("./openai-endpoints").OpenAiEndpointsMap>;
   mcpReadConfig: (args: { scope: import("./mcp").McpScope; projectPath?: string }) =>
     Promise<import("./mcp").McpServersMap>;
   mcpWriteConfig: (args: { scope: import("./mcp").McpScope; servers: import("./mcp").McpServersMap; projectPath?: string }) =>
@@ -161,6 +166,7 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(CH.ANSWER_QUESTION, { questionId, answer }),
   getCopilotModels: () => ipcRenderer.invoke(CH.GET_COPILOT_MODELS),
   getOllamaModels: () => ipcRenderer.invoke(CH.GET_OLLAMA_MODELS),
+  getOpenAiCompatModels: () => ipcRenderer.invoke(CH.GET_OPENAI_COMPAT_MODELS),
   getClaudeAgents: (projectPath) => ipcRenderer.invoke(CH.GET_CLAUDE_AGENTS, projectPath),
   getCopilotAgents: (projectPath) => ipcRenderer.invoke(CH.GET_COPILOT_AGENTS, projectPath),
   githubCreatePr: (args) => ipcRenderer.invoke(CH.GITHUB_CREATE_PR, args),
@@ -175,6 +181,9 @@ const api: ElectronAPI = {
   mcpProbeManaged: () => ipcRenderer.invoke(CH.MCP_PROBE_MANAGED),
   probeProviders: (args?: { projectId?: string; force?: boolean }) =>
     ipcRenderer.invoke(CH.PROBE_PROVIDERS, args),
+  readOpenAiEndpoints: () => ipcRenderer.invoke(CH.OPENAI_ENDPOINTS_READ),
+  upsertOpenAiEndpoint: (name, entry) => ipcRenderer.invoke(CH.OPENAI_ENDPOINT_UPSERT, name, entry),
+  deleteOpenAiEndpoint: (name) => ipcRenderer.invoke(CH.OPENAI_ENDPOINT_DELETE, name),
   mcpReadConfig: (args) => ipcRenderer.invoke(CH.MCP_READ_CONFIG, args),
   mcpWriteConfig: (args) => ipcRenderer.invoke(CH.MCP_WRITE_CONFIG, args),
   mcpDeleteServer: (args) => ipcRenderer.invoke(CH.MCP_DELETE_SERVER, args),

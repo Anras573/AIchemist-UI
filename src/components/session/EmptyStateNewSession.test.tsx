@@ -95,6 +95,7 @@ describe("EmptyStateNewSession", () => {
           anthropic: { ok: false, reason: "no key" },
           copilot: { ok: true },
           ollama: { ok: true },
+          "openai-compatible": { ok: true },
         }}
       />,
     );
@@ -119,6 +120,7 @@ describe("EmptyStateNewSession", () => {
           anthropic: { ok: false, reason: "no key" },
           copilot: { ok: false, reason: "no token" },
           ollama: { ok: false, reason: "not running" },
+          "openai-compatible": { ok: false, reason: "no endpoints" },
         }}
       />,
     );
@@ -147,6 +149,7 @@ describe("EmptyStateNewSession", () => {
           anthropic: { ok: false, reason: "no key" },
           copilot: { ok: true },
           ollama: { ok: true },
+          "openai-compatible": { ok: true },
         }}
       />,
     );
