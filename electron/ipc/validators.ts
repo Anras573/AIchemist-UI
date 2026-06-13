@@ -50,6 +50,25 @@ const writeSkillFileSchema = z.object({
   content: z.string(),
 });
 
+const createAgentSchema = z.object({
+  provider: z.string().min(1),
+  name: z.string().min(1),
+  projectPath: z.string().min(1),
+  scope: z.enum(["global", "project"]),
+  content: z.string(),
+});
+
+const createSkillSchema = z.object({
+  name: z.string().min(1),
+  projectPath: z.string().min(1),
+  scope: z.enum(["global", "project"]),
+  content: z.string(),
+  provider: z.string().optional(),
+});
+
+/** The delete channels take a bare path string rather than an options object. */
+const pathArgSchema = z.string().min(1);
+
 /**
  * Per-channel argument validators. Keyed by channel constant so a new mutation
  * channel can opt in with one entry.
@@ -59,4 +78,8 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.SAVE_MESSAGE]: (args) => check(saveMessageSchema, args[0], CH.SAVE_MESSAGE),
   [CH.WRITE_AGENT_FILE]: (args) => check(writeAgentFileSchema, args[0], CH.WRITE_AGENT_FILE),
   [CH.WRITE_SKILL_FILE]: (args) => check(writeSkillFileSchema, args[0], CH.WRITE_SKILL_FILE),
+  [CH.CREATE_AGENT]: (args) => check(createAgentSchema, args[0], CH.CREATE_AGENT),
+  [CH.DELETE_AGENT_FILE]: (args) => check(pathArgSchema, args[0], CH.DELETE_AGENT_FILE),
+  [CH.CREATE_SKILL]: (args) => check(createSkillSchema, args[0], CH.CREATE_SKILL),
+  [CH.DELETE_SKILL_DIR]: (args) => check(pathArgSchema, args[0], CH.DELETE_SKILL_DIR),
 };
