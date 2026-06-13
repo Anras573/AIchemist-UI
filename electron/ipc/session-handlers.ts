@@ -37,9 +37,9 @@ export function registerSessionHandlers(
   activeTurns: Set<string>,
   getMainWindow: () => BrowserWindow | null
 ): void {
-  handle(CH.CREATE_SESSION, async (_event, payload: string | { projectId: string; providerOverride?: Provider; issueNumber?: number | null }) => {
+  handle(CH.CREATE_SESSION, async (_event, payload: string | { projectId: string; providerOverride?: string; issueNumber?: number | null }) => {
     const projectId = typeof payload === "string" ? payload : payload.projectId;
-    const providerOverride = typeof payload === "string" ? undefined : payload.providerOverride;
+    const providerOverride = (typeof payload === "string" ? undefined : payload.providerOverride) as Provider | undefined;
     const issueNumber = typeof payload === "string" ? undefined : (payload.issueNumber ?? undefined);
 
     const project = listProjects(db).find((p) => p.id === projectId);

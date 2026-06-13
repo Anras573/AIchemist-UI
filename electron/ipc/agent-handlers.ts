@@ -248,14 +248,14 @@ export function registerAgentHandlers(
     // If a turn is somehow already running, drainNextQueued fires when it finishes.
   });
 
-  handle(CH.GET_COPILOT_MODELS, () => getProvider("copilot").listModels?.());
-  handle(CH.GET_OLLAMA_MODELS, () => getProvider("ollama").listModels?.());
-  handle(CH.GET_OPENAI_COMPAT_MODELS, () => getProvider("openai-compatible").listModels?.());
+  handle(CH.GET_COPILOT_MODELS, async () => (await getProvider("copilot").listModels?.()) ?? []);
+  handle(CH.GET_OLLAMA_MODELS, async () => (await getProvider("ollama").listModels?.()) ?? []);
+  handle(CH.GET_OPENAI_COMPAT_MODELS, async () => (await getProvider("openai-compatible").listModels?.()) ?? []);
   handle(CH.GET_CLAUDE_AGENTS, async (_event, projectPath: string) => {
-    return getProvider("anthropic").listAgents?.(projectPath);
+    return (await getProvider("anthropic").listAgents?.(projectPath)) ?? [];
   });
   handle(CH.GET_COPILOT_AGENTS, async (_event, projectPath: string) => {
-    return getProvider("copilot").listAgents?.(projectPath);
+    return (await getProvider("copilot").listAgents?.(projectPath)) ?? [];
   });
 
   handle(CH.LIST_SKILLS, (_event, args: string | { projectPath: string; provider?: string }) => {

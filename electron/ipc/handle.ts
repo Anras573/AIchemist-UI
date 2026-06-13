@@ -1,16 +1,34 @@
 import { ipcMain } from "electron";
+import type { ContractArgs, ContractResult, RequestChannel } from "../ipc-contract";
+import { classifyError, type IpcEnvelope } from "./errors";
+import { validators } from "./validators";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Handler = (event: Electron.IpcMainInvokeEvent, ...args: any[]) => any;
-
-export function handle(channel: string, handler: Handler): void {
-  ipcMain.handle(channel, async (event, ...args) => {
+/**
+ * Registers an `ipcMain.handle` for a contract channel. The handler's args and
+ * result are type-checked against {@link IpcContract}, so a registered handler
+ * can't drift from the channel's declared shape (this is what removed the old
+ * `any` signature).
+ *
+ * Every handler resolves to an {@link IpcEnvelope}: a thrown error is caught,
+ * logged, and returned as `{ ok: false, error: { code, message } }` rather than
+ * collapsed to a bare message string — so the renderer can branch on `code`.
+ * Mutation channels are validated (zod) before the handler runs.
+ */
+export function handle<C extends RequestChannel>(
+  channel: C,
+  handler: (
+    event: Electron.IpcMainInvokeEvent,
+    ...args: ContractArgs<C>
+  ) => ContractResult<C> | Promise<ContractResult<C>>
+): void {
+  ipcMain.handle(channel, async (event, ...args): Promise<IpcEnvelope<ContractResult<C>>> => {
     try {
-      return await handler(event, ...args);
+      validators[channel]?.(args);
+      const data = await handler(event, ...(args as ContractArgs<C>));
+      return { ok: true, data };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
       console.error(`[IPC] "${channel}" failed:`, err);
-      throw new Error(message);
+      return { ok: false, error: classifyError(err) };
     }
   });
 }

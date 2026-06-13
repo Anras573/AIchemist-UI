@@ -183,3 +183,10 @@ export const IpcContext = React.createContext<IpcClient>(ipc);
 export function useIpc(): IpcClient {
   return React.useContext(IpcContext);
 }
+
+// ── Structured errors ─────────────────────────────────────────────────────────
+// A failed IPC call rejects with an `IpcError` carrying a machine-readable
+// `code` (e.g. "not_found", "conflict"). Components can branch on it:
+//   catch (err) { if (err instanceof IpcError && err.code === "conflict") … }
+export { IpcError } from "../../electron/ipc/errors";
+export type { IpcErrorCode } from "../../electron/ipc/errors";
