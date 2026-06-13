@@ -16,6 +16,7 @@ import {
   getDisabledMcpServers,
 } from "../sessions";
 import { listProjects } from "../projects";
+import { isProviderId } from "../providers";
 import {
   cleanupManagedWorktree,
   createManagedWorktree,
@@ -39,7 +40,12 @@ export function registerSessionHandlers(
 ): void {
   handle(CH.CREATE_SESSION, async (_event, payload: string | { projectId: string; providerOverride?: string; issueNumber?: number | null }) => {
     const projectId = typeof payload === "string" ? payload : payload.projectId;
-    const providerOverride = (typeof payload === "string" ? undefined : payload.providerOverride) as Provider | undefined;
+    // The wire type is a plain string; validate it against the canonical
+    // provider ids so a buggy/compromised renderer can't slip an unknown
+    // provider into getProvider()/session creation. Unknown → fall back to default.
+    const rawOverride = typeof payload === "string" ? undefined : payload.providerOverride;
+    const providerOverride: Provider | undefined =
+      rawOverride && isProviderId(rawOverride) ? rawOverride : undefined;
     const issueNumber = typeof payload === "string" ? undefined : (payload.issueNumber ?? undefined);
 
     const project = listProjects(db).find((p) => p.id === projectId);

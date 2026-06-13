@@ -6,6 +6,7 @@ import type {
   GitHubGetPrContextArgs,
   GitHubListIssuesArgs,
   GitHubListPrsArgs,
+  MessageRole,
   ProjectConfig,
   Provider,
 } from "@/types";
@@ -34,7 +35,7 @@ export const ipc = {
   getSession: (sessionId: string) => window.electronAPI.getSession(sessionId),
   deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) =>
     window.electronAPI.deleteSession(sessionId, options),
-  saveMessage: (args: { sessionId: string; role: string; content: string }) =>
+  saveMessage: (args: { sessionId: string; role: MessageRole; content: string }) =>
     window.electronAPI.saveMessage(args),
   updateSessionTitle: (sessionId: string, title: string) =>
     window.electronAPI.updateSessionTitle(sessionId, title),

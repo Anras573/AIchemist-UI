@@ -82,7 +82,7 @@ export type IpcContract = {
   [CH.GET_SESSION]: { args: [sessionId: string]; result: Session };
   [CH.DELETE_SESSION]: { args: [sessionId: string, options?: { cleanupWorktree?: boolean }]; result: void };
   [CH.SAVE_MESSAGE]: {
-    args: [args: { sessionId: string; role: string; content: string }];
+    args: [args: { sessionId: string; role: Message["role"]; content: string }];
     result: Message;
   };
   [CH.UPDATE_SESSION_TITLE]: { args: [sessionId: string, title: string]; result: void };

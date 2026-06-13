@@ -76,7 +76,12 @@ function inferCode(message: string): IpcErrorCode {
  * defensiveness against any handler that bypasses `handle()`.
  */
 export function unwrap<T>(value: IpcEnvelope<T> | T): T {
-  if (value !== null && typeof value === "object" && "ok" in value) {
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    "ok" in value &&
+    ("data" in value || "error" in value)
+  ) {
     const env = value as IpcEnvelope<T>;
     if (env.ok) return env.data;
     throw new IpcError(env.error.code, env.error.message);

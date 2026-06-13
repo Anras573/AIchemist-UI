@@ -57,4 +57,11 @@ describe("unwrap", () => {
   it("passes a bare (non-enveloped) value through unchanged", () => {
     expect(unwrap("legacy" as unknown as string)).toBe("legacy");
   });
+
+  it("does not treat a domain object that merely has an `ok` key as an envelope", () => {
+    // e.g. a TRACE_UNBIND-style result { ok: true } reaching unwrap directly:
+    // no `data`/`error` key means it is not an envelope and must pass through.
+    const domain = { ok: true } as unknown as { ok: boolean };
+    expect(unwrap(domain)).toBe(domain);
+  });
 });

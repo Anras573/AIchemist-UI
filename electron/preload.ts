@@ -42,7 +42,11 @@ export interface ElectronAPI {
   listSessions: (projectId: string) => Promise<Res<typeof CH.LIST_SESSIONS>>;
   getSession: (sessionId: string) => Promise<Res<typeof CH.GET_SESSION>>;
   deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) => Promise<Res<typeof CH.DELETE_SESSION>>;
-  saveMessage: (args: { sessionId: string; role: string; content: string }) => Promise<Res<typeof CH.SAVE_MESSAGE>>;
+  saveMessage: (args: {
+    sessionId: string;
+    role: import("../src/types").Message["role"];
+    content: string;
+  }) => Promise<Res<typeof CH.SAVE_MESSAGE>>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<Res<typeof CH.UPDATE_SESSION_TITLE>>;
   updateSessionModel: (
     sessionId: string,

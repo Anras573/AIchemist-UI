@@ -36,7 +36,7 @@ const agentSendSchema = z.object({
 
 const saveMessageSchema = z.object({
   sessionId: z.string().min(1),
-  role: z.string().min(1),
+  role: z.enum(["user", "assistant", "tool"]),
   content: z.string(),
 });
 
