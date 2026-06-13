@@ -197,7 +197,9 @@ function OpenAiEndpointsSection() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    ipc.readOpenAiEndpoints().then(setEndpoints).catch(console.error);
+    ipc.readOpenAiEndpoints()
+      .then(setEndpoints)
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
   const startAdd = () => {
@@ -236,6 +238,7 @@ function OpenAiEndpointsSection() {
   };
 
   const remove = async (name: string) => {
+    setError(null);
     try {
       setEndpoints(await ipc.deleteOpenAiEndpoint(name));
     } catch (err) {
@@ -256,7 +259,17 @@ function OpenAiEndpointsSection() {
         </p>
       </div>
 
-      {names.length === 0 && !draft && (
+      {/* Error from loading / deleting endpoints (save errors render inside the
+          form below). Without this, a failure outside an open form would either
+          show no feedback or a misleading "no endpoints" empty state. */}
+      {error && !draft && (
+        <p className="flex items-start gap-1.5 text-xs text-destructive">
+          <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+          <span>{error}</span>
+        </p>
+      )}
+
+      {names.length === 0 && !draft && !error && (
         <p className="text-xs text-muted-foreground">No endpoints configured yet.</p>
       )}
 
