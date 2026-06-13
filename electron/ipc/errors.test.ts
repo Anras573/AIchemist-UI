@@ -20,6 +20,8 @@ describe("classifyError", () => {
     ["No window available", "unavailable"],
     ["No models available for provider", "unavailable"],
     ["Invalid name — must be a plain file name", "invalid_input"],
+    ["This cannot.", "invalid_input"],
+    ["operation cannot: reason", "invalid_input"],
     ["Refusing to touch agent file outside the library directories", "invalid_input"],
     ["something completely unexpected blew up", "internal"],
   ] as const)("classifies %j as %s", (message, code) => {

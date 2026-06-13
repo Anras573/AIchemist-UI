@@ -10,6 +10,7 @@ import type {
   ProjectConfig,
   Provider,
 } from "@/types";
+import type { IpcErrorCode } from "../../electron/ipc/errors";
 
 // ── Typed wrapper over window.electronAPI ─────────────────────────────────────
 
@@ -186,8 +187,25 @@ export function useIpc(): IpcClient {
 }
 
 // ── Structured errors ─────────────────────────────────────────────────────────
-// A failed IPC call rejects with an `IpcError` carrying a machine-readable
-// `code` (e.g. "not_found", "conflict"). Components can branch on it:
-//   catch (err) { if (err instanceof IpcError && err.code === "conflict") … }
+// A failed IPC call rejects with an error carrying a machine-readable `code`
+// (e.g. "not_found", "conflict"). Note: errors crossing the contextBridge are
+// not guaranteed to keep the `IpcError` prototype, so `instanceof IpcError` can
+// fail in the renderer even when `code` is present. Branch on the code instead,
+// via `ipcErrorCode()`:
+//   catch (err) { if (ipcErrorCode(err) === "conflict") … }
 export { IpcError } from "../../electron/ipc/errors";
-export type { IpcErrorCode } from "../../electron/ipc/errors";
+export type { IpcErrorCode };
+
+/**
+ * Reads the structured error code off a rejected IPC call. Prefer this over
+ * `instanceof IpcError` in renderer code — it works regardless of whether the
+ * error kept its class prototype across the contextBridge. Returns `undefined`
+ * for non-IPC errors (fall back to `err.message`).
+ */
+export function ipcErrorCode(err: unknown): IpcErrorCode | undefined {
+  if (err && typeof err === "object" && "code" in err) {
+    const code = (err as { code?: unknown }).code;
+    return typeof code === "string" ? (code as IpcErrorCode) : undefined;
+  }
+  return undefined;
+}

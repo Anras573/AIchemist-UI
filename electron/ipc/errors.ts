@@ -64,7 +64,7 @@ function inferCode(message: string): IpcErrorCode {
   if (/timed? ?out|timeout/.test(m)) return "timeout";
   if (/unauthor|forbidden|invalid (api )?key|authentication|not configured/.test(m)) return "unauthorized";
   if (/no window|unavailable|no models|not available|not running/.test(m)) return "unavailable";
-  if (/invalid|must be|cannot |refusing|outside the library|only github|escapes/.test(m))
+  if (/invalid|must be|cannot\b|refusing|outside the library|only github|escapes/.test(m))
     return "invalid_input";
   return "internal";
 }
