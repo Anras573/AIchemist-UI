@@ -142,6 +142,16 @@ describe("openai-compat model listing", () => {
   it("returns an empty list when no endpoints are configured", async () => {
     await expect(getOpenAiCompatModels()).resolves.toEqual([]);
   });
+
+  it("passes an abort signal to fetch so timeouts cancel the request", async () => {
+    setEndpoints({ alpha: { baseURL: "http://alpha.local/v1" } });
+    const fetchMock = mockFetchModels({ "http://alpha.local/v1/models": ["m1"] });
+    _setFetch(fetchMock as unknown as typeof fetch);
+
+    await getOpenAiCompatModels();
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
 });
 
 describe("openai-compat probe", () => {

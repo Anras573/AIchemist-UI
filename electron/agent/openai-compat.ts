@@ -97,16 +97,6 @@ export function _setClientFactory(factory: ClientFactory | null): void {
 
 // ── Model listing ─────────────────────────────────────────────────────────────
 
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<T>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms} ms`)), ms);
-  });
-  return Promise.race([p, timeout]).finally(() => {
-    if (timer) clearTimeout(timer);
-  });
-}
-
 /** `GET {baseURL}/models` — the standard OpenAI model-listing endpoint. */
 async function fetchEndpointModels(
   endpointName: string,
@@ -120,22 +110,29 @@ async function fetchEndpointModels(
     ...(entry.apiKey ? { Authorization: `Bearer ${entry.apiKey}` } : {}),
     ...(entry.headers ?? {}),
   };
-  const res = await withTimeout(
-    fetchImpl(url.toString(), { headers }),
+  // Abort the request (not just the await) on timeout so hung endpoints don't
+  // leak in-flight sockets across repeated probes / model listings.
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new Error(`${endpointName} /models timed out after ${LIST_MODELS_TIMEOUT_MS} ms`)),
     LIST_MODELS_TIMEOUT_MS,
-    `${endpointName} /models`,
   );
-  if (!res.ok) {
-    throw new Error(`${endpointName}: GET /models returned HTTP ${res.status}`);
+  try {
+    const res = await fetchImpl(url.toString(), { headers, signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`${endpointName}: GET /models returned HTTP ${res.status}`);
+    }
+    const body = (await res.json()) as { data?: Array<{ id?: unknown }> } | Array<{ id?: unknown }>;
+    const items = Array.isArray(body) ? body : body.data ?? [];
+    return items
+      .map((m) => {
+        const id = typeof m?.id === "string" ? m.id.trim() : "";
+        return id ? { id: formatCompositeModelId(endpointName, id), name: id } : null;
+      })
+      .filter((m): m is { id: string; name: string } => m !== null);
+  } finally {
+    clearTimeout(timer);
   }
-  const body = (await res.json()) as { data?: Array<{ id?: unknown }> } | Array<{ id?: unknown }>;
-  const items = Array.isArray(body) ? body : body.data ?? [];
-  return items
-    .map((m) => {
-      const id = typeof m?.id === "string" ? m.id.trim() : "";
-      return id ? { id: formatCompositeModelId(endpointName, id), name: id } : null;
-    })
-    .filter((m): m is { id: string; name: string } => m !== null);
 }
 
 /** Best-effort aggregation across all endpoints — one dead endpoint doesn't hide the rest. */

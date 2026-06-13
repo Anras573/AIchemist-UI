@@ -64,6 +64,13 @@ describe("openai-endpoints config", () => {
     expect(mode).toBe(0o600);
   });
 
+  it("tightens permissions on a pre-existing file with broader mode", () => {
+    fs.writeFileSync(configPath, JSON.stringify({ endpoints: {} }), { mode: 0o644 });
+    writeOpenAiEndpoints({ local: { baseURL: "http://localhost:8000/v1" } });
+    const mode = fs.statSync(configPath).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
   it("drops entries with invalid names or missing baseURL on read", () => {
     fs.writeFileSync(
       configPath,

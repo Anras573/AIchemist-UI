@@ -125,6 +125,9 @@ export function writeOpenAiEndpoints(endpoints: OpenAiEndpointsMap): void {
   doc.endpoints = endpoints;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(doc, null, 2) + "\n", { encoding: "utf-8", mode: 0o600 });
+  // writeFileSync only applies `mode` when creating the file — tighten
+  // pre-existing files too, since this file can contain API keys.
+  fs.chmodSync(filePath, 0o600);
 }
 
 /** Upsert a single named endpoint. */
