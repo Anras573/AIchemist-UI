@@ -88,6 +88,7 @@ function isValidEntry(entry: unknown): entry is OpenAiEndpointEntry {
 
 // ── Read / write ──────────────────────────────────────────────────────────────
 
+/** Best-effort read used by the write path to preserve unknown top-level keys. */
 function safeReadJson(filePath: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8"));
@@ -98,12 +99,36 @@ function safeReadJson(filePath: string): Record<string, unknown> {
 }
 
 /**
- * Read the configured endpoints. Returns `{}` when the file is missing or
- * unreadable. Entries with an invalid name or no usable `baseURL` are dropped
- * (with a console warning) instead of failing the whole map.
+ * Read and parse the config document for the public read path. A missing file
+ * (ENOENT) or malformed JSON is treated as an empty config; any other I/O error
+ * (e.g. EACCES / EISDIR) is rethrown so the IPC layer / Settings UI can surface
+ * a real problem instead of silently reporting "no endpoints configured".
+ */
+function readEndpointsDoc(): Record<string, unknown> {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(getOpenAiEndpointsPath(), "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw err;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    // Malformed JSON — treat as empty rather than hard-failing the app.
+    return {};
+  }
+}
+
+/**
+ * Read the configured endpoints. Returns `{}` when the file is missing or its
+ * JSON is malformed; rethrows real I/O errors (permission denied, etc.). Entries
+ * with an invalid name or malformed fields are dropped (with a console warning)
+ * instead of failing the whole map.
  */
 export function readOpenAiEndpoints(): OpenAiEndpointsMap {
-  const doc = safeReadJson(getOpenAiEndpointsPath());
+  const doc = readEndpointsDoc();
   const raw = doc.endpoints;
   if (!raw || typeof raw !== "object") return {};
 

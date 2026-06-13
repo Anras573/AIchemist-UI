@@ -39,6 +39,15 @@ describe("openai-endpoints config", () => {
     expect(readOpenAiEndpoints()).toEqual({});
   });
 
+  it("rethrows real I/O errors (not ENOENT) so they can be surfaced", () => {
+    // Point the path at a directory — reading it throws EISDIR, a real I/O
+    // error that must not be masked as "no endpoints configured".
+    const dirPath = path.join(tempDir, "is-a-dir");
+    fs.mkdirSync(dirPath);
+    _setEndpointsPathForTests(dirPath);
+    expect(() => readOpenAiEndpoints()).toThrow();
+  });
+
   it("round-trips endpoints through write and read", () => {
     writeOpenAiEndpoints({
       lmstudio: { baseURL: "http://localhost:1234/v1" },

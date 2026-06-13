@@ -182,6 +182,19 @@ describe("openai-compat probe", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("HTTP 401");
   });
+
+  it("returns a not-ok result instead of throwing when reading endpoints fails", async () => {
+    // Point the config path at a directory so readOpenAiEndpoints() throws
+    // EISDIR. probeAll() awaits every provider with Promise.all, so the probe
+    // must convert this into { ok: false } rather than reject.
+    const dirPath = path.join(tempDir, "is-a-dir");
+    fs.mkdirSync(dirPath);
+    _setEndpointsPathForTests(dirPath);
+
+    const result = await openaiCompatProvider.probe!();
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBeTruthy();
+  });
 });
 
 describe("openai-compat turn execution", () => {

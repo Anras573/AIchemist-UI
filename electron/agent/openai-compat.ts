@@ -174,18 +174,26 @@ async function probeOpenAiCompat(opts?: { force?: boolean }): Promise<{ ok: bool
     return probeCache.result;
   }
 
-  const endpoints = readOpenAiEndpoints();
   let result: { ok: boolean; reason?: string; durationMs?: number };
-  if (Object.keys(endpoints).length === 0) {
-    result = { ok: false, reason: OPENAI_COMPAT_NO_ENDPOINTS_ERROR, durationMs: 0 };
-  } else {
-    const start = Date.now();
-    const { models, errors } = await collectEndpointModels(endpoints);
-    const durationMs = Date.now() - start;
-    result =
-      models.length > 0
-        ? { ok: true, durationMs }
-        : { ok: false, reason: errors[0] ?? "Configured endpoints returned no models", durationMs };
+  try {
+    const endpoints = readOpenAiEndpoints();
+    if (Object.keys(endpoints).length === 0) {
+      result = { ok: false, reason: OPENAI_COMPAT_NO_ENDPOINTS_ERROR, durationMs: 0 };
+    } else {
+      const start = Date.now();
+      const { models, errors } = await collectEndpointModels(endpoints);
+      const durationMs = Date.now() - start;
+      result =
+        models.length > 0
+          ? { ok: true, durationMs }
+          : { ok: false, reason: errors[0] ?? "Configured endpoints returned no models", durationMs };
+    }
+  } catch (err) {
+    // Never throw — probeAll() awaits every provider with Promise.all, so a
+    // rejection here would mark *all* providers unavailable. Convert an
+    // unexpected failure (e.g. a config read I/O error) into a not-ok result
+    // for this provider only.
+    result = { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
   probeCache = { result, timestamp: Date.now() };
   return result;
