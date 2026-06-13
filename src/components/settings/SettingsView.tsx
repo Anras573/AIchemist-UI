@@ -200,7 +200,7 @@ function OpenAiEndpointsSection() {
     ipc.readOpenAiEndpoints()
       .then(setEndpoints)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, []);
+  }, [ipc]);
 
   const startAdd = () => {
     setEditingName(null);
@@ -226,7 +226,7 @@ function OpenAiEndpointsSection() {
       // Preserve fields the form doesn't edit (headers, queryParams, …).
       const existing = editingName ? endpoints[editingName] : undefined;
       const next = await ipc.upsertOpenAiEndpoint(name, {
-        ...existing,
+        ...(existing ?? {}),
         baseURL: draft.baseURL.trim(),
         ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : { apiKey: undefined }),
       });
