@@ -89,4 +89,18 @@ describe("handle — zod validation", () => {
     expect(result.ok).toBe(true);
     expect(handler).toHaveBeenCalledOnce();
   });
+
+  it("rejects empty optional strings on AGENT_SEND", async () => {
+    const handler = vi.fn(() => ({ queued: false }));
+    const fn = register(CH.AGENT_SEND, handler);
+
+    const result = (await fn(fakeEvent, { sessionId: "s1", prompt: "hi", agent: "" })) as {
+      ok: boolean;
+      error?: { code: string };
+    };
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("invalid_input");
+    expect(handler).not.toHaveBeenCalled();
+  });
 });

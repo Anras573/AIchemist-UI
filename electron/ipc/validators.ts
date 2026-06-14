@@ -28,10 +28,10 @@ function check<T>(schema: z.ZodType<T>, value: unknown, channel: string): void {
 const agentSendSchema = z.object({
   sessionId: z.string().min(1),
   prompt: z.string(),
-  agent: z.string().optional(),
-  oneshotSkills: z.array(z.string()).optional(),
+  agent: z.string().min(1).optional(),
+  oneshotSkills: z.array(z.string().min(1)).optional(),
   skipPersistence: z.boolean().optional(),
-  messageId: z.string().optional(),
+  messageId: z.string().min(1).optional(),
 });
 
 const saveMessageSchema = z.object({
