@@ -4,7 +4,8 @@
  * tuple of wire arguments `ipcRenderer.invoke` sends and the result the handler
  * resolves with (the success payload, before it is wrapped in an `IpcEnvelope`).
  *
- * Three surfaces derive from this map so a new channel can't drift out of sync:
+ * Three surfaces are checked against this map so the wired pieces can't drift
+ * out of sync:
  *   - `handle()` (electron/ipc/handle.ts) is generic over the contract, so a
  *     registered handler's args/result are checked against it.
  *   - the preload `invoke()` helper (electron/preload.ts) is generic over the
@@ -12,8 +13,12 @@
  *   - `ElectronAPI` result types reference `ContractResult<...>`, so the renderer
  *     surface can't promise a shape the handler doesn't produce.
  *
- * Adding a channel = one contract entry + one handler; the compiler enforces the
- * preload line and the renderer wrapper.
+ * Adding a channel still means wiring it in each place — a contract entry, a
+ * handler, the preload method, and the renderer wrapper. The contract does NOT
+ * force every channel to have a preload method (there's no exhaustiveness
+ * check), but it does guarantee that whatever IS wired agrees: a handler or
+ * `invoke(CH.X, …)` call whose args/result disagree with the channel's declared
+ * shape is a compile error.
  */
 import type * as CH from "./ipc-channels";
 import type {
