@@ -63,7 +63,7 @@ const createSkillSchema = z.object({
   projectPath: z.string().min(1),
   scope: z.enum(["global", "project"]),
   content: z.string(),
-  provider: z.string().optional(),
+  provider: z.string().min(1).optional(),
 });
 
 /** The delete channels take a bare path string rather than an options object. */
