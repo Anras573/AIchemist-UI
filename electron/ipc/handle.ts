@@ -5,9 +5,11 @@ import { validators } from "./validators";
 
 /**
  * Registers an `ipcMain.handle` for a contract channel. The handler's args and
- * result are type-checked against {@link IpcContract}, so a registered handler
- * can't drift from the channel's declared shape (this is what removed the old
- * `any` signature).
+ * result are type-checked against {@link IpcContract}, so they must stay
+ * compatible with the channel's declared shape (this is what removed the old
+ * `any` signature). Note TypeScript still permits a handler to *widen* a
+ * parameter (e.g. `Provider` → `string`) and remain assignable, so keep handler
+ * signatures exact to the contract to catch that kind of drift.
  *
  * Every handler resolves to an {@link IpcEnvelope}: a thrown error is caught,
  * logged, and returned as `{ ok: false, error: { code, message } }` rather than

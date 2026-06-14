@@ -38,11 +38,11 @@ export function registerSessionHandlers(
   activeTurns: Set<string>,
   getMainWindow: () => BrowserWindow | null
 ): void {
-  handle(CH.CREATE_SESSION, async (_event, payload: { projectId: string; providerOverride?: string; issueNumber?: number }) => {
+  handle(CH.CREATE_SESSION, async (_event, payload: { projectId: string; providerOverride?: Provider; issueNumber?: number }) => {
     const { projectId, issueNumber } = payload;
-    // The wire type is a plain string; validate it against the canonical
-    // provider ids so a buggy/compromised renderer can't slip an unknown
-    // provider into getProvider()/session creation. Unknown → fall back to default.
+    // Defensive runtime check: the renderer is untrusted, so re-validate the
+    // override against the canonical provider ids even though it is typed.
+    // Unknown → fall back to the project default.
     const providerOverride: Provider | undefined =
       payload.providerOverride && isProviderId(payload.providerOverride) ? payload.providerOverride : undefined;
 
