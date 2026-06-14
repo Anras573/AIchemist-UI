@@ -11,6 +11,7 @@ import type {
   Provider,
 } from "@/types";
 import type { IpcErrorCode } from "../../electron/ipc/errors";
+import { isIpcErrorCode } from "../../electron/ipc/errors";
 
 // ── Typed wrapper over window.electronAPI ─────────────────────────────────────
 
@@ -199,13 +200,15 @@ export type { IpcErrorCode };
 /**
  * Reads the structured error code off a rejected IPC call. Prefer this over
  * `instanceof IpcError` in renderer code — it works regardless of whether the
- * error kept its class prototype across the contextBridge. Returns `undefined`
- * for non-IPC errors (fall back to `err.message`).
+ * error kept its class prototype across the contextBridge. The code is
+ * validated against the canonical set, so a non-IPC error that merely carries a
+ * `code` string (e.g. a Node `"ENOENT"`) returns `undefined` rather than being
+ * mis-typed as a valid IPC code (fall back to `err.message`).
  */
 export function ipcErrorCode(err: unknown): IpcErrorCode | undefined {
   if (err && typeof err === "object" && "code" in err) {
     const code = (err as { code?: unknown }).code;
-    return typeof code === "string" ? (code as IpcErrorCode) : undefined;
+    return isIpcErrorCode(code) ? code : undefined;
   }
   return undefined;
 }

@@ -12,15 +12,24 @@
  * carries a machine-readable `code` the UI can branch on.
  */
 
+/** The canonical set of IPC error codes — the single source for both the type and runtime checks. */
+export const IPC_ERROR_CODES = [
+  "internal", // unclassified / unexpected failure
+  "invalid_input", // request failed validation (zod) or argument checks
+  "not_found", // a referenced project/session/resource does not exist
+  "conflict", // the operation collides with current state (e.g. session busy)
+  "unauthorized", // missing/invalid credentials
+  "timeout", // the operation timed out
+  "unavailable", // a dependency (provider, key, window) is not available
+] as const;
+
 /** Machine-readable error categories the renderer can branch on. */
-export type IpcErrorCode =
-  | "internal" // unclassified / unexpected failure
-  | "invalid_input" // request failed validation (zod) or argument checks
-  | "not_found" // a referenced project/session/resource does not exist
-  | "conflict" // the operation collides with current state (e.g. session busy)
-  | "unauthorized" // missing/invalid credentials
-  | "timeout" // the operation timed out
-  | "unavailable"; // a dependency (provider, key, window) is not available
+export type IpcErrorCode = (typeof IPC_ERROR_CODES)[number];
+
+/** Type guard: is `value` one of the canonical {@link IpcErrorCode}s? */
+export function isIpcErrorCode(value: unknown): value is IpcErrorCode {
+  return typeof value === "string" && (IPC_ERROR_CODES as readonly string[]).includes(value);
+}
 
 /** Error carrying an {@link IpcErrorCode}. Throw this from a handler to set the code explicitly. */
 export class IpcError extends Error {

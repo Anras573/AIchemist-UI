@@ -21,4 +21,9 @@ describe("ipcErrorCode", () => {
     expect(ipcErrorCode("boom")).toBeUndefined();
     expect(ipcErrorCode({ code: 42 })).toBeUndefined();
   });
+
+  it("ignores a non-IPC string code such as a Node ENOENT", () => {
+    const fsErr = Object.assign(new Error("no such file"), { code: "ENOENT" });
+    expect(ipcErrorCode(fsErr)).toBeUndefined();
+  });
 });
