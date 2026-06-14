@@ -20,9 +20,11 @@ describe("classifyError", () => {
     ["No window available", "unavailable"],
     ["No models available for provider", "unavailable"],
     ["Invalid name — must be a plain file name", "invalid_input"],
-    ["This cannot.", "invalid_input"],
-    ["operation cannot: reason", "invalid_input"],
     ["Refusing to touch agent file outside the library directories", "invalid_input"],
+    // A real JS TypeError is an internal crash, not bad input — must not be
+    // mis-tagged invalid_input by a generic "cannot" substring.
+    ["Cannot read properties of undefined (reading 'id')", "internal"],
+    ["Session abc is busy — cannot queue non-chat turns", "conflict"],
     ["something completely unexpected blew up", "internal"],
   ] as const)("classifies %j as %s", (message, code) => {
     expect(classifyError(new Error(message)).code).toBe(code);

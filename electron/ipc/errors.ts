@@ -73,7 +73,11 @@ function inferCode(message: string): IpcErrorCode {
   if (/timed? ?out|timeout/.test(m)) return "timeout";
   if (/unauthor|forbidden|invalid (api )?key|authentication|not configured/.test(m)) return "unauthorized";
   if (/no window|unavailable|no models|not available|not running/.test(m)) return "unavailable";
-  if (/invalid|must be|cannot\b|refusing|outside the library|only github|escapes/.test(m))
+  // Note: deliberately no generic "cannot" token here — JS runtime TypeErrors
+  // ("Cannot read properties of undefined …") are internal crashes, not bad
+  // input, and the one app message that says "cannot" ("busy — cannot queue")
+  // is already caught as `conflict` above.
+  if (/invalid|must be|refusing|outside the library|only github|escapes/.test(m))
     return "invalid_input";
   return "internal";
 }
