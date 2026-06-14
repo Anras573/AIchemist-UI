@@ -90,6 +90,21 @@ describe("handle — zod validation", () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
+  it("rejects extra wire arguments on a unary validated channel", async () => {
+    const handler = vi.fn(() => ({ id: "m1" }) as Message);
+    const fn = register(CH.SAVE_MESSAGE, handler);
+
+    const result = (await fn(
+      fakeEvent,
+      { sessionId: "s1", role: "user", content: "hello" },
+      "unexpected-extra-arg"
+    )) as { ok: boolean; error?: { code: string } };
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("invalid_input");
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("rejects empty optional strings on AGENT_SEND", async () => {
     const handler = vi.fn(() => ({ queued: false }));
     const fn = register(CH.AGENT_SEND, handler);

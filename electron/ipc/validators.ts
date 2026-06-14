@@ -25,6 +25,21 @@ function check<T>(schema: z.ZodType<T>, value: unknown, channel: string): void {
   }
 }
 
+/**
+ * Builds a validator for a single-argument channel. It enforces the unary arity
+ * (every validated channel takes exactly one wire arg — an object payload or a
+ * path string) so a renderer sending extra parameters is rejected, then runs
+ * `schema` against that argument.
+ */
+function unary<T>(schema: z.ZodType<T>, channel: string): (args: unknown[]) => void {
+  return (args) => {
+    if (args.length !== 1) {
+      throw new IpcError("invalid_input", `"${channel}" expects exactly one argument, got ${args.length}`);
+    }
+    check(schema, args[0], channel);
+  };
+}
+
 const agentSendSchema = z.object({
   sessionId: z.string().min(1),
   prompt: z.string(),
@@ -74,12 +89,12 @@ const pathArgSchema = z.string().min(1);
  * channel can opt in with one entry.
  */
 export const validators: Partial<Record<RequestChannel, (args: unknown[]) => void>> = {
-  [CH.AGENT_SEND]: (args) => check(agentSendSchema, args[0], CH.AGENT_SEND),
-  [CH.SAVE_MESSAGE]: (args) => check(saveMessageSchema, args[0], CH.SAVE_MESSAGE),
-  [CH.WRITE_AGENT_FILE]: (args) => check(writeAgentFileSchema, args[0], CH.WRITE_AGENT_FILE),
-  [CH.WRITE_SKILL_FILE]: (args) => check(writeSkillFileSchema, args[0], CH.WRITE_SKILL_FILE),
-  [CH.CREATE_AGENT]: (args) => check(createAgentSchema, args[0], CH.CREATE_AGENT),
-  [CH.DELETE_AGENT_FILE]: (args) => check(pathArgSchema, args[0], CH.DELETE_AGENT_FILE),
-  [CH.CREATE_SKILL]: (args) => check(createSkillSchema, args[0], CH.CREATE_SKILL),
-  [CH.DELETE_SKILL_DIR]: (args) => check(pathArgSchema, args[0], CH.DELETE_SKILL_DIR),
+  [CH.AGENT_SEND]: unary(agentSendSchema, CH.AGENT_SEND),
+  [CH.SAVE_MESSAGE]: unary(saveMessageSchema, CH.SAVE_MESSAGE),
+  [CH.WRITE_AGENT_FILE]: unary(writeAgentFileSchema, CH.WRITE_AGENT_FILE),
+  [CH.WRITE_SKILL_FILE]: unary(writeSkillFileSchema, CH.WRITE_SKILL_FILE),
+  [CH.CREATE_AGENT]: unary(createAgentSchema, CH.CREATE_AGENT),
+  [CH.DELETE_AGENT_FILE]: unary(pathArgSchema, CH.DELETE_AGENT_FILE),
+  [CH.CREATE_SKILL]: unary(createSkillSchema, CH.CREATE_SKILL),
+  [CH.DELETE_SKILL_DIR]: unary(pathArgSchema, CH.DELETE_SKILL_DIR),
 };

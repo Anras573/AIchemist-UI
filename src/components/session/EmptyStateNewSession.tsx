@@ -15,7 +15,7 @@ export function EmptyStateNewSession({
   projectPath,
 }: {
   defaultProvider: string | null;
-  onNewSession: (providerOverride?: string, issueNumber?: number) => void;
+  onNewSession: (providerOverride?: Provider, issueNumber?: number) => void;
   probes?: ProviderProbes | null;
   error?: string | null;
   /** When provided, shows an optional issue picker. */

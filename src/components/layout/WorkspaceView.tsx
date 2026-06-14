@@ -7,6 +7,7 @@ import { SplitPane } from "@/components/layout/SplitPane";
 import { TimelinePanel } from "@/components/session/TimelinePanel";
 import { ContextPanel, type ContextTab } from "@/components/session/ContextPanel";
 import { ToolStrip } from "@/components/session/ToolStrip";
+import type { Provider } from "@/types";
 
 export function WorkspaceView() {
   const ipc = useIpc();
@@ -69,7 +70,7 @@ export function WorkspaceView() {
     }
   }, [activeTab, showGitHubTab]);
 
-  const handleNewSession = useCallback(async (providerOverride?: string, issueNumber?: number) => {
+  const handleNewSession = useCallback(async (providerOverride?: Provider, issueNumber?: number) => {
     if (!activeProjectId) return;
     setCreateError(null);
     try {

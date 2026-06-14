@@ -31,7 +31,7 @@ export const ipc = {
     window.electronAPI.saveProjectConfig(id, config),
 
   // Sessions
-  createSession: (projectId: string, providerOverride?: string, issueNumber?: number) =>
+  createSession: (projectId: string, providerOverride?: Provider, issueNumber?: number) =>
     window.electronAPI.createSession(projectId, providerOverride, issueNumber),
   listSessions: (projectId: string) => window.electronAPI.listSessions(projectId),
   getSession: (sessionId: string) => window.electronAPI.getSession(sessionId),

@@ -36,7 +36,7 @@ export interface ElectronAPI {
   // ── Sessions ──────────────────────────────────────────────────────────────
   createSession: (
     projectId: string,
-    providerOverride?: string,
+    providerOverride?: import("../src/types").Provider,
     issueNumber?: number
   ) => Promise<Res<typeof CH.CREATE_SESSION>>;
   listSessions: (projectId: string) => Promise<Res<typeof CH.LIST_SESSIONS>>;

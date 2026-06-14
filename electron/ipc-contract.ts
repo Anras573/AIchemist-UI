@@ -80,7 +80,7 @@ export type IpcContract = {
 
   // ── Sessions ────────────────────────────────────────────────────────────
   [CH.CREATE_SESSION]: {
-    args: [payload: { projectId: string; providerOverride?: string; issueNumber?: number }];
+    args: [payload: { projectId: string; providerOverride?: Provider; issueNumber?: number }];
     result: Session;
   };
   [CH.LIST_SESSIONS]: { args: [projectId: string]; result: Session[] };
