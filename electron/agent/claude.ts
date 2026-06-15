@@ -551,9 +551,10 @@ export const claudeProvider: AgentProvider = {
       providerSessionStore.get(params.db, params.sessionId, "claude")?.sdkSessionId ?? null;
 
     // Legacy fallback: sessions that last ran before the provider_state migration
-    // carry their SDK id in the old sdk_session_id column. Read it once and
-    // backfill provider_state so subsequent turns stay on the unified path and
-    // conversation continuity survives the upgrade.
+    // carry their SDK id in the old sdk_session_id column. Read it once, backfill
+    // provider_state, and clear the legacy column so the fallback is truly
+    // one-time — otherwise a later invalidation (slice removed via set(…, null))
+    // would resurrect the stale id from the still-populated column.
     if (!sdkSessionId) {
       const legacy = params.db
         .prepare("SELECT sdk_session_id FROM sessions WHERE id = ?")
@@ -561,6 +562,9 @@ export const claudeProvider: AgentProvider = {
       if (legacy?.sdk_session_id) {
         sdkSessionId = legacy.sdk_session_id;
         providerSessionStore.set(params.db, params.sessionId, "claude", { sdkSessionId });
+        params.db
+          .prepare("UPDATE sessions SET sdk_session_id = NULL WHERE id = ?")
+          .run(params.sessionId);
       }
     }
 

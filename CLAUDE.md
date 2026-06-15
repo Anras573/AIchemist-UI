@@ -119,8 +119,8 @@ SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `me
 | `agent TEXT` | Selected agent name (nullable) |
 | `provider_state TEXT` | **Unified per-provider SDK session state (JSON).** One blob per session, one key per provider (`claude.sdkSessionId`, `copilot.{sessionId,agent,mcpFp}`). Owned by `electron/agent/provider-session-store.ts`. A new provider adds a key here — no schema change. |
 | `disabled_mcp_servers TEXT` | JSON array of AIchemist-managed MCP server names disabled for this session. Filtered out by `loadManagedMcpServers({ excludeNames })` before injection. |
-| `sdk_session_id TEXT` | **Legacy / dead write.** Superseded by `provider_state.claude.sdkSessionId`. Never written anymore, but read as a one-time fallback for pre-migration sessions (in `claudeProvider.run` and trace lookups) and backfilled into `provider_state` on the next turn. |
-| `copilot_session_id` / `copilot_session_agent` / `copilot_session_mcp_fp TEXT` | **Legacy / dead write.** Superseded by `provider_state.copilot`. Never written anymore, but read as a one-time fallback for pre-migration sessions (in `runCopilotAgentTurn` and trace lookups) and backfilled into `provider_state` on the next turn. |
+| `sdk_session_id TEXT` | **Legacy / dead write.** Superseded by `provider_state.claude.sdkSessionId`. Never written anymore, but read as a one-time fallback for pre-migration sessions (in `claudeProvider.run` and trace lookups); the runner backfills it into `provider_state` and NULLs this column so the fallback can't later resurrect a stale id. |
+| `copilot_session_id` / `copilot_session_agent` / `copilot_session_mcp_fp TEXT` | **Legacy / dead write.** Superseded by `provider_state.copilot`. Never written anymore, but read as a one-time fallback for pre-migration sessions (in `runCopilotAgentTurn` and trace lookups); the runner backfills them into `provider_state` and NULLs these columns so the fallback can't later resurrect stale state. |
 
 ### Migrations — numbered, gated by `PRAGMA user_version`
 

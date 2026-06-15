@@ -448,8 +448,10 @@ export async function runCopilotAgentTurn(params: {
 
   // Legacy fallback: sessions that last ran before the provider_state migration
   // carry their SDK session id / agent / MCP fingerprint in the old
-  // copilot_session_* columns. Read them once and backfill provider_state so
-  // continuity survives the upgrade and subsequent turns use the unified store.
+  // copilot_session_* columns. Read them once, backfill provider_state, and
+  // clear the legacy columns so the fallback is truly one-time — otherwise a
+  // later invalidation (slice removed via set(…, null)) would resurrect the
+  // stale state from the still-populated columns.
   if (!prior.sessionId) {
     const legacy = db
       .prepare(
@@ -469,6 +471,9 @@ export async function runCopilotAgentTurn(params: {
         mcpFp: legacy.copilot_session_mcp_fp,
       };
       providerSessionStore.set(db, sessionId, "copilot", prior);
+      db.prepare(
+        "UPDATE sessions SET copilot_session_id = NULL, copilot_session_agent = NULL, copilot_session_mcp_fp = NULL WHERE id = ?"
+      ).run(sessionId);
     }
   }
 
