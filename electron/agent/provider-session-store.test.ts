@@ -139,4 +139,16 @@ describe("ProviderSessionStore", () => {
     // No phantom cache entry for the deleted session.
     expect(providerSessionStore.get(db, "s1", "claude")).toBeUndefined();
   });
+
+  it("does not cache negative lookups so a later-inserted row is still read", () => {
+    const db = makeDb();
+    // Query a session whose row does not exist yet.
+    expect(providerSessionStore.get(db, "s2", "claude")).toBeUndefined();
+    // Insert the row with state — the store must read it fresh, not a cached {}.
+    db.prepare("INSERT INTO sessions (id, provider_state) VALUES (?, ?)").run(
+      "s2",
+      JSON.stringify({ claude: { sdkSessionId: "later" } })
+    );
+    expect(providerSessionStore.get(db, "s2", "claude")).toEqual({ sdkSessionId: "later" });
+  });
 });

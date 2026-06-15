@@ -93,7 +93,10 @@ class ProviderSessionStore {
       .prepare("SELECT provider_state FROM sessions WHERE id = ?")
       .get(sessionId) as { provider_state: string | null } | undefined;
     const state = parseProviderSessionState(row?.provider_state);
-    this.cache.set(sessionId, state);
+    // Only cache real rows. Caching a negative lookup (row not yet inserted, or
+    // temporarily deleted) would shadow the DB once the row appears, so the
+    // DB stays authoritative until the row actually exists.
+    if (row) this.cache.set(sessionId, state);
     return state;
   }
 
