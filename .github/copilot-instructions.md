@@ -57,8 +57,10 @@ When detecting an agent or MCP-fingerprint change in `copilot.ts`, normalize `un
 
 ```typescript
 const prior = providerSessionStore.get(db, sessionId, "copilot") ?? {};
+const normalizedAgent = agent ?? "";
+const normalizedMcpFp = mcpFp ?? "";
 let resumeId = prior.sessionId ?? null;
-if (resumeId && ((prior.agent ?? "") !== (agent ?? "") || (prior.mcpFp ?? "") !== mcpFp)) {
+if (resumeId && ((prior.agent ?? "") !== normalizedAgent || (prior.mcpFp ?? "") !== normalizedMcpFp)) {
   resumeId = null; // stale systemMessage/mcpServers → force a fresh createSession
 }
 ```

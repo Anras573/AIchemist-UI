@@ -43,7 +43,10 @@ Per-provider SDK state lives in `sessions.provider_state` behind `providerSessio
 ```typescript
 const prior = providerSessionStore.get(db, sessionId, "copilot") ?? {};
 const normalizedAgent = agent ?? "";
-if ((prior.agent ?? "") !== normalizedAgent) { /* force fresh session */ }
+const normalizedMcpFp = mcpFp ?? "";
+if ((prior.agent ?? "") !== normalizedAgent || (prior.mcpFp ?? "") !== normalizedMcpFp) {
+  /* force fresh session */
+}
 ```
 Using `?? null` on the stored side causes `undefined !== ""` to be always true, resetting the Copilot session and destroying conversation history on every turn.
 
