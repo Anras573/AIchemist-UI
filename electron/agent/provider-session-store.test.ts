@@ -122,4 +122,21 @@ describe("ProviderSessionStore", () => {
     // Neither mutation leaked into the cache.
     expect(providerSessionStore.get(db, "s1", "claude")).toEqual({ sdkSessionId: "abc" });
   });
+
+  it("returns undefined for a corrupted non-object slice", () => {
+    const db = makeDb();
+    for (const blob of ['{"claude":null}', '{"claude":"x"}', '{"claude":[1,2]}']) {
+      db.prepare("UPDATE sessions SET provider_state = ? WHERE id = ?").run(blob, "s1");
+      providerSessionStore.forget("s1");
+      expect(providerSessionStore.get(db, "s1", "claude")).toBeUndefined();
+    }
+  });
+
+  it("set() does not cache state for a session whose row no longer exists", () => {
+    const db = makeDb();
+    db.prepare("DELETE FROM sessions WHERE id = ?").run("s1");
+    expect(() => providerSessionStore.set(db, "s1", "claude", { sdkSessionId: "abc" })).not.toThrow();
+    // No phantom cache entry for the deleted session.
+    expect(providerSessionStore.get(db, "s1", "claude")).toBeUndefined();
+  });
 });

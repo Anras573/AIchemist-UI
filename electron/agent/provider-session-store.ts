@@ -104,9 +104,14 @@ class ProviderSessionStore {
     provider: K
   ): ProviderSessionState[K] {
     const slice = this.read(db, sessionId)[provider];
-    // Return a shallow copy so a caller mutating the result can't silently
-    // diverge the cache from the DB (slices are flat objects).
-    return (slice ? { ...slice } : slice) as ProviderSessionState[K];
+    // Treat a corrupted, non-object slice (e.g. `{"claude":null}` or
+    // `{"claude":"x"}` in a hand-edited row) as absent. Otherwise return a
+    // shallow copy so a caller mutating the result can't silently diverge the
+    // cache from the DB (slices are flat objects).
+    if (!slice || typeof slice !== "object" || Array.isArray(slice)) {
+      return undefined;
+    }
+    return { ...slice } as ProviderSessionState[K];
   }
 
   /**
@@ -127,11 +132,18 @@ class ProviderSessionStore {
       // into the cache.
       next[provider] = { ...state } as NonNullable<ProviderSessionState[K]>;
     }
-    this.cache.set(sessionId, next);
-    db.prepare("UPDATE sessions SET provider_state = ? WHERE id = ?").run(
-      serializeProviderSessionState(next),
-      sessionId
-    );
+    // Write through to the DB FIRST, then update the cache only if the row still
+    // exists. This way a throwing UPDATE never leaves the cache ahead of the DB,
+    // and a concurrently-deleted session (changes === 0) doesn't re-introduce
+    // phantom cache state.
+    const info = db
+      .prepare("UPDATE sessions SET provider_state = ? WHERE id = ?")
+      .run(serializeProviderSessionState(next), sessionId);
+    if (info.changes > 0) {
+      this.cache.set(sessionId, next);
+    } else {
+      this.cache.delete(sessionId);
+    }
   }
 
   /**
