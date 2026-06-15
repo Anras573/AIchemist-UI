@@ -38,6 +38,15 @@ describe("parseProviderSessionState", () => {
       claude: { sdkSessionId: "x" },
     });
   });
+
+  it("strips prototype-pollution keys and does not mutate Object.prototype", () => {
+    const blob =
+      '{"__proto__":{"polluted":true},"constructor":{"x":1},"claude":{"sdkSessionId":"x"}}';
+    const result = parseProviderSessionState(blob);
+    expect(result).toEqual({ claude: { sdkSessionId: "x" } });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined();
+  });
 });
 
 describe("ProviderSessionStore", () => {

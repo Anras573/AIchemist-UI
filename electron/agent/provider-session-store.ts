@@ -40,16 +40,24 @@ export interface ProviderSessionState {
 
 export type ProviderKey = keyof ProviderSessionState;
 
+/** Keys that could pollute Object.prototype if copied via spread/assign. */
+const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 /**
  * Defensive parse of the raw `provider_state` JSON column. Returns an empty
- * object for null/empty/malformed input so a corrupted row never throws.
+ * object for null/empty/malformed input so a corrupted row never throws. A
+ * reviver strips `__proto__` / `constructor` / `prototype` at every depth so a
+ * corrupted or hostile DB row can't trigger prototype pollution when the parsed
+ * object is later spread.
  */
 export function parseProviderSessionState(
   raw: string | null | undefined
 ): ProviderSessionState {
   if (!raw) return {};
   try {
-    const parsed: unknown = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw, (key, value) =>
+      DANGEROUS_KEYS.has(key) ? undefined : value
+    );
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed as ProviderSessionState;
     }
