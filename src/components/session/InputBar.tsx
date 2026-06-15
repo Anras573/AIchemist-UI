@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { SkillInfo, SessionUsage } from "@/types";
+import type { Provider } from "@/types";
 import { useIpc } from "@/lib/ipc";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { AgentPickerButton } from "./AgentPickerButton";
@@ -91,7 +92,7 @@ export interface InputBarProps {
   disabled?: boolean;
   placeholder?: string;
   onSend?: (text: string, oneshotSkills?: string[]) => void;
-  onNewSession?: (providerOverride?: string, issueNumber?: number) => void;
+  onNewSession?: (providerOverride?: Provider, issueNumber?: number) => void;
 }
 
 /** Outer shell — provides the controlled text context for the inner bar. */

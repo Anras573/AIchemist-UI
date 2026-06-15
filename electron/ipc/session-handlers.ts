@@ -16,6 +16,7 @@ import {
   getDisabledMcpServers,
 } from "../sessions";
 import { listProjects } from "../projects";
+import { isProviderId } from "../providers";
 import {
   cleanupManagedWorktree,
   createManagedWorktree,
@@ -37,10 +38,13 @@ export function registerSessionHandlers(
   activeTurns: Set<string>,
   getMainWindow: () => BrowserWindow | null
 ): void {
-  handle(CH.CREATE_SESSION, async (_event, payload: string | { projectId: string; providerOverride?: Provider; issueNumber?: number | null }) => {
-    const projectId = typeof payload === "string" ? payload : payload.projectId;
-    const providerOverride = typeof payload === "string" ? undefined : payload.providerOverride;
-    const issueNumber = typeof payload === "string" ? undefined : (payload.issueNumber ?? undefined);
+  handle(CH.CREATE_SESSION, async (_event, payload: { projectId: string; providerOverride?: Provider; issueNumber?: number }) => {
+    const { projectId, issueNumber } = payload;
+    // Defensive runtime check: the renderer is untrusted, so re-validate the
+    // override against the canonical provider ids even though it is typed.
+    // Unknown → fall back to the project default.
+    const providerOverride: Provider | undefined =
+      payload.providerOverride && isProviderId(payload.providerOverride) ? payload.providerOverride : undefined;
 
     const project = listProjects(db).find((p) => p.id === projectId);
     const provider = providerOverride ?? project?.config.provider ?? null;

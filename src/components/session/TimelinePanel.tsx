@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { Message as MessageRecord, CompactionEvent } from "@/types";
+import type { Provider } from "@/types";
 import { cn } from "@/lib/utils";
 import { useProviderProbes } from "@/lib/hooks/useProviderProbes";
 import { MessageResponse, Message, MessageContent } from "@/components/ai-elements/message";
@@ -242,7 +243,7 @@ interface TimelinePanelProps {
   /** Called by Phase 4 when the user submits a message. */
   onSendMessage?: (text: string, oneshotSkills?: string[]) => void;
   /** Called when the user clicks "Create new session" from the empty state. Optional provider override locks the new session provider. */
-  onNewSession?: (providerOverride?: string, issueNumber?: number) => void;
+  onNewSession?: (providerOverride?: Provider, issueNumber?: number) => void;
   /** Error message from a failed session creation attempt, to surface in the empty state. */
   createSessionError?: string | null;
   /** Project path — used for the issue picker in the empty state. */

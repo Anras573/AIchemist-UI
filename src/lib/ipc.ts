@@ -6,9 +6,12 @@ import type {
   GitHubGetPrContextArgs,
   GitHubListIssuesArgs,
   GitHubListPrsArgs,
+  MessageRole,
   ProjectConfig,
   Provider,
 } from "@/types";
+import type { IpcErrorCode } from "../../electron/ipc/errors";
+import { isIpcErrorCode } from "../../electron/ipc/errors";
 
 // ── Typed wrapper over window.electronAPI ─────────────────────────────────────
 
@@ -28,13 +31,13 @@ export const ipc = {
     window.electronAPI.saveProjectConfig(id, config),
 
   // Sessions
-  createSession: (projectId: string, providerOverride?: string, issueNumber?: number) =>
+  createSession: (projectId: string, providerOverride?: Provider, issueNumber?: number) =>
     window.electronAPI.createSession(projectId, providerOverride, issueNumber),
   listSessions: (projectId: string) => window.electronAPI.listSessions(projectId),
   getSession: (sessionId: string) => window.electronAPI.getSession(sessionId),
   deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) =>
     window.electronAPI.deleteSession(sessionId, options),
-  saveMessage: (args: { sessionId: string; role: string; content: string }) =>
+  saveMessage: (args: { sessionId: string; role: MessageRole; content: string }) =>
     window.electronAPI.saveMessage(args),
   updateSessionTitle: (sessionId: string, title: string) =>
     window.electronAPI.updateSessionTitle(sessionId, title),
@@ -182,4 +185,30 @@ export type IpcClient = typeof ipc;
 export const IpcContext = React.createContext<IpcClient>(ipc);
 export function useIpc(): IpcClient {
   return React.useContext(IpcContext);
+}
+
+// ── Structured errors ─────────────────────────────────────────────────────────
+// A failed IPC call rejects with an error carrying a machine-readable `code`
+// (e.g. "not_found", "conflict"). Note: errors crossing the contextBridge are
+// not guaranteed to keep the `IpcError` prototype, so `instanceof IpcError` can
+// fail in the renderer even when `code` is present. Branch on the code instead,
+// via `ipcErrorCode()`:
+//   catch (err) { if (ipcErrorCode(err) === "conflict") … }
+export { IpcError } from "../../electron/ipc/errors";
+export type { IpcErrorCode };
+
+/**
+ * Reads the structured error code off a rejected IPC call. Prefer this over
+ * `instanceof IpcError` in renderer code — it works regardless of whether the
+ * error kept its class prototype across the contextBridge. The code is
+ * validated against the canonical set, so a non-IPC error that merely carries a
+ * `code` string (e.g. a Node `"ENOENT"`) returns `undefined` rather than being
+ * mis-typed as a valid IPC code (fall back to `err.message`).
+ */
+export function ipcErrorCode(err: unknown): IpcErrorCode | undefined {
+  if (err && typeof err === "object" && "code" in err) {
+    const code = (err as { code?: unknown }).code;
+    return isIpcErrorCode(code) ? code : undefined;
+  }
+  return undefined;
 }
