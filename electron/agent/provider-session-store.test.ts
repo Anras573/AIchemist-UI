@@ -100,4 +100,17 @@ describe("ProviderSessionStore", () => {
     providerSessionStore.forget("s1");
     expect(providerSessionStore.get(db, "s1", "claude")).toBeUndefined();
   });
+
+  it("returns snapshots — mutating get()/set() inputs or outputs never touches the cache", () => {
+    const db = makeDb();
+    const input = { sdkSessionId: "abc" };
+    providerSessionStore.set(db, "s1", "claude", input);
+    input.sdkSessionId = "mutated-after-set";
+
+    const out = providerSessionStore.get(db, "s1", "claude")!;
+    out.sdkSessionId = "mutated-after-get";
+
+    // Neither mutation leaked into the cache.
+    expect(providerSessionStore.get(db, "s1", "claude")).toEqual({ sdkSessionId: "abc" });
+  });
 });

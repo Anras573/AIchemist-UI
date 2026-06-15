@@ -95,7 +95,10 @@ class ProviderSessionStore {
     sessionId: string,
     provider: K
   ): ProviderSessionState[K] {
-    return this.read(db, sessionId)[provider];
+    const slice = this.read(db, sessionId)[provider];
+    // Return a shallow copy so a caller mutating the result can't silently
+    // diverge the cache from the DB (slices are flat objects).
+    return (slice ? { ...slice } : slice) as ProviderSessionState[K];
   }
 
   /**
@@ -112,7 +115,9 @@ class ProviderSessionStore {
     if (state === null) {
       delete next[provider];
     } else {
-      next[provider] = state;
+      // Clone the incoming slice so a later mutation by the caller can't reach
+      // into the cache.
+      next[provider] = { ...state } as NonNullable<ProviderSessionState[K]>;
     }
     this.cache.set(sessionId, next);
     db.prepare("UPDATE sessions SET provider_state = ? WHERE id = ?").run(
