@@ -56,7 +56,7 @@ This is an **Electron** desktop application with a React + TypeScript renderer a
 | `preload.ts` | `contextBridge` — exposes typed `window.electronAPI` to the renderer |
 | `ipc-channels.ts` | Shared IPC channel name constants |
 | `config.ts` | Loads `~/.aichemist/.env` via `dotenv`; resolves API keys |
-| `db.ts` | Opens `~/.aichemist/aichemist.db` via `better-sqlite3`; forward-only migrations |
+| `db.ts` | Opens `~/.aichemist/aichemist.db` via `better-sqlite3`; numbered migrations gated by `PRAGMA user_version` |
 | `projects.ts` | CRUD for projects + per-project JSON config |
 | `sessions.ts` | CRUD for sessions and messages; includes `updateSessionAgent()` |
 | `dialog.ts` | Native folder picker via Electron's `dialog` module |
@@ -117,13 +117,18 @@ SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `me
 | Column | Purpose |
 |---|---|
 | `agent TEXT` | Selected agent name (nullable) |
-| `sdk_session_id TEXT` | Claude SDK session ID — enables `resume:` across restarts |
-| `copilot_session_id TEXT` | Copilot SDK session ID — enables `resumeSession()` across restarts |
-| `copilot_session_agent TEXT` | Agent active when the Copilot SDK session was created — used to detect agent changes across restarts and force a fresh session |
-| `copilot_session_mcp_fp TEXT` | Fingerprint of the AIchemist-managed MCP server map active when the Copilot SDK session was created — change forces a fresh session |
+| `provider_state TEXT` | **Unified per-provider SDK session state (JSON).** One blob per session, one key per provider (`claude.sdkSessionId`, `copilot.{sessionId,agent,mcpFp}`). Owned by `electron/agent/provider-session-store.ts`. A new provider adds a key here — no schema change. |
 | `disabled_mcp_servers TEXT` | JSON array of AIchemist-managed MCP server names disabled for this session. Filtered out by `loadManagedMcpServers({ excludeNames })` before injection. |
+| `sdk_session_id TEXT` | **Dead read.** Legacy Claude SDK session ID, superseded by `provider_state.claude.sdkSessionId`. Kept only so pre-migration sessions still resolve traces. |
+| `copilot_session_id` / `copilot_session_agent` / `copilot_session_mcp_fp TEXT` | **Dead reads.** Legacy Copilot trio, superseded by `provider_state.copilot`. Kept only for pre-migration trace lookups. |
 
-Migrations in `electron/db.ts` are **append-only** — never modify existing SQL.
+### Migrations — numbered, gated by `PRAGMA user_version`
+
+`electron/db.ts` runs an ordered `MIGRATIONS` array gated by `PRAGMA user_version`: index `i` is schema version `i + 1` and runs exactly once, inside a transaction with the version bump (so a crash can't half-apply one). The array is **append-only** — never reorder, delete, or edit an existing entry; add new ones to the end (a plain `ALTER TABLE … ADD COLUMN`). v1 is the baseline (columns the old "hasColumn + ALTER on every open" loop used to add, now guarded by `addColumnIfMissing` so existing DBs at `user_version 0` upgrade cleanly).
+
+### Provider session state — `ProviderSessionStore`
+
+`electron/agent/provider-session-store.ts` exposes the app-wide singleton `providerSessionStore`: a read-through cache over `provider_state` where the **DB is the source of truth** and the in-memory map is a per-app-run fast path. API: `get(db, sessionId, provider)`, `set(db, sessionId, provider, state | null)` (write-through; `null` removes the slice and collapses an empty blob to `NULL`), `forget(sessionId)` (drop one cache entry, used on session delete), `reset()` / `_resetProviderSessionStore()` (test seam — clears the whole cache, DB untouched). Both Claude and Copilot read/write their slice through it; there is no longer a "seeded from DB" gate or an in-memory/DB normalization footgun.
 
 ### Session provider lock
 
@@ -168,7 +173,7 @@ The Traces tab does **not** use an in-memory tracer. Instead, both providers wri
 
 ### IPC surface
 
-- **`GET_TRACES({ sessionId })`** in `electron/ipc/trace-handlers.ts` — dispatches by provider: looks up `sessions.sdk_session_id` (Claude) or `sessions.copilot_session_id` (Copilot) and parses the corresponding file.
+- **`GET_TRACES({ sessionId })`** in `electron/ipc/trace-handlers.ts` — dispatches by provider: reads the SDK session id from `provider_state` (`claude.sdkSessionId` / `copilot.sessionId`), falling back to the legacy `sessions.sdk_session_id` / `copilot_session_id` columns for pre-migration sessions, then parses the corresponding file.
 - **`TRACE_BIND_TRANSCRIPT({ sessionId })`** — sets up a `chokidar` watcher on the transcript file and streams incremental spans via `SESSION_TRACE_UPDATE`. The `TracesPanel` calls this when the tab opens.
 
 ### Copilot turn grouping — anchor on `interactionId`, not `turnId`
@@ -191,7 +196,7 @@ Claude's `.jsonl` format has one line per SDK message. `claude-transcript.ts` bu
 
 ### Session ID lookup
 
-Traces only appear once the session has run at least one turn — that's when `sdk_session_id` / `copilot_session_id` is first populated. Before then, `GET_TRACES` returns an empty array. Don't add a fallback that synthesizes spans from `tool_calls` rows; the transcript is the source of truth.
+Traces only appear once the session has run at least one turn — that's when the SDK session id (`provider_state.claude.sdkSessionId` / `provider_state.copilot.sessionId`) is first populated. Before then, `GET_TRACES` returns an empty array. Don't add a fallback that synthesizes spans from `tool_calls` rows; the transcript is the source of truth.
 
 ---
 
@@ -398,7 +403,7 @@ VS Code-style editor-owned MCP config. AIchemist maintains its own MCP server li
 | Reserved name | `aichemist-tools` is the in-process approval-gated server. `loadManagedMcpServers()` strips it defensively; the Claude runner spreads `{...managed, "aichemist-tools": mcpServer}` so the literal key always wins. |
 | Claude injection | `electron/agent/claude.ts` spreads managed servers into `query({ mcpServers })` before `aichemist-tools`. |
 | Copilot injection | `electron/agent/copilot.ts` adds them to `SessionConfig.mcpServers`. `MCPServerConfig` typed import from `@github/copilot-sdk` is required for the adapter return type. |
-| Copilot invalidation | `client.resumeSession()` does NOT honour an updated `mcpServers`. A stable fingerprint is stored in `sessions.copilot_session_mcp_fp`; on each turn, an agent change OR fingerprint change forces a fresh `createSession`. |
+| Copilot invalidation | `client.resumeSession()` does NOT honour an updated `mcpServers`. A stable fingerprint is stored in `provider_state.copilot.mcpFp` (via `providerSessionStore`); on each turn, an agent change OR fingerprint change forces a fresh `createSession`. |
 | Panel | `McpServersPanel` shows a violet "AIchemist" badge for `source === "aichemist"`. The "AIchemist" tab in `McpConfigEditorDialog` is the default scope. |
 | Health probing | `electron/agent/mcp-probe.ts` actively connects to each managed server (stdio/HTTP/SSE), runs `tools/list`, and surfaces `{ connected, tools, error }` on each row. Cached 30s by fingerprint of the unfiltered managed map; `force: true` (`MCP_PROBE_MANAGED` IPC, used by the refresh button) bypasses the cache. Stdio probes have a 4-parallel concurrency cap to avoid spawn storms. The SDK loader is injected via `_setSdkLoader` for tests — see `mcp-probe.test.ts`. |
 | Per-session disable | Toggle in the panel persists names to `sessions.disabled_mcp_servers` via `MCP_TOGGLE_SESSION_SERVER` and `setDisabledMcpServers`. Both runners read the disabled set per turn and pass it via `loadManagedMcpServers({ excludeNames })`. Claude picks up the new map per-turn (no cache work needed). For Copilot, the disabled set is filtered BEFORE `fingerprintManaged()` so toggling naturally invalidates the cached SDK session. |
@@ -442,26 +447,22 @@ MCP tools (`mcp__aichemist-tools__*`) are explicitly skipped in the hook (they h
 
 `customAgents` in Copilot sessions are **sub-agent delegation configs** — the parent Copilot agent decides when to delegate to them based on inference. They are NOT a replacement for the session system prompt.
 
-To make a user-selected agent's instructions the primary context, use `systemMessage: { mode: "replace", content: agentBody }` in the `createSession`/`resumeSession` config. When the agent changes between turns, the cached Copilot SDK session must be discarded (delete from `copilotSessionIds` **and** NULL out `copilot_session_id`/`copilot_session_agent` in the DB) so the next turn creates a fresh session with the new system message — `resumeSession` does not update the system message of an existing session.
+To make a user-selected agent's instructions the primary context, use `systemMessage: { mode: "replace", content: agentBody }` in the `createSession`/`resumeSession` config. When the agent changes between turns, the cached Copilot SDK session must be discarded so the next turn creates a fresh session with the new system message — `resumeSession` does not update the system message of an existing session. With `providerSessionStore`, this is just: skip the resume (`resumeId = null`) when `prior.agent` differs from the current agent, then `set(db, sessionId, "copilot", { sessionId, agent, mcpFp })` after creating the fresh session.
 
-### Copilot SDK — Agent tracking normalization
+### Copilot SDK — Agent / MCP-fingerprint change detection
 
-`copilot.ts` tracks the last agent used per session in `copilotSessionIds` (keyed `agent:${sessionId}`) **and** in `sessions.copilot_session_agent` in the DB. The in-memory map is the fast path within a single app run; the DB values are read once per session on first access (via the `seededFromDb` gate) so session continuity survives restarts. When comparing to detect an agent change, **always normalize both sides to the same type**:
+`copilot.ts` reads the prior Copilot SDK state for a session via `providerSessionStore.get(db, sessionId, "copilot")` — a single DB-backed blob (`{ sessionId, agent, mcpFp }`). Both sides of every comparison come from that same blob, so the old in-memory-map-vs-DB-column normalization footgun is gone. Still normalize `undefined`/`null` to `""` when comparing, since a stored slice may carry `null`:
 
 ```typescript
-// ✅ Correct — both sides normalize undefined to ""
+const prior = providerSessionStore.get(db, sessionId, "copilot") ?? {};
 const normalizedAgent = agent ?? "";
-const lastAgent = copilotSessionIds.get(lastAgentKey) ?? "";
-if (normalizedAgent !== lastAgent) { ... }
-copilotSessionIds.set(lastAgentKey, normalizedAgent);
-
-// ❌ Wrong — undefined !== "" is always true, resetting the session every turn
-const lastAgent = copilotSessionIds.get(lastAgentKey) ?? null;
-if (agent !== lastAgent) { ... }       // undefined !== "" → session deleted!
-copilotSessionIds.set(lastAgentKey, agent ?? "");
+let resumeId = prior.sessionId ?? null;
+if (resumeId && ((prior.agent ?? "") !== normalizedAgent || (prior.mcpFp ?? "") !== normalizedMcpFp)) {
+  resumeId = null; // stale systemMessage / mcpServers → force a fresh createSession
+}
+// …create or resume…
+providerSessionStore.set(db, sessionId, "copilot", { sessionId: session.sessionId, agent: normalizedAgent || null, mcpFp: normalizedMcpFp || null });
 ```
-
-The asymmetry silently destroys conversation history on every turn when no agent is selected.
 
 ### Tool call persistence — placeholder message pattern
 

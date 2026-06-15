@@ -14,10 +14,66 @@ function dbPath(): string {
   return path.join(base, "aichemist.db");
 }
 
+/** ALTER ... ADD COLUMN only if the column is not already present. */
+function addColumnIfMissing(
+  db: Database.Database,
+  table: string,
+  column: string,
+  type: string
+): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type};`);
+  }
+}
+
+type Migration = (db: Database.Database) => void;
+
 /**
- * Forward-only migrations. Add new statements to the end — never modify existing ones.
+ * Ordered, numbered migrations gated by `PRAGMA user_version`. Index `i` is
+ * schema version `i + 1` and runs exactly once. Each runs inside a transaction
+ * together with the `user_version` bump, so a crash can never leave a migration
+ * half-applied (SQLite DDL is transactional).
+ *
+ * APPEND-ONLY: never reorder, delete, or edit an existing entry — only add new
+ * ones to the end.
  */
-function migrate(db: Database.Database): void {
+const MIGRATIONS: Migration[] = [
+  // v1 — Baseline. These columns were originally added piecemeal by the old
+  // "hasColumn + ALTER" loop that ran on every open. Databases created before
+  // the numbered-migration system already carry them at user_version 0, so each
+  // ADD is guarded by addColumnIfMissing — existing DBs upgrade to v1 without a
+  // duplicate-column error, fresh DBs get every column.
+  (db) => {
+    addColumnIfMissing(db, "sessions", "sdk_session_id", "TEXT");
+    addColumnIfMissing(db, "sessions", "provider", "TEXT");
+    addColumnIfMissing(db, "sessions", "model", "TEXT");
+    addColumnIfMissing(db, "sessions", "branch", "TEXT");
+    addColumnIfMissing(db, "sessions", "workspace_path", "TEXT");
+    addColumnIfMissing(db, "sessions", "agent", "TEXT");
+    addColumnIfMissing(db, "sessions", "skills", "TEXT");
+    addColumnIfMissing(db, "sessions", "copilot_session_id", "TEXT");
+    addColumnIfMissing(db, "sessions", "copilot_session_agent", "TEXT");
+    addColumnIfMissing(db, "sessions", "copilot_session_mcp_fp", "TEXT");
+    addColumnIfMissing(db, "sessions", "disabled_mcp_servers", "TEXT");
+    addColumnIfMissing(db, "sessions", "github_issue_number", "INTEGER");
+    addColumnIfMissing(db, "messages", "agent", "TEXT");
+  },
+  // v2 — Unified provider session state (issue #56). A single JSON blob per
+  // session supersedes sdk_session_id + the copilot_session_* trio (those
+  // columns are kept as dead reads for legacy rows). A new provider adds a key
+  // to the blob instead of a new column, so this should be the last schema
+  // change driven by per-provider session state.
+  (db) => {
+    db.exec("ALTER TABLE sessions ADD COLUMN provider_state TEXT;");
+  },
+];
+
+/**
+ * Create the base schema (idempotent) and run any pending numbered migrations.
+ * Exported for tests; production code goes through {@link openDb}.
+ */
+export function migrate(db: Database.Database): void {
   db.exec(`
     PRAGMA journal_mode=WAL;
     PRAGMA foreign_keys=ON;
@@ -59,70 +115,13 @@ function migrate(db: Database.Database): void {
     );
   `);
 
-  // ── New migrations (append-only) ──────────────────────────────────────────
-  // Add sdk_session_id column to sessions table (if it doesn't already exist).
-  // We check PRAGMA table_info to avoid errors on re-runs.
-  const columns = db
-    .prepare("PRAGMA table_info(sessions)")
-    .all() as { name: string }[];
-  const hasColumn = (name: string) => columns.some((col) => col.name === name);
-
-  if (!hasColumn("sdk_session_id")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN sdk_session_id TEXT;");
-  }
-  if (!hasColumn("provider")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN provider TEXT;");
-  }
-  if (!hasColumn("model")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN model TEXT;");
-  }
-  if (!hasColumn("branch")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN branch TEXT;");
-  }
-  if (!hasColumn("workspace_path")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN workspace_path TEXT;");
-  }
-  if (!hasColumn("agent")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN agent TEXT;");
-  }
-  if (!hasColumn("skills")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN skills TEXT;");
-  }
-  if (!hasColumn("copilot_session_id")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN copilot_session_id TEXT;");
-  }
-  // Records which agent the Copilot SDK session was created with so we can
-  // detect agent changes across restarts and force a fresh SDK session.
-  if (!hasColumn("copilot_session_agent")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN copilot_session_agent TEXT;");
-  }
-  // Fingerprint of the AIchemist-managed MCP server map active when the Copilot
-  // SDK session was created. If the fingerprint changes, we recreate the SDK
-  // session so the new mcpServers map takes effect (resumeSession ignores it).
-  if (!hasColumn("copilot_session_mcp_fp")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN copilot_session_mcp_fp TEXT;");
-  }
-  // Per-session disabled MCP server names (JSON array of strings). Applied on
-  // top of `loadManagedMcpServers()` so users can silence a managed server for
-  // a single session without deleting it from ~/.aichemist/mcp.json.
-  if (!hasColumn("disabled_mcp_servers")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN disabled_mcp_servers TEXT;");
-  }
-  // GitHub issue number linked to this session at creation time (optional).
-  // Stored so the agent runner can inject the issue's title/labels/body as
-  // first-turn context without requiring the renderer to pass it on every send.
-  if (!hasColumn("github_issue_number")) {
-    db.exec("ALTER TABLE sessions ADD COLUMN github_issue_number INTEGER;");
-  }
-
-  // Add agent column to messages table to stamp which agent produced each message.
-  const msgColumns = db
-    .prepare("PRAGMA table_info(messages)")
-    .all() as { name: string }[];
-  const hasMsgColumn = (name: string) => msgColumns.some((col) => col.name === name);
-
-  if (!hasMsgColumn("agent")) {
-    db.exec("ALTER TABLE messages ADD COLUMN agent TEXT;");
+  const current = db.pragma("user_version", { simple: true }) as number;
+  for (let v = current; v < MIGRATIONS.length; v++) {
+    const apply = db.transaction(() => {
+      MIGRATIONS[v](db);
+      db.exec(`PRAGMA user_version = ${v + 1};`);
+    });
+    apply();
   }
 }
 
