@@ -63,9 +63,11 @@ const MIGRATIONS: Migration[] = [
   // session supersedes sdk_session_id + the copilot_session_* trio (those
   // columns are kept as dead reads for legacy rows). A new provider adds a key
   // to the blob instead of a new column, so this should be the last schema
-  // change driven by per-provider session state.
+  // change driven by per-provider session state. Guarded so a DB that somehow
+  // already has the column at user_version < 2 (dev build / manual tweak)
+  // upgrades instead of throwing a duplicate-column error.
   (db) => {
-    db.exec("ALTER TABLE sessions ADD COLUMN provider_state TEXT;");
+    addColumnIfMissing(db, "sessions", "provider_state", "TEXT");
   },
 ];
 

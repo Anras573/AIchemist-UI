@@ -119,8 +119,8 @@ SQLite at `~/.aichemist/aichemist.db`. Schema: `projects` → `sessions` → `me
 | `agent TEXT` | Selected agent name (nullable) |
 | `provider_state TEXT` | **Unified per-provider SDK session state (JSON).** One blob per session, one key per provider (`claude.sdkSessionId`, `copilot.{sessionId,agent,mcpFp}`). Owned by `electron/agent/provider-session-store.ts`. A new provider adds a key here — no schema change. |
 | `disabled_mcp_servers TEXT` | JSON array of AIchemist-managed MCP server names disabled for this session. Filtered out by `loadManagedMcpServers({ excludeNames })` before injection. |
-| `sdk_session_id TEXT` | **Dead read.** Legacy Claude SDK session ID, superseded by `provider_state.claude.sdkSessionId`. Kept only so pre-migration sessions still resolve traces. |
-| `copilot_session_id` / `copilot_session_agent` / `copilot_session_mcp_fp TEXT` | **Dead reads.** Legacy Copilot trio, superseded by `provider_state.copilot`. Kept only for pre-migration trace lookups. |
+| `sdk_session_id TEXT` | **Legacy / dead write.** Superseded by `provider_state.claude.sdkSessionId`. Never written anymore, but read as a one-time fallback for pre-migration sessions (in `claudeProvider.run` and trace lookups) and backfilled into `provider_state` on the next turn. |
+| `copilot_session_id` / `copilot_session_agent` / `copilot_session_mcp_fp TEXT` | **Legacy / dead write.** Superseded by `provider_state.copilot`. Never written anymore, but read as a one-time fallback for pre-migration sessions (in `runCopilotAgentTurn` and trace lookups) and backfilled into `provider_state` on the next turn. |
 
 ### Migrations — numbered, gated by `PRAGMA user_version`
 

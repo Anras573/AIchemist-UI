@@ -67,15 +67,6 @@ export async function stopCopilotClient(): Promise<void> {
   }
 }
 
-/**
- * Drops the cached provider session state for the given AIchemist session ID.
- * Call this when a session is deleted so the cache entry doesn't linger (the DB
- * row itself is removed via cascade).
- */
-export function cleanupCopilotSession(sessionId: string): void {
-  providerSessionStore.forget(sessionId);
-}
-
 /** Return the list of models available for the authenticated Copilot user. */
 export async function getCopilotModels(): Promise<Array<{ id: string; name: string }>> {
   const client = await getClient();
@@ -453,7 +444,34 @@ export async function runCopilotAgentTurn(params: {
   // first access so sessions survive app restarts). Both sides of every
   // comparison below come from this single DB-backed blob, so the old
   // in-memory/DB normalization footgun no longer exists.
-  const prior = providerSessionStore.get(db, sessionId, "copilot") ?? {};
+  let prior = providerSessionStore.get(db, sessionId, "copilot") ?? {};
+
+  // Legacy fallback: sessions that last ran before the provider_state migration
+  // carry their SDK session id / agent / MCP fingerprint in the old
+  // copilot_session_* columns. Read them once and backfill provider_state so
+  // continuity survives the upgrade and subsequent turns use the unified store.
+  if (!prior.sessionId) {
+    const legacy = db
+      .prepare(
+        "SELECT copilot_session_id, copilot_session_agent, copilot_session_mcp_fp FROM sessions WHERE id = ?"
+      )
+      .get(sessionId) as
+      | {
+          copilot_session_id: string | null;
+          copilot_session_agent: string | null;
+          copilot_session_mcp_fp: string | null;
+        }
+      | undefined;
+    if (legacy?.copilot_session_id) {
+      prior = {
+        sessionId: legacy.copilot_session_id,
+        agent: legacy.copilot_session_agent,
+        mcpFp: legacy.copilot_session_mcp_fp,
+      };
+      providerSessionStore.set(db, sessionId, "copilot", prior);
+    }
+  }
+
   const normalizedAgent = agent ?? "";
   const normalizedMcpFp = mcpFingerprint ?? "";
 

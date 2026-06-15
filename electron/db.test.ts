@@ -49,6 +49,15 @@ describe("migrate", () => {
     expect(userVersion(db)).toBe(2);
   });
 
+  it("does not throw when provider_state already exists below user_version 2", () => {
+    const db = new Database(":memory:");
+    migrate(db); // brings it to v2 with provider_state present
+    // Simulate a dev build / partial migration: column exists but version rewound.
+    db.exec("PRAGMA user_version = 1;");
+    expect(() => migrate(db)).not.toThrow();
+    expect(userVersion(db)).toBe(2);
+  });
+
   it("upgrades a legacy database (columns present, user_version 0) without error", () => {
     const db = new Database(":memory:");
     // Simulate the pre-issue-56 schema produced by the old hasColumn ALTER loop:
