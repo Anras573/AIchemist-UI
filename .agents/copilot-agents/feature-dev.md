@@ -39,10 +39,14 @@ Run these before considering the implementation complete:
 `allowedTools` auto-approves tools. `tools` restricts available tools and silently blocks all MCP tool calls. Never change one to the other.
 
 ### Copilot agent tracking
-Always normalize both sides when comparing agent names:
+Per-provider SDK state lives in `sessions.provider_state` behind `providerSessionStore` (`electron/agent/provider-session-store.ts`). When comparing the stored agent / MCP fingerprint against the current turn, normalize both sides:
 ```typescript
+const prior = providerSessionStore.get(db, sessionId, "copilot") ?? {};
 const normalizedAgent = agent ?? "";
-const lastAgent = copilotSessionIds.get(key) ?? "";
+const normalizedMcpFp = mcpFp ?? "";
+if ((prior.agent ?? "") !== normalizedAgent || (prior.mcpFp ?? "") !== normalizedMcpFp) {
+  /* force fresh session */
+}
 ```
 Using `?? null` on the stored side causes `undefined !== ""` to be always true, resetting the Copilot session and destroying conversation history on every turn.
 

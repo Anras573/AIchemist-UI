@@ -24,6 +24,7 @@ import {
   fingerprintManaged,
 } from "../mcp";
 import { saveToolCall, updateToolCallStatus, getDisabledMcpServers } from "../sessions";
+import { providerSessionStore } from "./provider-session-store";
 import {
   implWriteFileWithChange,
   implDeleteFileWithChange,
@@ -44,20 +45,6 @@ function nativeToolCategory(name: string): string {
 
 let clientInstance: CopilotClientType | null = null;
 
-/**
- * Maps AIchemist session ID → Copilot SDK session ID so we can resume the
- * same SDK session across multiple agent turns, preserving conversation history.
- * This in-memory map is the fast path within a single app run; the DB is the
- * persistent backing store that survives restarts.
- */
-const copilotSessionIds = new Map<string, string>();
-
-/**
- * Tracks which sessions have already been seeded from the DB so we only hit
- * the DB once per session per app run.
- */
-const seededFromDb = new Set<string>();
-
 async function getClient(): Promise<CopilotClientType> {
   if (clientInstance) return clientInstance;
   const { CopilotClient } = await import("@github/copilot-sdk");
@@ -73,19 +60,11 @@ export async function stopCopilotClient(): Promise<void> {
   if (clientInstance) {
     await clientInstance.stop();
     clientInstance = null;
-    copilotSessionIds.clear();
-    seededFromDb.clear();
+    // The SDK sessions held in memory are gone with the client; drop the
+    // read-through cache so the next turn re-reads from the DB and falls back to
+    // a fresh session if a resume fails.
+    providerSessionStore.reset();
   }
-}
-
-/**
- * Removes the Copilot SDK session mapping for the given AIchemist session ID.
- * Call this when a session is deleted so the SDK session entry doesn't linger.
- */
-export function cleanupCopilotSession(sessionId: string): void {
-  copilotSessionIds.delete(sessionId);
-  copilotSessionIds.delete(`${sessionId}:lastAgent`);
-  seededFromDb.delete(sessionId);
 }
 
 /** Return the list of models available for the authenticated Copilot user. */
@@ -461,76 +440,79 @@ export async function runCopilotAgentTurn(params: {
       : {}),
   };
 
-  // Seed the in-memory map from the DB on first access for this session so
-  // Copilot SDK sessions survive app restarts.
-  if (!seededFromDb.has(sessionId)) {
-    const dbRow = db
-      .prepare("SELECT copilot_session_id, copilot_session_agent, copilot_session_mcp_fp FROM sessions WHERE id = ?")
-      .get(sessionId) as {
-        copilot_session_id: string | null;
-        copilot_session_agent: string | null;
-        copilot_session_mcp_fp: string | null;
-      } | undefined;
-    if (dbRow?.copilot_session_id) {
-      copilotSessionIds.set(sessionId, dbRow.copilot_session_id);
+  // Load the prior Copilot SDK state (read-through cache, seeded from the DB on
+  // first access so sessions survive app restarts). Both sides of every
+  // comparison below come from this single DB-backed blob, so the old
+  // in-memory/DB normalization footgun no longer exists.
+  let prior = providerSessionStore.get(db, sessionId, "copilot") ?? {};
+
+  // Legacy fallback: sessions that last ran before the provider_state migration
+  // carry their SDK session id / agent / MCP fingerprint in the old
+  // copilot_session_* columns. Read them once, backfill provider_state, and
+  // clear the legacy columns so the fallback is truly one-time — otherwise a
+  // later invalidation (slice removed via set(…, null)) would resurrect the
+  // stale state from the still-populated columns.
+  if (!prior.sessionId) {
+    const legacy = db
+      .prepare(
+        "SELECT copilot_session_id, copilot_session_agent, copilot_session_mcp_fp FROM sessions WHERE id = ?"
+      )
+      .get(sessionId) as
+      | {
+          copilot_session_id: string | null;
+          copilot_session_agent: string | null;
+          copilot_session_mcp_fp: string | null;
+        }
+      | undefined;
+    if (legacy?.copilot_session_id) {
+      prior = {
+        sessionId: legacy.copilot_session_id,
+        agent: legacy.copilot_session_agent,
+        mcpFp: legacy.copilot_session_mcp_fp,
+      };
+      providerSessionStore.set(db, sessionId, "copilot", prior);
+      db.prepare(
+        "UPDATE sessions SET copilot_session_id = NULL, copilot_session_agent = NULL, copilot_session_mcp_fp = NULL WHERE id = ?"
+      ).run(sessionId);
     }
-    if (dbRow?.copilot_session_agent != null) {
-      copilotSessionIds.set(`agent:${sessionId}`, dbRow.copilot_session_agent);
-    }
-    if (dbRow?.copilot_session_mcp_fp != null) {
-      copilotSessionIds.set(`mcp:${sessionId}`, dbRow.copilot_session_mcp_fp);
-    }
-    seededFromDb.add(sessionId);
   }
 
-  // If the agent OR the managed-MCP fingerprint changed since the last turn,
-  // the old SDK session was created with a stale systemMessage / mcpServers map.
-  // resumeSession ignores both, so we must force a fresh session.
-  const lastAgentKey = `agent:${sessionId}`;
-  const lastMcpKey = `mcp:${sessionId}`;
   const normalizedAgent = agent ?? "";
-  const lastAgent = copilotSessionIds.get(lastAgentKey) ?? "";
   const normalizedMcpFp = mcpFingerprint ?? "";
-  const lastMcpFp = copilotSessionIds.get(lastMcpKey) ?? "";
-  const sessionInvalidated =
-    (normalizedAgent !== lastAgent || normalizedMcpFp !== lastMcpFp) &&
-    copilotSessionIds.has(sessionId);
-  if (sessionInvalidated) {
-    copilotSessionIds.delete(sessionId);
-    db.prepare(
-      "UPDATE sessions SET copilot_session_id = NULL, copilot_session_agent = NULL, copilot_session_mcp_fp = NULL WHERE id = ?"
-    ).run(sessionId);
+
+  // If the agent OR the managed-MCP fingerprint changed since the last turn, the
+  // old SDK session was created with a stale systemMessage / mcpServers map.
+  // resumeSession ignores both, so we must force a fresh session.
+  let resumeId = prior.sessionId ?? null;
+  if (
+    resumeId &&
+    ((prior.agent ?? "") !== normalizedAgent || (prior.mcpFp ?? "") !== normalizedMcpFp)
+  ) {
+    resumeId = null;
   }
-  copilotSessionIds.set(lastAgentKey, normalizedAgent);
-  copilotSessionIds.set(lastMcpKey, normalizedMcpFp);
 
   // Resume the existing Copilot SDK session for this AIchemist session (if any)
   // so conversation history is preserved across turns and app restarts.
   // Fall back to creating a new session if no prior session exists or resuming fails.
   let session: Awaited<ReturnType<typeof client.createSession>>;
-  const existingCopilotSessionId = copilotSessionIds.get(sessionId);
-  if (existingCopilotSessionId) {
+  if (resumeId) {
     try {
-      session = await client.resumeSession(existingCopilotSessionId, sessionConfig);
+      session = await client.resumeSession(resumeId, sessionConfig);
     } catch {
-      // Session state was lost (e.g. server expiry) — create fresh and clear DB
-      copilotSessionIds.delete(sessionId);
-      db.prepare(
-        "UPDATE sessions SET copilot_session_id = NULL, copilot_session_agent = NULL, copilot_session_mcp_fp = NULL WHERE id = ?"
-      ).run(sessionId);
+      // Session state was lost (e.g. server expiry) — create fresh.
       session = await client.createSession(sessionConfig);
-      copilotSessionIds.set(sessionId, session.sessionId);
-      db.prepare(
-        "UPDATE sessions SET copilot_session_id = ?, copilot_session_agent = ?, copilot_session_mcp_fp = ? WHERE id = ?"
-      ).run(session.sessionId, normalizedAgent || null, normalizedMcpFp || null, sessionId);
     }
   } else {
     session = await client.createSession(sessionConfig);
-    copilotSessionIds.set(sessionId, session.sessionId);
-    db.prepare(
-      "UPDATE sessions SET copilot_session_id = ?, copilot_session_agent = ?, copilot_session_mcp_fp = ? WHERE id = ?"
-    ).run(session.sessionId, normalizedAgent || null, normalizedMcpFp || null, sessionId);
   }
+
+  // Persist the resolved state (write-through to the DB) so the next turn and
+  // future app runs resume the same SDK session with the same agent / MCP map.
+  providerSessionStore.set(db, sessionId, "copilot", {
+    sessionId: session.sessionId,
+    agent: normalizedAgent || null,
+    mcpFp: normalizedMcpFp || null,
+  });
 
   // ── Event listeners — set up before sending ─────────────────────────────────
 

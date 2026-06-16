@@ -20,6 +20,7 @@ import {
   type CopilotTranscriptWatcher,
 } from "../copilot-transcript";
 import { handle } from "./handle";
+import { parseProviderSessionState } from "../agent/provider-session-store";
 
 export function registerTraceHandlers(db: Database, getMainWindow: () => BrowserWindow | null): void {
   const claudeWatchers = new Map<string, TranscriptWatcher>();
@@ -33,7 +34,8 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
   function resolveTraceSource(sessionId: string): TraceSource {
     const row = db
       .prepare(
-        `SELECT s.sdk_session_id AS sdkSessionId,
+        `SELECT s.provider_state AS providerState,
+                s.sdk_session_id AS sdkSessionId,
                 s.copilot_session_id AS copilotSessionId,
                COALESCE(s.workspace_path, p.path) AS workspacePath
          FROM sessions s
@@ -41,14 +43,24 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
          WHERE s.id = ?`
       )
       .get(sessionId) as
-      | { sdkSessionId: string | null; copilotSessionId: string | null; workspacePath: string }
+      | {
+          providerState: string | null;
+          sdkSessionId: string | null;
+          copilotSessionId: string | null;
+          workspacePath: string;
+        }
       | undefined;
     if (!row) return null;
-    if (row.sdkSessionId) {
-      return { kind: "claude", projectPath: row.workspacePath, sdkSessionId: row.sdkSessionId };
+    // Prefer the unified provider_state blob; fall back to the legacy columns
+    // for sessions that last ran before the provider_state migration.
+    const state = parseProviderSessionState(row.providerState);
+    const sdkSessionId = state.claude?.sdkSessionId ?? row.sdkSessionId;
+    const copilotSessionId = state.copilot?.sessionId ?? row.copilotSessionId;
+    if (sdkSessionId) {
+      return { kind: "claude", projectPath: row.workspacePath, sdkSessionId };
     }
-    if (row.copilotSessionId) {
-      return { kind: "copilot", copilotSessionId: row.copilotSessionId };
+    if (copilotSessionId) {
+      return { kind: "copilot", copilotSessionId };
     }
     return null;
   }

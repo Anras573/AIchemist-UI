@@ -20,6 +20,7 @@ import { getAnthropicConfig, resolveClaudePath } from "../config";
 import { requestApproval, requiresApproval } from "./approval";
 import type { ToolCategory } from "./approval";
 import { saveToolCall, updateToolCallStatus, getDisabledMcpServers } from "../sessions";
+import { providerSessionStore } from "./provider-session-store";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 
 // ── Native tool category map ───────────────────────────────────────────────────
@@ -534,12 +535,9 @@ export async function runClaudeAgentTurn(params: {
     throw err;
   }
 
-  // 5. Persist sdk_session_id if it changed or was assigned for the first time
+  // 5. Persist the SDK session id if it changed or was assigned for the first time
   if (resultSessionId && resultSessionId !== sdkSessionId) {
-    db.prepare("UPDATE sessions SET sdk_session_id = ? WHERE id = ?").run(
-      resultSessionId,
-      sessionId
-    );
+    providerSessionStore.set(db, sessionId, "claude", { sdkSessionId: resultSessionId });
   }
 
   return fullText;
@@ -549,10 +547,26 @@ export async function runClaudeAgentTurn(params: {
 
 export const claudeProvider: AgentProvider = {
   async run(params: AgentProviderParams): Promise<string> {
-    const sdkRow = params.db
-      .prepare("SELECT sdk_session_id FROM sessions WHERE id = ?")
-      .get(params.sessionId) as { sdk_session_id: string | null } | undefined;
-    const sdkSessionId = sdkRow?.sdk_session_id ?? null;
+    let sdkSessionId =
+      providerSessionStore.get(params.db, params.sessionId, "claude")?.sdkSessionId ?? null;
+
+    // Legacy fallback: sessions that last ran before the provider_state migration
+    // carry their SDK id in the old sdk_session_id column. Read it once, backfill
+    // provider_state, and clear the legacy column so the fallback is truly
+    // one-time — otherwise a later invalidation (slice removed via set(…, null))
+    // would resurrect the stale id from the still-populated column.
+    if (!sdkSessionId) {
+      const legacy = params.db
+        .prepare("SELECT sdk_session_id FROM sessions WHERE id = ?")
+        .get(params.sessionId) as { sdk_session_id: string | null } | undefined;
+      if (legacy?.sdk_session_id) {
+        sdkSessionId = legacy.sdk_session_id;
+        providerSessionStore.set(params.db, params.sessionId, "claude", { sdkSessionId });
+        params.db
+          .prepare("UPDATE sessions SET sdk_session_id = NULL WHERE id = ?")
+          .run(params.sessionId);
+      }
+    }
 
     return runClaudeAgentTurn({ ...params, sdkSessionId });
   },

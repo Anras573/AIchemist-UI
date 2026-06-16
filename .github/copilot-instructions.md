@@ -49,22 +49,23 @@ These two `Options` fields are not interchangeable:
 
 `DropdownMenuTrigger` and `ModelSelectorTrigger` do **not** support `asChild` — style them directly with `className`.
 
-### Agent-tracking normalization (Copilot provider)
+### Provider session state — `ProviderSessionStore`
 
-When comparing or storing the active agent name in `copilot.ts`, always normalize both sides to the same type:
+Per-provider SDK session state lives in one JSON column, `sessions.provider_state`, behind the `providerSessionStore` singleton (`electron/agent/provider-session-store.ts`) — a read-through cache where the DB is the source of truth. Claude stores `claude.sdkSessionId`; Copilot stores `copilot.{sessionId,agent,mcpFp}`. A new provider adds a key, not a column. Use `get(db, sessionId, provider)` / `set(db, sessionId, provider, state | null)`; `_resetProviderSessionStore()` is the test seam.
+
+When detecting an agent or MCP-fingerprint change in `copilot.ts`, normalize `undefined`/`null` to `""` before comparing (a stored slice may carry `null`):
 
 ```typescript
-// ✅ Correct — both sides normalize undefined to ""
+const prior = providerSessionStore.get(db, sessionId, "copilot") ?? {};
 const normalizedAgent = agent ?? "";
-const lastAgent = copilotSessionIds.get(lastAgentKey) ?? "";
-if (normalizedAgent !== lastAgent) { ... }
-
-// ❌ Wrong — undefined !== "" resets the Copilot session on every turn
-const lastAgent = copilotSessionIds.get(lastAgentKey) ?? null;
-if (agent !== lastAgent) { ... }
+const normalizedMcpFp = mcpFp ?? "";
+let resumeId = prior.sessionId ?? null;
+if (resumeId && ((prior.agent ?? "") !== normalizedAgent || (prior.mcpFp ?? "") !== normalizedMcpFp)) {
+  resumeId = null; // stale systemMessage/mcpServers → force a fresh createSession
+}
 ```
 
-The asymmetry silently destroys conversation history on every turn when no agent is selected.
+A type-mismatched comparison would silently destroy conversation history on every turn when no agent is selected.
 
 ### Never use `useChat` in AI Elements components
 

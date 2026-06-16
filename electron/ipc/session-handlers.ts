@@ -25,7 +25,7 @@ import {
 } from "../worktree";
 import { cancelSessionApprovals } from "../agent/approval";
 import { cancelSessionQuestions } from "../agent/question";
-import { cleanupCopilotSession } from "../agent/copilot";
+import { providerSessionStore } from "../agent/provider-session-store";
 import { getProvider } from "../agent/runner";
 import { OLLAMA_NO_MODELS_ERROR } from "../agent/ollama";
 import { OPENAI_COMPAT_NO_MODELS_ERROR } from "../agent/openai-compat";
@@ -147,7 +147,8 @@ export function registerSessionHandlers(
 
     cancelSessionApprovals(sessionId);
     cancelSessionQuestions(sessionId);
-    cleanupCopilotSession(sessionId);
+    // Drop the cached provider session state (the DB row goes away via cascade).
+    providerSessionStore.forget(sessionId);
     activeTurns.delete(sessionId);
     cleanupSessionQueueState(sessionId);
     return deleteSession(db, sessionId);
