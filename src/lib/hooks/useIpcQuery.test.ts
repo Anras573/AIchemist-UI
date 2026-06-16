@@ -160,6 +160,34 @@ describe("useIpcQuery", () => {
     expect(result.current.error).toBeUndefined();
   });
 
+  it("treats a cached undefined value as data, not 'no data'", async () => {
+    let resolveSecond!: (v: undefined) => void;
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(() => new Promise<undefined>((r) => { resolveSecond = r; }));
+
+    const { result } = renderHook(() => useIpcQuery<undefined>("void-cache", fetcher, { ttl: 10_000 }));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.data).toBeUndefined();
+
+    let pending: Promise<void>;
+    act(() => {
+      pending = result.current.refetch();
+    });
+
+    // A refetch over a cached `undefined` value is revalidation, not an initial
+    // load: loading must stay false (only `fetching` flips), proving the cache
+    // entry is recognised as "has data" despite the value being undefined.
+    await waitFor(() => expect(result.current.fetching).toBe(true));
+    expect(result.current.loading).toBe(false);
+
+    await act(async () => {
+      resolveSecond(undefined);
+      await pending;
+    });
+  });
+
   it("isolates entries by key", async () => {
     const fa = vi.fn().mockResolvedValue("A");
     const fb = vi.fn().mockResolvedValue("B");

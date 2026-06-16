@@ -30,6 +30,9 @@ type Status = "loading" | "success" | "error";
 interface CacheEntry<T> {
   status: Status;
   data?: T;
+  /** Whether a fetch has ever succeeded — distinguishes a cached `undefined`
+   *  value from "no data yet", which a bare `data !== undefined` check can't. */
+  hasData: boolean;
   error?: unknown;
   /** Epoch ms of the last settle (success or error). `0` means never settled. */
   settledAt: number;
@@ -46,7 +49,7 @@ const cache = new Map<string, CacheEntry<unknown>>();
 function getEntry<T>(key: string): CacheEntry<T> {
   let entry = cache.get(key) as CacheEntry<T> | undefined;
   if (!entry) {
-    entry = { status: "loading", settledAt: 0, listeners: new Set() };
+    entry = { status: "loading", hasData: false, settledAt: 0, listeners: new Set() };
     cache.set(key, entry as CacheEntry<unknown>);
   }
   return entry;
@@ -68,14 +71,14 @@ function runFetch<T>(key: string, fetcher: Fetcher<T>, force: boolean): Promise<
   // the loading state. Either way, clear any stale error up front so a Retry /
   // refetch doesn't keep rendering the old error while the new request is in
   // flight — `error` is re-set only if this fetch itself fails.
-  const hasData = entry.data !== undefined;
-  entry.status = hasData ? "success" : "loading";
+  entry.status = entry.hasData ? "success" : "loading";
   entry.error = undefined;
 
   const promise = (async () => {
     try {
       const data = await fetcher({ force });
       entry.data = data;
+      entry.hasData = true;
       entry.error = undefined;
       entry.status = "success";
     } catch (err) {
