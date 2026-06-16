@@ -185,9 +185,10 @@ export function McpServersPanel() {
     ({ force }) => (force ? ipc.mcpProbeManaged() : ipc.listMcpServers()),
   );
   // On error, fall back to an empty list (matching the prior behaviour of
-  // showing "0 connected" alongside the error message).
+  // showing "0 connected" alongside the error message) rather than leaving
+  // stale servers from a prior successful load on screen.
   const error = queryError ? String(queryError) : null;
-  const servers = data ?? (error ? [] : null);
+  const servers = error ? [] : (data ?? null);
 
   const handleToggle = useCallback(async (name: string) => {
     if (!activeSessionId) return;

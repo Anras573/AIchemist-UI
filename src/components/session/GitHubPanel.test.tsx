@@ -206,6 +206,41 @@ describe("GitHubPanel", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
+  it("clears a URL-open error when switching projects", async () => {
+    const projectOne = makeProject({ id: "proj-1", path: "/project-one" });
+    const projectTwo = makeProject({ id: "proj-2", path: "/project-two" });
+    useProjectStore.getState().addProject(projectOne);
+    useProjectStore.getState().addProject(projectTwo);
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    window.electronAPI.githubListPrs = vi.fn().mockImplementation(
+      async (args: { projectPath: string }) =>
+        args.projectPath === "/project-one"
+          ? { prs: [makePr({ id: 1, number: 1, title: "First PR", head_sha: "sha-1" })] }
+          : { prs: [] }
+    );
+    window.electronAPI.githubListIssues = vi.fn().mockResolvedValue({ issues: [] });
+    window.electronAPI.githubGetCiStatus = vi.fn().mockResolvedValue({ status: { state: "success" } });
+    window.electronAPI.openGitHubUrl = vi.fn().mockRejectedValue(new Error("Invalid URL"));
+
+    renderWithProviders(<GitHubPanel />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open pull request #1: First PR" })
+    );
+
+    // The failed open puts the panel into its error/retry state.
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+
+    useProjectStore.getState().setActiveProject("proj-2");
+
+    // Switching projects clears the navigation error so the new project's data shows.
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      expect(screen.getByText("No open pull requests")).toBeInTheDocument();
+    });
+  });
+
   it("ignores stale responses when a newer request finishes first", async () => {
     const projectOne = makeProject({ id: "proj-1", path: "/project-one" });
     const projectTwo = makeProject({ id: "proj-2", path: "/project-two" });

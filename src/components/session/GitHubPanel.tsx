@@ -235,10 +235,12 @@ export function GitHubPanel({}: GitHubPanelProps) {
     [ipc]
   );
 
-  // Reset CI badge state whenever the project changes so stale CI responses
-  // from the previous project (tracked by ciGenerationRef) are discarded.
+  // Reset transient panel state whenever the project changes: drop stale CI
+  // responses (tracked by ciGenerationRef) and clear any URL-open error so a
+  // navigation failure doesn't leak into a different project's view.
   useEffect(() => {
     resetCiState();
+    setUrlError(null);
   }, [projectPath, resetCiState]);
 
   useEffect(() => {
