@@ -12,10 +12,11 @@ import type { AgentInfo, ProjectConfig } from "../../src/types/index";
 import { getApiKey } from "../config";
 import { parseAgentMarkdown } from "./agent-file";
 import { requestApproval, requiresApproval } from "./approval";
+import type { ToolCategory } from "./approval";
 import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
 import { readAgentFileSystemPrompt } from "./claude";
-import { runGatedTool } from "./tool-gate";
+import { classifyNativeTool, runGatedTool } from "./tool-gate";
 import type { GatedToolContext } from "./tool-gate";
 import { TurnEmitter } from "./turn-emitter";
 import {
@@ -35,10 +36,15 @@ import type { AgentProvider, AgentProviderParams } from "./provider";
 
 // ── Native tool category helper ───────────────────────────────────────────────
 
-function nativeToolCategory(name: string): string {
-  if (["bash", "run_shell"].includes(name.toLowerCase())) return "shell";
-  if (["web_fetch", "web_search", "browser"].includes(name.toLowerCase())) return "web";
-  return "filesystem";
+/** Maps Copilot native tool names (case-insensitive) onto approval categories. */
+const COPILOT_TOOL_RULES = {
+  shell: ["bash", "run_shell"],
+  web: ["web_fetch", "web_search", "browser"],
+  normalize: (name: string) => name.toLowerCase(),
+} as const;
+
+function nativeToolCategory(name: string): ToolCategory {
+  return classifyNativeTool(name, COPILOT_TOOL_RULES) ?? "filesystem";
 }
 
 // ── Singleton client ──────────────────────────────────────────────────────────

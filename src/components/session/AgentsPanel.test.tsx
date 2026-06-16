@@ -5,46 +5,10 @@ import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { AgentsPanel } from "@/components/session/AgentsPanel";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import type { AgentInfo, Project, Session, SkillInfo } from "@/types";
+import type { AgentInfo, Project, SkillInfo } from "@/types";
+import { makeProject, makeSession } from "@/test/utils/fixtures";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function makeSession(overrides: Partial<Session> = {}): Session {
-  return {
-    id: "sess-1",
-    project_id: "proj-1",
-    title: "Test",
-    status: "idle",
-    created_at: "2024-01-01T00:00:00Z",
-    messages: [],
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    branch: null,
-    workspace_path: null,
-    agent: null,
-    skills: null,
-    ...overrides,
-  };
-}
-
-function makeProject(overrides: Partial<Project> = {}): Project {
-  return {
-    id: "proj-1",
-    name: "My Project",
-    path: "/home/user/proj",
-    created_at: "2024-01-01T00:00:00Z",
-    config: {
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
-      approval_mode: "custom",
-      approval_rules: [],
-      custom_tools: [],
-      allowed_tools: [],
-      create_worktree_per_session: false,
-    },
-    ...overrides,
-  };
-}
 
 const AGENTS: AgentInfo[] = [
   { name: "research", description: "Searches the web for information", model: "claude-opus-4-5" },

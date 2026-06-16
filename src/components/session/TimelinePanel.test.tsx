@@ -4,56 +4,7 @@ import { TimelinePanel } from "./TimelinePanel";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import type { Message, Project, Session } from "@/types";
-
-function makeSession(id: string, overrides: Partial<Session> = {}): Session {
-  return {
-    id,
-    project_id: "proj-1",
-    title: id,
-    status: "idle",
-    created_at: "2024-01-01T00:00:00Z",
-    messages: [],
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    branch: null,
-    workspace_path: null,
-    agent: null,
-    skills: null,
-    ...overrides,
-  };
-}
-
-function makeMessage(id: string, overrides: Partial<Message> = {}): Message {
-  return {
-    id,
-    session_id: "sess-1",
-    role: "user",
-    content: `content of ${id}`,
-    tool_calls: [],
-    created_at: "2024-01-01T00:00:01Z",
-    ...overrides,
-  };
-}
-
-function makeProject(overrides: Partial<Project> = {}): Project {
-  return {
-    id: "proj-1",
-    name: "My Project",
-    path: "/project",
-    created_at: "2024-01-01T00:00:00Z",
-    config: {
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
-      approval_mode: "custom",
-      approval_rules: [],
-      custom_tools: [],
-      allowed_tools: [],
-      create_worktree_per_session: false,
-    },
-    ...overrides,
-  };
-}
+import { makeMessage, makeProject, makeSession } from "@/test/utils/fixtures";
 
 // Conversation (use-stick-to-bottom) requires ResizeObserver, absent in jsdom.
 class ResizeObserverStub {

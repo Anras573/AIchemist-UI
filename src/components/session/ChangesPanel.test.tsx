@@ -4,7 +4,8 @@ import { ChangesPanel } from "./ChangesPanel";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import type { FileChange, Project, Session } from "@/types";
+import type { FileChange } from "@/types";
+import { makeProject, makeSession } from "@/test/utils/fixtures";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -22,43 +23,6 @@ function makeFileChange(overrides: Partial<FileChange> = {}): FileChange {
       "+added line",
     ].join("\n"),
     operation: "write",
-    ...overrides,
-  };
-}
-
-function makeSession(id: string, overrides: Partial<Session> = {}): Session {
-  return {
-    id,
-    project_id: "proj-1",
-    title: id,
-    status: "idle",
-    created_at: "2024-01-01T00:00:00Z",
-    messages: [],
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    branch: null,
-    workspace_path: null,
-    agent: null,
-    skills: null,
-    ...overrides,
-  };
-}
-
-function makeProject(overrides: Partial<Project> = {}): Project {
-  return {
-    id: "proj-1",
-    name: "My Project",
-    path: "/project",
-    created_at: "2024-01-01T00:00:00Z",
-    config: {
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
-      approval_mode: "custom",
-      approval_rules: [],
-      custom_tools: [],
-      allowed_tools: [],
-      create_worktree_per_session: false,
-    },
     ...overrides,
   };
 }

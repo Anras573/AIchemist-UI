@@ -25,6 +25,11 @@ export function getProvider(name: string): AgentProvider {
   return provider;
 }
 
+/** Look up a provider by name, returning null for unknown providers. */
+export function getProviderOrNull(name: string): AgentProvider | null {
+  return PROVIDERS[name] ?? null;
+}
+
 /** Register a new provider at runtime (e.g. in tests or for extensions). */
 export function registerProvider(name: string, provider: AgentProvider): void {
   PROVIDERS[name] = provider;

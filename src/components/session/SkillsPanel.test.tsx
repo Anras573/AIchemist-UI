@@ -5,7 +5,8 @@ import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { SkillsPanel } from "@/components/session/SkillsPanel";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import type { Project, Session, SkillInfo } from "@/types";
+import type { SkillInfo } from "@/types";
+import { makeProject, makeSession } from "@/test/utils/fixtures";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -24,46 +25,9 @@ const PLUGIN_SKILL: SkillInfo = {
   plugin: "anras573/ef-toolkit",
 };
 
-function makeSession(overrides: Partial<Session> = {}): Session {
-  return {
-    id: "sess-1",
-    project_id: "proj-1",
-    title: "Test",
-    status: "idle",
-    created_at: "2024-01-01T00:00:00Z",
-    messages: [],
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    branch: null,
-    workspace_path: null,
-    agent: null,
-    skills: null,
-    ...overrides,
-  };
-}
-
-function makeProject(overrides: Partial<Project> = {}): Project {
-  return {
-    id: "proj-1",
-    name: "My Project",
-    path: "/home/user/proj",
-    created_at: "2024-01-01T00:00:00Z",
-    config: {
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
-      approval_mode: "custom",
-      approval_rules: [],
-      custom_tools: [],
-      allowed_tools: [],
-      create_worktree_per_session: false,
-    },
-    ...overrides,
-  };
-}
-
 function setupStores() {
   const session = makeSession();
-  const project = makeProject();
+  const project = makeProject({ path: "/home/user/proj" });
   useSessionStore.getState().addSession(session);
   useSessionStore.getState().setActiveSession(session.id);
   useProjectStore.getState().addProject(project);

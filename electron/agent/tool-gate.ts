@@ -10,6 +10,36 @@ import type { TurnEmitter } from "./turn-emitter";
 export const TOOL_DENIED_MESSAGE = "Tool call denied by user.";
 
 /**
+ * Rules for mapping a provider's native tool names onto approval categories.
+ * `shell` and `web` list the tool names in those categories; `filesystem`
+ * optionally lists the write/edit tools that should gate. `normalize`
+ * canonicalises a raw tool name before matching (e.g. Copilot lowercases).
+ */
+export interface NativeToolCategoryRules {
+  shell: readonly string[];
+  web: readonly string[];
+  filesystem?: readonly string[];
+  normalize?: (name: string) => string;
+}
+
+/**
+ * Classify a native tool name into its approval category, or null for
+ * read-only / unknown tools that never require approval. Centralises the
+ * shell / web / filesystem mapping shared by the Claude and Copilot runners;
+ * each passes its own provider-specific `rules`.
+ */
+export function classifyNativeTool(
+  name: string,
+  rules: NativeToolCategoryRules,
+): ToolCategory | null {
+  const normalized = rules.normalize ? rules.normalize(name) : name;
+  if (rules.shell.includes(normalized)) return "shell";
+  if (rules.web.includes(normalized)) return "web";
+  if (rules.filesystem?.includes(normalized)) return "filesystem";
+  return null;
+}
+
+/**
  * The per-turn state a gated tool execution needs. Provider tool contexts that
  * carry extra fields (clients, depth counters, …) satisfy this structurally.
  */

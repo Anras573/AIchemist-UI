@@ -300,7 +300,7 @@ export function implGlobFiles(projectPath: string, inputPattern: string): string
 // ── File-change capture helpers ───────────────────────────────────────────────
 
 /** Returns true if a Buffer contains null bytes in its first 8 KB (binary heuristic). */
-function isBinaryBuffer(buf: Buffer): boolean {
+export function isBinaryBuffer(buf: Buffer): boolean {
   const len = Math.min(buf.length, 8192);
   for (let i = 0; i < len; i++) {
     if (buf[i] === 0) return true;

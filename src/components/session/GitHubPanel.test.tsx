@@ -3,26 +3,8 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { GitHubPanel } from "./GitHubPanel";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import type { GitHubIssue, GitHubPR, Project } from "@/types";
-
-function makeProject(overrides: Partial<Project> = {}): Project {
-  return {
-    id: "proj-1",
-    name: "Repo",
-    path: "/project",
-    created_at: "2024-01-01T00:00:00Z",
-    config: {
-      provider: "anthropic",
-      model: "claude-sonnet-4-6",
-      approval_mode: "custom",
-      approval_rules: [],
-      custom_tools: [],
-      allowed_tools: [],
-      create_worktree_per_session: false,
-    },
-    ...overrides,
-  };
-}
+import type { GitHubIssue, GitHubPR } from "@/types";
+import { makeProject } from "@/test/utils/fixtures";
 
 function makePr(overrides: Partial<GitHubPR> = {}): GitHubPR {
   return {

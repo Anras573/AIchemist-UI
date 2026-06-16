@@ -16,7 +16,7 @@ import * as os from "os";
 import * as path from "path";
 import { copilotProvider } from "./copilot";
 import { ollamaProvider } from "./ollama";
-import { getProvider, getProviderNames } from "./runner";
+import { getProviderNames, getProviderOrNull } from "./runner";
 import type { ProjectConfig, Provider } from "../../src/types/index";
 import { getApiKey } from "../config";
 
@@ -309,12 +309,11 @@ const BUILTIN_PROBES: Partial<Record<Provider, (opts?: { force?: boolean }) => P
 };
 
 function probeOne(name: string, opts?: { force?: boolean }): Promise<ProviderProbeResult> {
-  try {
-    const registered = getProvider(name).probe;
-    if (registered) return registered(opts);
-  } catch {
-    // Provider not in the registry — fall through to the built-in probe.
-  }
+  // A provider may carry its own probe() on its registry entry, which takes
+  // precedence. Unknown names (not in the registry) fall through to the
+  // built-in probe below.
+  const registered = getProviderOrNull(name)?.probe;
+  if (registered) return registered(opts);
   const builtin = BUILTIN_PROBES[name as Provider];
   if (builtin) return builtin(opts);
   // Registered provider with no probe() and no built-in — assume available.
@@ -341,7 +340,13 @@ export async function probeAll(
       disabled.has(name) ? Promise.resolve(userDisabled()) : probeOne(name, opts),
     ),
   );
-  return Object.fromEntries(names.map((name, i) => [name, results[i]])) as unknown as ProviderProbes;
+  // Build the keyed result directly so the Provider key union is preserved
+  // (Object.fromEntries would widen the keys back to string).
+  const probes = {} as ProviderProbes;
+  names.forEach((name, i) => {
+    probes[name as Provider] = results[i];
+  });
+  return probes;
 }
 
 // ── Internals ─────────────────────────────────────────────────────────────────

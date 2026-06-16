@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { SkillInfo } from "../src/types/index";
+import { frontmatterField } from "./frontmatter";
 
 /**
  * Skill discovery across the three source tiers (project → global → plugin).
@@ -13,24 +14,7 @@ import type { SkillInfo } from "../src/types/index";
 // ── Frontmatter / skill scanning helpers ─────────────────────────────────────
 
 function parseFrontmatterField(content: string, field: string): string {
-  const singleLine = content.match(new RegExp(`^${field}:\\s*["']?(.+?)["']?\\s*$`, "m"));
-  const value = singleLine?.[1]?.trim() ?? "";
-
-  if (/^[|>][-+]?$/.test(value)) {
-    const blockMatch = content.match(
-      new RegExp(`^${field}:\\s*[|>][-+]?\\s*\\n((?:[ \\t]+.+\\n?)+)`, "m")
-    );
-    if (blockMatch) {
-      return blockMatch[1]
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .join(" ");
-    }
-    return "";
-  }
-
-  return value;
+  return frontmatterField(content, field) ?? "";
 }
 
 function scanSkillsDir(
