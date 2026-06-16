@@ -19,7 +19,7 @@ function resolveOverrides<T>(
 ): Partial<T> {
   return typeof idOrOverrides === "string"
     ? { ...fromId(idOrOverrides), ...overrides }
-    : (idOrOverrides ?? {});
+    : { ...(idOrOverrides ?? {}), ...overrides };
 }
 
 export function makeSession(
