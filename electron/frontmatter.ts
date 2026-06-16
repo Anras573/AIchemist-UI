@@ -26,13 +26,19 @@ export function splitFrontmatter(
  * Returns undefined when the field is absent.
  */
 export function frontmatterField(source: string, field: string): string | undefined {
-  const singleLine = source.match(new RegExp(`^${field}:\\s*["']?(.+?)["']?\\s*$`, "m"));
+  // When `source` is a full document with a frontmatter block, scope the search
+  // to that block so body lines like `name: ...` can't produce false positives.
+  // Fall back to the whole string when there is no delimiter (e.g. callers that
+  // already passed an extracted block).
+  const scoped = splitFrontmatter(source)?.frontmatter ?? source;
+
+  const singleLine = scoped.match(new RegExp(`^${field}:\\s*["']?(.+?)["']?\\s*$`, "m"));
   if (!singleLine) return undefined;
   const value = singleLine[1].trim();
 
   // Block scalar (`|` / `>`): collect the indented lines that follow.
   if (/^[|>][-+]?$/.test(value)) {
-    const blockMatch = source.match(
+    const blockMatch = scoped.match(
       new RegExp(`^${field}:\\s*[|>][-+]?\\s*\\n((?:[ \\t]+.+\\n?)+)`, "m"),
     );
     if (!blockMatch) return "";
