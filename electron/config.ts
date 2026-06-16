@@ -25,13 +25,22 @@ export function resolveClaudePath(): string | null {
   const override = process.env.CLAUDE_CODE_PATH;
   if (override) return override;
 
-  // Check common locations before falling back to `which`
-  const candidates = [
-    "/opt/homebrew/bin/claude",
-    "/usr/local/bin/claude",
-    `${os.homedir()}/.npm-global/bin/claude`,
-    `${os.homedir()}/.local/bin/claude`,
-  ];
+  const isWindows = process.platform === "win32";
+
+  // Check common locations before falling back to the shell.
+  const candidates = isWindows
+    ? [
+        // npm global installs land in %APPDATA%\npm as a .cmd shim.
+        path.join(process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"), "npm", "claude.cmd"),
+        path.join(os.homedir(), ".local", "bin", "claude.exe"),
+        path.join(os.homedir(), ".local", "bin", "claude.cmd"),
+      ]
+    : [
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+        `${os.homedir()}/.npm-global/bin/claude`,
+        `${os.homedir()}/.local/bin/claude`,
+      ];
   for (const p of candidates) {
     try {
       const { statSync } = require("fs") as typeof import("fs");
@@ -40,9 +49,11 @@ export function resolveClaudePath(): string | null {
     } catch { /* not found */ }
   }
 
-  // Last resort: ask the shell
+  // Last resort: ask the shell. `which` is POSIX-only; Windows uses `where`,
+  // which can return multiple lines — take the first.
   try {
-    return execSync("which claude", { encoding: "utf-8" }).trim() || null;
+    const lookup = isWindows ? "where claude" : "which claude";
+    return execSync(lookup, { encoding: "utf-8" }).split(/\r?\n/)[0]?.trim() || null;
   } catch {
     return null;
   }

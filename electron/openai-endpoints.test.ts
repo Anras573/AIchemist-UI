@@ -15,6 +15,11 @@ import {
   writeOpenAiEndpoints,
 } from "./openai-endpoints";
 
+// Windows (NTFS) does not model POSIX permission bits, so fs.chmod's 0o600 is a
+// no-op there — fs.statSync reports 0o666 regardless. Skip the mode assertions
+// on Windows; the owner-only-write guarantee only applies on POSIX filesystems.
+const itPosix = process.platform === "win32" ? it.skip : it;
+
 let tempDir: string;
 let configPath: string;
 
@@ -67,13 +72,13 @@ describe("openai-endpoints config", () => {
     expect(doc.endpoints.local.baseURL).toBe("http://localhost:8000/v1");
   });
 
-  it("writes the file with owner-only permissions (may contain API keys)", () => {
+  itPosix("writes the file with owner-only permissions (may contain API keys)", () => {
     writeOpenAiEndpoints({ local: { baseURL: "http://localhost:8000/v1" } });
     const mode = fs.statSync(configPath).mode & 0o777;
     expect(mode).toBe(0o600);
   });
 
-  it("tightens permissions on a pre-existing file with broader mode", () => {
+  itPosix("tightens permissions on a pre-existing file with broader mode", () => {
     fs.writeFileSync(configPath, JSON.stringify({ endpoints: {} }), { mode: 0o644 });
     writeOpenAiEndpoints({ local: { baseURL: "http://localhost:8000/v1" } });
     const mode = fs.statSync(configPath).mode & 0o777;

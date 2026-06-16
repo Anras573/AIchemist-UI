@@ -31,6 +31,11 @@ type OllamaMockState = {
 let ollamaMocks: OllamaMockState;
 const tempDirs: string[] = [];
 
+// Creating a file symlink on Windows requires elevation or Developer Mode, so
+// fs.symlinkSync throws EPERM in ordinary CI. The boundary check itself works on
+// Windows (it relies on fs.realpathSync) — we just can't set up the fixture.
+const itSymlink = process.platform === "win32" ? it.skip : it;
+
 function makeTempProject(): string {
   const dir = fs.mkdtempSync(path.join(process.cwd(), ".ollama-provider-"));
   tempDirs.push(dir);
@@ -292,7 +297,7 @@ describe("ollama provider", () => {
     expect(toolMessage?.content).toContain("File too large");
   });
 
-  it("rejects read_file for symlinks that escape the project boundary", async () => {
+  itSymlink("rejects read_file for symlinks that escape the project boundary", async () => {
     const projectPath = makeTempProject();
     const outsideDir = fs.mkdtempSync(path.join(process.cwd(), ".ollama-outside-"));
     tempDirs.push(outsideDir);

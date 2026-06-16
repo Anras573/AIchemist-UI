@@ -18,9 +18,14 @@ vi.mock("fs/promises", () => {
     e.code = "ENOENT";
     return e;
   };
+  // The code under test builds paths with the real `path` module, which emits
+  // backslash separators on Windows. The in-memory FS is keyed with POSIX
+  // separators, so normalize incoming paths before every lookup.
+  const norm = (p: string) => p.replace(/\\/g, "/");
   return {
     default: {},
-    stat: async (p: string) => {
+    stat: async (raw: string) => {
+      const p = norm(raw);
       if (p in files) {
         return { size: Buffer.byteLength(files[p], "utf8"), isDirectory: () => false, mtimeMs: 1 };
       }
@@ -29,11 +34,13 @@ vi.mock("fs/promises", () => {
       }
       throw ENOENT(p);
     },
-    readFile: async (p: string) => {
+    readFile: async (raw: string) => {
+      const p = norm(raw);
       if (!(p in files)) throw ENOENT(p);
       return files[p];
     },
-    readdir: async (p: string) => {
+    readdir: async (raw: string) => {
+      const p = norm(raw);
       if (!dirs.has(p)) throw ENOENT(p);
       const prefix = p.endsWith("/") ? p : p + "/";
       const out = new Set<string>();
@@ -46,10 +53,12 @@ vi.mock("fs/promises", () => {
       }
       return [...out];
     },
-    access: async (p: string) => {
+    access: async (raw: string) => {
+      const p = norm(raw);
       if (!(p in files) && !dirs.has(p)) throw ENOENT(p);
     },
-    open: async (p: string) => {
+    open: async (raw: string) => {
+      const p = norm(raw);
       if (!(p in files)) throw ENOENT(p);
       const content = Buffer.from(files[p], "utf8");
       return {
@@ -102,6 +111,10 @@ beforeEach(() => {
 
 const PROJECTS = "/home/user/.claude/projects";
 
+// findTranscriptFile returns a path built with the real `path` module (backslash
+// separators on Windows). Normalize before comparing against POSIX expectations.
+const n = (p: string | null) => (p === null ? null : p.replace(/\\/g, "/"));
+
 describe("sanitizeCwd", () => {
   it("replaces slashes with dashes", () => {
     expect(sanitizeCwd("/Users/me/proj")).toBe("-Users-me-proj");
@@ -127,7 +140,7 @@ describe("findTranscriptFile", () => {
     addDir(dir);
     addFile(`${dir}/abc123.jsonl`, "");
     const found = await findTranscriptFile("/Users/me/proj", "abc123");
-    expect(found).toBe(`${dir}/abc123.jsonl`);
+    expect(n(found)).toBe(`${dir}/abc123.jsonl`);
   });
 
   it("falls back to content match when filename doesn't match", async () => {
@@ -138,7 +151,7 @@ describe("findTranscriptFile", () => {
       JSON.stringify({ type: "user", sessionId: "xyz789", cwd: "/Users/me/proj" }) + "\n"
     );
     const found = await findTranscriptFile("/Users/me/proj", "xyz789");
-    expect(found).toBe(`${dir}/other.jsonl`);
+    expect(n(found)).toBe(`${dir}/other.jsonl`);
   });
 
   it("returns null when no project dir exists", async () => {
@@ -155,7 +168,7 @@ describe("findTranscriptFile", () => {
       JSON.stringify({ type: "user", sessionId: "sid", cwd: "/my/cwd" }) + "\n"
     );
     const found = await findTranscriptFile("/my/cwd", "sid");
-    expect(found).toBe(`${dir}/sid.jsonl`);
+    expect(n(found)).toBe(`${dir}/sid.jsonl`);
   });
 });
 

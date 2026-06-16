@@ -18,10 +18,14 @@ import * as fs from "fs";
 
 let files: Record<string, string>;
 
+// The code builds paths with the real `path` module (backslash separators on
+// Windows). Key the in-memory FS with POSIX separators and normalize on access.
+const n = (p: fs.PathOrFileDescriptor) => String(p).replace(/\\/g, "/");
+
 beforeEach(() => {
   files = {};
   vi.mocked(fs.readFileSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
-    const key = String(p);
+    const key = n(p);
     if (!(key in files)) {
       const err = new Error("ENOENT") as NodeJS.ErrnoException;
       err.code = "ENOENT";
@@ -30,7 +34,7 @@ beforeEach(() => {
     return files[key];
   });
   vi.mocked(fs.writeFileSync).mockImplementation((p, data) => {
-    files[String(p)] = String(data);
+    files[n(p)] = String(data);
   });
   vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
 });
