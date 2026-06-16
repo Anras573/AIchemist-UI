@@ -4,6 +4,8 @@ import { cleanup } from "@testing-library/react";
 import { createElectronAPIMock } from "./mocks/electronAPI";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
+import { useGitHubPrStore } from "@/lib/store/useGitHubPrStore";
+import { _resetIpcQueryCache } from "@/lib/hooks/useIpcQuery";
 
 // Zustand's persist middleware calls createJSONStorage(() => window.localStorage)
 // at store creation time (module evaluation). jsdom's localStorage requires a
@@ -58,6 +60,12 @@ beforeEach(() => {
   // Merge reset values — do NOT pass replace=true as that wipes action functions
   useSessionStore.setState(initialSessionState);
   useProjectStore.setState(initialProjectState);
+  // Drop the shared useIpcQuery cache so each test re-fetches against its own
+  // freshly-mocked electronAPI rather than serving a previous test's value.
+  _resetIpcQueryCache();
+  // Clear per-session PR form drafts so an open form in one test doesn't leak
+  // into the next test that reuses the same session id.
+  useGitHubPrStore.setState({ forms: {} });
   localStorage.clear();
 
   // jsdom doesn't implement matchMedia — provide a stub

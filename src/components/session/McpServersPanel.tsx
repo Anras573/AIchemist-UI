@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { RefreshCw, Server, CheckCircle2, XCircle, MinusCircle, Loader2, Settings, ChevronRight, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
+import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 import { McpConfigEditorDialog } from "./McpConfigEditorDialog";
 import type { McpServerInfo } from "@/types";
@@ -173,28 +174,20 @@ export function McpServersPanel() {
     [activeSessionId, sessionDisabledMcp],
   );
 
-  const [servers, setServers] = useState<McpServerInfo[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
 
-  // `force=true` bypasses the 30s probe cache and re-spawns each managed server.
-  // Used by the manual refresh button so users can re-test after editing config.
-  const load = useCallback(async (force = false) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = force ? await ipc.mcpProbeManaged() : await ipc.listMcpServers();
-      setServers(result);
-    } catch (e) {
-      setError(String(e));
-      setServers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [ipc]);
-
-  useEffect(() => { load(); }, [load]);
+  // The server list is global (not project-scoped), so a single cache key
+  // suffices. The cheap `listMcpServers` read is used on mount; the refresh
+  // button forces a `mcpProbeManaged()` call, which bypasses the 30s probe
+  // cache and re-spawns each managed server so users can re-test after edits.
+  const { data, fetching: loading, error: queryError, refetch } = useIpcQuery<McpServerInfo[]>(
+    "mcp:servers",
+    ({ force }) => (force ? ipc.mcpProbeManaged() : ipc.listMcpServers()),
+  );
+  // On error, fall back to an empty list (matching the prior behaviour of
+  // showing "0 connected" alongside the error message).
+  const error = queryError ? String(queryError) : null;
+  const servers = data ?? (error ? [] : null);
 
   const handleToggle = useCallback(async (name: string) => {
     if (!activeSessionId) return;
@@ -258,7 +251,7 @@ export function McpServersPanel() {
         </WithTooltip>
         <WithTooltip label="Refresh (re-probe)">
           <button
-            onClick={() => load(true)}
+            onClick={() => void refetch()}
             disabled={loading}
             className={cn(
               "flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
@@ -322,7 +315,7 @@ export function McpServersPanel() {
         open={editorOpen}
         onClose={() => setEditorOpen(false)}
         projectPath={projectPath}
-        onSaved={() => load(true)}
+        onSaved={() => void refetch()}
       />
     </div>
   );

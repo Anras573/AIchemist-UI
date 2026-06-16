@@ -5,6 +5,7 @@ import { SkillInfo, SessionUsage } from "@/types";
 import type { Provider } from "@/types";
 import { useIpc } from "@/lib/ipc";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
+import { useGitBranch } from "@/lib/hooks/useGitBranch";
 import { AgentPickerButton } from "./AgentPickerButton";
 import { ModelPickerButton } from "./ModelPickerButton";
 import {
@@ -121,7 +122,7 @@ function InputBarInner({
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
   const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
-  const [gitBranch, setGitBranch] = useState<string | null>(null);
+  const { branch: gitBranch } = useGitBranch(sessionPath);
 
   // Slash-command state
   const [skills, setSkills] = useState<SkillInfo[] | null>(null);
@@ -130,22 +131,6 @@ function InputBarInner({
   const [slashQuery, setSlashQuery] = useState("");
   const [slashBadges, setSlashBadges] = useState<SkillInfo[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!sessionPath) { setGitBranch(null); return () => { cancelled = true; }; }
-    ipc
-      .getGitBranch(sessionPath)
-      .then((branch) => {
-        if (!cancelled) setGitBranch(branch);
-      })
-      .catch(() => {
-        if (!cancelled) setGitBranch(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionPath]);
 
   // Reset the skill cache and one-shot badges when the effective skill scope
   // changes: the session path (sessions can have per-worktree workspace_path
