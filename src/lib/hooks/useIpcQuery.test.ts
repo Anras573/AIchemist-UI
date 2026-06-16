@@ -131,6 +131,35 @@ describe("useIpcQuery", () => {
     expect(result.current.data).toBe("ok");
   });
 
+  it("clears the error and shows loading while retrying after an initial failure", async () => {
+    let resolveSecond!: (v: string) => void;
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockImplementationOnce(() => new Promise<string>((r) => { resolveSecond = r; }));
+
+    const { result } = renderHook(() => useIpcQuery("retry-err", fetcher, { ttl: 10_000 }));
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
+
+    let pending: Promise<void>;
+    act(() => {
+      pending = result.current.refetch();
+    });
+
+    // While the retry is in flight, the stale error must be gone and — since
+    // there is no cached data — the hook reports loading rather than error.
+    await waitFor(() => expect(result.current.fetching).toBe(true));
+    expect(result.current.error).toBeUndefined();
+    expect(result.current.loading).toBe(true);
+
+    await act(async () => {
+      resolveSecond("recovered");
+      await pending;
+    });
+    expect(result.current.data).toBe("recovered");
+    expect(result.current.error).toBeUndefined();
+  });
+
   it("isolates entries by key", async () => {
     const fa = vi.fn().mockResolvedValue("A");
     const fb = vi.fn().mockResolvedValue("B");

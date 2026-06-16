@@ -63,11 +63,14 @@ function runFetch<T>(key: string, fetcher: Fetcher<T>, force: boolean): Promise<
   // starting its own. `force` can't preempt a fetch already on the wire.
   if (entry.promise) return entry.promise;
 
-  // Only flip to the "loading" status before the first successful/failed
-  // settle. A forced refetch over already-resolved data keeps the stale value
-  // visible (and reports `fetching` instead) so the UI doesn't flash empty.
-  const hadValue = entry.settledAt > 0;
-  if (!hadValue) entry.status = "loading";
+  // Keep the last *successful* value visible while revalidating; but when there
+  // is no cached data (initial load, or the previous attempt errored) flip to
+  // the loading state. Either way, clear any stale error up front so a Retry /
+  // refetch doesn't keep rendering the old error while the new request is in
+  // flight — `error` is re-set only if this fetch itself fails.
+  const hasData = entry.data !== undefined;
+  entry.status = hasData ? "success" : "loading";
+  entry.error = undefined;
 
   const promise = (async () => {
     try {

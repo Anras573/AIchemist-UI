@@ -108,7 +108,10 @@ export function OpenPrSection({
 
   // Session-scoped form fields (see useGitHubPrStore): the in-progress draft
   // survives session switches and resets cleanly for a brand-new session.
-  const formKey = activeSessionId ?? "";
+  // OpenPrSection can render with no active session (ChangesPanel keys off the
+  // project path), so fall back to a project-scoped key rather than a shared
+  // empty-string bucket that would collide drafts across projects.
+  const formKey = activeSessionId ?? `project:${projectPath}`;
   const form = useGitHubPrStore((s) => s.forms[formKey] ?? EMPTY_PR_FORM);
   const patchForm = useGitHubPrStore((s) => s.setForm);
   const setFormField = (patch: Parameters<typeof patchForm>[1]) => patchForm(formKey, patch);
