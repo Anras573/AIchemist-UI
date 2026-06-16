@@ -139,10 +139,6 @@ export function GitHubPanel({}: GitHubPanelProps) {
   const error =
     (queryError instanceof Error ? queryError.message : queryError ? String(queryError) : null) ??
     urlError;
-  const fetchData = useCallback(() => {
-    setUrlError(null);
-    void refetch();
-  }, [refetch]);
 
   const [ciByKey, setCiByKey] = useState<Record<string, CiBadgeEntry>>({});
   const [ciLoadingByKey, setCiLoadingByKey] = useState<Record<string, boolean>>({});
@@ -156,6 +152,15 @@ export function GitHubPanel({}: GitHubPanelProps) {
     setCiByKey({});
     setCiLoadingByKey({});
   }, []);
+
+  // The main Refresh button reloads the PR/issue list AND drops the CI badge
+  // cache, so stale statuses get re-probed for the refreshed list (the CI
+  // prefetch effect skips PRs already present in ciByKey).
+  const fetchData = useCallback(() => {
+    setUrlError(null);
+    resetCiState();
+    void refetch();
+  }, [refetch, resetCiState]);
 
   const fetchCiStatus = useCallback(
     async (pr: GitHubPR, options?: { force?: boolean }) => {

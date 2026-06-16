@@ -123,6 +123,33 @@ describe("GitHubPanel", () => {
     });
   });
 
+  it("re-probes CI for unchanged PRs when the main Refresh is clicked", async () => {
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+    window.electronAPI.githubListPrs = vi.fn().mockResolvedValue({
+      prs: [makePr({ title: "PR One", head_sha: "sha-1" })],
+    });
+    window.electronAPI.githubListIssues = vi.fn().mockResolvedValue({ issues: [] });
+    window.electronAPI.githubGetCiStatus = vi.fn().mockResolvedValue({
+      status: { state: "success" },
+    });
+
+    renderWithProviders(<GitHubPanel />);
+
+    expect(await screen.findByText("passing")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.electronAPI.githubGetCiStatus).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    // The list reloads and the CI badge cache is dropped, so the same PR's CI
+    // is re-probed even though its head SHA is unchanged.
+    await waitFor(() => {
+      expect(window.electronAPI.githubGetCiStatus).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("refreshes CI for a single PR without navigating", async () => {
     useProjectStore.getState().addProject(makeProject());
     useProjectStore.getState().setActiveProject("proj-1");
