@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
 import { FileText, Brain } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
+import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 
 interface MemoryFile {
@@ -23,27 +23,13 @@ interface MemoryPanelProps {
 export function MemoryPanel({ projectPath, onFileOpen }: MemoryPanelProps) {
   const ipc = useIpc();
   const provider = useActiveSessionProvider();
-  const [files, setFiles] = useState<MemoryFile[] | null>(null);
-
-  useEffect(() => {
-    if (provider && provider !== "anthropic") {
-      setFiles([]);
-      return;
-    }
-    let cancelled = false;
-    setFiles(null);
-    ipc
-      .listMemory(projectPath)
-      .then((r) => {
-        if (!cancelled) setFiles(r.files);
-      })
-      .catch(() => {
-        if (!cancelled) setFiles([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectPath, provider]);
+  // Memory is Claude-only — skip the IPC fetch entirely for other providers.
+  const memoryKey = provider && provider !== "anthropic" ? null : `memory:${projectPath}`;
+  const { data } = useIpcQuery<MemoryFile[]>(
+    memoryKey,
+    () => ipc.listMemory(projectPath).then((r) => r.files).catch(() => []),
+  );
+  const files = memoryKey === null ? [] : (data ?? null);
 
   if (provider && provider !== "anthropic") {
     return (

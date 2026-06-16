@@ -1,9 +1,10 @@
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { Check, Eye, Info, Loader2, Pencil, Plus, Search, X } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
+import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -130,7 +131,17 @@ export function SkillsPanel() {
   const activeSkills = activeSessionId ? (sessionSkills[activeSessionId] ?? []) : [];
   const provider = useActiveSessionProvider();
 
-  const [skills, setSkills] = useState<SkillInfo[] | null>(null);
+  // Cache the skill listing by project path + provider (the two inputs that
+  // change the scanned locations) so re-mounting the panel doesn't re-scan disk.
+  const skillsKey = projectPath ? `skills:${projectPath}:${provider ?? ""}` : null;
+  const { data, refetch: reloadSkills } = useIpcQuery<SkillInfo[]>(
+    skillsKey,
+    () => ipc.listSkills(projectPath, provider ?? undefined).catch(() => []),
+  );
+  // `null` is the loading sentinel the render below keys off of; an empty key
+  // (no project) resolves to an empty list rather than a perpetual spinner.
+  const skills = skillsKey === null ? [] : (data ?? null);
+
   const [enabledSources, setEnabledSources] = useState<Set<SkillSource>>(
     () => new Set(ALL_SOURCES)
   );
@@ -157,27 +168,11 @@ export function SkillsPanel() {
     );
   }) ?? null;
 
-  const loadSkills = useCallback(() => {
-    if (!projectPath) {
-      setSkills([]);
-      return;
-    }
-    setSkills(null);
-    ipc
-      .listSkills(projectPath, provider ?? undefined)
-      .then(setSkills)
-      .catch(() => setSkills([]));
-  }, [projectPath, provider, ipc]);
-
   // Modal state — undefined means closed, null means "new", SkillInfo means "edit/view"
   const [editingSkill, setEditingSkill] = useState<SkillInfo | null | undefined>(undefined);
   const [viewingSkill, setViewingSkill] = useState<SkillInfo | undefined>(undefined);
   const modalOpen = editingSkill !== undefined;
   const viewModalOpen = viewingSkill !== undefined;
-
-  useEffect(() => {
-    loadSkills();
-  }, [loadSkills]);
 
   const handleToggle = useCallback(
     (skillName: string) => {
@@ -195,8 +190,8 @@ export function SkillsPanel() {
   const handleViewModalClose = useCallback(() => setViewingSkill(undefined), []);
 
   const handleModalSaved = useCallback(() => {
-    loadSkills();
-  }, [loadSkills]);
+    void reloadSkills();
+  }, [reloadSkills]);
 
   return (
     <>

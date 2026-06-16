@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { McpServersPanel } from "@/components/session/McpServersPanel";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -78,5 +78,26 @@ describe("McpServersPanel", () => {
     expect(screen.queryByText("claude-only")).not.toBeInTheDocument();
     expect(window.electronAPI.listMcpServers).toHaveBeenCalledTimes(1);
     expect(window.electronAPI.mcpProbeManaged).not.toHaveBeenCalled();
+  });
+
+  it("drops stale servers and shows the error when a refresh fails", async () => {
+    useSessionStore.getState().addSession(makeSession());
+    useSessionStore.getState().setActiveSession("sess-1");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+    vi.mocked(window.electronAPI.mcpProbeManaged).mockRejectedValue(new Error("probe boom"));
+
+    renderWithProviders(<McpServersPanel />);
+
+    expect(await screen.findByText("context7")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Refresh"));
+
+    // On a failed refresh the panel clears to the empty/error state rather than
+    // leaving the previously-loaded servers on screen.
+    await waitFor(() => {
+      expect(screen.getByText(/probe boom/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("context7")).not.toBeInTheDocument();
   });
 });

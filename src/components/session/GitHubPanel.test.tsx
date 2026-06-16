@@ -123,6 +123,33 @@ describe("GitHubPanel", () => {
     });
   });
 
+  it("re-probes CI for unchanged PRs when the main Refresh is clicked", async () => {
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+    window.electronAPI.githubListPrs = vi.fn().mockResolvedValue({
+      prs: [makePr({ title: "PR One", head_sha: "sha-1" })],
+    });
+    window.electronAPI.githubListIssues = vi.fn().mockResolvedValue({ issues: [] });
+    window.electronAPI.githubGetCiStatus = vi.fn().mockResolvedValue({
+      status: { state: "success" },
+    });
+
+    renderWithProviders(<GitHubPanel />);
+
+    expect(await screen.findByText("passing")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.electronAPI.githubGetCiStatus).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    // The list reloads and the CI badge cache is dropped, so the same PR's CI
+    // is re-probed even though its head SHA is unchanged.
+    await waitFor(() => {
+      expect(window.electronAPI.githubGetCiStatus).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("refreshes CI for a single PR without navigating", async () => {
     useProjectStore.getState().addProject(makeProject());
     useProjectStore.getState().setActiveProject("proj-1");
@@ -177,6 +204,41 @@ describe("GitHubPanel", () => {
     expect(await screen.findByText("PR with no CI")).toBeInTheDocument();
     expect(await screen.findByText("unknown")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  it("clears a URL-open error when switching projects", async () => {
+    const projectOne = makeProject({ id: "proj-1", path: "/project-one" });
+    const projectTwo = makeProject({ id: "proj-2", path: "/project-two" });
+    useProjectStore.getState().addProject(projectOne);
+    useProjectStore.getState().addProject(projectTwo);
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    window.electronAPI.githubListPrs = vi.fn().mockImplementation(
+      async (args: { projectPath: string }) =>
+        args.projectPath === "/project-one"
+          ? { prs: [makePr({ id: 1, number: 1, title: "First PR", head_sha: "sha-1" })] }
+          : { prs: [] }
+    );
+    window.electronAPI.githubListIssues = vi.fn().mockResolvedValue({ issues: [] });
+    window.electronAPI.githubGetCiStatus = vi.fn().mockResolvedValue({ status: { state: "success" } });
+    window.electronAPI.openGitHubUrl = vi.fn().mockRejectedValue(new Error("Invalid URL"));
+
+    renderWithProviders(<GitHubPanel />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open pull request #1: First PR" })
+    );
+
+    // The failed open puts the panel into its error/retry state.
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+
+    useProjectStore.getState().setActiveProject("proj-2");
+
+    // Switching projects clears the navigation error so the new project's data shows.
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      expect(screen.getByText("No open pull requests")).toBeInTheDocument();
+    });
   });
 
   it("ignores stale responses when a newer request finishes first", async () => {

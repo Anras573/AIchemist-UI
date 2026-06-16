@@ -6,6 +6,9 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { IPC_CHANNELS, onSessionEvent, useIpc } from "@/lib/ipc";
+import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
+import { useGitBranch } from "@/lib/hooks/useGitBranch";
+import { useGitHubPrStore, EMPTY_PR_FORM } from "@/lib/store/useGitHubPrStore";
 import type { Message, SessionDeltaEvent, SessionStatus } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,17 +106,44 @@ export function OpenPrSection({
   const headInputId = `${formId}-pr-head`;
   const descriptionInputId = `${formId}-pr-description`;
 
-  const [isChecking, setIsChecking] = useState(true);
-  const [hasGitHubToken, setHasGitHubToken] = useState(false);
-  const [hasGitHubRemote, setHasGitHubRemote] = useState(false);
-  const [defaultBaseBranch, setDefaultBaseBranch] = useState<string | null>(null);
-  const [defaultHeadBranch, setDefaultHeadBranch] = useState<string | null>(null);
+  // Session-scoped form fields (see useGitHubPrStore): the in-progress draft
+  // survives session switches and resets cleanly for a brand-new session.
+  // OpenPrSection can render with no active session (ChangesPanel keys off the
+  // project path), so fall back to a project-scoped key rather than a shared
+  // empty-string bucket that would collide drafts across projects.
+  const formKey = activeSessionId ?? `project:${projectPath}`;
+  const form = useGitHubPrStore((s) => s.forms[formKey] ?? EMPTY_PR_FORM);
+  const patchForm = useGitHubPrStore((s) => s.setForm);
+  const setFormField = (patch: Parameters<typeof patchForm>[1]) => patchForm(formKey, patch);
+  const { isOpen, title, base, head, description } = form;
 
-  const [isOpen, setIsOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [base, setBase] = useState("");
-  const [head, setHead] = useState("");
-  const [description, setDescription] = useState("");
+  // Availability check — token (global) gates the PR-context probe, which in
+  // turn gates the branch lookup. All cached/de-duplicated via useIpcQuery; the
+  // branch read shares a key with InputBar's branch badge.
+  const { data: token, loading: tokenLoading } = useIpcQuery<string | null>(
+    "github-token",
+    () => ipc.getApiKey("github").catch(() => null),
+  );
+  const hasGitHubToken = Boolean(token);
+
+  const prContextKey = hasGitHubToken && projectPath ? `github-pr-context:${projectPath}` : null;
+  const { data: prContext, loading: prContextLoading } = useIpcQuery(
+    prContextKey,
+    () => ipc.githubGetPrContext({ projectPath }).catch(() => ({ hasRemote: false, defaultBase: null })),
+  );
+  const hasGitHubRemote = prContext?.hasRemote ?? false;
+  const defaultBaseBranch = prContext?.defaultBase ?? null;
+
+  const { branch: currentBranch, loading: branchLoading } = useGitBranch(
+    hasGitHubRemote ? projectPath : null,
+  );
+  const defaultHeadBranch = hasGitHubRemote ? currentBranch : null;
+
+  // Stay in the "checking" state until the branch is resolved too, so the form
+  // doesn't appear (and prefill an empty head) before the branch is known.
+  const isChecking =
+    tokenLoading || (hasGitHubToken && prContextLoading) || (hasGitHubRemote && branchLoading);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,52 +155,6 @@ export function OpenPrSection({
   const generatedDescriptionRef = useRef("");
   const streamUnsubscribeRef = useRef<(() => void) | null>(null);
   const generateInFlightRef = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setIsChecking(true);
-
-    void (async () => {
-      try {
-        const token = await ipc.getApiKey("github");
-        if (cancelled) return;
-        const hasToken = Boolean(token);
-        setHasGitHubToken(hasToken);
-
-        if (!hasToken) {
-          setHasGitHubRemote(false);
-          setDefaultBaseBranch(null);
-          setDefaultHeadBranch(null);
-          return;
-        }
-
-        const context = await ipc.githubGetPrContext({ projectPath });
-        if (cancelled) return;
-        setHasGitHubRemote(context.hasRemote);
-        setDefaultBaseBranch(context.defaultBase);
-
-        if (context.hasRemote) {
-          const currentBranch = await ipc.getGitBranch(projectPath);
-          if (cancelled) return;
-          setDefaultHeadBranch(currentBranch);
-        } else {
-          setDefaultHeadBranch(null);
-        }
-      } catch {
-        if (cancelled) return;
-        setHasGitHubToken(false);
-        setHasGitHubRemote(false);
-        setDefaultBaseBranch(null);
-        setDefaultHeadBranch(null);
-      } finally {
-        if (!cancelled) setIsChecking(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [ipc, projectPath]);
 
   useEffect(() => {
     if (!successToast) return;
@@ -190,21 +174,23 @@ export function OpenPrSection({
   if (!visible) return null;
 
   const openForm = () => {
-    setTitle(sessionTitle ?? "");
-    setBase(defaultBaseBranch ?? "");
-    setHead(defaultHeadBranch ?? "");
-    setDescription("");
+    setFormField({
+      title: sessionTitle ?? "",
+      base: defaultBaseBranch ?? "",
+      head: defaultHeadBranch ?? "",
+      description: "",
+      isOpen: true,
+    });
     setError(null);
     setGenerateError(null);
     setCreatedPrUrl(null);
-    setIsOpen(true);
   };
 
   const closeForm = () => {
     cancelGenerateRef.current = true;
     streamUnsubscribeRef.current?.();
     streamUnsubscribeRef.current = null;
-    setIsOpen(false);
+    setFormField({ isOpen: false });
     setIsSubmitting(false);
     setIsGenerating(false);
   };
@@ -247,7 +233,7 @@ export function OpenPrSection({
     cancelGenerateRef.current = true;
     streamUnsubscribeRef.current?.();
     streamUnsubscribeRef.current = null;
-    setDescription(initialDescriptionRef.current);
+    setFormField({ description: initialDescriptionRef.current });
     setIsGenerating(false);
     setGenerateError(null);
   };
@@ -277,7 +263,7 @@ export function OpenPrSection({
       initialDescriptionRef.current = description;
       generatedDescriptionRef.current = "";
       cancelGenerateRef.current = false;
-      setDescription("");
+      setFormField({ description: "" });
       setIsGenerating(true);
       lockedUi = true;
 
@@ -335,7 +321,7 @@ export function OpenPrSection({
       streamUnsubscribeRef.current = onSessionEvent<SessionDeltaEvent>(IPC_CHANNELS.SESSION_DELTA, (payload) => {
         if (payload.session_id !== activeSessionId || cancelGenerateRef.current) return;
         generatedDescriptionRef.current += payload.text_delta;
-        setDescription(generatedDescriptionRef.current);
+        setFormField({ description: generatedDescriptionRef.current });
       });
 
       try {
@@ -347,14 +333,13 @@ export function OpenPrSection({
         });
         if (!cancelGenerateRef.current) {
           const { title: generatedTitle, body } = parseGeneratedPrDraft(generatedDescriptionRef.current);
-          if (generatedTitle) setTitle(generatedTitle);
           // Intentionally allow empty body to clear streamed Title/Body contract text from the textarea.
-          setDescription(body);
+          setFormField(generatedTitle ? { title: generatedTitle, description: body } : { description: body });
         }
       } catch (e) {
         if (!cancelGenerateRef.current) {
           setGenerateError(e instanceof Error ? e.message : String(e));
-          setDescription(initialDescriptionRef.current);
+          setFormField({ description: initialDescriptionRef.current });
         }
       } finally {
         streamUnsubscribeRef.current?.();
@@ -369,7 +354,7 @@ export function OpenPrSection({
       // the description the user had before clicking Generate.
       if (lockedUi && !cancelGenerateRef.current) {
         setIsGenerating(false);
-        setDescription(initialDescriptionRef.current);
+        setFormField({ description: initialDescriptionRef.current });
       }
     }
   };
@@ -411,7 +396,7 @@ export function OpenPrSection({
             <Input
               id={titleInputId}
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => setFormField({ title: e.target.value })}
               placeholder="PR title"
             />
           </div>
@@ -424,7 +409,7 @@ export function OpenPrSection({
               <Input
                 id={baseInputId}
                 value={base}
-                onChange={(e) => setBase(e.target.value)}
+                onChange={(e) => setFormField({ base: e.target.value })}
                 placeholder="Auto-detect if empty"
               />
             </div>
@@ -435,7 +420,7 @@ export function OpenPrSection({
               <Input
                 id={headInputId}
                 value={head}
-                onChange={(e) => setHead(e.target.value)}
+                onChange={(e) => setFormField({ head: e.target.value })}
                 placeholder="feature-branch"
               />
             </div>
@@ -466,7 +451,7 @@ export function OpenPrSection({
             <Textarea
               id={descriptionInputId}
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => setFormField({ description: e.target.value })}
               placeholder="Optional PR description"
               readOnly={isGenerating}
             />

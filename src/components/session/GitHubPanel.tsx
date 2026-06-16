@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { RefreshCw, GitBranch, Tag, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIpc } from "@/lib/ipc";
+import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { WithTooltip } from "@/components/ui/with-tooltip";
@@ -112,12 +113,35 @@ export function GitHubPanel({}: GitHubPanelProps) {
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const projectPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
-  const [data, setData] = useState<GitHubData | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  // Open PRs + issues, cached/de-duplicated by project path. Key-based caching
+  // also subsumes the manual request-id staleness guard the panel used to keep:
+  // switching projects switches keys, so an in-flight fetch for the previous
+  // project settles into its own (now unobserved) cache entry.
+  const githubKey = projectPath ? `github:list:${projectPath}` : null;
+  const {
+    data: queryData,
+    fetching: isLoading,
+    error: queryError,
+    refetch,
+  } = useIpcQuery<GitHubData>(githubKey, async () => {
+    const [prsResult, issuesResult] = await Promise.all([
+      ipc.githubListPrs({ projectPath, state: "open" }),
+      ipc.githubListIssues({ projectPath, state: "open" }),
+    ]);
+    if ("error" in prsResult) throw new Error(mapGitHubError(prsResult.error));
+    if ("error" in issuesResult) throw new Error(mapGitHubError(issuesResult.error));
+    return { prs: prsResult.prs, issues: issuesResult.issues };
+  });
+  const data = queryData ?? null;
+  // Transient errors from opening a GitHub URL (not a data-fetch failure).
+  const [urlError, setUrlError] = useState<string | null>(null);
+  const error =
+    (queryError instanceof Error ? queryError.message : queryError ? String(queryError) : null) ??
+    urlError;
+
   const [ciByKey, setCiByKey] = useState<Record<string, CiBadgeEntry>>({});
   const [ciLoadingByKey, setCiLoadingByKey] = useState<Record<string, boolean>>({});
-  const requestIdRef = useRef(0);
   const ciGenerationRef = useRef(0);
   const ciRequestIdRef = useRef(0);
   const ciLatestRequestByKeyRef = useRef<Record<string, number>>({});
@@ -128,6 +152,15 @@ export function GitHubPanel({}: GitHubPanelProps) {
     setCiByKey({});
     setCiLoadingByKey({});
   }, []);
+
+  // The main Refresh button reloads the PR/issue list AND drops the CI badge
+  // cache, so stale statuses get re-probed for the refreshed list (the CI
+  // prefetch effect skips PRs already present in ciByKey).
+  const fetchData = useCallback(() => {
+    setUrlError(null);
+    resetCiState();
+    void refetch();
+  }, [refetch, resetCiState]);
 
   const fetchCiStatus = useCallback(
     async (pr: GitHubPR, options?: { force?: boolean }) => {
@@ -191,60 +224,24 @@ export function GitHubPanel({}: GitHubPanelProps) {
     [projectPath, ciByKey, ciLoadingByKey, ipc]
   );
 
-  const fetchData = useCallback(async () => {
-    const requestId = ++requestIdRef.current;
-    if (!projectPath) return;
-
-    setData(null);
-    setIsLoading(true);
-    setError(null);
-    resetCiState();
-
-    try {
-      const [prsResult, issuesResult] = await Promise.all([
-        ipc.githubListPrs({ projectPath, state: "open" }),
-        ipc.githubListIssues({ projectPath, state: "open" }),
-      ]);
-
-      if (requestId !== requestIdRef.current) return;
-
-      const prs = "error" in prsResult ? [] : prsResult.prs;
-      const issues = "error" in issuesResult ? [] : issuesResult.issues;
-
-      if ("error" in prsResult || "error" in issuesResult) {
-        const fetchError =
-          "error" in prsResult
-            ? prsResult.error
-            : "error" in issuesResult
-              ? issuesResult.error
-              : "Unknown error";
-        setError(mapGitHubError(fetchError));
-      }
-
-      setData({ prs, issues });
-    } catch (err) {
-      if (requestId !== requestIdRef.current) return;
-      setError(mapGitHubError(err));
-    } finally {
-      if (requestId !== requestIdRef.current) return;
-      setIsLoading(false);
-    }
-  }, [projectPath, ipc, resetCiState]);
-
   const openGitHubUrl = useCallback(
     async (url: string) => {
       try {
         await ipc.openGitHubUrl(url);
       } catch (err) {
-        setError(mapGitHubError(err));
+        setUrlError(mapGitHubError(err));
       }
     },
     [ipc]
   );
 
+  // Reset transient panel state whenever the project changes: drop stale CI
+  // responses (tracked by ciGenerationRef) and clear any URL-open error so a
+  // navigation failure doesn't leak into a different project's view.
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    resetCiState();
+    setUrlError(null);
+  }, [projectPath, resetCiState]);
 
   useEffect(() => {
     if (!data?.prs.length) return;
@@ -258,7 +255,6 @@ export function GitHubPanel({}: GitHubPanelProps) {
 
   useEffect(() => {
     return () => {
-      requestIdRef.current += 1;
       ciGenerationRef.current += 1;
     };
   }, []);
