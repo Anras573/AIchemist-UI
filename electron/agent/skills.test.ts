@@ -17,6 +17,11 @@ function makeEntry(name: string, isDirectory = true): fs.Dirent {
   return { name, isDirectory: () => isDirectory, isFile: () => !isDirectory } as unknown as fs.Dirent;
 }
 
+// buildSkillsContext builds paths with the real `path` module, which emits
+// backslash separators on Windows. The mocks below compare against POSIX path
+// strings, so normalize the incoming path before every comparison.
+const n = (p: unknown) => String(p).replace(/\\/g, "/");
+
 // ─── buildSkillsContext ───────────────────────────────────────────────────────
 
 describe("buildSkillsContext", () => {
@@ -41,7 +46,7 @@ describe("buildSkillsContext", () => {
 
   it("includes content from a project-local skill", () => {
     vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
-      if (String(filePath) === "/project/.agents/skills/my-skill/SKILL.md") {
+      if (n(filePath) === "/project/.agents/skills/my-skill/SKILL.md") {
         return "---\nname: my-skill\n---\n\nDo the thing.";
       }
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -54,7 +59,7 @@ describe("buildSkillsContext", () => {
 
   it("falls back to the global skill when project skill is missing", () => {
     vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
-      if (String(filePath) === "/home/user/.claude/skills/global-skill/SKILL.md") {
+      if (n(filePath) === "/home/user/.claude/skills/global-skill/SKILL.md") {
         return "---\nname: global-skill\n---\n\nGlobal guidance.";
       }
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -77,7 +82,7 @@ describe("buildSkillsContext", () => {
     });
 
     vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
-      const p = String(filePath);
+      const p = n(filePath);
       if (p.endsWith("installed_plugins.json")) return pluginsJson;
       if (p === "/home/user/.claude/plugins/my-plugin@1.0.0/skills/plugin-skill/SKILL.md") {
         return "---\nname: plugin-skill\ndescription: Plugin skill\n---\n\nPlugin content.";
@@ -87,7 +92,7 @@ describe("buildSkillsContext", () => {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vi.mocked(fs.readdirSync) as any).mockImplementation((dir: string) => {
-      if (String(dir) === "/home/user/.claude/plugins/my-plugin@1.0.0/skills") {
+      if (n(dir) === "/home/user/.claude/plugins/my-plugin@1.0.0/skills") {
         return [makeEntry("plugin-skill")];
       }
       return [];
@@ -99,7 +104,7 @@ describe("buildSkillsContext", () => {
 
   it("strips frontmatter before including skill content", () => {
     vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
-      if (String(filePath) === "/project/.agents/skills/my-skill/SKILL.md") {
+      if (n(filePath) === "/project/.agents/skills/my-skill/SKILL.md") {
         return "---\nname: my-skill\ndescription: A skill\n---\n\nActual instructions here.";
       }
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -112,7 +117,7 @@ describe("buildSkillsContext", () => {
 
   it("combines multiple skills", () => {
     vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
-      const p = String(filePath);
+      const p = n(filePath);
       if (p === "/project/.agents/skills/skill-a/SKILL.md") return "---\n---\n\nInstructions A.";
       if (p === "/project/.agents/skills/skill-b/SKILL.md") return "---\n---\n\nInstructions B.";
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -125,7 +130,7 @@ describe("buildSkillsContext", () => {
 
   it("falls back to the Copilot user-global skill dir (~/.agents/skills/)", () => {
     vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
-      if (String(filePath) === "/home/user/.agents/skills/copilot-user-skill/SKILL.md") {
+      if (n(filePath) === "/home/user/.agents/skills/copilot-user-skill/SKILL.md") {
         return "---\nname: copilot-user-skill\n---\n\nCopilot user content.";
       }
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -137,7 +142,7 @@ describe("buildSkillsContext", () => {
 
   it("falls back to a Copilot plugin skill (~/.copilot/installed-plugins/...)", () => {
     vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
-      const p = String(filePath);
+      const p = n(filePath);
       if (p === "/home/user/.copilot/installed-plugins/scope/myplugin/skills/copilot-plugin-skill/SKILL.md") {
         return "---\nname: copilot-plugin-skill\n---\n\nCopilot plugin content.";
       }
@@ -146,7 +151,7 @@ describe("buildSkillsContext", () => {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vi.mocked(fs.readdirSync) as any).mockImplementation((dir: string) => {
-      const d = String(dir);
+      const d = n(dir);
       if (d === "/home/user/.copilot/installed-plugins") return [makeEntry("scope")];
       if (d === "/home/user/.copilot/installed-plugins/scope") return [makeEntry("myplugin")];
       if (d === "/home/user/.copilot/installed-plugins/scope/myplugin/skills") {
@@ -161,7 +166,7 @@ describe("buildSkillsContext", () => {
 
   it("prefers project skill over Copilot user-global with the same name", () => {
     vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
-      const p = String(filePath);
+      const p = n(filePath);
       if (p === "/project/.agents/skills/dup/SKILL.md") {
         return "---\nname: dup\n---\n\nProject wins.";
       }

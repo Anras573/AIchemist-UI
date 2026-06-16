@@ -16,23 +16,31 @@ vi.mock("fs/promises", () => {
     e.code = "ENOENT";
     return e;
   };
+  // The code under test builds paths with the real `path` module, which emits
+  // backslash separators on Windows. The in-memory FS is keyed with POSIX
+  // separators, so normalize incoming paths before every lookup.
+  const norm = (p: string) => p.replace(/\\/g, "/");
   return {
     default: {},
-    stat: async (p: string) => {
+    stat: async (raw: string) => {
+      const p = norm(raw);
       if (p in files) {
         return { size: Buffer.byteLength(files[p], "utf8"), isDirectory: () => false, mtimeMs: 1 };
       }
       if (dirs.has(p)) return { size: 0, isDirectory: () => true, mtimeMs: 1 };
       throw ENOENT(p);
     },
-    readFile: async (p: string) => {
+    readFile: async (raw: string) => {
+      const p = norm(raw);
       if (!(p in files)) throw ENOENT(p);
       return files[p];
     },
-    access: async (p: string) => {
+    access: async (raw: string) => {
+      const p = norm(raw);
       if (!(p in files) && !dirs.has(p)) throw ENOENT(p);
     },
-    open: async (p: string) => {
+    open: async (raw: string) => {
+      const p = norm(raw);
       if (!(p in files)) throw ENOENT(p);
       const content = Buffer.from(files[p], "utf8");
       return {
@@ -64,6 +72,10 @@ import {
 const SID = "abc123";
 const EV_PATH = "/home/user/.copilot/session-state/abc123/events.jsonl";
 
+// Paths returned by the code are built with the real `path` module (backslash
+// separators on Windows). Normalize before comparing against POSIX expectations.
+const n = (p: string | null) => (p === null ? null : p.replace(/\\/g, "/"));
+
 beforeEach(() => {
   for (const k of Object.keys(files)) delete files[k];
   dirs.clear();
@@ -77,7 +89,7 @@ function jsonl(events: CopilotEvent[]) {
 
 describe("copilot-transcript paths", () => {
   it("computes the expected events.jsonl path", () => {
-    expect(copilotEventsPath(SID)).toBe(EV_PATH);
+    expect(n(copilotEventsPath(SID))).toBe(EV_PATH);
   });
 
   it("findCopilotEventsFile returns null when missing", async () => {
@@ -86,7 +98,7 @@ describe("copilot-transcript paths", () => {
 
   it("findCopilotEventsFile returns the path when present", async () => {
     files[EV_PATH] = "";
-    expect(await findCopilotEventsFile(SID)).toBe(EV_PATH);
+    expect(n(await findCopilotEventsFile(SID))).toBe(EV_PATH);
   });
 });
 
