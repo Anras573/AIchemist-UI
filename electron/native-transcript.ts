@@ -332,12 +332,16 @@ export function watchNativeTranscript(
   const dir = path.dirname(file);
   let closed = false;
   let debounceTimer: NodeJS.Timeout | null = null;
+  let pollTimer: NodeJS.Timeout | null = null;
   let watcher: fs.FSWatcher | null = null;
+  let lastEmit = 0;
+  let lastMtime: number | null = null;
 
   const refresh = async () => {
     if (closed) return;
     try {
       const events = await parseNativeTranscript(file);
+      lastEmit = Date.now();
       cb.onUpdate(nativeEventsToSpans(events, { sessionId }));
     } catch (err) {
       cb.onError?.(err);
@@ -360,6 +364,26 @@ export function watchNativeTranscript(
     /* best effort */
   }
 
+  // macOS fs.watch safety-net: stat-poll the file every 1s and schedule a
+  // refresh when mtime changed without a recent fs.watch-driven emit. Mirrors
+  // the fallback in claude-transcript.ts so updates aren't silently missed.
+  pollTimer = setInterval(async () => {
+    if (closed) return;
+    try {
+      const st = await fsp.stat(file);
+      if (lastMtime === null) {
+        lastMtime = st.mtimeMs;
+        return;
+      }
+      if (st.mtimeMs !== lastMtime) {
+        lastMtime = st.mtimeMs;
+        if (Date.now() - lastEmit > 500) schedule();
+      }
+    } catch {
+      /* file may not exist yet */
+    }
+  }, 1000);
+
   // Initial emit for whatever already exists on disk.
   void refresh();
 
@@ -367,6 +391,7 @@ export function watchNativeTranscript(
     close() {
       closed = true;
       if (debounceTimer) clearTimeout(debounceTimer);
+      if (pollTimer) clearInterval(pollTimer);
       if (watcher) {
         try {
           watcher.close();

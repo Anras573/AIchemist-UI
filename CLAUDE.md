@@ -178,8 +178,8 @@ Ollama and OpenAI-compatible run an in-process tool loop and have no SDK session
 
 ### IPC surface
 
-- **`GET_TRACES({ sessionId })`** in `electron/ipc/trace-handlers.ts` — dispatches by provider: reads the SDK session id from `provider_state` (`claude.sdkSessionId` / `copilot.sessionId`), falling back to the legacy `sessions.sdk_session_id` / `copilot_session_id` columns for pre-migration sessions, then parses the corresponding file. When neither SDK id exists, it falls back to the native transcript at `~/.aichemist/traces/<sessionId>/events.jsonl` (Ollama / OpenAI-compatible).
-- **`TRACE_BIND_TRANSCRIPT({ sessionId })`** — sets up a `chokidar` watcher on the transcript file and streams incremental spans via `SESSION_TRACE_UPDATE`. The `TracesPanel` calls this when the tab opens.
+- **`GET_TRACES({ sessionId })`** in `electron/ipc/trace-handlers.ts` — dispatches by provider: reads the SDK session id from `provider_state` (`claude.sdkSessionId` / `copilot.sessionId`), falling back to the legacy `sessions.sdk_session_id` / `copilot_session_id` columns for pre-migration sessions, then parses the corresponding file. When neither SDK id exists, it resolves the session's **effective provider** (`session.provider ?? project.config.provider`) and, for the self-driven providers (Ollama / OpenAI-compatible), reads the native transcript at `~/.aichemist/traces/<sessionId>/events.jsonl`. Resolving by provider rather than file existence lets the watcher bind before the first turn has written the file.
+- **`TRACE_BIND_TRANSCRIPT({ sessionId })`** — sets up an `fs.watch` watcher (directory-level, with a 1 s stat-poll safety-net for macOS) on the transcript file and streams incremental spans via `SESSION_TRACE`. The `TracesPanel` calls this when the tab opens.
 
 ### Copilot turn grouping — anchor on `interactionId`, not `turnId`
 

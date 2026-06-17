@@ -46,6 +46,8 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
         `SELECT s.provider_state AS providerState,
                 s.sdk_session_id AS sdkSessionId,
                 s.copilot_session_id AS copilotSessionId,
+                s.provider AS provider,
+                p.config AS projectConfig,
                COALESCE(s.workspace_path, p.path) AS workspacePath
          FROM sessions s
          JOIN projects p ON p.id = s.project_id
@@ -56,6 +58,8 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
           providerState: string | null;
           sdkSessionId: string | null;
           copilotSessionId: string | null;
+          provider: string | null;
+          projectConfig: string | null;
           workspacePath: string;
         }
       | undefined;
@@ -73,7 +77,19 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     }
     // Self-driven providers (Ollama, OpenAI-compatible) have no SDK session id;
     // they write their own transcript to ~/.aichemist/traces/<sessionId>/.
-    if (findNativeTranscriptFile(sessionId)) {
+    // Resolve by the session's effective provider (lock at creation, falling
+    // back to the project default for legacy null-provider sessions) rather
+    // than file existence — so binding the watcher before the first turn still
+    // streams updates once events.jsonl appears.
+    let projectProvider = "anthropic";
+    try {
+      projectProvider =
+        (JSON.parse(row.projectConfig ?? "{}") as { provider?: string })?.provider ?? "anthropic";
+    } catch {
+      /* corrupt config — treat as default */
+    }
+    const effectiveProvider = row.provider ?? projectProvider;
+    if (effectiveProvider === "ollama" || effectiveProvider === "openai-compatible") {
       return { kind: "native", sessionId };
     }
     return null;
