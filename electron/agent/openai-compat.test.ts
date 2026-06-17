@@ -21,6 +21,7 @@ import {
   runOpenAiCompatTurn,
 } from "./openai-compat";
 import { _setEndpointsPathForTests, writeOpenAiEndpoints } from "../openai-endpoints";
+import { _setNativeTracesRootForTests } from "../native-transcript";
 import type { OpenAiEndpointsMap } from "../openai-endpoints";
 import { createManagedMcpBridge } from "../mcp/approval";
 
@@ -92,6 +93,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openai-compat-cfg-"));
   _setEndpointsPathForTests(path.join(tempDir, "openai-providers.json"));
+  _setNativeTracesRootForTests(path.join(tempDir, "traces"));
   _resetOpenAiCompatProbeCache();
   vi.mocked(createManagedMcpBridge).mockResolvedValue({
     tools: [],
@@ -103,6 +105,7 @@ beforeEach(() => {
 
 afterEach(() => {
   _setEndpointsPathForTests(null);
+  _setNativeTracesRootForTests(null);
   _setFetch(null);
   _setClientFactory(null);
   fs.rmSync(tempDir, { recursive: true, force: true });

@@ -7,6 +7,10 @@ import { loadToolCallsForMessage } from "../sessions";
 import { runGatedTool } from "./tool-gate";
 import { TurnEmitter } from "./turn-emitter";
 import {
+  createNativeTranscriptRecorder,
+  type NativeTranscriptRecorder,
+} from "../native-transcript";
+import {
   implDeleteFileWithChange,
   implExecuteBash,
   implGlobFiles,
@@ -78,6 +82,7 @@ interface ToolExecutionContext {
   emitter: TurnEmitter;
   client: OllamaClientLike;
   delegationDepth: number;
+  recorder: NativeTranscriptRecorder | null;
 }
 
 export const OLLAMA_NO_MODELS_ERROR =
@@ -563,6 +568,12 @@ async function runChatRound(
           cache_read_input_tokens: 0,
           cache_creation_input_tokens: 0,
         });
+        ctx.recorder?.usage({
+          input: chunk.prompt_eval_count ?? 0,
+          output: chunk.eval_count ?? 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+        });
       }
     }
     return { text: fullText, toolCalls };
@@ -591,6 +602,10 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
         params.projectPath,
       );
   const tools = params.noTools ? [] : [...makeToolDefinitions(), ...(managedMcpBridge?.tools ?? [])];
+  // noTools turns are text-only generation (e.g. PR draft generation) — skip
+  // transcript recording so they don't surface as empty turns in the Traces tab.
+  const recorder = params.noTools ? null : createNativeTranscriptRecorder(params.sessionId, "ollama");
+  recorder?.turnStart(model);
   const ctx: ToolExecutionContext = {
     db: params.db,
     sessionId: params.sessionId,
@@ -600,6 +615,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
     emitter: new TurnEmitter(params.webContents, params.sessionId),
     client,
     delegationDepth: 0,
+    recorder,
   };
 
   const systemPrompt = buildSystemPrompt(params);
@@ -609,12 +625,14 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   ];
 
   let fullText = "";
+  let turnStatus: "success" | "error" = "error";
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const { text, toolCalls } = await runChatRound(client, model, messages, tools, ctx);
       fullText += text;
 
       if (toolCalls.length === 0) {
+        turnStatus = "success";
         return fullText;
       }
       if (params.noTools) {
@@ -638,6 +656,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
     }
   } finally {
     await managedMcpBridge?.close();
+    recorder?.turnEnd(turnStatus);
   }
 
   throw new Error(`Ollama tool loop exceeded ${MAX_TOOL_ROUNDS} rounds`);

@@ -20,6 +20,7 @@ import {
   runOllamaAgentTurn,
 } from "./ollama";
 import { resolveApproval } from "./approval";
+import { _setNativeTracesRootForTests } from "../native-transcript";
 
 type OllamaMockState = {
   list: ReturnType<typeof vi.fn>;
@@ -81,6 +82,9 @@ describe("ollama provider", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     _resetOllamaClientForTests();
+    const tracesDir = fs.mkdtempSync(path.join(process.cwd(), ".ollama-traces-"));
+    tempDirs.push(tracesDir);
+    _setNativeTracesRootForTests(tracesDir);
     delete process.env.OLLAMA_HOST;
     ollamaMocks = await loadMocks();
     ollamaMocks.bridge.mockResolvedValue({
@@ -98,6 +102,7 @@ describe("ollama provider", () => {
   });
 
   afterEach(() => {
+    _setNativeTracesRootForTests(null);
     while (tempDirs.length > 0) {
       fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
     }
