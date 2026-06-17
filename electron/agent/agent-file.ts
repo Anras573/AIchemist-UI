@@ -4,6 +4,8 @@
  * `model`, followed by a body that becomes the agent's system prompt.
  */
 
+import { frontmatterField, splitFrontmatter } from "../frontmatter";
+
 export interface ParsedAgentFile {
   /** `name` frontmatter field, or null when absent. */
   name: string | null;
@@ -15,24 +17,17 @@ export interface ParsedAgentFile {
   body: string;
 }
 
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?([\s\S]*)$/;
-
-function frontmatterField(fm: string, field: string): string | undefined {
-  const match = fm.match(new RegExp(`^${field}:\\s*(.+)$`, "m"));
-  return match ? match[1].trim().replace(/^['"]|['"]$/g, "") : undefined;
-}
-
 /** Parse an agent markdown file. Returns null when no frontmatter block exists. */
 export function parseAgentMarkdown(content: string): ParsedAgentFile | null {
-  const match = content.match(FRONTMATTER_RE);
-  if (!match) return null;
+  const split = splitFrontmatter(content);
+  if (!split) return null;
 
-  const fm = match[1];
-  const model = frontmatterField(fm, "model");
+  const { frontmatter, body } = split;
+  const model = frontmatterField(frontmatter, "model");
   return {
-    name: frontmatterField(fm, "name") ?? null,
-    description: frontmatterField(fm, "description") ?? "",
+    name: frontmatterField(frontmatter, "name") ?? null,
+    description: frontmatterField(frontmatter, "description") ?? "",
     ...(model ? { model } : {}),
-    body: (match[2] ?? "").trim(),
+    body,
   };
 }

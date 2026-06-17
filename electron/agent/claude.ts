@@ -19,38 +19,33 @@ import { buildSkillsContext } from "./skills";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
 import { requestApproval, requiresApproval } from "./approval";
 import type { ToolCategory } from "./approval";
+import { classifyNativeTool } from "./tool-gate";
+import { isBinaryBuffer } from "./tool-impls";
 import { saveToolCall, updateToolCallStatus, getDisabledMcpServers } from "../sessions";
 import { providerSessionStore } from "./provider-session-store";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 
 // ── Native tool category map ───────────────────────────────────────────────────
 
+/** Maps Claude Code native tool names onto their approval categories. */
+const CLAUDE_TOOL_RULES = {
+  filesystem: ["Write", "Edit", "MultiEdit", "NotebookEditCell"],
+  shell: ["Bash"],
+  web: ["WebFetch", "WebSearch"],
+} as const;
+
 /** Maps a Claude Code native tool name to its approval category.
  *  Returns null for read-only or unknown tools that never require approval. */
 function getNativeToolCategory(toolName: string): ToolCategory | null {
-  if (["Write", "Edit", "MultiEdit", "NotebookEditCell"].includes(toolName)) return "filesystem";
-  if (["Bash"].includes(toolName)) return "shell";
-  if (["WebFetch", "WebSearch"].includes(toolName)) return "web";
-  return null;
+  return classifyNativeTool(toolName, CLAUDE_TOOL_RULES);
 }
 
-/** Maps a Claude Code native tool name to a ToolCategory string for DB storage. */
-function nativeToolCategory(name: string): string {
-  if (name === "Bash") return "shell";
-  if (["WebFetch", "WebSearch"].includes(name)) return "web";
-  return "filesystem";
+/** Maps a Claude Code native tool name to a ToolCategory for DB storage. */
+function nativeToolCategory(name: string): ToolCategory {
+  return classifyNativeTool(name, CLAUDE_TOOL_RULES) ?? "filesystem";
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-/** Returns true if a Buffer contains null bytes in its first 8 KB (binary heuristic). */
-function isBinaryBuffer(buf: Buffer): boolean {
-  const len = Math.min(buf.length, 8192);
-  for (let i = 0; i < len; i++) {
-    if (buf[i] === 0) return true;
-  }
-  return false;
-}
 
 function resolveModel(requestedModel: string): string {
   const {
