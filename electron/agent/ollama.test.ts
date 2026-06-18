@@ -13,6 +13,13 @@ vi.mock("../mcp/approval", () => ({
   createManagedMcpBridge: vi.fn(),
 }));
 
+// Control the tool-round cap without touching the real ~/.aichemist/.env.
+const settingsMock = vi.hoisted(() => ({ maxToolRounds: 8 }));
+vi.mock("../settings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../settings")>();
+  return { ...actual, readMaxToolRounds: () => settingsMock.maxToolRounds };
+});
+
 import {
   _resetOllamaClientForTests,
   getOllamaModels,
@@ -81,6 +88,7 @@ function streamChunks(chunks: Array<{ message?: { content?: string; tool_calls?:
 describe("ollama provider", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    settingsMock.maxToolRounds = 8;
     _resetOllamaClientForTests();
     const tracesDir = fs.mkdtempSync(path.join(process.cwd(), ".ollama-traces-"));
     tempDirs.push(tracesDir);
@@ -536,6 +544,50 @@ describe("ollama provider", () => {
     expect(recordedCategory).toBe("shell");
     expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({ tool_name: toolName }));
     expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({ tool_name: toolName, output: "bridge result" }));
+  });
+
+  it("surfaces a truncation notice (and keeps partial text) when the tool-round cap is hit", async () => {
+    settingsMock.maxToolRounds = 1;
+    const projectPath = makeTempProject();
+    fs.writeFileSync(path.join(projectPath, "notes.txt"), "content");
+    const db = makeDb([
+      { id: "m-placeholder", role: "user", content: "placeholder" },
+      { id: "m-user", role: "user", content: "keep going" },
+    ]);
+    const send = vi.fn();
+    // The model keeps asking for tools; with the cap at 1 the loop stops after
+    // the first round instead of looping forever.
+    ollamaMocks.chat.mockResolvedValue(
+      streamChunks([
+        {
+          message: {
+            content: "working",
+            tool_calls: [{ function: { name: "read_file", arguments: { path: "notes.txt" } } }],
+          },
+        },
+      ]),
+    );
+
+    const text = await runOllamaAgentTurn({
+      db: db as never,
+      sessionId: "s-cap",
+      messageId: "m-placeholder",
+      projectPath,
+      projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    // Exactly one chat round ran before the cap stopped the loop.
+    expect(ollamaMocks.chat).toHaveBeenCalledTimes(1);
+    expect(text).toContain("working");
+    expect(text).toContain("Reached the tool-round limit (1)");
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_DELTA,
+      expect.objectContaining({
+        session_id: "s-cap",
+        text_delta: expect.stringContaining("Reached the tool-round limit (1)"),
+      }),
+    );
   });
 
   it("rejects provider tool calls when noTools is enabled", async () => {

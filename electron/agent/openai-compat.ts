@@ -26,7 +26,8 @@ import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
 import type { ManagedMcpBridge } from "../mcp";
 import { getDisabledMcpServers, loadToolCallsForMessage } from "../sessions";
 import { runGatedTool } from "./tool-gate";
-import { TurnEmitter } from "./turn-emitter";
+import { TurnEmitter, emitToolRoundLimitNotice } from "./turn-emitter";
+import { readMaxToolRounds } from "../settings";
 import {
   createNativeTranscriptRecorder,
   type NativeTranscriptRecorder,
@@ -60,7 +61,6 @@ const OPENAI_COMPAT_SYSTEM_PROMPT = [
   "When you need clarification, use ask_user instead of asking in plain text.",
 ].join(" ");
 
-const MAX_TOOL_STEPS = 8;
 const LIST_MODELS_TIMEOUT_MS = 5_000;
 const PROBE_CACHE_TTL_MS = 30_000;
 
@@ -474,14 +474,19 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   // succeeds, so a failed setup can't leave an unterminated "running" span.
   recorder?.turnStart(formatCompositeModelId(endpointName, modelId));
 
+  const maxToolRounds = readMaxToolRounds();
   let fullText = "";
   let turnStatus: "success" | "error" = "error";
+  // Captured from the final `finish` part. A `tool-calls` reason means the AI
+  // SDK halted the multi-step loop at `stepCountIs(maxToolRounds)` while the
+  // model still wanted to call tools — i.e. the turn was truncated.
+  let finishReason: string | undefined;
   try {
     const result = streamText({
       model,
       system: buildSystemPrompt(params),
       messages,
-      ...(tools ? { tools, stopWhen: stepCountIs(MAX_TOOL_STEPS) } : {}),
+      ...(tools ? { tools, stopWhen: stepCountIs(maxToolRounds) } : {}),
     });
 
     for await (const part of result.fullStream) {
@@ -498,6 +503,7 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
           emitter.thinkingDone();
           break;
         case "finish":
+          finishReason = part.finishReason;
           emitter.usage({
             input_tokens: part.totalUsage.inputTokens ?? 0,
             output_tokens: part.totalUsage.outputTokens ?? 0,
@@ -517,6 +523,12 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
           // Tool calls/results are emitted and persisted inside runGatedTool.
           break;
       }
+    }
+    // The loop stopped on `tool-calls` rather than a natural `stop`: the step
+    // cap was hit mid-workflow. Surface the truncation (and keep any partial
+    // text) instead of ending silently.
+    if (tools && finishReason === "tool-calls") {
+      fullText += emitToolRoundLimitNotice(emitter, maxToolRounds);
     }
     turnStatus = "success";
   } finally {

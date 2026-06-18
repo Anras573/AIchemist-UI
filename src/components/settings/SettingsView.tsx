@@ -346,6 +346,12 @@ function OpenAiEndpointsSection() {
 
 const VALID_APPROVAL_MODES = ["none", "custom", "all"] as const;
 
+// Mirror of the bounds in electron/settings.ts (kept as plain numbers here so
+// the renderer doesn't pull the Node-only settings module into its bundle).
+const DEFAULT_MAX_TOOL_ROUNDS = 8;
+const MIN_MAX_TOOL_ROUNDS = 1;
+const MAX_MAX_TOOL_ROUNDS = 100;
+
 function normalizeProvider(v: string | undefined): string {
   const normalized = v?.trim().toLowerCase() ?? "";
   return (PROVIDER_IDS as readonly string[]).includes(normalized) ? normalized : "anthropic";
@@ -396,7 +402,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
           "ANTHROPIC_DEFAULT_HAIKU_MODEL",
           "ANTHROPIC_DEFAULT_OPUS_MODEL",
         ],
-        defaults: ["AICHEMIST_DEFAULT_PROVIDER", "AICHEMIST_DEFAULT_APPROVAL_MODE"],
+        defaults: ["AICHEMIST_DEFAULT_PROVIDER", "AICHEMIST_DEFAULT_APPROVAL_MODE", "AICHEMIST_MAX_TOOL_ROUNDS"],
         providers: ["AICHEMIST_DISABLED_PROVIDERS"],
         appearance: [],
       };
@@ -623,6 +629,26 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                       <option value="custom">Custom — approve risky tools only</option>
                       <option value="all">All — approve every tool call</option>
                     </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="max-tool-rounds" className="text-sm font-medium leading-none">Max tool rounds</label>
+                    <Input
+                      id="max-tool-rounds"
+                      type="number"
+                      min={MIN_MAX_TOOL_ROUNDS}
+                      max={MAX_MAX_TOOL_ROUNDS}
+                      step={1}
+                      value={draft.AICHEMIST_MAX_TOOL_ROUNDS ?? ""}
+                      onChange={(e) => set("AICHEMIST_MAX_TOOL_ROUNDS", e.target.value)}
+                      placeholder={String(DEFAULT_MAX_TOOL_ROUNDS)}
+                      className="font-mono text-sm w-32"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Caps the in-process tool loop for the Ollama and OpenAI-compatible
+                      providers so long tasks aren&apos;t cut off silently. Leave blank for
+                      the default ({DEFAULT_MAX_TOOL_ROUNDS}). Range {MIN_MAX_TOOL_ROUNDS}–{MAX_MAX_TOOL_ROUNDS}.
+                      Claude and Copilot ignore this (they&apos;re bounded by the context window).
+                    </p>
                   </div>
                 </div>
                 <SaveRow

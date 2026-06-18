@@ -116,3 +116,19 @@ export class TurnEmitter {
 class SilentDeltaEmitter extends TurnEmitter {
   override delta(): void {}
 }
+
+/**
+ * Emit and return a user-visible notice that a self-driven provider's
+ * in-process tool loop was stopped at its configured round cap
+ * (`AICHEMIST_MAX_TOOL_ROUNDS`). Shared by the Ollama and OpenAI-compatible
+ * providers so the phrasing stays consistent. The returned text is appended to
+ * the turn's persisted content so the truncation survives in history, while
+ * the `delta()` surfaces it live in the streaming bubble.
+ */
+export function emitToolRoundLimitNotice(emitter: TurnEmitter, maxRounds: number): string {
+  const notice =
+    `\n\n_Reached the tool-round limit (${maxRounds}). The turn was stopped before the ` +
+    `model finished — raise "Max tool rounds" in Settings → Defaults if you need longer runs._`;
+  emitter.delta(notice);
+  return notice;
+}

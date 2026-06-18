@@ -11,6 +11,13 @@ vi.mock("../mcp/approval", () => ({
   createManagedMcpBridge: vi.fn(),
 }));
 
+// Control the tool-round cap without touching the real ~/.aichemist/.env.
+const settingsMock = vi.hoisted(() => ({ maxToolRounds: 8 }));
+vi.mock("../settings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../settings")>();
+  return { ...actual, readMaxToolRounds: () => settingsMock.maxToolRounds };
+});
+
 import {
   _resetOpenAiCompatProbeCache,
   _setClientFactory,
@@ -91,6 +98,7 @@ function mockFetchModels(byUrl: Record<string, string[] | number>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  settingsMock.maxToolRounds = 8;
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openai-compat-cfg-"));
   _setEndpointsPathForTests(path.join(tempDir, "openai-providers.json"));
   _setNativeTracesRootForTests(path.join(tempDir, "traces"));
@@ -347,6 +355,79 @@ describe("openai-compat turn execution", () => {
     );
     // Second round received the tool result.
     expect(JSON.stringify(prompts[1])).toContain("file-content-42");
+  });
+
+  it("surfaces a truncation notice when the tool-round cap is hit", async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    settingsMock.maxToolRounds = 1;
+
+    // The model keeps wanting to call tools; with the cap at 1 the AI SDK halts
+    // after the first step and the final finishReason stays "tool-calls".
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({
+        doStream: async () => ({
+          stream: simulateReadableStream({
+            chunks: [
+              {
+                type: "tool-call" as const,
+                toolCallId: "call-1",
+                toolName: "read_file",
+                input: JSON.stringify({ path: "notes.txt" }),
+              },
+              {
+                type: "finish" as const,
+                finishReason: { unified: "tool-calls" as const, raw: undefined },
+                usage: FINISH_USAGE,
+              },
+            ],
+          }),
+        }),
+      }),
+    );
+
+    const projectPath = makeTempProject();
+    fs.writeFileSync(path.join(projectPath, "notes.txt"), "x");
+    const send = vi.fn();
+    const text = await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "go" }]) as never,
+      sessionId: "s-cap",
+      messageId: "m-placeholder",
+      prompt: "go",
+      projectPath,
+      projectConfig: { model: "local/test-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    expect(text).toContain("Reached the tool-round limit (1)");
+    // The notice is also streamed live as a delta.
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_DELTA,
+      expect.objectContaining({
+        session_id: "s-cap",
+        text_delta: expect.stringContaining("Reached the tool-round limit (1)"),
+      }),
+    );
+  });
+
+  it("does not append a truncation notice when the model finishes normally", async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    settingsMock.maxToolRounds = 1;
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({ doStream: async () => textStream(["all done"]) }),
+    );
+
+    const text = await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "hi" }]) as never,
+      sessionId: "s-nocap",
+      messageId: "m-placeholder",
+      prompt: "hi",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "local/test-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+    } as never);
+
+    expect(text).toBe("all done");
+    expect(text).not.toContain("tool-round limit");
   });
 
   it("falls back to the first listed model when none is configured", async () => {
