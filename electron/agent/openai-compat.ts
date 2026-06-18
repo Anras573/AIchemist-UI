@@ -28,6 +28,10 @@ import { getDisabledMcpServers, loadToolCallsForMessage } from "../sessions";
 import { runGatedTool } from "./tool-gate";
 import { TurnEmitter } from "./turn-emitter";
 import {
+  createNativeTranscriptRecorder,
+  type NativeTranscriptRecorder,
+} from "../native-transcript";
+import {
   implDeleteFileWithChange,
   implExecuteBash,
   implGlobFiles,
@@ -67,6 +71,7 @@ interface ToolContext {
   projectPath: string;
   projectConfig: AgentProviderParams["projectConfig"];
   emitter: TurnEmitter;
+  recorder: NativeTranscriptRecorder | null;
 }
 
 // ── Test seams ────────────────────────────────────────────────────────────────
@@ -438,6 +443,11 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   const model = clientFactory(endpointName, entry)(modelId);
 
   const emitter = new TurnEmitter(params.webContents, params.sessionId);
+  // noTools turns are text-only generation (e.g. PR draft generation) — skip
+  // transcript recording so they don't surface as empty turns in the Traces tab.
+  const recorder = params.noTools
+    ? null
+    : createNativeTranscriptRecorder(params.sessionId, "openai-compatible");
   const ctx: ToolContext = {
     db: params.db,
     sessionId: params.sessionId,
@@ -445,6 +455,7 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
     projectPath: params.projectPath,
     projectConfig: params.projectConfig,
     emitter,
+    recorder,
   };
 
   // When noTools is true (text-only generation turns), skip all tool
@@ -459,7 +470,12 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
 
   const messages = withCurrentPrompt(loadHistory(params.db, params.sessionId, params.messageId), params.prompt);
 
+  // Open the transcript turn only after the throwing setup (bridge/history)
+  // succeeds, so a failed setup can't leave an unterminated "running" span.
+  recorder?.turnStart(formatCompositeModelId(endpointName, modelId));
+
   let fullText = "";
+  let turnStatus: "success" | "error" = "error";
   try {
     const result = streamText({
       model,
@@ -476,6 +492,7 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
           break;
         case "reasoning-delta":
           emitter.thinkingDelta(part.text);
+          recorder?.reasoning(part.text);
           break;
         case "reasoning-end":
           emitter.thinkingDone();
@@ -487,6 +504,12 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
             cache_read_input_tokens: part.totalUsage.inputTokenDetails?.cacheReadTokens ?? 0,
             cache_creation_input_tokens: part.totalUsage.inputTokenDetails?.cacheWriteTokens ?? 0,
           });
+          recorder?.usage({
+            input: part.totalUsage.inputTokens ?? 0,
+            output: part.totalUsage.outputTokens ?? 0,
+            cacheRead: part.totalUsage.inputTokenDetails?.cacheReadTokens ?? 0,
+            cacheCreation: part.totalUsage.inputTokenDetails?.cacheWriteTokens ?? 0,
+          });
           break;
         case "error":
           throw part.error instanceof Error ? part.error : new Error(String(part.error));
@@ -495,8 +518,10 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
           break;
       }
     }
+    turnStatus = "success";
   } finally {
     await managedMcpBridge?.close();
+    recorder?.turnEnd(turnStatus);
   }
 
   return fullText;

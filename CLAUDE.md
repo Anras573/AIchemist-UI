@@ -164,17 +164,22 @@ Each session is locked to a single provider (`"anthropic"`, `"copilot"`, `"ollam
 
 ## Traces (transcript-based)
 
-The Traces tab does **not** use an in-memory tracer. Instead, both providers write structured session transcripts to disk, and we parse them on demand (non-blocking reads) into `TraceSpan[]`.
+The Traces tab does **not** use an in-memory tracer. Instead, every provider has a structured session transcript on disk, and we parse it on demand (non-blocking reads) into `TraceSpan[]`. The SDK-backed providers (Claude, Copilot) get theirs from the SDK; the self-driven providers (Ollama, OpenAI-compatible) write their own (see below).
 
 | Provider | Transcript path | Parser |
 |---|---|---|
 | Claude | `~/.claude/projects/<encoded-cwd>/<sdk_session_id>.jsonl` | `electron/claude-transcript.ts` |
 | Copilot | `~/.copilot/session-state/<copilot_session_id>/events.jsonl` | `electron/copilot-transcript.ts` |
+| Ollama / OpenAI-compatible | `~/.aichemist/traces/<sessionId>/events.jsonl` | `electron/native-transcript.ts` |
+
+### Native-provider transcripts — `electron/native-transcript.ts`
+
+Ollama and OpenAI-compatible run an in-process tool loop and have no SDK session id, so they write their own JSONL transcript keyed by **app `sessionId`** (not an SDK id). Each turn a `NativeTranscriptRecorder` (`createNativeTranscriptRecorder(sessionId, provider)`) appends events: `turn_start` first (so the live turn span exists), then `tool_call` / `tool_result` as they happen (id-paired into tool spans), then a folded `reasoning` + `usage` summary and `turn_end` at the end. The two providers call `turnStart` / `turnEnd` (in a `finally`, with success/error status) and record reasoning/usage; **tool events are recorded in the shared `runGatedTool`** via an optional `recorder` on `GatedToolContext` (unset for the SDK providers, so they're unaffected). `noTools` turns (text-only PR-draft generation) are not recorded. Writes are fail-safe — a transcript I/O error can never break a turn. Test seam: `_setNativeTracesRootForTests(dir | null)`.
 
 ### IPC surface
 
-- **`GET_TRACES({ sessionId })`** in `electron/ipc/trace-handlers.ts` — dispatches by provider: reads the SDK session id from `provider_state` (`claude.sdkSessionId` / `copilot.sessionId`), falling back to the legacy `sessions.sdk_session_id` / `copilot_session_id` columns for pre-migration sessions, then parses the corresponding file.
-- **`TRACE_BIND_TRANSCRIPT({ sessionId })`** — sets up a `chokidar` watcher on the transcript file and streams incremental spans via `SESSION_TRACE_UPDATE`. The `TracesPanel` calls this when the tab opens.
+- **`GET_TRACES({ sessionId })`** in `electron/ipc/trace-handlers.ts` — dispatches by provider: reads the SDK session id from `provider_state` (`claude.sdkSessionId` / `copilot.sessionId`), falling back to the legacy `sessions.sdk_session_id` / `copilot_session_id` columns for pre-migration sessions, then parses the corresponding file. When neither SDK id exists, it resolves the session's **effective provider** (`session.provider ?? project.config.provider`) and, for the self-driven providers (Ollama / OpenAI-compatible), reads the native transcript at `~/.aichemist/traces/<sessionId>/events.jsonl`. Resolving by provider rather than file existence lets the watcher bind before the first turn has written the file.
+- **`TRACE_BIND_TRANSCRIPT({ sessionId })`** — sets up an `fs.watch` watcher (directory-level, with a 1 s stat-poll safety-net for macOS) on the transcript file and streams incremental spans via `SESSION_TRACE`. The `TracesPanel` calls this when the tab opens.
 
 ### Copilot turn grouping — anchor on `interactionId`, not `turnId`
 

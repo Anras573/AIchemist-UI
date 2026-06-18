@@ -19,16 +19,26 @@ import {
   watchCopilotTranscript,
   type CopilotTranscriptWatcher,
 } from "../copilot-transcript";
+import {
+  findNativeTranscriptFile,
+  parseNativeTranscript,
+  nativeEventsToSpans,
+  watchNativeTranscript,
+  type NativeTranscriptWatcher,
+} from "../native-transcript";
 import { handle } from "./handle";
 import { parseProviderSessionState } from "../agent/provider-session-store";
+import { getProjectConfig } from "../projects";
 
 export function registerTraceHandlers(db: Database, getMainWindow: () => BrowserWindow | null): void {
   const claudeWatchers = new Map<string, TranscriptWatcher>();
   const copilotWatchers = new Map<string, CopilotTranscriptWatcher>();
+  const nativeWatchers = new Map<string, NativeTranscriptWatcher>();
 
   type TraceSource =
     | { kind: "claude"; projectPath: string; sdkSessionId: string }
     | { kind: "copilot"; copilotSessionId: string }
+    | { kind: "native"; sessionId: string }
     | null;
 
   function resolveTraceSource(sessionId: string): TraceSource {
@@ -37,6 +47,8 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
         `SELECT s.provider_state AS providerState,
                 s.sdk_session_id AS sdkSessionId,
                 s.copilot_session_id AS copilotSessionId,
+                s.provider AS provider,
+                s.project_id AS projectId,
                COALESCE(s.workspace_path, p.path) AS workspacePath
          FROM sessions s
          JOIN projects p ON p.id = s.project_id
@@ -47,6 +59,8 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
           providerState: string | null;
           sdkSessionId: string | null;
           copilotSessionId: string | null;
+          provider: string | null;
+          projectId: string;
           workspacePath: string;
         }
       | undefined;
@@ -62,6 +76,25 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     if (copilotSessionId) {
       return { kind: "copilot", copilotSessionId };
     }
+    // Self-driven providers (Ollama, OpenAI-compatible) have no SDK session id;
+    // they write their own transcript to ~/.aichemist/traces/<sessionId>/.
+    // Resolve by the session's effective provider (lock at creation, falling
+    // back to the project default for legacy null-provider sessions) rather
+    // than file existence — so binding the watcher before the first turn still
+    // streams updates once events.jsonl appears. Project config lives on disk
+    // (`<project>/.aichemist/config.json`), not a DB column, so read it via
+    // getProjectConfig (best-effort: returns defaults on any failure).
+    let effectiveProvider = row.provider ?? undefined;
+    if (!effectiveProvider) {
+      try {
+        effectiveProvider = getProjectConfig(db, row.projectId).provider;
+      } catch {
+        effectiveProvider = "anthropic";
+      }
+    }
+    if (effectiveProvider === "ollama" || effectiveProvider === "openai-compatible") {
+      return { kind: "native", sessionId };
+    }
     return null;
   }
 
@@ -73,6 +106,12 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
       if (!file) return [];
       const entries = await parseTranscript(file);
       return transcriptToSpans(entries, { sessionId, sdkSessionId: src.sdkSessionId });
+    }
+    if (src.kind === "native") {
+      const file = findNativeTranscriptFile(src.sessionId);
+      if (!file) return [];
+      const events = await parseNativeTranscript(file);
+      return nativeEventsToSpans(events, { sessionId });
     }
     const file = await findCopilotEventsFile(src.copilotSessionId);
     if (!file) return [];
@@ -113,7 +152,13 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
 
   handle(CH.TRACE_BIND_TRANSCRIPT, (_event, sessionId: string) => {
     if (!sessionId) return { ok: false };
-    if (claudeWatchers.has(sessionId) || copilotWatchers.has(sessionId)) return { ok: true };
+    if (
+      claudeWatchers.has(sessionId) ||
+      copilotWatchers.has(sessionId) ||
+      nativeWatchers.has(sessionId)
+    ) {
+      return { ok: true };
+    }
 
     const src = resolveTraceSource(sessionId);
     if (!src) return { ok: false, reason: "no-sdk-session-id" };
@@ -127,6 +172,9 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     if (src.kind === "claude") {
       const watcher = watchTranscript(src.projectPath, src.sdkSessionId, sessionId, { onUpdate });
       claudeWatchers.set(sessionId, watcher);
+    } else if (src.kind === "native") {
+      const watcher = watchNativeTranscript(sessionId, { onUpdate });
+      nativeWatchers.set(sessionId, watcher);
     } else {
       const watcher = watchCopilotTranscript(src.copilotSessionId, sessionId, { onUpdate });
       copilotWatchers.set(sessionId, watcher);
@@ -139,6 +187,8 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     if (a) { a.close(); claudeWatchers.delete(sessionId); }
     const b = copilotWatchers.get(sessionId);
     if (b) { b.close(); copilotWatchers.delete(sessionId); }
+    const c = nativeWatchers.get(sessionId);
+    if (c) { c.close(); nativeWatchers.delete(sessionId); }
     return { ok: true };
   });
 }

@@ -5,6 +5,7 @@ import { requestApproval, requiresApproval } from "./approval";
 import type { ToolCategory } from "./approval";
 import { saveToolCall, updateToolCallStatus } from "../sessions";
 import type { TurnEmitter } from "./turn-emitter";
+import type { NativeTranscriptRecorder } from "../native-transcript";
 
 /** Result text returned to the model when the user rejects a tool call. */
 export const TOOL_DENIED_MESSAGE = "Tool call denied by user.";
@@ -49,6 +50,13 @@ export interface GatedToolContext {
   messageId: string;
   projectConfig: ProjectConfig;
   emitter: TurnEmitter;
+  /**
+   * Optional native-provider transcript recorder. Self-driven providers
+   * (Ollama, OpenAI-compatible) set this so tool calls/results are written to
+   * the on-disk transcript that powers the Traces tab. Unset for the
+   * SDK-backed providers, which get transcripts from their own SDKs.
+   */
+  recorder?: NativeTranscriptRecorder | null;
 }
 
 /**
@@ -74,7 +82,7 @@ export async function runGatedTool(
     onError?: "return" | "throw";
   },
 ): Promise<string> {
-  const { db, sessionId, messageId, projectConfig, emitter } = ctx;
+  const { db, sessionId, messageId, projectConfig, emitter, recorder } = ctx;
   const { name, args, category, impl } = opts;
 
   const toolCallId = crypto.randomUUID();
@@ -82,6 +90,7 @@ export async function runGatedTool(
     category !== "custom" && requiresApproval(sessionId, projectConfig, category, name, args);
 
   emitter.toolCall(toolCallId, name, args);
+  recorder?.toolCall(toolCallId, name, args);
   saveToolCall(db, {
     id: toolCallId,
     messageId,
@@ -96,6 +105,7 @@ export async function runGatedTool(
     if (!approved) {
       updateToolCallStatus(db, toolCallId, "rejected", TOOL_DENIED_MESSAGE);
       emitter.toolResult(name, TOOL_DENIED_MESSAGE);
+      recorder?.toolResult(toolCallId, TOOL_DENIED_MESSAGE, true);
       return TOOL_DENIED_MESSAGE;
     }
     updateToolCallStatus(db, toolCallId, "approved");
@@ -105,10 +115,12 @@ export async function runGatedTool(
     const output = await impl();
     updateToolCallStatus(db, toolCallId, "complete", output);
     emitter.toolResult(name, output);
+    recorder?.toolResult(toolCallId, output, false);
     return output;
   } catch (err) {
     const output = err instanceof Error ? err.message : String(err);
     updateToolCallStatus(db, toolCallId, "error", output);
+    recorder?.toolResult(toolCallId, output, true);
     if (opts.onError === "throw") throw err;
     emitter.toolResult(name, output);
     return output;
