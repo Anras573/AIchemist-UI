@@ -605,7 +605,6 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   // noTools turns are text-only generation (e.g. PR draft generation) — skip
   // transcript recording so they don't surface as empty turns in the Traces tab.
   const recorder = params.noTools ? null : createNativeTranscriptRecorder(params.sessionId, "ollama");
-  recorder?.turnStart(model);
   const ctx: ToolExecutionContext = {
     db: params.db,
     sessionId: params.sessionId,
@@ -623,6 +622,11 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
     { role: "system", content: systemPrompt },
     ...(params.prompt?.trim() ? withCurrentPrompt(history, params.prompt) : history),
   ];
+
+  // Open the transcript turn only after the throwing setup (system prompt /
+  // history) succeeds, so a failed setup can't leave an unterminated
+  // "running" span. The MCP bridge was already created above.
+  recorder?.turnStart(model);
 
   let fullText = "";
   let turnStatus: "success" | "error" = "error";

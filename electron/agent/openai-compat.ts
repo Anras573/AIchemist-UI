@@ -448,7 +448,6 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   const recorder = params.noTools
     ? null
     : createNativeTranscriptRecorder(params.sessionId, "openai-compatible");
-  recorder?.turnStart(formatCompositeModelId(endpointName, modelId));
   const ctx: ToolContext = {
     db: params.db,
     sessionId: params.sessionId,
@@ -470,6 +469,10 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   const tools = managedMcpBridge ? { ...makeBuiltinTools(ctx), ...makeMcpTools(ctx, managedMcpBridge) } : undefined;
 
   const messages = withCurrentPrompt(loadHistory(params.db, params.sessionId, params.messageId), params.prompt);
+
+  // Open the transcript turn only after the throwing setup (bridge/history)
+  // succeeds, so a failed setup can't leave an unterminated "running" span.
+  recorder?.turnStart(formatCompositeModelId(endpointName, modelId));
 
   let fullText = "";
   let turnStatus: "success" | "error" = "error";

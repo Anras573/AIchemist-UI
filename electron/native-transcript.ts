@@ -444,6 +444,11 @@ export function watchNativeTranscript(
       const st = await fsp.stat(file);
       if (lastMtime === null) {
         lastMtime = st.mtimeMs;
+        // File just appeared — emit now in case fs.watch missed the create
+        // event, so the initial turn_start renders without waiting for the
+        // next write. The initial void refresh() may have run before the file
+        // existed; the lastEmit guard avoids a redundant double-emit.
+        if (Date.now() - lastEmit > 500) schedule();
         return;
       }
       if (st.mtimeMs !== lastMtime) {
