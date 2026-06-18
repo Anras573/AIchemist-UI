@@ -82,7 +82,7 @@ export async function getCopilotModels(): Promise<Array<{ id: string; name: stri
 
 // ── Agent scanning ────────────────────────────────────────────────────────────
 
-type CopilotAgentEntry = { name: string; description: string; prompt: string; filePath: string };
+type CopilotAgentEntry = { name: string; description: string; prompt: string; model?: string; filePath: string };
 type CopilotAgentParsed = Omit<CopilotAgentEntry, "filePath">;
 
 /** Parse a Copilot agent markdown file's YAML frontmatter + body. */
@@ -90,7 +90,12 @@ function parseCopilotAgentFile(content: string): CopilotAgentParsed | null {
   const parsed = parseAgentMarkdown(content);
   // The body becomes the agent's system prompt — must be non-empty
   if (!parsed?.name || !parsed.body) return null;
-  return { name: parsed.name, description: parsed.description, prompt: parsed.body };
+  return {
+    name: parsed.name,
+    description: parsed.description,
+    prompt: parsed.body,
+    ...(parsed.model ? { model: parsed.model } : {}),
+  };
 }
 
 /** Scan a directory for `*.md` agent files and return parsed entries. */
@@ -161,18 +166,37 @@ function toCustomAgentConfigs(projectPath: string): CustomAgentConfig[] {
 }
 
 /**
- * Find a Copilot agent by name and return its prompt body.
- * Searches project-local agents first, then global agents.
+ * Find a Copilot agent by name and return its prompt body + optional `model:`
+ * override. Searches project-local agents first, then global agents.
  */
-function findCopilotAgentBody(agentName: string, projectPath: string): string | null {
+function findCopilotAgent(
+  agentName: string,
+  projectPath: string,
+): { prompt: string; model?: string } | null {
   const projectDir = path.join(projectPath, ".agents", "copilot-agents");
   const globalDir = path.join(os.homedir(), ".github-copilot", "agents");
   for (const dir of [projectDir, globalDir]) {
     for (const entry of scanAgentDir(dir)) {
-      if (entry.name === agentName) return entry.prompt;
+      if (entry.name === agentName) return { prompt: entry.prompt, model: entry.model };
     }
   }
   return null;
+}
+
+/**
+ * Resolve a selected agent's system-prompt body and optional `model:` override.
+ * Lookup order: Copilot agent files → Claude agent files (cross-provider, e.g.
+ * agents selected via the Command Palette which merges both providers). The
+ * model is taken from whichever file supplied the body.
+ */
+export function resolveSelectedAgent(
+  agentName: string,
+  projectPath: string,
+): { body: string | null; model?: string } {
+  const copilotAgent = findCopilotAgent(agentName, projectPath);
+  if (copilotAgent) return { body: copilotAgent.prompt, model: copilotAgent.model };
+  const claudeAgent = readAgentFileSystemPrompt(agentName);
+  return { body: claudeAgent?.body ?? null, model: claudeAgent?.model };
 }
 
 // ── Agent turn ────────────────────────────────────────────────────────────────
@@ -388,12 +412,15 @@ export async function runCopilotAgentTurn(params: {
   let systemMessageContent: string | null = null;
   let systemMessageMode: "replace" | "append" = "replace";
   let customAgents: CustomAgentConfig[] = [];
+  // A selected agent's `model:` frontmatter overrides the session model for this
+  // turn. Lookup order mirrors the body lookup: Copilot agent files → Claude
+  // agent files.
+  let agentModelOverride: string | undefined;
 
   if (agent) {
-    const agentBody =
-      findCopilotAgentBody(agent, projectPath) ??
-      readAgentFileSystemPrompt(agent)?.body ??
-      null;
+    const selected = resolveSelectedAgent(agent, projectPath);
+    const agentBody = selected.body;
+    agentModelOverride = selected.model;
     if (agentBody) {
       systemMessageContent = agentBody + skillsContext + askUserInstruction;
     } else {
@@ -427,7 +454,7 @@ export async function runCopilotAgentTurn(params: {
   const mcpFingerprint = fingerprintManaged(managedMcpRaw);
 
   const sessionConfig = {
-    model: projectConfig.model,
+    model: agentModelOverride?.trim() || projectConfig.model,
     streaming: true,
     workingDirectory: projectPath,
     // When noTools is true, omit all custom tool definitions and block all

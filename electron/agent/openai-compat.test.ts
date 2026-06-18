@@ -11,6 +11,12 @@ vi.mock("../mcp/approval", () => ({
   createManagedMcpBridge: vi.fn(),
 }));
 
+// Control the agent file's `model:` frontmatter without touching ~/.claude/agents.
+const agentFileMock = vi.hoisted(() => ({ result: null as { body: string; model?: string } | null }));
+vi.mock("./claude", () => ({
+  readAgentFileSystemPrompt: vi.fn(() => agentFileMock.result),
+}));
+
 // Control the tool-round cap without touching the real ~/.aichemist/.env.
 const settingsMock = vi.hoisted(() => ({ maxToolRounds: 8 }));
 vi.mock("../settings", async (importOriginal) => {
@@ -25,6 +31,7 @@ import {
   getOpenAiCompatModels,
   OPENAI_COMPAT_NO_ENDPOINTS_ERROR,
   openaiCompatProvider,
+  pickAgentModelTarget,
   runOpenAiCompatTurn,
 } from "./openai-compat";
 import { _setEndpointsPathForTests, writeOpenAiEndpoints } from "../openai-endpoints";
@@ -99,6 +106,7 @@ function mockFetchModels(byUrl: Record<string, string[] | number>) {
 beforeEach(() => {
   vi.clearAllMocks();
   settingsMock.maxToolRounds = 8;
+  agentFileMock.result = null;
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openai-compat-cfg-"));
   _setEndpointsPathForTests(path.join(tempDir, "openai-providers.json"));
   _setNativeTracesRootForTests(path.join(tempDir, "traces"));
@@ -554,5 +562,132 @@ describe("openai-compat turn execution", () => {
         webContents: { send: vi.fn() } as never,
       } as never),
     ).rejects.toThrow(/connection refused/);
+  });
+});
+
+describe("openai-compat agent model override", () => {
+  const ENDPOINTS = {
+    alpha: { baseURL: "http://alpha.local/v1" },
+    beta: { baseURL: "http://beta.local/v1" },
+  };
+  const MODELS_FETCH = {
+    "http://alpha.local/v1/models": ["model-x"],
+    "http://beta.local/v1/models": ["model-y"],
+  };
+
+  describe("pickAgentModelTarget", () => {
+    const models = [{ id: "alpha/model-x" }, { id: "beta/model-y" }];
+
+    it("matches a composite <endpoint>/<model> override", () => {
+      expect(pickAgentModelTarget("beta/model-y", models, ENDPOINTS as never)).toEqual({
+        endpointName: "beta",
+        entry: ENDPOINTS.beta,
+        modelId: "model-y",
+      });
+    });
+
+    it("matches a bare model id against any endpoint", () => {
+      expect(pickAgentModelTarget("model-y", models, ENDPOINTS as never)).toEqual({
+        endpointName: "beta",
+        entry: ENDPOINTS.beta,
+        modelId: "model-y",
+      });
+    });
+
+    it("matches composite ids whose model portion contains slashes", () => {
+      const slashy = [{ id: "together/meta-llama/Llama-3-70b" }];
+      expect(
+        pickAgentModelTarget("together/meta-llama/Llama-3-70b", slashy, {
+          together: { baseURL: "http://together.local/v1" },
+        } as never),
+      ).toEqual({
+        endpointName: "together",
+        entry: { baseURL: "http://together.local/v1" },
+        modelId: "meta-llama/Llama-3-70b",
+      });
+    });
+
+    it("returns null for an unknown model or an absent override", () => {
+      expect(pickAgentModelTarget("nope", models, ENDPOINTS as never)).toBeNull();
+      expect(pickAgentModelTarget(undefined, models, ENDPOINTS as never)).toBeNull();
+      expect(pickAgentModelTarget("   ", models, ENDPOINTS as never)).toBeNull();
+    });
+  });
+
+  it("uses the agent's composite model: override for the turn", async () => {
+    setEndpoints(ENDPOINTS);
+    agentFileMock.result = { body: "be terse", model: "beta/model-y" };
+    _setFetch(mockFetchModels(MODELS_FETCH) as unknown as typeof fetch);
+
+    const seen: string[] = [];
+    _setClientFactory((endpointName) => (modelId) => {
+      seen.push(`${endpointName}/${modelId}`);
+      return new MockLanguageModelV3({ doStream: async () => textStream(["ok"]) });
+    });
+
+    await runOpenAiCompatTurn({
+      db: makeDb([]) as never,
+      sessionId: "s-agent-1",
+      messageId: "m-placeholder",
+      prompt: "hi",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "alpha/model-x", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+      agent: "coder",
+    } as never);
+
+    expect(seen).toEqual(["beta/model-y"]);
+  });
+
+  it("falls back to the project model when the agent omits a model", async () => {
+    setEndpoints(ENDPOINTS);
+    agentFileMock.result = { body: "be terse" };
+
+    const seen: string[] = [];
+    _setClientFactory((endpointName) => (modelId) => {
+      seen.push(`${endpointName}/${modelId}`);
+      return new MockLanguageModelV3({ doStream: async () => textStream(["ok"]) });
+    });
+
+    await runOpenAiCompatTurn({
+      db: makeDb([]) as never,
+      sessionId: "s-agent-2",
+      messageId: "m-placeholder",
+      prompt: "hi",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "alpha/model-x", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+      agent: "coder",
+    } as never);
+
+    expect(seen).toEqual(["alpha/model-x"]);
+  });
+
+  it("warns and falls back to the project model when the agent model is unavailable", async () => {
+    setEndpoints(ENDPOINTS);
+    agentFileMock.result = { body: "be terse", model: "ghost/model-z" };
+    _setFetch(mockFetchModels(MODELS_FETCH) as unknown as typeof fetch);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const seen: string[] = [];
+    _setClientFactory((endpointName) => (modelId) => {
+      seen.push(`${endpointName}/${modelId}`);
+      return new MockLanguageModelV3({ doStream: async () => textStream(["ok"]) });
+    });
+
+    await runOpenAiCompatTurn({
+      db: makeDb([]) as never,
+      sessionId: "s-agent-3",
+      messageId: "m-placeholder",
+      prompt: "hi",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "alpha/model-x", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+      agent: "coder",
+    } as never);
+
+    expect(seen).toEqual(["alpha/model-x"]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("ghost/model-z"));
+    warn.mockRestore();
   });
 });

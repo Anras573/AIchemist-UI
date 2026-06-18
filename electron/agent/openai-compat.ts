@@ -236,6 +236,54 @@ async function resolveEndpointAndModel(
   return { endpointName: parsed.endpointName, entry: endpoints[parsed.endpointName], modelId: parsed.modelId };
 }
 
+/**
+ * Match an agent's `model:` frontmatter override against the listed endpoint
+ * models. Accepts the composite `<endpoint>/<model>` form (matched exactly) or a
+ * bare model id (matched against any endpoint's model list). Returns the
+ * resolved target, or null when the override is absent or doesn't match any
+ * listed model — the caller then falls back to the session model.
+ */
+export function pickAgentModelTarget(
+  override: string | undefined,
+  models: Array<{ id: string }>,
+  endpoints: OpenAiEndpointsMap,
+): { endpointName: string; entry: OpenAiEndpointEntry; modelId: string } | null {
+  const wanted = override?.trim();
+  if (!wanted) return null;
+  // Composite form: the listed ids are themselves "<endpoint>/<model>", so an
+  // exact match covers "<endpoint>/<model>" overrides (including model ids that
+  // contain slashes).
+  const exact = models.find((m) => m.id === wanted);
+  // Bare model id: match against the model portion of any listed composite id.
+  const bare = exact ?? models.find((m) => parseCompositeModelId(m.id)?.modelId === wanted);
+  if (!bare) return null;
+  const parsed = parseCompositeModelId(bare.id);
+  if (!parsed || !endpoints[parsed.endpointName]) return null;
+  return { endpointName: parsed.endpointName, entry: endpoints[parsed.endpointName], modelId: parsed.modelId };
+}
+
+/**
+ * Resolve the turn's endpoint + model. A selected agent's `model:` frontmatter
+ * takes precedence when it matches a listed endpoint model; otherwise we fall
+ * back to the session/project model resolution. An unknown agent model warns
+ * rather than failing the turn.
+ */
+async function resolveTargetForTurn(
+  endpoints: OpenAiEndpointsMap,
+  params: AgentProviderParams,
+): Promise<{ endpointName: string; entry: OpenAiEndpointEntry; modelId: string }> {
+  const override = params.agent ? readAgentFileSystemPrompt(params.agent)?.model : undefined;
+  if (override?.trim()) {
+    const { models } = await collectEndpointModels(endpoints);
+    const picked = pickAgentModelTarget(override, models, endpoints);
+    if (picked) return picked;
+    console.warn(
+      `[openai-compat] Agent model "${override.trim()}" is not available on any configured endpoint — falling back to the session model`,
+    );
+  }
+  return resolveEndpointAndModel(endpoints, params.projectConfig.model);
+}
+
 // ── System prompt & history ───────────────────────────────────────────────────
 
 function buildSystemPrompt(params: AgentProviderParams): string {
@@ -439,7 +487,7 @@ function makeMcpTools(ctx: ToolContext, bridge: ManagedMcpBridge): ToolSet {
 
 export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<string> {
   const endpoints = readOpenAiEndpoints();
-  const { endpointName, entry, modelId } = await resolveEndpointAndModel(endpoints, params.projectConfig.model);
+  const { endpointName, entry, modelId } = await resolveTargetForTurn(endpoints, params);
   const model = clientFactory(endpointName, entry)(modelId);
 
   const emitter = new TurnEmitter(params.webContents, params.sessionId);
