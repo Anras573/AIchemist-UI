@@ -28,6 +28,7 @@ import {
 } from "../native-transcript";
 import { handle } from "./handle";
 import { parseProviderSessionState } from "../agent/provider-session-store";
+import { getProjectConfig } from "../projects";
 
 export function registerTraceHandlers(db: Database, getMainWindow: () => BrowserWindow | null): void {
   const claudeWatchers = new Map<string, TranscriptWatcher>();
@@ -47,7 +48,7 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
                 s.sdk_session_id AS sdkSessionId,
                 s.copilot_session_id AS copilotSessionId,
                 s.provider AS provider,
-                p.config AS projectConfig,
+                s.project_id AS projectId,
                COALESCE(s.workspace_path, p.path) AS workspacePath
          FROM sessions s
          JOIN projects p ON p.id = s.project_id
@@ -59,7 +60,7 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
           sdkSessionId: string | null;
           copilotSessionId: string | null;
           provider: string | null;
-          projectConfig: string | null;
+          projectId: string;
           workspacePath: string;
         }
       | undefined;
@@ -80,15 +81,17 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     // Resolve by the session's effective provider (lock at creation, falling
     // back to the project default for legacy null-provider sessions) rather
     // than file existence — so binding the watcher before the first turn still
-    // streams updates once events.jsonl appears.
-    let projectProvider = "anthropic";
-    try {
-      projectProvider =
-        (JSON.parse(row.projectConfig ?? "{}") as { provider?: string })?.provider ?? "anthropic";
-    } catch {
-      /* corrupt config — treat as default */
+    // streams updates once events.jsonl appears. Project config lives on disk
+    // (`<project>/.aichemist/config.json`), not a DB column, so read it via
+    // getProjectConfig (best-effort: returns defaults on any failure).
+    let effectiveProvider = row.provider ?? undefined;
+    if (!effectiveProvider) {
+      try {
+        effectiveProvider = getProjectConfig(db, row.projectId).provider;
+      } catch {
+        effectiveProvider = "anthropic";
+      }
     }
-    const effectiveProvider = row.provider ?? projectProvider;
     if (effectiveProvider === "ollama" || effectiveProvider === "openai-compatible") {
       return { kind: "native", sessionId };
     }

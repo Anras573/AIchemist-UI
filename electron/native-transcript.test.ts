@@ -5,6 +5,7 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   _setNativeTracesRootForTests,
+  createNativeTranscriptReader,
   createNativeTranscriptRecorder,
   findNativeTranscriptFile,
   nativeEventsToSpans,
@@ -129,5 +130,50 @@ describe("nativeEventsToSpans", () => {
 
   it("returns no source file before any turn is recorded", () => {
     expect(findNativeTranscriptFile("never-ran")).toBeNull();
+  });
+});
+
+describe("createNativeTranscriptReader", () => {
+  it("only parses appended bytes across reads, returning the full accumulated list", async () => {
+    const file = nativeTranscriptPath("sess-inc");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const line = (e: NativeEvent) => JSON.stringify(e) + "\n";
+
+    fs.writeFileSync(file, line({ type: "turn_start", ts: 1, turnId: "t", provider: "ollama" }));
+    const reader = createNativeTranscriptReader(file);
+    let events = await reader.readAll();
+    expect(events).toHaveLength(1);
+
+    // Append more — the reader should pick up only the new lines but still
+    // return the full accumulated list.
+    fs.appendFileSync(
+      file,
+      line({ type: "tool_call", ts: 2, turnId: "t", toolCallId: "c1", name: "read_file", input: {} }) +
+        line({ type: "turn_end", ts: 3, turnId: "t", status: "success" }),
+    );
+    events = await reader.readAll();
+    expect(events.map((e) => e.type)).toEqual(["turn_start", "tool_call", "turn_end"]);
+
+    // No change — no new events, list unchanged.
+    events = await reader.readAll();
+    expect(events).toHaveLength(3);
+  });
+
+  it("buffers a partial trailing line until it is completed", async () => {
+    const file = nativeTranscriptPath("sess-partial");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    // Write a complete line plus the start of a second (no trailing newline).
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ type: "turn_start", ts: 1, turnId: "t", provider: "ollama" }) +
+        '\n{"type":"turn_end","ts":2,',
+    );
+    const reader = createNativeTranscriptReader(file);
+    expect(await reader.readAll()).toHaveLength(1);
+
+    // Complete the partial line — it should now parse.
+    fs.appendFileSync(file, '"turnId":"t","status":"success"}\n');
+    const events = await reader.readAll();
+    expect(events.map((e) => e.type)).toEqual(["turn_start", "turn_end"]);
   });
 });

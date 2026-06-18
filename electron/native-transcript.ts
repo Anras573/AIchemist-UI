@@ -174,6 +174,75 @@ export async function parseNativeTranscript(filePath: string): Promise<NativeEve
   return out;
 }
 
+export interface NativeTranscriptReader {
+  /** Re-read any new bytes since the last call; returns the full events list. */
+  readAll(): Promise<NativeEvent[]>;
+  /** Reset offset + buffer (force a full re-parse next call). */
+  reset(): void;
+}
+
+/**
+ * Incremental reader — keeps a byte offset + partial-line buffer so a live
+ * watcher only parses appended bytes instead of re-reading the whole file on
+ * every change. Mirrors `createTranscriptReader` in claude-transcript.ts.
+ */
+export function createNativeTranscriptReader(filePath: string): NativeTranscriptReader {
+  let offset = 0;
+  let buffer = "";
+  const events: NativeEvent[] = [];
+
+  async function pull(): Promise<void> {
+    let size = 0;
+    try {
+      size = (await fsp.stat(filePath)).size;
+    } catch {
+      return;
+    }
+    if (size < offset) {
+      // File was truncated / rotated — start over (append-only in practice).
+      offset = 0;
+      buffer = "";
+      events.length = 0;
+    }
+    if (size === offset) return;
+
+    const fd = await fsp.open(filePath, "r");
+    try {
+      const len = size - offset;
+      const buf = Buffer.alloc(len);
+      await fd.read(buf, 0, len, offset);
+      offset = size;
+      buffer += buf.toString("utf8");
+    } finally {
+      await fd.close();
+    }
+
+    const lines = buffer.split("\n");
+    // Last element is the (possibly empty) trailing partial — keep it for next call.
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        events.push(JSON.parse(line) as NativeEvent);
+      } catch {
+        /* skip malformed line */
+      }
+    }
+  }
+
+  return {
+    async readAll() {
+      await pull();
+      return [...events];
+    },
+    reset() {
+      offset = 0;
+      buffer = "";
+      events.length = 0;
+    },
+  };
+}
+
 function truncatePreview(s: string, lines = 5, maxLen = 800): string {
   const split = s.split("\n");
   const head = split.slice(0, lines).join("\n");
@@ -330,6 +399,7 @@ export function watchNativeTranscript(
 ): NativeTranscriptWatcher {
   const file = nativeTranscriptPath(sessionId);
   const dir = path.dirname(file);
+  const reader = createNativeTranscriptReader(file);
   let closed = false;
   let debounceTimer: NodeJS.Timeout | null = null;
   let pollTimer: NodeJS.Timeout | null = null;
@@ -340,7 +410,8 @@ export function watchNativeTranscript(
   const refresh = async () => {
     if (closed) return;
     try {
-      const events = await parseNativeTranscript(file);
+      // Incremental read — only appended bytes are parsed per change.
+      const events = await reader.readAll();
       lastEmit = Date.now();
       cb.onUpdate(nativeEventsToSpans(events, { sessionId }));
     } catch (err) {
