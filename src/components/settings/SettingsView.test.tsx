@@ -11,6 +11,48 @@ async function openProvidersSection() {
   fireEvent.click(await screen.findByRole("button", { name: "Providers" }));
 }
 
+describe("SettingsView — Defaults: max tool rounds", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("clamps an out-of-range value to the max before persisting and reflects it in the field", async () => {
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({} as never);
+
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Defaults" }));
+
+    const input = (await screen.findByLabelText("Max tool rounds")) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "9999" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(window.electronAPI.settingsWrite).toHaveBeenCalledWith(
+        expect.objectContaining({ AICHEMIST_MAX_TOOL_ROUNDS: "100" }),
+      ),
+    );
+    // The field is corrected to the clamped value the app actually uses.
+    await waitFor(() => expect(input.value).toBe("100"));
+  });
+
+  it("persists a valid in-range value unchanged", async () => {
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({} as never);
+
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Defaults" }));
+
+    const input = (await screen.findByLabelText("Max tool rounds")) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(window.electronAPI.settingsWrite).toHaveBeenCalledWith(
+        expect.objectContaining({ AICHEMIST_MAX_TOOL_ROUNDS: "12" }),
+      ),
+    );
+  });
+});
+
 describe("SettingsView — OpenAI-compatible endpoints error feedback", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -5,7 +5,7 @@ import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
 import { loadToolCallsForMessage } from "../sessions";
 import { runGatedTool } from "./tool-gate";
-import { TurnEmitter } from "./turn-emitter";
+import { TurnEmitter, emitToolRoundLimitNotice } from "./turn-emitter";
 import {
   createNativeTranscriptRecorder,
   type NativeTranscriptRecorder,
@@ -21,6 +21,7 @@ import {
 } from "./tool-impls";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 import { getDisabledMcpServers } from "../sessions";
+import { readMaxToolRounds } from "../settings";
 
 type ChatRole = "system" | "user" | "assistant" | "tool";
 
@@ -94,8 +95,6 @@ const OLLAMA_SYSTEM_PROMPT = [
   "Never invent file contents or command output. If you need more context, use a tool.",
   "When you need clarification, use ask_user instead of asking in plain text.",
 ].join(" ");
-
-const MAX_TOOL_ROUNDS = 8;
 
 function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
   return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
@@ -628,10 +627,14 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   // "running" span. The MCP bridge was already created above.
   recorder?.turnStart(model);
 
+  // Tool rounds only happen when tools are available; a text-only (noTools)
+  // turn returns after the first model response, so skip the settings read and
+  // bound the loop at a single round.
+  const maxToolRounds = params.noTools ? 1 : readMaxToolRounds();
   let fullText = "";
   let turnStatus: "success" | "error" = "error";
   try {
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    for (let round = 0; round < maxToolRounds; round++) {
       const { text, toolCalls } = await runChatRound(client, model, messages, tools, ctx);
       fullText += text;
 
@@ -658,12 +661,17 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
         });
       }
     }
+
+    // The model still wanted to call tools but we hit the configured round
+    // cap. Surface the truncation to the user (and preserve any partial text)
+    // instead of throwing, so the turn isn't silently lost mid-workflow.
+    fullText += emitToolRoundLimitNotice(ctx.emitter, maxToolRounds);
+    turnStatus = "success";
+    return fullText;
   } finally {
     await managedMcpBridge?.close();
     recorder?.turnEnd(turnStatus);
   }
-
-  throw new Error(`Ollama tool loop exceeded ${MAX_TOOL_ROUNDS} rounds`);
 }
 
 async function listInstalledModels(client: OllamaClientLike): Promise<Array<{ id: string; name: string }>> {

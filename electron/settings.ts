@@ -22,6 +22,14 @@ export interface SettingsMap {
    * actual probe, so the new-session UI greys them out everywhere.
    */
   AICHEMIST_DISABLED_PROVIDERS: string;
+  /**
+   * Maximum number of in-process tool rounds for the self-driven providers
+   * (Ollama / OpenAI-compatible) before the turn is stopped. Stored as a
+   * string; parse with {@link parseMaxToolRounds}. Empty string means "use the
+   * default" ({@link DEFAULT_MAX_TOOL_ROUNDS}). The SDK-backed providers
+   * (Claude, Copilot) are bounded by the context window and ignore this.
+   */
+  AICHEMIST_MAX_TOOL_ROUNDS: string;
 }
 
 const KNOWN_KEYS = new Set<string>([
@@ -31,7 +39,31 @@ const KNOWN_KEYS = new Set<string>([
   "AICHEMIST_DEFAULT_PROVIDER", "AICHEMIST_DEFAULT_APPROVAL_MODE",
   "AICHEMIST_THEME",
   "AICHEMIST_DISABLED_PROVIDERS",
+  "AICHEMIST_MAX_TOOL_ROUNDS",
 ]);
+
+/** Default tool-round cap for self-driven providers when unset / invalid. */
+export const DEFAULT_MAX_TOOL_ROUNDS = 8;
+/** Lower bound — at least one round so the model can run once. */
+export const MIN_MAX_TOOL_ROUNDS = 1;
+/** Upper bound — guard against runaway loops from a fat-fingered value. */
+export const MAX_MAX_TOOL_ROUNDS = 100;
+
+/**
+ * Parse and clamp the configured tool-round cap. Falls back to
+ * {@link DEFAULT_MAX_TOOL_ROUNDS} for empty / non-numeric input and clamps to
+ * [{@link MIN_MAX_TOOL_ROUNDS}, {@link MAX_MAX_TOOL_ROUNDS}].
+ */
+export function parseMaxToolRounds(raw: string | undefined): number {
+  const n = Number.parseInt((raw ?? "").trim(), 10);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_TOOL_ROUNDS;
+  return Math.min(MAX_MAX_TOOL_ROUNDS, Math.max(MIN_MAX_TOOL_ROUNDS, n));
+}
+
+/** Resolve the effective tool-round cap from persisted settings. */
+export function readMaxToolRounds(): number {
+  return parseMaxToolRounds(readSettings().AICHEMIST_MAX_TOOL_ROUNDS);
+}
 
 function envPath(): string {
   return path.join(os.homedir(), ".aichemist", ".env");
@@ -68,6 +100,7 @@ export function readSettings(): SettingsMap {
     AICHEMIST_DEFAULT_APPROVAL_MODE: env["AICHEMIST_DEFAULT_APPROVAL_MODE"] ?? "custom",
     AICHEMIST_THEME:                 env["AICHEMIST_THEME"] ?? "system",
     AICHEMIST_DISABLED_PROVIDERS:    env["AICHEMIST_DISABLED_PROVIDERS"] ?? "",
+    AICHEMIST_MAX_TOOL_ROUNDS:       env["AICHEMIST_MAX_TOOL_ROUNDS"] ?? "",
   };
 }
 
