@@ -356,6 +356,17 @@ function normalizeProvider(v: string | undefined): string {
   const normalized = v?.trim().toLowerCase() ?? "";
   return (PROVIDER_IDS as readonly string[]).includes(normalized) ? normalized : "anthropic";
 }
+// Mirror parseMaxToolRounds() in electron/settings.ts: trim → "" means
+// "use the default"; otherwise parse + clamp so the persisted value matches
+// what the app actually uses (an <input type="number"> can still hold
+// out-of-range / non-numeric text via paste).
+function normalizeMaxToolRounds(v: string | undefined): string {
+  const trimmed = (v ?? "").trim();
+  if (trimmed === "") return "";
+  const n = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(n)) return "";
+  return String(Math.min(MAX_MAX_TOOL_ROUNDS, Math.max(MIN_MAX_TOOL_ROUNDS, n)));
+}
 function normalizeApprovalMode(v: string | undefined): string {
   const normalized = v?.trim().toLowerCase() ?? "";
   return VALID_APPROVAL_MODES.includes(normalized as typeof VALID_APPROVAL_MODES[number]) ? normalized : "custom";
@@ -411,10 +422,16 @@ export function SettingsView({ onClose }: SettingsViewProps) {
       for (const k of sectionKeys[section]) {
         updates[k] = (draft[k] ?? "") as string & SettingsMap[typeof k];
       }
+      // Clamp the raw input so the saved value matches what the app uses.
+      if ("AICHEMIST_MAX_TOOL_ROUNDS" in updates) {
+        updates.AICHEMIST_MAX_TOOL_ROUNDS = normalizeMaxToolRounds(updates.AICHEMIST_MAX_TOOL_ROUNDS);
+      }
 
       try {
         await ipc.settingsWrite(updates);
         setSettings((s) => (s ? { ...s, ...updates } : s));
+        // Reflect any normalization (e.g. clamped 9999 → 100) back into the field.
+        setDraft((d) => ({ ...d, ...updates }));
         setSaveStatus((s) => ({ ...s, [section]: "saved" }));
         setTimeout(() => setSaveStatus((s) => ({ ...s, [section]: "idle" })), 2500);
       } catch {

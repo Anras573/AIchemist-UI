@@ -474,7 +474,9 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   // succeeds, so a failed setup can't leave an unterminated "running" span.
   recorder?.turnStart(formatCompositeModelId(endpointName, modelId));
 
-  const maxToolRounds = readMaxToolRounds();
+  // Only the tool loop needs the cap; text-only (noTools) turns set no
+  // `stopWhen` and can't emit a truncation notice, so skip the settings read.
+  const maxToolRounds = tools ? readMaxToolRounds() : 0;
   let fullText = "";
   let turnStatus: "success" | "error" = "error";
   // Captured from the final `finish` part. A `tool-calls` reason means the AI

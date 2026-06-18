@@ -627,7 +627,10 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   // "running" span. The MCP bridge was already created above.
   recorder?.turnStart(model);
 
-  const maxToolRounds = readMaxToolRounds();
+  // Tool rounds only happen when tools are available; a text-only (noTools)
+  // turn returns after the first model response, so skip the settings read and
+  // bound the loop at a single round.
+  const maxToolRounds = params.noTools ? 1 : readMaxToolRounds();
   let fullText = "";
   let turnStatus: "success" | "error" = "error";
   try {
