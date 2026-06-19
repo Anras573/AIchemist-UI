@@ -22,6 +22,14 @@ import {
 import type { AgentProvider, AgentProviderParams } from "./provider";
 import { getDisabledMcpServers } from "../sessions";
 import { readMaxToolRounds } from "../settings";
+import {
+  MAX_DELEGATION_DEPTH,
+  SUB_AGENT_MAX_ROUNDS,
+  SUB_AGENT_NO_RESPONSE,
+  SUB_AGENT_SYSTEM_PROMPT,
+  askUserUnavailableError,
+  delegationDepthLimitError,
+} from "./delegation";
 
 type ChatRole = "system" | "user" | "assistant" | "tool";
 
@@ -347,8 +355,6 @@ function makeToolDefinitions(): OllamaToolDefinition[] {
   ];
 }
 
-const MAX_DELEGATION_DEPTH = 1;
-
 function resolveInstalledModel(
   available: Array<{ id: string }>,
   requested: string,
@@ -377,14 +383,6 @@ function resolveInstalledModel(
 
   return undefined;
 }
-
-const SUB_AGENT_MAX_ROUNDS = 4;
-const SUB_AGENT_SYSTEM_PROMPT = [
-  "You are a specialised sub-agent delegated a task by an orchestrating AI assistant.",
-  "Complete the task using the available tools.",
-  "Never invent file contents or command output — use tools to gather real data.",
-  "Return a clear, concise result the orchestrating agent can act on directly.",
-].join(" ");
 
 async function runDelegatedTurn(
   ctx: ToolExecutionContext,
@@ -426,7 +424,7 @@ async function runDelegatedTurn(
     }
   }
 
-  return fullText || "(sub-agent reached tool round limit without producing a final response)";
+  return fullText || SUB_AGENT_NO_RESPONSE;
 }
 
 function runTool(
@@ -484,7 +482,7 @@ async function executeTool(
     case "ask_user":
       if (ctx.delegationDepth > 0) {
         return runTool(ctx, name, args, "custom", async () => {
-          throw new Error("ask_user is not available in delegated turns — the orchestrating agent must handle user interaction.");
+          throw askUserUnavailableError();
         });
       }
       return runTool(ctx, name, args, "custom", async () =>
@@ -499,7 +497,7 @@ async function executeTool(
     case "delegate_task":
       return runTool(ctx, name, args, "custom", async () => {
         if (ctx.delegationDepth >= MAX_DELEGATION_DEPTH) {
-          throw new Error(`Delegation depth limit (${MAX_DELEGATION_DEPTH}) reached — sub-agents cannot delegate further`);
+          throw delegationDepthLimitError();
         }
         const subModel = String(args.model ?? "").trim();
         const subPrompt = String(args.prompt ?? "").trim();

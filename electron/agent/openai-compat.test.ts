@@ -85,6 +85,22 @@ function textStream(deltas: string[], finishReason: "stop" | "tool-calls" = "sto
   };
 }
 
+/** doStream result that emits a single tool call then finishes on "tool-calls". */
+function toolCallStream(toolCallId: string, toolName: string, input: unknown) {
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "tool-call" as const, toolCallId, toolName, input: JSON.stringify(input) },
+        {
+          type: "finish" as const,
+          finishReason: { unified: "tool-calls" as const, raw: undefined },
+          usage: FINISH_USAGE,
+        },
+      ],
+    }),
+  };
+}
+
 function mockFetchModels(byUrl: Record<string, string[] | number>) {
   return vi.fn().mockImplementation(async (url: string) => {
     for (const [prefix, value] of Object.entries(byUrl)) {
@@ -852,5 +868,270 @@ describe("openai-compat agent model override", () => {
 
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("not available"));
     warn.mockRestore();
+  });
+});
+
+describe("openai-compat delegate_task", () => {
+  /**
+   * Build a client factory whose orchestrator model (anything other than
+   * `subModelId`) drives the supplied `orchestrator` callback, while the
+   * delegated `subModelId` runs the supplied `subAgent` callback. Each model
+   * instance keeps its own per-step call counter.
+   */
+  function delegationFactory(opts: {
+    subModelId: string;
+    orchestrator: (call: number, prompt: unknown) => ReturnType<typeof textStream>;
+    subAgent: (call: number, prompt: unknown) => ReturnType<typeof textStream>;
+    seen?: string[];
+  }) {
+    _setClientFactory((endpointName) => (modelId) => {
+      opts.seen?.push(`${endpointName}/${modelId}`);
+      const isSub = modelId === opts.subModelId;
+      let call = 0;
+      return new MockLanguageModelV3({
+        doStream: async (options) => {
+          call += 1;
+          return (isSub ? opts.subAgent : opts.orchestrator)(call, options.prompt);
+        },
+      });
+    });
+  }
+
+  it("delegates a sub-task to a model on another endpoint and returns its response", async () => {
+    setEndpoints({
+      local: { baseURL: "http://local.local/v1" },
+      coder: { baseURL: "http://coder.local/v1" },
+    });
+    const seen: string[] = [];
+    let subPrompt: unknown;
+    delegationFactory({
+      subModelId: "coder-model",
+      seen,
+      orchestrator: (call) =>
+        call === 1
+          ? (toolCallStream("d1", "delegate_task", {
+              model: "coder/coder-model",
+              prompt: "write hello world",
+            }) as never)
+          : textStream(["All done"]),
+      subAgent: (_call, prompt) => {
+        subPrompt = prompt;
+        return textStream(["sub-agent result"]);
+      },
+    });
+
+    const send = vi.fn();
+    const text = await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "delegate" }]) as never,
+      sessionId: "s-del-1",
+      messageId: "m-placeholder",
+      prompt: "delegate",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "local/test-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    expect(text).toBe("All done");
+    // Orchestrator ran on local/test-model, sub-agent on coder/coder-model.
+    expect(seen).toEqual(["local/test-model", "coder/coder-model"]);
+    // The sub-agent received the self-contained prompt (no history) and the
+    // delegation sub-agent system prompt.
+    const sub = subPrompt as Array<{ role: string; content: unknown }>;
+    expect(sub.map((m) => m.role)).toEqual(["system", "user"]);
+    expect(JSON.stringify(sub[1].content)).toContain("write hello world");
+    // The sub-agent's response is surfaced as the delegate_task tool result.
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_CALL,
+      expect.objectContaining({ tool_name: "delegate_task" }),
+    );
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_RESULT,
+      expect.objectContaining({ tool_name: "delegate_task", output: "sub-agent result" }),
+    );
+    // The sub-agent's streaming text is suppressed; the orchestrator's is not.
+    expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, expect.objectContaining({ text_delta: "All done" }));
+    expect(send).not.toHaveBeenCalledWith(
+      CH.SESSION_DELTA,
+      expect.objectContaining({ text_delta: "sub-agent result" }),
+    );
+  });
+
+  it("resolves a bare delegate model id across multiple endpoints via /models", async () => {
+    setEndpoints({
+      local: { baseURL: "http://local.local/v1" },
+      coder: { baseURL: "http://coder.local/v1" },
+    });
+    // The composite resolution path is skipped for a bare id with several
+    // endpoints, so delegate_task lists models to discover which endpoint serves it.
+    _setFetch(
+      mockFetchModels({
+        "http://local.local/v1/models": ["test-model"],
+        "http://coder.local/v1/models": ["coder-model"],
+      }) as unknown as typeof fetch,
+    );
+    const seen: string[] = [];
+    delegationFactory({
+      subModelId: "coder-model",
+      seen,
+      orchestrator: (call) =>
+        call === 1
+          ? (toolCallStream("d1", "delegate_task", { model: "coder-model", prompt: "go" }) as never)
+          : textStream(["done"]),
+      subAgent: () => textStream(["sub ok"]),
+    });
+
+    const send = vi.fn();
+    await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "delegate" }]) as never,
+      sessionId: "s-del-bare",
+      messageId: "m-placeholder",
+      prompt: "delegate",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "local/test-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    expect(seen).toEqual(["local/test-model", "coder/coder-model"]);
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_RESULT,
+      expect.objectContaining({ tool_name: "delegate_task", output: "sub ok" }),
+    );
+  });
+
+  it("returns an error tool result when the delegate model resolves to no endpoint", async () => {
+    setEndpoints({
+      local: { baseURL: "http://local.local/v1" },
+      coder: { baseURL: "http://coder.local/v1" },
+    });
+    _setFetch(
+      mockFetchModels({
+        "http://local.local/v1/models": ["test-model"],
+        "http://coder.local/v1/models": ["coder-model"],
+      }) as unknown as typeof fetch,
+    );
+    delegationFactory({
+      subModelId: "never",
+      orchestrator: (call) =>
+        call === 1
+          ? (toolCallStream("d1", "delegate_task", { model: "ghost-model", prompt: "go" }) as never)
+          : textStream(["handled"]),
+      subAgent: () => textStream(["unused"]),
+    });
+
+    const send = vi.fn();
+    const text = await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "delegate" }]) as never,
+      sessionId: "s-del-missing",
+      messageId: "m-placeholder",
+      prompt: "delegate",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "local/test-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    expect(text).toBe("handled");
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_RESULT,
+      expect.objectContaining({
+        tool_name: "delegate_task",
+        output: expect.stringContaining('model "ghost-model" is not available'),
+      }),
+    );
+  });
+
+  it("blocks a sub-agent from delegating further at the depth limit", async () => {
+    setEndpoints({
+      local: { baseURL: "http://local.local/v1" },
+      coder: { baseURL: "http://coder.local/v1" },
+    });
+    delegationFactory({
+      subModelId: "coder-model",
+      orchestrator: (call) =>
+        call === 1
+          ? (toolCallStream("d1", "delegate_task", {
+              model: "coder/coder-model",
+              prompt: "level 1",
+            }) as never)
+          : textStream(["orchestrator done"]),
+      // Sub-agent (depth 1) tries to delegate again, then produces final text.
+      subAgent: (call) =>
+        call === 1
+          ? (toolCallStream("d2", "delegate_task", {
+              model: "coder/coder-model",
+              prompt: "level 2",
+            }) as never)
+          : textStream(["sub recovered"]),
+    });
+
+    const send = vi.fn();
+    const text = await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "delegate" }]) as never,
+      sessionId: "s-del-depth",
+      messageId: "m-placeholder",
+      prompt: "delegate",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "local/test-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    expect(text).toBe("orchestrator done");
+    // The nested delegate_task call is surfaced and blocked with a depth error.
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_CALL,
+      expect.objectContaining({ tool_name: "delegate_task", input: expect.objectContaining({ prompt: "level 2" }) }),
+    );
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_RESULT,
+      expect.objectContaining({ tool_name: "delegate_task", output: expect.stringContaining("depth limit") }),
+    );
+    // The sub-agent's recovered response is returned as the outer tool result.
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_RESULT,
+      expect.objectContaining({ tool_name: "delegate_task", output: "sub recovered" }),
+    );
+  });
+
+  it("blocks ask_user inside a delegated turn without prompting the user", async () => {
+    setEndpoints({
+      local: { baseURL: "http://local.local/v1" },
+      coder: { baseURL: "http://coder.local/v1" },
+    });
+    delegationFactory({
+      subModelId: "coder-model",
+      orchestrator: (call) =>
+        call === 1
+          ? (toolCallStream("d1", "delegate_task", {
+              model: "coder/coder-model",
+              prompt: "ask the user",
+            }) as never)
+          : textStream(["orchestrator done"]),
+      // Sub-agent (depth 1) calls ask_user, then produces final text.
+      subAgent: (call) =>
+        call === 1
+          ? (toolCallStream("q1", "ask_user", { question: "What colour?" }) as never)
+          : textStream(["sub done"]),
+    });
+
+    const send = vi.fn();
+    await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "delegate" }]) as never,
+      sessionId: "s-del-ask",
+      messageId: "m-placeholder",
+      prompt: "delegate",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "local/test-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_CALL, expect.objectContaining({ tool_name: "ask_user" }));
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_RESULT,
+      expect.objectContaining({
+        tool_name: "ask_user",
+        output: expect.stringContaining("not available in delegated turns"),
+      }),
+    );
+    // The real question flow must be bypassed entirely.
+    expect(send).not.toHaveBeenCalledWith(CH.SESSION_QUESTION_REQUIRED, expect.anything());
   });
 });
