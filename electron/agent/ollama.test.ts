@@ -1355,5 +1355,41 @@ describe("ollama provider", () => {
         expect.objectContaining({ text_delta: "sub-agent reasoning" }),
       );
     });
+
+    it("ignores late thinking after the reasoning block was closed (no delta after done)", async () => {
+      const send = vi.fn();
+      ollamaMocks.show.mockResolvedValue({ capabilities: ["thinking"] });
+      // Reasoning, then content (closes the block), then a stray late thinking chunk.
+      ollamaMocks.chat.mockResolvedValue(
+        streamChunks([
+          { message: { thinking: "early reasoning" } },
+          { message: { content: "Answer." } },
+          { message: { thinking: "late reasoning" } },
+        ]),
+      );
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "hi" },
+        ]) as never,
+        sessionId: "s-late-think",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen3:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      // The early reasoning and the done event are emitted in order…
+      const thinkingDeltas = send.mock.calls.filter(([ch]) => ch === CH.SESSION_THINKING_DELTA);
+      expect(thinkingDeltas).toEqual([
+        [CH.SESSION_THINKING_DELTA, { session_id: "s-late-think", text_delta: "early reasoning" }],
+      ]);
+      // …and the late thinking chunk after thinkingDone is dropped entirely.
+      expect(send).not.toHaveBeenCalledWith(
+        CH.SESSION_THINKING_DELTA,
+        expect.objectContaining({ text_delta: "late reasoning" }),
+      );
+      expect(send).toHaveBeenCalledWith(CH.SESSION_THINKING_DONE, { session_id: "s-late-think" });
+    });
   });
 });

@@ -610,7 +610,10 @@ async function runChatRound(
 
   if (isAsyncIterable<OllamaChatChunk>(response)) {
     for await (const chunk of response) {
-      const thinkingDelta = think ? (chunk.message?.thinking ?? "") : "";
+      // Once the block is closed (content/tool_call seen), ignore any late
+      // `thinking` so we never emit a delta after `thinkingDone`. In practice
+      // Ollama sends all reasoning up front, but guard against out-of-order UI.
+      const thinkingDelta = think && !thinkingClosed ? (chunk.message?.thinking ?? "") : "";
       if (thinkingDelta) {
         sawThinking = true;
         ctx.emitter.thinkingDelta(thinkingDelta);
