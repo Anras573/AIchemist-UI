@@ -48,6 +48,14 @@ import {
   readOpenAiEndpoints,
 } from "../openai-endpoints";
 import type { OpenAiEndpointEntry, OpenAiEndpointsMap } from "../openai-endpoints";
+import {
+  MAX_DELEGATION_DEPTH,
+  SUB_AGENT_MAX_ROUNDS,
+  SUB_AGENT_NO_RESPONSE,
+  SUB_AGENT_SYSTEM_PROMPT,
+  askUserUnavailableError,
+  delegationDepthLimitError,
+} from "./delegation";
 
 export const OPENAI_COMPAT_NO_ENDPOINTS_ERROR =
   "No OpenAI-compatible endpoints configured. Add one in Settings → Providers.";
@@ -72,6 +80,10 @@ interface ToolContext {
   projectConfig: AgentProviderParams["projectConfig"];
   emitter: TurnEmitter;
   recorder: NativeTranscriptRecorder | null;
+  /** Configured endpoints — needed to resolve a `delegate_task` target model. */
+  endpoints: OpenAiEndpointsMap;
+  /** 0 for the orchestrator turn, incremented for each delegated sub-turn. */
+  delegationDepth: number;
 }
 
 // ── Test seams ────────────────────────────────────────────────────────────────
@@ -531,11 +543,43 @@ function makeBuiltinTools(ctx: ToolContext): ToolSet {
         placeholder: z.string().optional().describe("Placeholder for free-form input"),
       }),
       execute: ({ question, options, placeholder }) =>
-        runTool(ctx, "ask_user", { question, options, placeholder }, "custom", async () =>
-          requestQuestion(ctx.emitter.webContents, ctx.sessionId, question, options, placeholder).then(
+        runTool(ctx, "ask_user", { question, options, placeholder }, "custom", async () => {
+          // ask_user is unavailable in delegated turns — only the orchestrator
+          // (depth 0) may interact with the user.
+          if (ctx.delegationDepth > 0) throw askUserUnavailableError();
+          return requestQuestion(ctx.emitter.webContents, ctx.sessionId, question, options, placeholder).then(
             (answer) => answer || "(no answer provided)",
+          );
+        }),
+    }),
+    delegate_task: tool({
+      description:
+        "Delegate a self-contained sub-task to a different model served by a configured " +
+        "OpenAI-compatible endpoint. Use when the task suits a specialist model (e.g. a code " +
+        "model for refactoring, a reasoning model for planning). The sub-agent receives a fresh " +
+        "context with no conversation history and may use filesystem, shell, and web tools. " +
+        "Returns the sub-agent's complete response.",
+      inputSchema: z.object({
+        model: z
+          .string()
+          .describe(
+            "Target model. Use the composite \"<endpoint>/<model>\" form, or a bare model id when only one endpoint is configured or the id is unique across endpoints.",
           ),
-        ),
+        prompt: z
+          .string()
+          .describe(
+            "Complete, self-contained prompt for the sub-agent. Include all context it needs; it has no access to the current conversation history.",
+          ),
+      }),
+      execute: ({ model, prompt }) =>
+        runTool(ctx, "delegate_task", { model, prompt }, "custom", async () => {
+          if (ctx.delegationDepth >= MAX_DELEGATION_DEPTH) throw delegationDepthLimitError();
+          const subModel = model.trim();
+          const subPrompt = prompt.trim();
+          if (!subModel) throw new Error(`delegate_task requires a "model" argument`);
+          if (!subPrompt) throw new Error(`delegate_task requires a "prompt" argument`);
+          return runDelegatedTurn(ctx, subModel, subPrompt);
+        }),
     }),
   };
 }
@@ -556,6 +600,93 @@ function makeMcpTools(ctx: ToolContext, bridge: ManagedMcpBridge): ToolSet {
     });
   }
   return out;
+}
+
+// ── Sub-agent delegation ───────────────────────────────────────────────────────
+
+/**
+ * Resolve a `delegate_task` target model to an endpoint. Unlike the agent
+ * `model:` override resolution (which falls back to the session model on
+ * failure), an unresolvable delegation target throws — the error becomes the
+ * tool result so the orchestrating model can react and try a valid model.
+ */
+async function resolveDelegateTarget(
+  endpoints: OpenAiEndpointsMap,
+  requested: string,
+): Promise<{ endpointName: string; entry: OpenAiEndpointEntry; modelId: string }> {
+  const names = Object.keys(endpoints);
+  if (names.length === 0) throw new Error(OPENAI_COMPAT_NO_ENDPOINTS_ERROR);
+
+  const parsed = parseCompositeModelId(requested);
+  if (parsed && endpoints[parsed.endpointName]) {
+    return { endpointName: parsed.endpointName, entry: endpoints[parsed.endpointName], modelId: parsed.modelId };
+  }
+  // Bare id with a single endpoint is unambiguous — no need to list models.
+  if (names.length === 1) {
+    return { endpointName: names[0], entry: endpoints[names[0]], modelId: requested };
+  }
+
+  // Bare id across multiple endpoints — list models to discover which serves it.
+  const { models } = await collectEndpointModels(endpoints);
+  const match = pickAgentModelTarget(requested, models, endpoints);
+  if (match.kind === "matched") {
+    return { endpointName: match.endpointName, entry: match.entry, modelId: match.modelId };
+  }
+  if (match.kind === "ambiguous") {
+    throw new Error(
+      `model "${requested}" is served by multiple endpoints (${match.endpoints.join(", ")}). Use the composite "<endpoint>/<model>" form.`,
+    );
+  }
+  const list = models.map((m) => m.id).join(", ") || "none reachable";
+  throw new Error(`model "${requested}" is not available on any configured endpoint. Available: ${list}`);
+}
+
+/**
+ * Run a self-contained sub-turn for `delegate_task`. The sub-agent gets a fresh
+ * context (no history), a tighter round budget, and a delta-suppressed emitter
+ * so its streaming text doesn't interleave with the orchestrator's bubble. Its
+ * tool calls still surface in the timeline (tool events are not suppressed), and
+ * the depth guard + the `ask_user` guard in `makeBuiltinTools` enforce the
+ * delegation guardrails. MCP tools are intentionally not offered to sub-agents.
+ */
+async function runDelegatedTurn(ctx: ToolContext, requested: string, subPrompt: string): Promise<string> {
+  const target = await resolveDelegateTarget(ctx.endpoints, requested);
+  const model = clientFactory(target.endpointName, target.entry)(target.modelId);
+
+  const subCtx: ToolContext = {
+    ...ctx,
+    delegationDepth: ctx.delegationDepth + 1,
+    emitter: ctx.emitter.withoutDeltas(),
+  };
+  const subTools = makeBuiltinTools(subCtx);
+
+  let fullText = "";
+  const result = streamText({
+    model,
+    system: SUB_AGENT_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: subPrompt }],
+    tools: subTools,
+    stopWhen: stepCountIs(SUB_AGENT_MAX_ROUNDS),
+  });
+
+  for await (const part of result.fullStream) {
+    switch (part.type) {
+      case "text-delta":
+        fullText += part.text;
+        // Suppressed by the silent-delta emitter, kept for symmetry.
+        subCtx.emitter.delta(part.text);
+        break;
+      case "error":
+        throw part.error instanceof Error ? part.error : new Error(String(part.error));
+      default:
+        // Tool calls/results are emitted and persisted inside runGatedTool.
+        // Usage/finish are intentionally not surfaced for the sub-turn so the
+        // orchestrator's own usage indicator isn't double-counted.
+        break;
+    }
+  }
+
+  return fullText || SUB_AGENT_NO_RESPONSE;
 }
 
 // ── Turn execution ────────────────────────────────────────────────────────────
@@ -579,6 +710,8 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
     projectConfig: params.projectConfig,
     emitter,
     recorder,
+    endpoints,
+    delegationDepth: 0,
   };
 
   // When noTools is true (text-only generation turns), skip all tool
