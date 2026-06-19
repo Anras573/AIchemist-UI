@@ -13,6 +13,12 @@ vi.mock("../mcp/approval", () => ({
   createManagedMcpBridge: vi.fn(),
 }));
 
+// Control the agent file's `model:` frontmatter without touching ~/.claude/agents.
+const agentFileMock = vi.hoisted(() => ({ result: null as { body: string; model?: string } | null }));
+vi.mock("./claude", () => ({
+  readAgentFileSystemPrompt: vi.fn(() => agentFileMock.result),
+}));
+
 // Control the tool-round cap without touching the real ~/.aichemist/.env.
 const settingsMock = vi.hoisted(() => ({ maxToolRounds: 8 }));
 vi.mock("../settings", async (importOriginal) => {
@@ -89,6 +95,7 @@ describe("ollama provider", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     settingsMock.maxToolRounds = 8;
+    agentFileMock.result = null;
     _resetOllamaClientForTests();
     const tracesDir = fs.mkdtempSync(path.join(process.cwd(), ".ollama-traces-"));
     tempDirs.push(tracesDir);
@@ -1041,6 +1048,74 @@ describe("ollama provider", () => {
         tool_name: "mcp__context7__lookup",
         output: expect.stringContaining("Unsupported tool"),
       }));
+    });
+  });
+
+  describe("agent model override", () => {
+    it("uses the agent's model: frontmatter, honoring untagged → :latest matching", async () => {
+      agentFileMock.result = { body: "be terse", model: "codellama" };
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }, { model: "codellama:latest" }] });
+      ollamaMocks.chat.mockResolvedValue(streamChunks([{ message: { content: "ok" } }]));
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "hi" },
+        ]) as never,
+        sessionId: "s-agent-model",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send: vi.fn() } as never,
+        agent: "coder",
+      } as never);
+
+      // The agent override resolves the untagged "codellama" to the installed
+      // "codellama:latest", overriding the project model "qwen2.5:latest".
+      expect(ollamaMocks.chat.mock.calls[0][0].model).toBe("codellama:latest");
+    });
+
+    it("falls back to the project model when the agent omits a model", async () => {
+      agentFileMock.result = { body: "be terse" };
+      ollamaMocks.chat.mockResolvedValue(streamChunks([{ message: { content: "ok" } }]));
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "hi" },
+        ]) as never,
+        sessionId: "s-agent-no-model",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send: vi.fn() } as never,
+        agent: "coder",
+      } as never);
+
+      expect(ollamaMocks.chat.mock.calls[0][0].model).toBe("qwen2.5:latest");
+      // No model override means we never need to list installed models.
+      expect(ollamaMocks.list).not.toHaveBeenCalled();
+    });
+
+    it("warns and falls back to the project model when the agent model is not installed", async () => {
+      agentFileMock.result = { body: "be terse", model: "not-installed" };
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen2.5:latest" }] });
+      ollamaMocks.chat.mockResolvedValue(streamChunks([{ message: { content: "ok" } }]));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "hi" },
+        ]) as never,
+        sessionId: "s-agent-bad-model",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send: vi.fn() } as never,
+        agent: "coder",
+      } as never);
+
+      expect(ollamaMocks.chat.mock.calls[0][0].model).toBe("qwen2.5:latest");
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("not-installed"));
+      warn.mockRestore();
     });
   });
 });

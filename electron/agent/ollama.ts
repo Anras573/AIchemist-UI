@@ -590,7 +590,7 @@ async function runChatRound(
 export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<string> {
   const client = await loadClient();
   const history = loadHistory(params.db, params.sessionId, params.messageId);
-  const model = await resolveModel(client, params.projectConfig.model);
+  const model = await resolveModelForTurn(client, params);
 
   // When noTools is true (text-only generation turns), skip all tool definitions
   // and MCP bridge startup to prevent any filesystem/shell side-effects.
@@ -692,6 +692,25 @@ async function resolveModel(client: OllamaClientLike, configuredModel?: string):
   const fallback = discovered[0]?.id;
   if (fallback) return fallback;
   throw new Error(OLLAMA_NO_MODELS_ERROR);
+}
+
+/**
+ * Resolve the model for a turn. A selected agent's `model:` frontmatter takes
+ * precedence when it matches an installed model — honoring Ollama's untagged
+ * convention (`codellama` → `codellama:latest`) via `resolveInstalledModel`.
+ * An unknown agent model warns and falls back to the session/project model
+ * rather than failing the turn.
+ */
+async function resolveModelForTurn(client: OllamaClientLike, params: AgentProviderParams): Promise<string> {
+  const override = params.agent ? readAgentFileSystemPrompt(params.agent)?.model?.trim() : undefined;
+  if (override) {
+    const matched = resolveInstalledModel(await listInstalledModels(client), override);
+    if (matched) return matched;
+    console.warn(
+      `[ollama] Agent model "${override}" is not installed — falling back to the session model`,
+    );
+  }
+  return resolveModel(client, params.projectConfig.model);
 }
 
 export async function getOllamaModels(): Promise<Array<{ id: string; name: string }>> {
