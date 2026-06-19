@@ -263,27 +263,64 @@ export function pickAgentModelTarget(
 }
 
 /**
+ * Resolve a selected agent's `model:` override to an endpoint target without
+ * always hitting the network:
+ *
+ * - Composite `<endpoint>/<model>` referencing a configured endpoint → resolved
+ *   directly (no `/models` call), mirroring how `resolveEndpointAndModel` treats
+ *   an explicit composite session model.
+ * - Bare model id with exactly one configured endpoint → unambiguous, resolved
+ *   directly.
+ * - Bare model id with multiple endpoints → ambiguous, so we list models once to
+ *   discover which endpoint serves it. If nothing can be listed (all endpoints
+ *   unreachable) we can't validate, so we return null *silently* (the
+ *   per-endpoint listing failures already warned); a listed-but-unmatched model
+ *   warns once.
+ *
+ * Returns null when the override can't be resolved — the caller then falls back
+ * to the session model. Never throws.
+ */
+async function resolveOverrideTarget(
+  endpoints: OpenAiEndpointsMap,
+  override: string,
+): Promise<{ endpointName: string; entry: OpenAiEndpointEntry; modelId: string } | null> {
+  const names = Object.keys(endpoints);
+  const parsed = parseCompositeModelId(override);
+  if (parsed && endpoints[parsed.endpointName]) {
+    return { endpointName: parsed.endpointName, entry: endpoints[parsed.endpointName], modelId: parsed.modelId };
+  }
+  if (names.length === 1) {
+    return { endpointName: names[0], entry: endpoints[names[0]], modelId: override };
+  }
+  // Bare id with multiple endpoints — the only case that needs discovery.
+  const { models } = await collectEndpointModels(endpoints);
+  if (models.length === 0) return null; // can't validate; stay silent
+  const picked = pickAgentModelTarget(override, models, endpoints);
+  if (!picked) {
+    console.warn(
+      `[openai-compat] Agent model "${override}" is not available on any configured endpoint — falling back to the session model`,
+    );
+  }
+  return picked;
+}
+
+/**
  * Resolve the turn's endpoint + model. A selected agent's `model:` frontmatter
- * takes precedence when it matches a listed endpoint model; otherwise we fall
- * back to the session/project model resolution. An unknown agent model warns
- * rather than failing the turn.
+ * takes precedence when it resolves to a configured endpoint; otherwise we fall
+ * back to the session/project model resolution. An unresolvable agent model
+ * falls back rather than failing the turn.
  */
 async function resolveTargetForTurn(
   endpoints: OpenAiEndpointsMap,
   params: AgentProviderParams,
 ): Promise<{ endpointName: string; entry: OpenAiEndpointEntry; modelId: string }> {
-  const override = params.agent ? readAgentFileSystemPrompt(params.agent)?.model : undefined;
+  const override = params.agent ? readAgentFileSystemPrompt(params.agent)?.model?.trim() : undefined;
   // Skip the override path when no endpoints are configured — there is nothing
-  // to validate against, and `resolveEndpointAndModel` will surface the real
-  // OPENAI_COMPAT_NO_ENDPOINTS_ERROR. (Avoids a misleading "model not available"
-  // warning.)
-  if (override?.trim() && Object.keys(endpoints).length > 0) {
-    const { models } = await collectEndpointModels(endpoints);
-    const picked = pickAgentModelTarget(override, models, endpoints);
+  // to resolve against, and `resolveEndpointAndModel` will surface the real
+  // OPENAI_COMPAT_NO_ENDPOINTS_ERROR.
+  if (override && Object.keys(endpoints).length > 0) {
+    const picked = await resolveOverrideTarget(endpoints, override);
     if (picked) return picked;
-    console.warn(
-      `[openai-compat] Agent model "${override.trim()}" is not available on any configured endpoint — falling back to the session model`,
-    );
   }
   return resolveEndpointAndModel(endpoints, params.projectConfig.model);
 }

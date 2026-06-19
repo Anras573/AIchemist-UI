@@ -614,10 +614,15 @@ describe("openai-compat agent model override", () => {
     });
   });
 
-  it("uses the agent's composite model: override for the turn", async () => {
+  it("uses the agent's composite model: override without listing models (no network)", async () => {
     setEndpoints(ENDPOINTS);
     agentFileMock.result = { body: "be terse", model: "beta/model-y" };
-    _setFetch(mockFetchModels(MODELS_FETCH) as unknown as typeof fetch);
+    // A composite override referencing a configured endpoint resolves directly,
+    // so no /models call should happen — fail the test if fetch is touched.
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("unexpected /models call");
+    });
+    _setFetch(fetchSpy as unknown as typeof fetch);
 
     const seen: string[] = [];
     _setClientFactory((endpointName) => (modelId) => {
@@ -637,6 +642,96 @@ describe("openai-compat agent model override", () => {
     } as never);
 
     expect(seen).toEqual(["beta/model-y"]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("resolves a bare agent model directly when only one endpoint is configured (no network)", async () => {
+    setEndpoints({ solo: { baseURL: "http://solo.local/v1" } });
+    agentFileMock.result = { body: "be terse", model: "model-q" };
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("unexpected /models call");
+    });
+    _setFetch(fetchSpy as unknown as typeof fetch);
+
+    const seen: string[] = [];
+    _setClientFactory((endpointName) => (modelId) => {
+      seen.push(`${endpointName}/${modelId}`);
+      return new MockLanguageModelV3({ doStream: async () => textStream(["ok"]) });
+    });
+
+    await runOpenAiCompatTurn({
+      db: makeDb([]) as never,
+      sessionId: "s-agent-solo",
+      messageId: "m-placeholder",
+      prompt: "hi",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "solo/model-x", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+      agent: "coder",
+    } as never);
+
+    expect(seen).toEqual(["solo/model-q"]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("discovers the endpoint for a bare agent model across multiple endpoints", async () => {
+    setEndpoints(ENDPOINTS);
+    agentFileMock.result = { body: "be terse", model: "model-y" };
+    _setFetch(mockFetchModels(MODELS_FETCH) as unknown as typeof fetch);
+
+    const seen: string[] = [];
+    _setClientFactory((endpointName) => (modelId) => {
+      seen.push(`${endpointName}/${modelId}`);
+      return new MockLanguageModelV3({ doStream: async () => textStream(["ok"]) });
+    });
+
+    await runOpenAiCompatTurn({
+      db: makeDb([]) as never,
+      sessionId: "s-agent-bare",
+      messageId: "m-placeholder",
+      prompt: "hi",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "alpha/model-x", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+      agent: "coder",
+    } as never);
+
+    expect(seen).toEqual(["beta/model-y"]);
+  });
+
+  it("falls back silently for a bare agent model when no endpoint models can be listed", async () => {
+    setEndpoints(ENDPOINTS);
+    agentFileMock.result = { body: "be terse", model: "mystery" };
+    // Both endpoints unreachable → empty model list → can't validate. We must
+    // NOT emit a misleading "not available" warning; just fall back.
+    _setFetch(
+      mockFetchModels({
+        "http://alpha.local/v1/models": 503,
+        "http://beta.local/v1/models": 503,
+      }) as unknown as typeof fetch,
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const seen: string[] = [];
+    _setClientFactory((endpointName) => (modelId) => {
+      seen.push(`${endpointName}/${modelId}`);
+      return new MockLanguageModelV3({ doStream: async () => textStream(["ok"]) });
+    });
+
+    await runOpenAiCompatTurn({
+      db: makeDb([]) as never,
+      sessionId: "s-agent-unreachable",
+      messageId: "m-placeholder",
+      prompt: "hi",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "alpha/model-x", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+      agent: "coder",
+    } as never);
+
+    expect(seen).toEqual(["alpha/model-x"]);
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("not available"));
+    warn.mockRestore();
   });
 
   it("falls back to the project model when the agent omits a model", async () => {
