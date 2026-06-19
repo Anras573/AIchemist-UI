@@ -690,4 +690,26 @@ describe("openai-compat agent model override", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("ghost/model-z"));
     warn.mockRestore();
   });
+
+  it("surfaces the no-endpoints error without a misleading model warning when none are configured", async () => {
+    // No endpoints configured.
+    agentFileMock.result = { body: "be terse", model: "beta/model-y" };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(
+      runOpenAiCompatTurn({
+        db: makeDb([]) as never,
+        sessionId: "s-agent-4",
+        messageId: "m-placeholder",
+        prompt: "hi",
+        projectPath: makeTempProject(),
+        projectConfig: { model: "", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send: vi.fn() } as never,
+        agent: "coder",
+      } as never),
+    ).rejects.toThrow(OPENAI_COMPAT_NO_ENDPOINTS_ERROR);
+
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("not available"));
+    warn.mockRestore();
+  });
 });

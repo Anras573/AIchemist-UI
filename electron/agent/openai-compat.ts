@@ -273,7 +273,11 @@ async function resolveTargetForTurn(
   params: AgentProviderParams,
 ): Promise<{ endpointName: string; entry: OpenAiEndpointEntry; modelId: string }> {
   const override = params.agent ? readAgentFileSystemPrompt(params.agent)?.model : undefined;
-  if (override?.trim()) {
+  // Skip the override path when no endpoints are configured — there is nothing
+  // to validate against, and `resolveEndpointAndModel` will surface the real
+  // OPENAI_COMPAT_NO_ENDPOINTS_ERROR. (Avoids a misleading "model not available"
+  // warning.)
+  if (override?.trim() && Object.keys(endpoints).length > 0) {
     const { models } = await collectEndpointModels(endpoints);
     const picked = pickAgentModelTarget(override, models, endpoints);
     if (picked) return picked;
