@@ -1245,41 +1245,63 @@ describe("ollama provider", () => {
       expect(send).toHaveBeenCalledWith(CH.SESSION_THINKING_DONE, { session_id: "s-think-tool" });
     });
 
-    it("caches the capability probe across tool rounds (one show() call per turn)", async () => {
-      const projectPath = makeTempProject();
-      fs.writeFileSync(path.join(projectPath, "notes.txt"), "content");
+    it("caches the capability probe per model across turns (one show() call for two turns)", async () => {
       const send = vi.fn();
       ollamaMocks.show.mockResolvedValue({ capabilities: ["thinking"] });
-      ollamaMocks.chat
-        .mockResolvedValueOnce(
-          streamChunks([
-            {
-              message: {
-                content: "",
-                tool_calls: [{ function: { name: "read_file", arguments: { path: "notes.txt" } } }],
-              },
-            },
-          ]),
-        )
-        .mockResolvedValueOnce(streamChunks([{ message: { content: "Done" } }]));
+      ollamaMocks.chat.mockResolvedValue(streamChunks([{ message: { content: "ok" } }]));
 
-      await runOllamaAgentTurn({
-        db: makeDb([
-          { id: "m-placeholder", role: "user", content: "placeholder" },
-          { id: "m-user", role: "user", content: "read it" },
-        ]) as never,
-        sessionId: "s-think-cache",
-        messageId: "m-placeholder",
-        projectPath,
-        projectConfig: { model: "qwen3:latest", approval_mode: "none", approval_rules: [] } as never,
-        webContents: { send } as never,
-      } as never);
+      const runTurn = (sessionId: string) =>
+        runOllamaAgentTurn({
+          db: makeDb([
+            { id: "m-placeholder", role: "user", content: "placeholder" },
+            { id: "m-user", role: "user", content: "hi" },
+          ]) as never,
+          sessionId,
+          messageId: "m-placeholder",
+          projectConfig: { model: "qwen3:latest", approval_mode: "none", approval_rules: [] } as never,
+          webContents: { send } as never,
+        } as never);
+
+      // Two turns with the same model and NO cache reset in between — the
+      // capability must be probed only once across both.
+      await runTurn("s-think-cache-1");
+      await runTurn("s-think-cache-2");
 
       expect(ollamaMocks.chat).toHaveBeenCalledTimes(2);
-      // Both rounds pass think: true, but the capability is probed only once.
-      expect(ollamaMocks.chat.mock.calls[0][0].think).toBe(true);
-      expect(ollamaMocks.chat.mock.calls[1][0].think).toBe(true);
+      // Both turns still request thinking…
+      expect(ollamaMocks.chat.mock.calls.every((c) => c[0].think === true)).toBe(true);
+      // …but the capability probe ran exactly once (the second turn hit the cache).
       expect(ollamaMocks.show).toHaveBeenCalledTimes(1);
+    });
+
+    it("re-probes on the next turn after a transient probe failure (does not cache errors)", async () => {
+      const send = vi.fn();
+      // First probe throws; second probe succeeds — thinking must come back on.
+      ollamaMocks.show
+        .mockRejectedValueOnce(new Error("server temporarily unavailable"))
+        .mockResolvedValueOnce({ capabilities: ["thinking"] });
+      ollamaMocks.chat.mockResolvedValue(streamChunks([{ message: { content: "ok" } }]));
+
+      const runTurn = (sessionId: string) =>
+        runOllamaAgentTurn({
+          db: makeDb([
+            { id: "m-placeholder", role: "user", content: "placeholder" },
+            { id: "m-user", role: "user", content: "hi" },
+          ]) as never,
+          sessionId,
+          messageId: "m-placeholder",
+          projectConfig: { model: "qwen3:latest", approval_mode: "none", approval_rules: [] } as never,
+          webContents: { send } as never,
+        } as never);
+
+      await runTurn("s-think-retry-1");
+      await runTurn("s-think-retry-2");
+
+      // The failure was NOT cached, so the second turn probed again…
+      expect(ollamaMocks.show).toHaveBeenCalledTimes(2);
+      // …turn 1 had no thinking (probe failed), turn 2 enabled it (probe succeeded).
+      expect(ollamaMocks.chat.mock.calls[0][0].think).toBeUndefined();
+      expect(ollamaMocks.chat.mock.calls[1][0].think).toBe(true);
     });
   });
 });

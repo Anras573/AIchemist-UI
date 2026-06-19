@@ -127,26 +127,32 @@ const thinkingCapabilityCache = new Map<string, boolean>();
 
 /**
  * Whether the given model exposes a structured thinking/reasoning channel.
- * Resolved from `ollama.show()`'s `capabilities` list. Fail-safe: any error
- * (old client without `show`, model not pulled, network hiccup) reports `false`
- * so a turn never breaks over a capability probe — it just won't stream
+ * Resolved from `ollama.show()`'s `capabilities` list. Fail-safe: it never
+ * throws — a turn must not break over a capability probe, it just won't stream
  * reasoning for that model.
+ *
+ * Caching: a successful probe (or an absent `show`, which can't change at
+ * runtime) is cached per model id. A *transient* probe failure (server briefly
+ * unavailable, model still pulling) returns `false` WITHOUT caching, so a later
+ * turn retries rather than permanently disabling thinking for the session.
  */
 async function modelSupportsThinking(client: OllamaClientLike, model: string): Promise<boolean> {
   const cached = thinkingCapabilityCache.get(model);
   if (cached !== undefined) return cached;
 
-  let supported = false;
-  if (typeof client.show === "function") {
-    try {
-      const info = await client.show({ model });
-      supported = Array.isArray(info?.capabilities) && info.capabilities.includes("thinking");
-    } catch {
-      supported = false;
-    }
+  if (typeof client.show !== "function") {
+    thinkingCapabilityCache.set(model, false);
+    return false;
   }
-  thinkingCapabilityCache.set(model, supported);
-  return supported;
+
+  try {
+    const info = await client.show({ model });
+    const supported = Array.isArray(info?.capabilities) && info.capabilities.includes("thinking");
+    thinkingCapabilityCache.set(model, supported);
+    return supported;
+  } catch {
+    return false;
+  }
 }
 
 function safeJson(value: unknown): string {
@@ -452,8 +458,9 @@ async function runDelegatedTurn(
 
   let fullText = "";
   for (let round = 0; round < SUB_AGENT_MAX_ROUNDS; round++) {
-    // Sub-agent reasoning is internal — don't surface it as the orchestrator's
-    // (its deltas are already suppressed via `subCtx.emitter`).
+    // Sub-agent reasoning is internal — pass think=false so delegated turns
+    // never request or surface thinking deltas. (`subCtx.emitter` separately
+    // suppresses SESSION_DELTA so the sub-agent's answer text doesn't interleave.)
     const { text, toolCalls } = await runChatRound(ctx.client, subModel, messages, subTools, subCtx, false);
     fullText += text;
 
