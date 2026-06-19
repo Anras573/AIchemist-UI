@@ -1303,5 +1303,57 @@ describe("ollama provider", () => {
       expect(ollamaMocks.chat.mock.calls[0][0].think).toBeUndefined();
       expect(ollamaMocks.chat.mock.calls[1][0].think).toBe(true);
     });
+
+    it("does not surface thinking from a delegated sub-agent even if the model emits it", async () => {
+      const send = vi.fn();
+      ollamaMocks.list.mockResolvedValue({ models: [{ model: "qwen3:latest" }, { model: "phi4" }] });
+      // Orchestrator (think-capable) reasons, then delegates.
+      ollamaMocks.show.mockResolvedValue({ capabilities: ["thinking"] });
+      ollamaMocks.chat
+        .mockResolvedValueOnce(
+          streamChunks([
+            { message: { thinking: "orchestrator reasoning" } },
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "delegate_task", arguments: { model: "phi4", prompt: "sub-task" } } }],
+              },
+            },
+          ]),
+        )
+        // Sub-agent emits thinking despite think=false — it must be suppressed.
+        .mockResolvedValueOnce(
+          streamChunks([
+            { message: { thinking: "sub-agent reasoning" } },
+            { message: { content: "sub done" } },
+          ]),
+        )
+        // Orchestrator final round.
+        .mockResolvedValueOnce(streamChunks([{ message: { content: "done" } }]));
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "delegate" },
+        ]) as never,
+        sessionId: "s-sub-no-think",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen3:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      // The sub-agent runs with think=false (no thinking requested)…
+      expect(ollamaMocks.chat.mock.calls[1][0].think).toBeUndefined();
+      // …the orchestrator's reasoning is surfaced…
+      expect(send).toHaveBeenCalledWith(CH.SESSION_THINKING_DELTA, {
+        session_id: "s-sub-no-think",
+        text_delta: "orchestrator reasoning",
+      });
+      // …but the sub-agent's reasoning is never emitted.
+      expect(send).not.toHaveBeenCalledWith(
+        CH.SESSION_THINKING_DELTA,
+        expect.objectContaining({ text_delta: "sub-agent reasoning" }),
+      );
+    });
   });
 });

@@ -594,9 +594,11 @@ async function runChatRound(
   const seenToolCalls = new Set<string>();
 
   // Ollama streams the model's reasoning on `message.thinking` before the
-  // answer arrives on `message.content`. There is no explicit "thinking done"
-  // marker, so we close the reasoning block when the first content/tool_call
-  // appears (or at end of stream).
+  // answer arrives on `message.content`. We only surface it when thinking was
+  // actually requested (`think`) — delegated sub-agent and noTools rounds pass
+  // `think=false`, and a model could in principle emit `thinking` unsolicited.
+  // There is no explicit "thinking done" marker, so we close the reasoning
+  // block when the first content/tool_call appears (or at end of stream).
   let sawThinking = false;
   let thinkingClosed = false;
   const closeThinking = () => {
@@ -608,7 +610,7 @@ async function runChatRound(
 
   if (isAsyncIterable<OllamaChatChunk>(response)) {
     for await (const chunk of response) {
-      const thinkingDelta = chunk.message?.thinking ?? "";
+      const thinkingDelta = think ? (chunk.message?.thinking ?? "") : "";
       if (thinkingDelta) {
         sawThinking = true;
         ctx.emitter.thinkingDelta(thinkingDelta);
@@ -653,7 +655,7 @@ async function runChatRound(
   }
 
   const message = response.message ?? {};
-  const thinking = message.thinking ?? "";
+  const thinking = think ? (message.thinking ?? "") : "";
   if (thinking) {
     ctx.emitter.thinkingDelta(thinking);
     ctx.recorder?.reasoning(thinking);
