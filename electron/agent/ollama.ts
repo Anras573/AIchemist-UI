@@ -36,6 +36,7 @@ type ChatRole = "system" | "user" | "assistant" | "tool";
 interface OllamaMessage {
   role: ChatRole;
   content: string;
+  thinking?: string;
   tool_calls?: OllamaToolCall[];
   tool_name?: string;
 }
@@ -63,13 +64,24 @@ interface OllamaChatChunk {
   eval_count?: number;
 }
 
+interface OllamaShowResult {
+  capabilities?: string[];
+}
+
 interface OllamaClientLike {
   list(): Promise<OllamaListResult>;
+  /**
+   * Model metadata. `capabilities` lists features the model supports
+   * (e.g. "thinking", "tools", "vision"). Optional because older `ollama`
+   * clients may not expose it — callers must feature-detect.
+   */
+  show?(input: { model: string }): Promise<OllamaShowResult>;
   chat(input: {
     model: string;
     messages: OllamaMessage[];
     stream?: boolean;
     tools?: OllamaToolDefinition[];
+    think?: boolean;
   }): Promise<AsyncIterable<OllamaChatChunk> | { message?: Partial<OllamaMessage> }>;
 }
 
@@ -106,6 +118,41 @@ const OLLAMA_SYSTEM_PROMPT = [
 
 function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
   return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
+}
+
+// Per-model capability cache. `show()` is a cheap local call, but the result is
+// stable for the lifetime of an installed model, so cache it to avoid a probe on
+// every turn. Cleared by `_resetOllamaClientForTests`.
+const thinkingCapabilityCache = new Map<string, boolean>();
+
+/**
+ * Whether the given model exposes a structured thinking/reasoning channel.
+ * Resolved from `ollama.show()`'s `capabilities` list. Fail-safe: it never
+ * throws — a turn must not break over a capability probe, it just won't stream
+ * reasoning for that model.
+ *
+ * Caching: a successful probe (or an absent `show`, which can't change at
+ * runtime) is cached per model id. A *transient* probe failure (server briefly
+ * unavailable, model still pulling) returns `false` WITHOUT caching, so a later
+ * turn retries rather than permanently disabling thinking for the session.
+ */
+async function modelSupportsThinking(client: OllamaClientLike, model: string): Promise<boolean> {
+  const cached = thinkingCapabilityCache.get(model);
+  if (cached !== undefined) return cached;
+
+  if (typeof client.show !== "function") {
+    thinkingCapabilityCache.set(model, false);
+    return false;
+  }
+
+  try {
+    const info = await client.show({ model });
+    const supported = Array.isArray(info?.capabilities) && info.capabilities.includes("thinking");
+    thinkingCapabilityCache.set(model, supported);
+    return supported;
+  } catch {
+    return false;
+  }
 }
 
 function safeJson(value: unknown): string {
@@ -411,7 +458,10 @@ async function runDelegatedTurn(
 
   let fullText = "";
   for (let round = 0; round < SUB_AGENT_MAX_ROUNDS; round++) {
-    const { text, toolCalls } = await runChatRound(ctx.client, subModel, messages, subTools, subCtx);
+    // Sub-agent reasoning is internal — pass think=false so delegated turns
+    // never request or surface thinking deltas. (`subCtx.emitter` separately
+    // suppresses SESSION_DELTA so the sub-agent's answer text doesn't interleave.)
+    const { text, toolCalls } = await runChatRound(ctx.client, subModel, messages, subTools, subCtx, false);
     fullText += text;
 
     if (toolCalls.length === 0) return fullText;
@@ -529,26 +579,54 @@ async function runChatRound(
   messages: OllamaMessage[],
   tools: OllamaToolDefinition[],
   ctx: ToolExecutionContext,
+  think: boolean,
 ): Promise<{ text: string; toolCalls: OllamaToolCall[] }> {
   const response = await client.chat({
     model,
     messages,
     stream: true,
     tools,
+    ...(think ? { think: true } : {}),
   });
 
   let fullText = "";
   let toolCalls: OllamaToolCall[] = [];
   const seenToolCalls = new Set<string>();
 
+  // Ollama streams the model's reasoning on `message.thinking` before the
+  // answer arrives on `message.content`. We only surface it when thinking was
+  // actually requested (`think`) — delegated sub-agent and noTools rounds pass
+  // `think=false`, and a model could in principle emit `thinking` unsolicited.
+  // There is no explicit "thinking done" marker, so we close the reasoning
+  // block when the first content/tool_call appears (or at end of stream).
+  let sawThinking = false;
+  let thinkingClosed = false;
+  const closeThinking = () => {
+    if (sawThinking && !thinkingClosed) {
+      thinkingClosed = true;
+      ctx.emitter.thinkingDone();
+    }
+  };
+
   if (isAsyncIterable<OllamaChatChunk>(response)) {
     for await (const chunk of response) {
+      // Once the block is closed (content/tool_call seen), ignore any late
+      // `thinking` so we never emit a delta after `thinkingDone`. In practice
+      // Ollama sends all reasoning up front, but guard against out-of-order UI.
+      const thinkingDelta = think && !thinkingClosed ? (chunk.message?.thinking ?? "") : "";
+      if (thinkingDelta) {
+        sawThinking = true;
+        ctx.emitter.thinkingDelta(thinkingDelta);
+        ctx.recorder?.reasoning(thinkingDelta);
+      }
       const delta = chunk.message?.content ?? "";
       if (delta) {
+        closeThinking();
         fullText += delta;
         ctx.emitter.delta(delta);
       }
       if (chunk.message?.tool_calls?.length) {
+        closeThinking();
         for (const toolCall of chunk.message.tool_calls) {
           const key = `${toolCall.function.name}::${safeJson(toolCall.function.arguments ?? {})}`;
           if (seenToolCalls.has(key)) continue;
@@ -573,10 +651,19 @@ async function runChatRound(
         });
       }
     }
+    // Reasoning may have arrived without any following content/tool_call (e.g.
+    // a pure-thinking chunk before the stream ended) — close it out.
+    closeThinking();
     return { text: fullText, toolCalls };
   }
 
   const message = response.message ?? {};
+  const thinking = think ? (message.thinking ?? "") : "";
+  if (thinking) {
+    ctx.emitter.thinkingDelta(thinking);
+    ctx.recorder?.reasoning(thinking);
+    ctx.emitter.thinkingDone();
+  }
   const text = message.content ?? "";
   if (text) {
     fullText += text;
@@ -625,6 +712,12 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   // "running" span. The MCP bridge was already created above.
   recorder?.turnStart(model);
 
+  // Only request thinking from models that actually expose a reasoning channel,
+  // so the `Reasoning` component lights up without breaking non-reasoning models
+  // (passing `think: true` to one errors in Ollama). noTools turns are text-only
+  // generation that isn't recorded, so skip the probe.
+  const think = params.noTools ? false : await modelSupportsThinking(client, model);
+
   // Tool rounds only happen when tools are available; a text-only (noTools)
   // turn returns after the first model response, so skip the settings read and
   // bound the loop at a single round.
@@ -633,7 +726,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   let turnStatus: "success" | "error" = "error";
   try {
     for (let round = 0; round < maxToolRounds; round++) {
-      const { text, toolCalls } = await runChatRound(client, model, messages, tools, ctx);
+      const { text, toolCalls } = await runChatRound(client, model, messages, tools, ctx, think);
       fullText += text;
 
       if (toolCalls.length === 0) {
@@ -718,6 +811,7 @@ export async function getOllamaModels(): Promise<Array<{ id: string; name: strin
 
 export function _resetOllamaClientForTests(): void {
   clientPromise = null;
+  thinkingCapabilityCache.clear();
 }
 
 export const ollamaProvider: AgentProvider = {
