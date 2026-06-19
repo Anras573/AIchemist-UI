@@ -580,17 +580,27 @@ describe("openai-compat agent model override", () => {
 
     it("matches a composite <endpoint>/<model> override", () => {
       expect(pickAgentModelTarget("beta/model-y", models, ENDPOINTS as never)).toEqual({
+        kind: "matched",
         endpointName: "beta",
         entry: ENDPOINTS.beta,
         modelId: "model-y",
       });
     });
 
-    it("matches a bare model id against any endpoint", () => {
+    it("matches a bare model id served by exactly one endpoint", () => {
       expect(pickAgentModelTarget("model-y", models, ENDPOINTS as never)).toEqual({
+        kind: "matched",
         endpointName: "beta",
         entry: ENDPOINTS.beta,
         modelId: "model-y",
+      });
+    });
+
+    it("reports ambiguity when a bare model id is served by multiple endpoints", () => {
+      const shared = [{ id: "alpha/shared" }, { id: "beta/shared" }];
+      expect(pickAgentModelTarget("shared", shared, ENDPOINTS as never)).toEqual({
+        kind: "ambiguous",
+        endpoints: ["alpha", "beta"],
       });
     });
 
@@ -601,16 +611,17 @@ describe("openai-compat agent model override", () => {
           together: { baseURL: "http://together.local/v1" },
         } as never),
       ).toEqual({
+        kind: "matched",
         endpointName: "together",
         entry: { baseURL: "http://together.local/v1" },
         modelId: "meta-llama/Llama-3-70b",
       });
     });
 
-    it("returns null for an unknown model or an absent override", () => {
-      expect(pickAgentModelTarget("nope", models, ENDPOINTS as never)).toBeNull();
-      expect(pickAgentModelTarget(undefined, models, ENDPOINTS as never)).toBeNull();
-      expect(pickAgentModelTarget("   ", models, ENDPOINTS as never)).toBeNull();
+    it("returns kind 'none' for an unknown model or an absent override", () => {
+      expect(pickAgentModelTarget("nope", models, ENDPOINTS as never)).toEqual({ kind: "none" });
+      expect(pickAgentModelTarget(undefined, models, ENDPOINTS as never)).toEqual({ kind: "none" });
+      expect(pickAgentModelTarget("   ", models, ENDPOINTS as never)).toEqual({ kind: "none" });
     });
   });
 
@@ -697,6 +708,41 @@ describe("openai-compat agent model override", () => {
     } as never);
 
     expect(seen).toEqual(["beta/model-y"]);
+  });
+
+  it("falls back with an ambiguity warning when a bare agent model is served by multiple endpoints", async () => {
+    setEndpoints(ENDPOINTS);
+    agentFileMock.result = { body: "be terse", model: "shared" };
+    // Both endpoints expose "shared" — the bare id can't disambiguate which one.
+    _setFetch(
+      mockFetchModels({
+        "http://alpha.local/v1/models": ["shared"],
+        "http://beta.local/v1/models": ["shared"],
+      }) as unknown as typeof fetch,
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const seen: string[] = [];
+    _setClientFactory((endpointName) => (modelId) => {
+      seen.push(`${endpointName}/${modelId}`);
+      return new MockLanguageModelV3({ doStream: async () => textStream(["ok"]) });
+    });
+
+    await runOpenAiCompatTurn({
+      db: makeDb([]) as never,
+      sessionId: "s-agent-ambiguous",
+      messageId: "m-placeholder",
+      prompt: "hi",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "alpha/model-x", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+      agent: "coder",
+    } as never);
+
+    // Falls back to the session model rather than guessing an endpoint.
+    expect(seen).toEqual(["alpha/model-x"]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("multiple endpoints"));
+    warn.mockRestore();
   });
 
   it("falls back silently for a bare agent model when no endpoint models can be listed", async () => {
