@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as CH from "../ipc-channels";
 
 vi.mock("ollama", () => ({
-  default: { list: vi.fn(), chat: vi.fn() },
+  default: { list: vi.fn(), chat: vi.fn(), show: vi.fn() },
   Ollama: vi.fn(),
 }));
 
@@ -38,6 +38,7 @@ import { _setNativeTracesRootForTests } from "../native-transcript";
 type OllamaMockState = {
   list: ReturnType<typeof vi.fn>;
   chat: ReturnType<typeof vi.fn>;
+  show: ReturnType<typeof vi.fn>;
   ctor: ReturnType<typeof vi.fn>;
   bridge: ReturnType<typeof vi.fn>;
 };
@@ -62,6 +63,7 @@ async function loadMocks(): Promise<OllamaMockState> {
   return {
     list: ollamaModule.default.list as OllamaMockState["list"],
     chat: ollamaModule.default.chat as OllamaMockState["chat"],
+    show: ollamaModule.default.show as OllamaMockState["show"],
     ctor: ollamaModule.Ollama as OllamaMockState["ctor"],
     bridge: bridgeModule.createManagedMcpBridge as OllamaMockState["bridge"],
   };
@@ -83,7 +85,7 @@ function makeDb(
   };
 }
 
-function streamChunks(chunks: Array<{ message?: { content?: string; tool_calls?: Array<{ function: { name: string; arguments?: Record<string, unknown> } }> } }>) {
+function streamChunks(chunks: Array<{ message?: { content?: string; thinking?: string; tool_calls?: Array<{ function: { name: string; arguments?: Record<string, unknown> } }> } }>) {
   return {
     [Symbol.asyncIterator]: async function* () {
       for (const chunk of chunks) yield chunk;
@@ -1116,6 +1118,168 @@ describe("ollama provider", () => {
       expect(ollamaMocks.chat.mock.calls[0][0].model).toBe("qwen2.5:latest");
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("not-installed"));
       warn.mockRestore();
+    });
+  });
+
+  describe("extended thinking / reasoning", () => {
+    it("requests thinking and streams reasoning deltas for a thinking-capable model", async () => {
+      const send = vi.fn();
+      ollamaMocks.show.mockResolvedValue({ capabilities: ["completion", "tools", "thinking"] });
+      ollamaMocks.chat.mockResolvedValue(
+        streamChunks([
+          { message: { thinking: "Let me " } },
+          { message: { thinking: "reason." } },
+          { message: { content: "Answer." } },
+        ]),
+      );
+
+      const text = await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "think hard" },
+        ]) as never,
+        sessionId: "s-think",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen3:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      expect(text).toBe("Answer.");
+      expect(ollamaMocks.show).toHaveBeenCalledWith({ model: "qwen3:latest" });
+      expect(ollamaMocks.chat).toHaveBeenCalledWith(expect.objectContaining({ think: true }));
+      // Reasoning is streamed via the thinking channel, then closed when content arrives.
+      expect(send).toHaveBeenCalledWith(CH.SESSION_THINKING_DELTA, {
+        session_id: "s-think",
+        text_delta: "Let me ",
+      });
+      expect(send).toHaveBeenCalledWith(CH.SESSION_THINKING_DELTA, {
+        session_id: "s-think",
+        text_delta: "reason.",
+      });
+      expect(send).toHaveBeenCalledWith(CH.SESSION_THINKING_DONE, { session_id: "s-think" });
+      expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, {
+        session_id: "s-think",
+        text_delta: "Answer.",
+      });
+    });
+
+    it("does not request thinking (or emit reasoning) for a model without the thinking capability", async () => {
+      const send = vi.fn();
+      ollamaMocks.show.mockResolvedValue({ capabilities: ["completion", "tools"] });
+      ollamaMocks.chat.mockResolvedValue(streamChunks([{ message: { content: "Hi" } }]));
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "hello" },
+        ]) as never,
+        sessionId: "s-no-think",
+        messageId: "m-placeholder",
+        projectConfig: { model: "llama3.2:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      expect(ollamaMocks.chat.mock.calls[0][0].think).toBeUndefined();
+      expect(send).not.toHaveBeenCalledWith(CH.SESSION_THINKING_DELTA, expect.anything());
+      expect(send).not.toHaveBeenCalledWith(CH.SESSION_THINKING_DONE, expect.anything());
+    });
+
+    it("treats a failing capability probe as no-thinking instead of breaking the turn", async () => {
+      const send = vi.fn();
+      ollamaMocks.show.mockRejectedValue(new Error("show unsupported"));
+      ollamaMocks.chat.mockResolvedValue(streamChunks([{ message: { content: "ok" } }]));
+
+      const text = await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "hello" },
+        ]) as never,
+        sessionId: "s-think-err",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      expect(text).toBe("ok");
+      expect(ollamaMocks.chat.mock.calls[0][0].think).toBeUndefined();
+      expect(send).not.toHaveBeenCalledWith(CH.SESSION_THINKING_DELTA, expect.anything());
+    });
+
+    it("closes the reasoning block at end of stream when thinking is followed by a tool call (no content)", async () => {
+      const projectPath = makeTempProject();
+      fs.writeFileSync(path.join(projectPath, "notes.txt"), "content");
+      const send = vi.fn();
+      ollamaMocks.show.mockResolvedValue({ capabilities: ["thinking", "tools"] });
+      ollamaMocks.chat
+        .mockResolvedValueOnce(
+          streamChunks([
+            { message: { thinking: "I should read the file." } },
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "read_file", arguments: { path: "notes.txt" } } }],
+              },
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(streamChunks([{ message: { content: "Done" } }]));
+
+      await expect(
+        runOllamaAgentTurn({
+          db: makeDb([
+            { id: "m-placeholder", role: "user", content: "placeholder" },
+            { id: "m-user", role: "user", content: "read it" },
+          ]) as never,
+          sessionId: "s-think-tool",
+          messageId: "m-placeholder",
+          projectPath,
+          projectConfig: { model: "qwen3:latest", approval_mode: "none", approval_rules: [] } as never,
+          webContents: { send } as never,
+        } as never),
+      ).resolves.toBe("Done");
+
+      expect(send).toHaveBeenCalledWith(CH.SESSION_THINKING_DELTA, {
+        session_id: "s-think-tool",
+        text_delta: "I should read the file.",
+      });
+      expect(send).toHaveBeenCalledWith(CH.SESSION_THINKING_DONE, { session_id: "s-think-tool" });
+    });
+
+    it("caches the capability probe across tool rounds (one show() call per turn)", async () => {
+      const projectPath = makeTempProject();
+      fs.writeFileSync(path.join(projectPath, "notes.txt"), "content");
+      const send = vi.fn();
+      ollamaMocks.show.mockResolvedValue({ capabilities: ["thinking"] });
+      ollamaMocks.chat
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [{ function: { name: "read_file", arguments: { path: "notes.txt" } } }],
+              },
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(streamChunks([{ message: { content: "Done" } }]));
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "read it" },
+        ]) as never,
+        sessionId: "s-think-cache",
+        messageId: "m-placeholder",
+        projectPath,
+        projectConfig: { model: "qwen3:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      expect(ollamaMocks.chat).toHaveBeenCalledTimes(2);
+      // Both rounds pass think: true, but the capability is probed only once.
+      expect(ollamaMocks.chat.mock.calls[0][0].think).toBe(true);
+      expect(ollamaMocks.chat.mock.calls[1][0].think).toBe(true);
+      expect(ollamaMocks.show).toHaveBeenCalledTimes(1);
     });
   });
 });
