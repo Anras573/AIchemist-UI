@@ -377,7 +377,7 @@ Use `<WithTooltip label="…">` from `src/components/ui/with-tooltip.tsx` for ho
 The right-side context panels (Skills, MCP, Memory) filter their content to the active session's provider, matching the per-session provider lock. Use `useActiveSessionProvider()` from `src/lib/hooks/useActiveSessionProvider.ts` — it resolves the session's `provider` and falls back to the active project's default for legacy sessions, returning `"anthropic" | "copilot" | null`.
 
 - **MCP** (`McpServersPanel`) filters its rows by `source`: Claude sessions see `claude`/`both`, Copilot sees `copilot`/`both`. AIchemist-managed servers (`source: "aichemist"`) are passed through to **both** providers.
-- **Memory** (`MemoryPanel`) is Claude-only — Copilot sessions render a "not available" placeholder and skip the IPC fetch entirely.
+- **Memory** (`MemoryPanel`) is provider-aware: it passes the provider into `LIST_MEMORY`, which resolves the store per provider — Claude reads the SDK-owned `~/.claude/projects/<cwd>/memory`, while the self-driven providers (Ollama, OpenAI-compatible) read `memoryDir(projectPath)` (`~/.aichemist/memory/<cwd>`, owned by `electron/agent/memory.ts`). Providers with no store yet (Copilot) render a "not available" placeholder and skip the IPC fetch entirely.
 - **Skills** (`SkillsPanel`) passes the provider through to `LIST_SKILLS` so the backend scans the right global / plugin paths (see Skills Panel section).
 
 ---

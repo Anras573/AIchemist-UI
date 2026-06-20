@@ -20,6 +20,7 @@ import { ChangesPanel } from "./ChangesPanel";
 import { InteractiveTerminal } from "./InteractiveTerminal";
 import { McpServersPanel } from "./McpServersPanel";
 import { MemoryPanel } from "./MemoryPanel";
+import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { GitHubPanel } from "./GitHubPanel";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 
@@ -237,6 +238,9 @@ export function ContextPanel({
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
   const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
+  // Effective provider (session lock, falling back to the project default for
+  // legacy null-provider sessions) gates the Memory tab's file viewer.
+  const memoryProvider = useActiveSessionProvider();
   const [viewingFile, setViewingFile] = useState<string | null>(null);
   const [viewingMemoryFile, setViewingMemoryFile] = useState<string | null>(null);
 
@@ -331,11 +335,9 @@ export function ContextPanel({
         ) : activeTab === "mcp" ? (
           <McpServersPanel />
         ) : activeTab === "memory" ? (
-          activeSession?.provider === "copilot" ? (
-            <div className="p-3 text-xs text-muted-foreground">
-              Memory is not yet supported for Copilot sessions.
-            </div>
-          ) : isViewingMemory ? (
+          // MemoryPanel owns the per-provider placeholder (e.g. Copilot has no
+          // store yet); only enter the file viewer for providers that do.
+          isViewingMemory && memoryProvider !== "copilot" ? (
             <MemoryFileViewer filePath={viewingMemoryFile!} />
           ) : (
             <MemoryPanel

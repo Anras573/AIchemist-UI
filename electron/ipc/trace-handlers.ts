@@ -28,6 +28,7 @@ import {
 } from "../native-transcript";
 import { handle } from "./handle";
 import { parseProviderSessionState } from "../agent/provider-session-store";
+import { memoryDir } from "../agent/memory";
 import { getProjectConfig } from "../projects";
 
 export function registerTraceHandlers(db: Database, getMainWindow: () => BrowserWindow | null): void {
@@ -128,12 +129,24 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     }
   });
 
-  handle(CH.LIST_MEMORY, async (_event, projectPath: string) => {
+  handle(CH.LIST_MEMORY, async (_event, args: string | { projectPath: string; provider?: string }) => {
+    // Accept a bare projectPath string for back-compat (treated as Claude),
+    // exactly as LIST_SKILLS does.
+    const projectPath = typeof args === "string" ? args : args.projectPath;
+    const provider = typeof args === "string" ? undefined : args.provider;
     if (!projectPath) return { files: [] as Array<{ name: string; path: string }> };
     try {
-      const projectDir = await resolveProjectDir(projectPath);
-      if (!projectDir) return { files: [] };
-      const memDir = path.join(projectDir, "memory");
+      // Resolve the memory directory per provider. Claude's store is owned by
+      // the SDK under ~/.claude/projects/<cwd>/memory; the self-driven providers
+      // (Ollama, OpenAI-compatible) use AIchemist's own ~/.aichemist/memory/<cwd>.
+      let memDir: string | null;
+      if (provider === "ollama" || provider === "openai-compatible") {
+        memDir = memoryDir(projectPath);
+      } else {
+        const projectDir = await resolveProjectDir(projectPath);
+        memDir = projectDir ? path.join(projectDir, "memory") : null;
+      }
+      if (!memDir) return { files: [] };
       let names: string[];
       try {
         names = await fs.promises.readdir(memDir);
@@ -143,7 +156,7 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
       const files = names
         .filter((n) => n.toLowerCase().endsWith(".md"))
         .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-        .map((name) => ({ name, path: path.join(memDir, name) }));
+        .map((name) => ({ name, path: path.join(memDir!, name) }));
       return { files };
     } catch {
       return { files: [] };

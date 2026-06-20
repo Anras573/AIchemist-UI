@@ -60,7 +60,7 @@ export interface ElectronAPI {
   // ── File system ───────────────────────────────────────────────────────────
   listDirectory: (path: string) => Promise<Res<typeof CH.LIST_DIRECTORY>>;
   readFile: (path: string) => Promise<Res<typeof CH.READ_FILE>>;
-  listMemory: (projectPath: string) => Promise<Res<typeof CH.LIST_MEMORY>>;
+  listMemory: (projectPath: string, provider?: string) => Promise<Res<typeof CH.LIST_MEMORY>>;
 
   // ── Settings ──────────────────────────────────────────────────────────────
   settingsRead: () => Promise<Res<typeof CH.SETTINGS_READ>>;
@@ -205,7 +205,7 @@ const api: ElectronAPI = {
 
   listDirectory: (path) => invoke(CH.LIST_DIRECTORY, path),
   readFile: (path) => invoke(CH.READ_FILE, path),
-  listMemory: (projectPath) => invoke(CH.LIST_MEMORY, projectPath),
+  listMemory: (projectPath, provider) => invoke(CH.LIST_MEMORY, { projectPath, provider }),
 
   settingsRead: () => invoke(CH.SETTINGS_READ),
   settingsWrite: (updates) => invoke(CH.SETTINGS_WRITE, updates),
