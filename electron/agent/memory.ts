@@ -34,9 +34,47 @@ export interface MemoryFile {
  */
 const MAX_MEMORY_FILE_BYTES = 64 * 1024;
 
+/**
+ * Cap on a single `write_memory` payload. The tool is un-gated, so without a
+ * limit a runaway model could fill the disk. Generous relative to the 64 KB
+ * injection cap, but bounded.
+ */
+const MAX_MEMORY_WRITE_BYTES = 256 * 1024;
+
+/** `O_NOFOLLOW` where supported (POSIX); 0 elsewhere so the open still works. */
+const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
+
 /** `~/.aichemist/memory/<sanitized-cwd>` for the given project. */
 export function memoryDir(projectPath: string): string {
   return path.join(os.homedir(), ".aichemist", "memory", sanitizeCwd(projectPath));
+}
+
+/**
+ * Verify no component of the memory directory chain (`~/.aichemist`,
+ * `~/.aichemist/memory`, and the per-project dir) is a symlink or a non-directory.
+ * A symlinked ancestor could redirect the whole store outside `~/.aichemist`
+ * (e.g. into the project tree, which writes deliberately keep out of the Changes
+ * tab). Missing components are fine — they'll be created as real dirs. Returns
+ * the per-project memory dir.
+ */
+function assertMemoryDirChainSafe(projectPath: string): string {
+  const base = path.join(os.homedir(), ".aichemist");
+  const dir = memoryDir(projectPath);
+  for (const seg of [base, path.join(base, "memory"), dir]) {
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(seg);
+    } catch {
+      continue; // doesn't exist yet — will be created as a real directory
+    }
+    if (stat.isSymbolicLink()) {
+      throw new Error(`Refusing to use a symlinked memory directory: "${seg}"`);
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`Memory path is not a directory: "${seg}"`);
+    }
+  }
+  return dir;
 }
 
 /**
@@ -58,7 +96,7 @@ function resolveMemoryFile(projectPath: string, name: string): string {
   if (!trimmed.toLowerCase().endsWith(".md")) {
     throw new Error(`Memory files must be markdown (.md): "${name}"`);
   }
-  const dir = memoryDir(projectPath);
+  const dir = assertMemoryDirChainSafe(projectPath);
   const resolved = path.resolve(dir, trimmed);
   if (!resolved.startsWith(dir + path.sep)) {
     throw new Error(`Memory path escapes the memory directory: "${name}"`);
@@ -90,9 +128,12 @@ function assertRegularFileIfExists(file: string): fs.Stats | null {
  * never surfaces in the viewer or the injected context.
  */
 export function listMemoryFiles(projectPath: string): MemoryFile[] {
-  const dir = memoryDir(projectPath);
+  let dir: string;
   let entries: fs.Dirent[];
   try {
+    // Bail (empty list) if the dir is missing, not a directory, or a symlink —
+    // a symlinked memory dir could otherwise surface arbitrary .md files.
+    dir = assertMemoryDirChainSafe(projectPath);
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
     return [];
@@ -110,6 +151,12 @@ export function listMemoryFiles(projectPath: string): MemoryFile[] {
  * link can't redirect an un-gated `write_memory` onto an arbitrary target.
  */
 export function implWriteMemory(projectPath: string, name: string, content: string): string {
+  if (Buffer.byteLength(content, "utf8") > MAX_MEMORY_WRITE_BYTES) {
+    throw new Error(
+      `Memory content exceeds the ${Math.round(MAX_MEMORY_WRITE_BYTES / 1024)} KB limit`,
+    );
+  }
+  // resolveMemoryFile validates the directory chain has no symlinked ancestors.
   const file = resolveMemoryFile(projectPath, name);
   assertRegularFileIfExists(file);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -148,15 +195,21 @@ export function implDeleteMemory(projectPath: string, name: string): string {
 
 /**
  * Read at most `cap` bytes from a file without loading the whole thing into
- * memory. Returns the decoded text and whether the file exceeded the cap.
+ * memory. Opens with `O_NOFOLLOW` so a symlink at `filePath` fails the open
+ * (TOCTOU-safe between listing and read), then `fstat`s the opened descriptor
+ * to confirm it's a regular file. Returns the decoded text and whether the file
+ * exceeded the cap.
  */
 function readCapped(filePath: string, cap: number): { text: string; truncated: boolean } {
-  const fd = fs.openSync(filePath, "r");
+  const fd = fs.openSync(filePath, fs.constants.O_RDONLY | O_NOFOLLOW);
   try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      throw new Error(`Not a regular file: "${path.basename(filePath)}"`);
+    }
     const buf = Buffer.alloc(cap);
     const bytesRead = fs.readSync(fd, buf, 0, cap, 0);
-    const size = fs.fstatSync(fd).size;
-    return { text: buf.subarray(0, bytesRead).toString("utf8"), truncated: size > cap };
+    return { text: buf.subarray(0, bytesRead).toString("utf8"), truncated: stat.size > cap };
   } finally {
     fs.closeSync(fd);
   }
@@ -175,8 +228,10 @@ export function buildMemoryContext(projectPath: string): string {
   for (const file of files) {
     let body = "";
     try {
-      // listMemoryFiles already excludes symlinks, but re-check by reading at
-      // most MAX_MEMORY_FILE_BYTES so a single huge file can't bloat the prompt.
+      // readCapped re-checks (O_NOFOLLOW + fstat) that the entry is still a
+      // regular file at open time and reads at most MAX_MEMORY_FILE_BYTES, so a
+      // symlink swapped in after listing is refused and one huge file can't
+      // bloat the prompt.
       const { text, truncated } = readCapped(file.path, MAX_MEMORY_FILE_BYTES);
       body = text.trim();
       if (truncated) {
