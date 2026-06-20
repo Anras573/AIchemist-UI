@@ -20,6 +20,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
 
 import { buildSkillsContext } from "./skills";
+import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory } from "./memory";
 import { readAgentFileSystemPrompt } from "./claude";
 import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
@@ -67,6 +68,7 @@ const OPENAI_COMPAT_SYSTEM_PROMPT = [
   "Use the available tools to inspect and modify the project, run commands, fetch URLs, and ask the user questions when needed.",
   "Never invent file contents or command output. If you need more context, use a tool.",
   "When you need clarification, use ask_user instead of asking in plain text.",
+  "Use write_memory to persist durable facts about this project (conventions, decisions, gotchas) so they survive across turns, read_memory to recall a saved note, and delete_memory to remove one that is no longer accurate.",
 ].join(" ");
 
 const LIST_MODELS_TIMEOUT_MS = 5_000;
@@ -375,8 +377,9 @@ async function resolveTargetForTurn(
 
 function buildSystemPrompt(params: AgentProviderParams): string {
   const skillsContext = buildSkillsContext(params.skills ?? [], params.projectPath);
+  const memoryContext = buildMemoryContext(params.projectPath);
   const agentBody = params.agent ? readAgentFileSystemPrompt(params.agent)?.body ?? "" : "";
-  const parts = [OPENAI_COMPAT_SYSTEM_PROMPT, agentBody, skillsContext];
+  const parts = [OPENAI_COMPAT_SYSTEM_PROMPT, agentBody, skillsContext, memoryContext];
   return parts.filter((part) => part.trim().length > 0).join("\n\n");
 }
 
@@ -535,6 +538,42 @@ function makeBuiltinTools(ctx: ToolContext): ToolSet {
       }),
       execute: ({ url }) => runTool(ctx, "web_fetch", { url }, "web", async () => implWebFetch({ url })),
     }),
+    write_memory: tool({
+      description:
+        "Persist a durable note about this project to AIchemist's project memory so it is " +
+        "available on future turns. Use for conventions, decisions, and gotchas worth remembering. " +
+        "Overwrites the named memory file if it already exists.",
+      inputSchema: z.object({
+        name: z.string().describe("Memory file name (a flat '.md' filename)"),
+        content: z.string().describe("Markdown content to save"),
+      }),
+      // Category "custom" keeps memory un-gated: it's the model's own scratchpad,
+      // sandboxed to AIchemist's dir, and emits no FileChange (not a project edit).
+      execute: ({ name, content }) =>
+        runTool(ctx, "write_memory", { name, content }, "custom", async () =>
+          implWriteMemory(ctx.projectPath, name, content),
+        ),
+    }),
+    read_memory: tool({
+      description: "Read back a previously saved project memory note by name.",
+      inputSchema: z.object({
+        name: z.string().describe("Memory file name (a flat '.md' filename)"),
+      }),
+      execute: ({ name }) =>
+        runTool(ctx, "read_memory", { name }, "custom", async () =>
+          implReadMemory(ctx.projectPath, name),
+        ),
+    }),
+    delete_memory: tool({
+      description: "Delete a saved project memory note that is no longer accurate.",
+      inputSchema: z.object({
+        name: z.string().describe("Memory file name (a flat '.md' filename)"),
+      }),
+      execute: ({ name }) =>
+        runTool(ctx, "delete_memory", { name }, "custom", async () =>
+          implDeleteMemory(ctx.projectPath, name),
+        ),
+    }),
     ask_user: tool({
       description: "Ask the user a question and wait for the answer before proceeding.",
       inputSchema: z.object({
@@ -647,7 +686,9 @@ async function resolveDelegateTarget(
  * so its streaming text doesn't interleave with the orchestrator's bubble. Its
  * tool calls still surface in the timeline (tool events are not suppressed), and
  * the depth guard + the `ask_user` guard in `makeBuiltinTools` enforce the
- * delegation guardrails. MCP tools are intentionally not offered to sub-agents.
+ * delegation guardrails. Memory tools are stripped (a sub-agent's ephemeral
+ * context must not mutate shared project memory) and MCP tools are intentionally
+ * not offered to sub-agents.
  */
 async function runDelegatedTurn(ctx: ToolContext, requested: string, subPrompt: string): Promise<string> {
   const target = await resolveDelegateTarget(ctx.endpoints, requested);
@@ -659,6 +700,11 @@ async function runDelegatedTurn(ctx: ToolContext, requested: string, subPrompt: 
     emitter: ctx.emitter.withoutDeltas(),
   };
   const subTools = makeBuiltinTools(subCtx);
+  // Sub-agents must not mutate shared project memory — their context is ephemeral.
+  // (ask_user is separately blocked by the depth guard inside its own execute.)
+  delete subTools.write_memory;
+  delete subTools.read_memory;
+  delete subTools.delete_memory;
 
   let fullText = "";
   const result = streamText({
