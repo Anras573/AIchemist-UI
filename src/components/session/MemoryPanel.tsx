@@ -15,27 +15,33 @@ interface MemoryPanelProps {
 }
 
 /**
- * Lists Claude memory files (~/.claude/projects/<sanitized-cwd>/memory/*.md)
- * for the active project. Read-only — clicking a file opens it in the
- * shared FileViewer via the parent ContextPanel. Memory is Claude-specific;
- * Copilot sessions show a "not available" placeholder.
+ * Lists memory files for the active project, resolved per provider:
+ *   - Claude (anthropic): ~/.claude/projects/<sanitized-cwd>/memory/*.md (SDK-owned)
+ *   - Ollama / OpenAI-compatible: ~/.aichemist/memory/<sanitized-cwd>/*.md
+ * Read-only — clicking a file opens it in the shared FileViewer via the parent
+ * ContextPanel. Providers without a memory store yet (Copilot) show a "not
+ * available" placeholder.
  */
 export function MemoryPanel({ projectPath, onFileOpen }: MemoryPanelProps) {
   const ipc = useIpc();
   const provider = useActiveSessionProvider();
-  // Memory is Claude-only — skip the IPC fetch entirely for other providers.
-  const memoryKey = provider && provider !== "anthropic" ? null : `memory:${projectPath}`;
+  // Copilot has no memory store yet — skip the IPC fetch entirely.
+  const memoryKey = provider === "copilot" ? null : `memory:${projectPath}:${provider ?? ""}`;
   const { data } = useIpcQuery<MemoryFile[]>(
     memoryKey,
-    () => ipc.listMemory(projectPath).then((r) => r.files).catch(() => []),
+    () =>
+      ipc
+        .listMemory(projectPath, provider ?? undefined)
+        .then((r) => r.files)
+        .catch(() => []),
   );
   const files = memoryKey === null ? [] : (data ?? null);
 
-  if (provider && provider !== "anthropic") {
+  if (provider === "copilot") {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs px-3 text-center">
         <Brain className="h-8 w-8 opacity-30" />
-        <span>Memory files are only available for Claude sessions.</span>
+        <span>Memory is not yet supported for Copilot sessions.</span>
       </div>
     );
   }

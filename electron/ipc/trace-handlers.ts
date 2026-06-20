@@ -3,7 +3,7 @@ import * as path from "path";
 import type { Database } from "better-sqlite3";
 import type { BrowserWindow } from "electron";
 import * as CH from "../ipc-channels";
-import type { TraceSpan } from "../../src/types/index";
+import type { Provider, TraceSpan } from "../../src/types/index";
 import {
   findTranscriptFile,
   parseTranscript,
@@ -28,6 +28,7 @@ import {
 } from "../native-transcript";
 import { handle } from "./handle";
 import { parseProviderSessionState } from "../agent/provider-session-store";
+import { listMemoryFiles } from "../agent/memory";
 import { getProjectConfig } from "../projects";
 
 export function registerTraceHandlers(db: Database, getMainWindow: () => BrowserWindow | null): void {
@@ -128,20 +129,43 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     }
   });
 
-  handle(CH.LIST_MEMORY, async (_event, projectPath: string) => {
+  handle(CH.LIST_MEMORY, async (_event, args: string | { projectPath: string; provider?: Provider }) => {
+    // Accept a bare projectPath string for back-compat (treated as Claude),
+    // exactly as LIST_SKILLS does.
+    const projectPath = typeof args === "string" ? args : args.projectPath;
+    const provider = typeof args === "string" ? undefined : args.provider;
     if (!projectPath) return { files: [] as Array<{ name: string; path: string }> };
     try {
+      // Self-driven providers (Ollama, OpenAI-compatible) use AIchemist's own
+      // store at ~/.aichemist/memory/<cwd>. Go through listMemoryFiles so the
+      // memory module's safety checks (symlinked-dir-chain refusal, regular-file
+      // filtering) apply — a raw readdir could surface symlinked .md entries that
+      // READ_FILE would then follow to arbitrary paths.
+      if (provider === "ollama" || provider === "openai-compatible") {
+        return { files: listMemoryFiles(projectPath) };
+      }
+      // Only Claude has an SDK-owned store (under ~/.claude/projects/<cwd>/memory);
+      // the bare-string / unset form is treated as Claude for back-compat. Any
+      // other provider (e.g. Copilot) has no store yet — return empty rather than
+      // falling through, which would surface Claude memory for a non-Claude caller.
+      if (provider !== undefined && provider !== "anthropic") {
+        return { files: [] };
+      }
       const projectDir = await resolveProjectDir(projectPath);
       if (!projectDir) return { files: [] };
       const memDir = path.join(projectDir, "memory");
-      let names: string[];
+      let entries: fs.Dirent[];
       try {
-        names = await fs.promises.readdir(memDir);
+        // withFileTypes + isFile() filters out symlinks (and dirs), mirroring
+        // listMemoryFiles — otherwise a symlinked .md (e.g. secret.md -> /etc/passwd)
+        // would surface here and READ_FILE (no path sandbox) would follow it.
+        entries = await fs.promises.readdir(memDir, { withFileTypes: true });
       } catch {
         return { files: [] };
       }
-      const files = names
-        .filter((n) => n.toLowerCase().endsWith(".md"))
+      const files = entries
+        .filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md"))
+        .map((e) => e.name)
         .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
         .map((name) => ({ name, path: path.join(memDir, name) }));
       return { files };
