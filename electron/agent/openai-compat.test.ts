@@ -36,6 +36,12 @@ import {
 } from "./openai-compat";
 import { _setEndpointsPathForTests, writeOpenAiEndpoints } from "../openai-endpoints";
 import { _setNativeTracesRootForTests } from "../native-transcript";
+import {
+  _setMemoryRootForTests,
+  implReadMemory,
+  implWriteMemory,
+  listMemoryFiles,
+} from "./memory";
 import type { OpenAiEndpointsMap } from "../openai-endpoints";
 import { createManagedMcpBridge } from "../mcp/approval";
 
@@ -126,6 +132,9 @@ beforeEach(() => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openai-compat-cfg-"));
   _setEndpointsPathForTests(path.join(tempDir, "openai-providers.json"));
   _setNativeTracesRootForTests(path.join(tempDir, "traces"));
+  // Isolate the project-memory store to a temp dir so memory reads/writes never
+  // touch the real ~/.aichemist/memory.
+  _setMemoryRootForTests(path.join(tempDir, "aichemist"));
   _resetOpenAiCompatProbeCache();
   vi.mocked(createManagedMcpBridge).mockResolvedValue({
     tools: [],
@@ -138,6 +147,7 @@ beforeEach(() => {
 afterEach(() => {
   _setEndpointsPathForTests(null);
   _setNativeTracesRootForTests(null);
+  _setMemoryRootForTests(null);
   _setFetch(null);
   _setClientFactory(null);
   fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1133,5 +1143,132 @@ describe("openai-compat delegate_task", () => {
     );
     // The real question flow must be bypassed entirely.
     expect(send).not.toHaveBeenCalledWith(CH.SESSION_QUESTION_REQUIRED, expect.anything());
+  });
+});
+
+describe("openai-compat project memory", () => {
+  it("includes saved memory content in the system prompt", async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    const projectPath = makeTempProject();
+    implWriteMemory(projectPath, "conventions.md", "Always use bun, never npm.");
+
+    let capturedPrompt: unknown;
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({
+        doStream: async (options) => {
+          capturedPrompt = options.prompt;
+          return textStream(["ok"]);
+        },
+      }),
+    );
+
+    await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "hi" }]) as never,
+      sessionId: "s-mem-prompt",
+      messageId: "m-placeholder",
+      prompt: "hi",
+      projectPath,
+      projectConfig: { model: "local/test-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+    } as never);
+
+    const systemMessage = (capturedPrompt as Array<{ role: string; content: unknown }>)[0];
+    expect(systemMessage.role).toBe("system");
+    const systemContent = JSON.stringify(systemMessage.content);
+    expect(systemContent).toContain("# Project Memory");
+    expect(systemContent).toContain("## Memory: conventions.md");
+    expect(systemContent).toContain("Always use bun, never npm.");
+  });
+
+  it("persists a write_memory tool call to disk and emits no FileChange", async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    const projectPath = makeTempProject();
+
+    let call = 0;
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({
+        doStream: async () => {
+          call += 1;
+          if (call === 1) {
+            return toolCallStream("call-1", "write_memory", {
+              name: "note.md",
+              content: "remember this",
+            });
+          }
+          return textStream(["Saved."]);
+        },
+      }),
+    );
+
+    const send = vi.fn();
+    const text = await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "save a note" }]) as never,
+      sessionId: "s-mem-write",
+      messageId: "m-placeholder",
+      prompt: "save a note",
+      projectPath,
+      projectConfig: { model: "local/test-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    expect(text).toBe("Saved.");
+    // The file is persisted to the memory store…
+    expect(listMemoryFiles(projectPath).map((f) => f.name)).toEqual(["note.md"]);
+    expect(implReadMemory(projectPath, "note.md")).toBe("remember this");
+    // …and the tool call/result is surfaced in the timeline…
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_CALL,
+      expect.objectContaining({ tool_name: "write_memory" }),
+    );
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_RESULT,
+      expect.objectContaining({ tool_name: "write_memory" }),
+    );
+    // …but a memory write is not a project edit, so it must not surface in the
+    // Changes tab (no SESSION_FILE_CHANGE).
+    expect(send).not.toHaveBeenCalledWith(CH.SESSION_FILE_CHANGE, expect.anything());
+  });
+
+  it("does not offer memory tools to delegated sub-agents", async () => {
+    setEndpoints({
+      local: { baseURL: "http://local.local/v1" },
+      coder: { baseURL: "http://coder.local/v1" },
+    });
+    const projectPath = makeTempProject();
+    // Orchestrator (local/test-model) delegates; the sub-agent (coder-model)
+    // tries write_memory, which is not in its toolset, so the write never reaches
+    // disk. Each model instance keeps its own per-step call counter.
+    _setClientFactory((endpointName) => (modelId) => {
+      void endpointName;
+      const isSub = modelId === "coder-model";
+      let call = 0;
+      return new MockLanguageModelV3({
+        doStream: async () => {
+          call += 1;
+          if (isSub) {
+            return call === 1
+              ? toolCallStream("w1", "write_memory", { name: "leak.md", content: "should not persist" })
+              : textStream(["sub done"]);
+          }
+          return call === 1
+            ? toolCallStream("d1", "delegate_task", { model: "coder/coder-model", prompt: "remember something" })
+            : textStream(["orchestrator done"]);
+        },
+      });
+    });
+
+    const text = await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "delegate" }]) as never,
+      sessionId: "s-mem-delegate",
+      messageId: "m-placeholder",
+      prompt: "delegate",
+      projectPath,
+      projectConfig: { model: "local/test-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+    } as never);
+
+    expect(text).toBe("orchestrator done");
+    // The sub-agent had no write_memory tool, so nothing was persisted.
+    expect(listMemoryFiles(projectPath)).toEqual([]);
   });
 });
