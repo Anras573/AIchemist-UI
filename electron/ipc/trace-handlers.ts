@@ -144,7 +144,13 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
       if (provider === "ollama" || provider === "openai-compatible") {
         return { files: listMemoryFiles(projectPath) };
       }
-      // Claude's store is owned by the SDK under ~/.claude/projects/<cwd>/memory.
+      // Only Claude has an SDK-owned store (under ~/.claude/projects/<cwd>/memory);
+      // the bare-string / unset form is treated as Claude for back-compat. Any
+      // other provider (e.g. Copilot) has no store yet — return empty rather than
+      // falling through, which would surface Claude memory for a non-Claude caller.
+      if (provider !== undefined && provider !== "anthropic") {
+        return { files: [] };
+      }
       const projectDir = await resolveProjectDir(projectPath);
       if (!projectDir) return { files: [] };
       const memDir = path.join(projectDir, "memory");
