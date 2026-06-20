@@ -168,6 +168,9 @@ export function implWriteMemory(projectPath: string, name: string, content: stri
   // resolveMemoryFile validates the directory chain has no symlinked ancestors.
   const file = resolveMemoryFile(projectPath, name);
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  // O_NOFOLLOW degrades to 0 on platforms without it (e.g. Windows), where the
+  // open would follow a planted symlink — fall back to an lstat check there.
+  if (O_NOFOLLOW === 0) assertRegularFileIfExists(file);
   // O_NOFOLLOW makes the open fail if `file` is an existing symlink, closing the
   // TOCTOU window an lstat-then-write would leave open. O_CREAT|O_TRUNC give the
   // overwrite semantics; fstat confirms a regular file before writing.
@@ -231,6 +234,15 @@ export function implDeleteMemory(projectPath: string, name: string): string {
  * exceeded the cap.
  */
 function readCapped(filePath: string, cap: number): { text: string; truncated: boolean } {
+  // O_NOFOLLOW degrades to 0 on platforms without it (e.g. Windows); fall back to
+  // an lstat check so a planted symlink is still refused. lstat throws ENOENT for
+  // a missing file, which callers map to "not found".
+  if (O_NOFOLLOW === 0) {
+    const st = fs.lstatSync(filePath);
+    if (st.isSymbolicLink() || !st.isFile()) {
+      throw new Error(`Not a regular file: "${path.basename(filePath)}"`);
+    }
+  }
   const fd = fs.openSync(filePath, fs.constants.O_RDONLY | O_NOFOLLOW);
   try {
     const stat = fs.fstatSync(fd);
@@ -278,14 +290,15 @@ export function buildMemoryContext(projectPath: string): string {
     }
     if (!body) continue;
     const block = `## Memory: ${file.name}\n\n${body}`;
+    const blockBytes = Buffer.byteLength(block, "utf8");
     // Stop before the combined block exceeds the total cap (always keep at least
     // one so a single large file still contributes its capped slice).
-    if (blocks.length > 0 && totalBytes + block.length > MAX_MEMORY_TOTAL_BYTES) {
+    if (blocks.length > 0 && totalBytes + blockBytes > MAX_MEMORY_TOTAL_BYTES) {
       truncatedBlock = true;
       break;
     }
     blocks.push(block);
-    totalBytes += block.length;
+    totalBytes += blockBytes;
   }
 
   if (blocks.length === 0) return "";
