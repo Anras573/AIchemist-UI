@@ -15,6 +15,7 @@ import { requestApproval, requiresApproval } from "./approval";
 import type { ToolCategory } from "./approval";
 import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
+import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory } from "./memory";
 import { readAgentFileSystemPrompt } from "./claude";
 import { classifyNativeTool, runGatedTool } from "./tool-gate";
 import type { GatedToolContext } from "./tool-gate";
@@ -199,6 +200,64 @@ export function resolveSelectedAgent(
   return { body: claudeAgent?.body ?? null, model: claudeAgent?.model };
 }
 
+// ── System message composition ──────────────────────────────────────────────────
+
+/**
+ * Steer Copilot to the in-Electron `ask_user` tool instead of asking in plain
+ * text (the native CLI question UI is unavailable in this app).
+ */
+const ASK_USER_INSTRUCTION =
+  "\n\nWhen a task is ambiguous or could reasonably be interpreted multiple ways, " +
+  "always call the `ask_user` tool before proceeding rather than making assumptions or asking questions in plain text. " +
+  "Never ask the user a question by writing it in your response — always use the `ask_user` tool instead. " +
+  "The `ask_user` tool supports an `options` array of short choices the user can click; " +
+  "always provide relevant options when there are distinct alternatives to choose from.";
+
+/**
+ * Tell Copilot the project-memory tools exist. Unlike the saved-notes block from
+ * `buildMemoryContext()` (which is empty until something is written), this is
+ * always present so the model knows it *can* start persisting memory.
+ */
+const MEMORY_INSTRUCTION =
+  "\n\nUse the write_memory tool to persist durable facts about this project " +
+  "(conventions, decisions, gotchas) so they survive across turns, read_memory to recall " +
+  "a saved note, and delete_memory to remove one that is no longer accurate.";
+
+/**
+ * Compose the Copilot `systemMessage` content + mode from the resolved agent
+ * body, the active skills context, and the project memory context.
+ *
+ * - With an agent body → `replace` mode (the agent's instructions ARE the
+ *   primary context); skills, the memory tool instruction + saved notes, and the
+ *   `ask_user` instruction are appended after it.
+ * - Without one (default Copilot prompt, or an agent that wasn't found) →
+ *   `append` mode so the memory + `ask_user` instructions augment Copilot's own
+ *   prompt. (Skills, when present, are injected via `customAgents` instead in
+ *   that path, so they are not included here.)
+ *
+ * NOTE: the saved-notes block changes whenever memory is written, but memory is
+ * deliberately NOT part of the resume-invalidation fingerprint (see the
+ * "customAgents vs systemMessage" footgun in CLAUDE.md). `resumeSession` ignores
+ * an updated systemMessage, so folding memory into the fingerprint would force a
+ * fresh `createSession` — and lose conversation history — on every memory write.
+ * Instead, within a session the model's own writes are already in history, and
+ * `read_memory` recalls anything on demand; a fresh injection only happens when
+ * the session is recreated for another reason (agent / MCP change, app restart).
+ * This mirrors how `skillsContext` is already injected without churning resumes.
+ */
+export function composeCopilotSystemMessage(opts: {
+  agentBody: string | null;
+  skillsContext: string;
+  memoryContext: string;
+}): { content: string; mode: "replace" | "append" } {
+  const { agentBody, skillsContext, memoryContext } = opts;
+  const augmentation = MEMORY_INSTRUCTION + ASK_USER_INSTRUCTION + memoryContext;
+  if (agentBody) {
+    return { content: agentBody + skillsContext + augmentation, mode: "replace" };
+  }
+  return { content: augmentation, mode: "append" };
+}
+
 // ── Agent turn ────────────────────────────────────────────────────────────────
 
 export async function runCopilotAgentTurn(params: {
@@ -350,6 +409,75 @@ export async function runCopilotAgentTurn(params: {
     }
   );
 
+  // ── Project memory tools ──────────────────────────────────────────────────────
+  // The model's own scratchpad, stored at ~/.aichemist/memory/<cwd>/*.md (the
+  // SAME store the self-driven providers use, so memory is portable across
+  // providers for a project). Category "custom" keeps them un-gated and they
+  // emit NO FileChange — they are not project edits and stay out of the Changes
+  // tab. The store lives outside the project root, so the project-boundary FS
+  // validators in tool-impls.ts cannot be reused; memory.ts carries its own.
+
+  const writeMemoryTool = defineTool<{ name: string; content: string }>("write_memory", {
+    description:
+      "Persist a durable note about this project to AIchemist's project memory so it is " +
+      "available in future turns. Use for conventions, decisions, and gotchas. " +
+      "Overwrites the named memory file if it already exists.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Memory file name (a flat '.md' filename)" },
+        content: { type: "string", description: "Markdown content to save" },
+      },
+      required: ["name", "content"],
+    },
+    handler: (args) =>
+      runGatedTool(gateCtx, {
+        name: "write_memory",
+        args,
+        category: "custom",
+        onError: "throw",
+        impl: async () => implWriteMemory(projectPath, args.name, args.content),
+      }),
+  });
+
+  const readMemoryTool = defineTool<{ name: string }>("read_memory", {
+    description: "Read back a previously saved project memory note by name.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Memory file name (a flat '.md' filename)" },
+      },
+      required: ["name"],
+    },
+    handler: (args) =>
+      runGatedTool(gateCtx, {
+        name: "read_memory",
+        args,
+        category: "custom",
+        onError: "throw",
+        impl: async () => implReadMemory(projectPath, args.name),
+      }),
+  });
+
+  const deleteMemoryTool = defineTool<{ name: string }>("delete_memory", {
+    description: "Delete a saved project memory note that is no longer accurate.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Memory file name (a flat '.md' filename)" },
+      },
+      required: ["name"],
+    },
+    handler: (args) =>
+      runGatedTool(gateCtx, {
+        name: "delete_memory",
+        args,
+        category: "custom",
+        onError: "throw",
+        impl: async () => implDeleteMemory(projectPath, args.name),
+      }),
+  });
+
   // ── Permission handler for built-in CLI tools ───────────────────────────────
   // Our custom defineTool handlers gate approval themselves; this handles the
   // CLI's built-in tools (read_file, edit_file, run_shell, etc.).
@@ -397,13 +525,10 @@ export async function runCopilotAgentTurn(params: {
   // ── Create or resume session ────────────────────────────────────────────────
 
   const skillsContext = buildSkillsContext(skills ?? [], projectPath);
-
-  const askUserInstruction =
-    "\n\nWhen a task is ambiguous or could reasonably be interpreted multiple ways, " +
-    "always call the `ask_user` tool before proceeding rather than making assumptions or asking questions in plain text. " +
-    "Never ask the user a question by writing it in your response — always use the `ask_user` tool instead. " +
-    "The `ask_user` tool supports an `options` array of short choices the user can click; " +
-    "always provide relevant options when there are distinct alternatives to choose from.";
+  // Project memory (~/.aichemist/memory/<cwd>) — the same store the self-driven
+  // providers read, folded into the systemMessage. See composeCopilotSystemMessage
+  // for why memory is deliberately kept out of the resume-invalidation fingerprint.
+  const memoryContext = buildMemoryContext(projectPath);
 
   // When a specific agent is selected, inject its system prompt via `systemMessage`
   // using replace mode so the agent's instructions ARE the primary context.
@@ -419,15 +544,17 @@ export async function runCopilotAgentTurn(params: {
 
   if (agent) {
     const selected = resolveSelectedAgent(agent, projectPath);
-    const agentBody = selected.body;
     agentModelOverride = selected.model;
-    if (agentBody) {
-      systemMessageContent = agentBody + skillsContext + askUserInstruction;
-    } else {
+    if (!selected.body) {
       console.warn(`[copilot] Agent "${agent}" not found — running without custom system prompt`);
-      systemMessageContent = askUserInstruction;
-      systemMessageMode = "append";
     }
+    const composed = composeCopilotSystemMessage({
+      agentBody: selected.body,
+      skillsContext,
+      memoryContext,
+    });
+    systemMessageContent = composed.content;
+    systemMessageMode = composed.mode;
   } else {
     customAgents = toCustomAgentConfigs(projectPath);
     if (skillsContext) {
@@ -437,9 +564,14 @@ export async function runCopilotAgentTurn(params: {
         customAgents = [{ name: "_skills", description: "Active skills context", prompt: skillsContext }];
       }
     }
-    // Append ask_user instruction to Copilot's default system prompt
-    systemMessageContent = askUserInstruction;
-    systemMessageMode = "append";
+    // Append the memory + ask_user instructions to Copilot's default system prompt.
+    const composed = composeCopilotSystemMessage({
+      agentBody: null,
+      skillsContext,
+      memoryContext,
+    });
+    systemMessageContent = composed.content;
+    systemMessageMode = composed.mode;
   }
 
   // Load AIchemist-managed MCP servers (~/.aichemist/mcp.json) and compute a
@@ -459,7 +591,18 @@ export async function runCopilotAgentTurn(params: {
     workingDirectory: projectPath,
     // When noTools is true, omit all custom tool definitions and block all
     // built-in CLI tool permissions so the model cannot perform side-effects.
-    tools: noTools ? [] : [writeFileTool, deleteFileTool, executeBashTool, webFetchTool, askUserTool],
+    tools: noTools
+      ? []
+      : [
+          writeFileTool,
+          deleteFileTool,
+          executeBashTool,
+          webFetchTool,
+          askUserTool,
+          writeMemoryTool,
+          readMemoryTool,
+          deleteMemoryTool,
+        ],
     onPermissionRequest: noTools
       ? () => Promise.resolve({ kind: "reject" as const })
       : onPermissionRequest,
@@ -550,7 +693,16 @@ export async function runCopilotAgentTurn(params: {
   // ── Event listeners — set up before sending ─────────────────────────────────
 
   // Names of our custom defineTool handlers — they already send their own TOOL_CALL/RESULT events
-  const customToolNames = new Set(["execute_bash", "write_file", "delete_file", "web_fetch", "ask_user"]);
+  const customToolNames = new Set([
+    "execute_bash",
+    "write_file",
+    "delete_file",
+    "web_fetch",
+    "ask_user",
+    "write_memory",
+    "read_memory",
+    "delete_memory",
+  ]);
 
   // Track toolCallId → toolName for built-in tools (tool.execution_complete has no toolName)
   const toolCallIdToName = new Map<string, string>();

@@ -1,4 +1,4 @@
-import { FileText, Brain } from "lucide-react";
+import { FileText } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
@@ -17,16 +17,14 @@ interface MemoryPanelProps {
 /**
  * Lists memory files for the active project, resolved per provider:
  *   - Claude (anthropic): ~/.claude/projects/<sanitized-cwd>/memory/*.md (SDK-owned)
- *   - Ollama / OpenAI-compatible: ~/.aichemist/memory/<sanitized-cwd>/*.md
+ *   - Ollama / OpenAI-compatible / Copilot: ~/.aichemist/memory/<sanitized-cwd>/*.md
  * Read-only — clicking a file opens it in the shared FileViewer via the parent
- * ContextPanel. Providers without a memory store yet (Copilot) show a "not
- * available" placeholder.
+ * ContextPanel.
  */
 export function MemoryPanel({ projectPath, onFileOpen }: MemoryPanelProps) {
   const ipc = useIpc();
   const provider = useActiveSessionProvider();
-  // Copilot has no memory store yet — skip the IPC fetch entirely.
-  const memoryKey = provider === "copilot" ? null : `memory:${projectPath}:${provider ?? ""}`;
+  const memoryKey = `memory:${projectPath}:${provider ?? ""}`;
   const { data } = useIpcQuery<MemoryFile[]>(
     memoryKey,
     () =>
@@ -35,16 +33,7 @@ export function MemoryPanel({ projectPath, onFileOpen }: MemoryPanelProps) {
         .then((r) => r.files)
         .catch(() => []),
   );
-  const files = memoryKey === null ? [] : (data ?? null);
-
-  if (provider === "copilot") {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs px-3 text-center">
-        <Brain className="h-8 w-8 opacity-30" />
-        <span>Memory is not yet supported for Copilot sessions.</span>
-      </div>
-    );
-  }
+  const files = data ?? null;
 
   if (files === null) {
     return (

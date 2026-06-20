@@ -75,6 +75,15 @@ describe("LIST_MEMORY", () => {
     expect(files.map((f) => f.name)).toEqual(["ollama-note.md"]);
   });
 
+  it("returns the AIchemist memory store for a Copilot session", async () => {
+    // Copilot reuses the same ~/.aichemist/memory store as the self-driven
+    // providers, so its notes are portable across providers for a project.
+    implWriteMemory(PROJECT, "copilot-note.md", "remember gh token");
+
+    const files = await listMemory({ projectPath: PROJECT, provider: "copilot" });
+    expect(files.map((f) => f.name)).toEqual(["copilot-note.md"]);
+  });
+
   it("returns the SDK-owned store for a Claude session", async () => {
     const claudeProjectDir = makeTempDir("trace-claude-proj-");
     fs.mkdirSync(path.join(claudeProjectDir, "memory"));
@@ -111,15 +120,15 @@ describe("LIST_MEMORY", () => {
     expect(files.map((f) => f.name)).toEqual(["legacy.md"]);
   });
 
-  it("returns an empty list for a provider with no memory store (Copilot)", async () => {
-    // Even if a Claude store happens to exist on disk, a Copilot request must not
-    // surface it.
+  it("returns an empty list for an unknown provider", async () => {
+    // Even if a Claude store happens to exist on disk, a non-Claude request for a
+    // provider with no recognised store must not surface it.
     const claudeProjectDir = makeTempDir("trace-claude-proj-");
     fs.mkdirSync(path.join(claudeProjectDir, "memory"));
     fs.writeFileSync(path.join(claudeProjectDir, "memory", "claude-note.md"), "x");
     resolveProjectDirMock.fn.mockResolvedValue(claudeProjectDir);
 
-    const files = await listMemory({ projectPath: PROJECT, provider: "copilot" });
+    const files = await listMemory({ projectPath: PROJECT, provider: "some-future-provider" });
     expect(files).toEqual([]);
   });
 });
