@@ -148,14 +148,18 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
       const projectDir = await resolveProjectDir(projectPath);
       if (!projectDir) return { files: [] };
       const memDir = path.join(projectDir, "memory");
-      let names: string[];
+      let entries: fs.Dirent[];
       try {
-        names = await fs.promises.readdir(memDir);
+        // withFileTypes + isFile() filters out symlinks (and dirs), mirroring
+        // listMemoryFiles — otherwise a symlinked .md (e.g. secret.md -> /etc/passwd)
+        // would surface here and READ_FILE (no path sandbox) would follow it.
+        entries = await fs.promises.readdir(memDir, { withFileTypes: true });
       } catch {
         return { files: [] };
       }
-      const files = names
-        .filter((n) => n.toLowerCase().endsWith(".md"))
+      const files = entries
+        .filter((e) => e.isFile() && e.name.toLowerCase().endsWith(".md"))
+        .map((e) => e.name)
         .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
         .map((name) => ({ name, path: path.join(memDir, name) }));
       return { files };
