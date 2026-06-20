@@ -34,6 +34,12 @@ import {
 } from "./ollama";
 import { resolveApproval } from "./approval";
 import { _setNativeTracesRootForTests } from "../native-transcript";
+import {
+  _setMemoryRootForTests,
+  implReadMemory,
+  implWriteMemory,
+  listMemoryFiles,
+} from "./memory";
 
 type OllamaMockState = {
   list: ReturnType<typeof vi.fn>;
@@ -102,6 +108,11 @@ describe("ollama provider", () => {
     const tracesDir = fs.mkdtempSync(path.join(process.cwd(), ".ollama-traces-"));
     tempDirs.push(tracesDir);
     _setNativeTracesRootForTests(tracesDir);
+    // Isolate the project-memory store to a temp dir so memory reads/writes never
+    // touch the real ~/.aichemist/memory.
+    const memoryRoot = fs.mkdtempSync(path.join(process.cwd(), ".ollama-memory-"));
+    tempDirs.push(memoryRoot);
+    _setMemoryRootForTests(memoryRoot);
     delete process.env.OLLAMA_HOST;
     ollamaMocks = await loadMocks();
     ollamaMocks.bridge.mockResolvedValue({
@@ -120,6 +131,7 @@ describe("ollama provider", () => {
 
   afterEach(() => {
     _setNativeTracesRootForTests(null);
+    _setMemoryRootForTests(null);
     while (tempDirs.length > 0) {
       fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
     }
@@ -1118,6 +1130,85 @@ describe("ollama provider", () => {
       expect(ollamaMocks.chat.mock.calls[0][0].model).toBe("qwen2.5:latest");
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("not-installed"));
       warn.mockRestore();
+    });
+  });
+
+  describe("project memory", () => {
+    it("includes saved memory content in the system prompt", async () => {
+      const projectPath = makeTempProject();
+      implWriteMemory(projectPath, "conventions.md", "Always use bun, never npm.");
+      ollamaMocks.chat.mockResolvedValue(streamChunks([{ message: { content: "ok" } }]));
+
+      await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "hi" },
+        ]) as never,
+        sessionId: "s-mem-prompt",
+        messageId: "m-placeholder",
+        projectPath,
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send: vi.fn() } as never,
+      } as never);
+
+      const systemMessage = ollamaMocks.chat.mock.calls[0][0].messages[0];
+      expect(systemMessage.role).toBe("system");
+      expect(systemMessage.content).toContain("# Project Memory");
+      expect(systemMessage.content).toContain("## Memory: conventions.md");
+      expect(systemMessage.content).toContain("Always use bun, never npm.");
+    });
+
+    it("persists a write_memory tool call to disk and emits no FileChange", async () => {
+      const projectPath = makeTempProject();
+      const send = vi.fn();
+      ollamaMocks.chat
+        .mockResolvedValueOnce(
+          streamChunks([
+            {
+              message: {
+                content: "",
+                tool_calls: [
+                  {
+                    function: {
+                      name: "write_memory",
+                      arguments: { name: "note.md", content: "remember this" },
+                    },
+                  },
+                ],
+              },
+            },
+          ]),
+        )
+        .mockResolvedValueOnce({ message: { content: "Saved." } });
+
+      const text = await runOllamaAgentTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "user", content: "placeholder" },
+          { id: "m-user", role: "user", content: "save a note" },
+        ]) as never,
+        sessionId: "s-mem-write",
+        messageId: "m-placeholder",
+        projectPath,
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never);
+
+      expect(text).toBe("Saved.");
+      // The file is persisted to the memory store…
+      expect(listMemoryFiles(projectPath).map((f) => f.name)).toEqual(["note.md"]);
+      expect(implReadMemory(projectPath, "note.md")).toBe("remember this");
+      // …and the tool call/result is surfaced in the timeline…
+      expect(send).toHaveBeenCalledWith(
+        CH.SESSION_TOOL_CALL,
+        expect.objectContaining({ tool_name: "write_memory" }),
+      );
+      expect(send).toHaveBeenCalledWith(
+        CH.SESSION_TOOL_RESULT,
+        expect.objectContaining({ tool_name: "write_memory" }),
+      );
+      // …but a memory write is not a project edit, so it must not surface in the
+      // Changes tab (no SESSION_FILE_CHANGE).
+      expect(send).not.toHaveBeenCalledWith(CH.SESSION_FILE_CHANGE, expect.anything());
     });
   });
 
