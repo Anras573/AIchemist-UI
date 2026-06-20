@@ -260,17 +260,23 @@ export function ContextPanel({
     if (activeTab !== "memory") setViewingMemoryFile(null);
   }, [activeTab]);
 
-  // ContextPanel is not remounted across session/workspace changes, so reset the
-  // viewer state when the active session changes — otherwise a stale file view
-  // (header, back button) can carry over from the previous session.
+  // ContextPanel is not remounted across session/workspace/provider changes, so
+  // reset the viewer state when any of them change — otherwise a stale file view
+  // (header, back button) can carry over from the previous session, or a memory
+  // file viewed under a memory-capable provider can resurface after the
+  // (legacy-session) provider flips to/from Copilot, which gates the viewer off.
   useEffect(() => {
     setViewingFile(null);
     setViewingMemoryFile(null);
-  }, [activeSessionId, sessionPath]);
+  }, [activeSessionId, sessionPath, memoryProvider]);
 
-  // Header content depends on whether we're viewing a file
+  // Header content depends on whether we're viewing a file. Bake the Copilot
+  // memory gate into isViewingMemory so the header (back button + title) stays
+  // in sync with the body, which renders the placeholder rather than the viewer
+  // for providers without a memory store.
   const isViewingFile = activeTab === "files" && viewingFile !== null;
-  const isViewingMemory = activeTab === "memory" && viewingMemoryFile !== null;
+  const isViewingMemory =
+    activeTab === "memory" && viewingMemoryFile !== null && memoryProvider !== "copilot";
   const fileName = (isViewingMemory ? viewingMemoryFile : viewingFile)?.split("/").pop() ?? "";
   const headerLabel =
     isViewingFile || isViewingMemory
@@ -344,8 +350,9 @@ export function ContextPanel({
           <McpServersPanel />
         ) : activeTab === "memory" ? (
           // MemoryPanel owns the per-provider placeholder (e.g. Copilot has no
-          // store yet); only enter the file viewer for providers that do.
-          isViewingMemory && memoryProvider !== "copilot" ? (
+          // store yet); isViewingMemory already excludes gated providers, so the
+          // viewer only shows for providers that have a store.
+          isViewingMemory ? (
             <MemoryFileViewer filePath={viewingMemoryFile!} />
           ) : (
             <MemoryPanel
