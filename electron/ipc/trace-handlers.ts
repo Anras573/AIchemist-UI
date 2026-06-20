@@ -28,7 +28,7 @@ import {
 } from "../native-transcript";
 import { handle } from "./handle";
 import { parseProviderSessionState } from "../agent/provider-session-store";
-import { memoryDir } from "../agent/memory";
+import { listMemoryFiles } from "../agent/memory";
 import { getProjectConfig } from "../projects";
 
 export function registerTraceHandlers(db: Database, getMainWindow: () => BrowserWindow | null): void {
@@ -136,17 +136,18 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     const provider = typeof args === "string" ? undefined : args.provider;
     if (!projectPath) return { files: [] as Array<{ name: string; path: string }> };
     try {
-      // Resolve the memory directory per provider. Claude's store is owned by
-      // the SDK under ~/.claude/projects/<cwd>/memory; the self-driven providers
-      // (Ollama, OpenAI-compatible) use AIchemist's own ~/.aichemist/memory/<cwd>.
-      let memDir: string | null;
+      // Self-driven providers (Ollama, OpenAI-compatible) use AIchemist's own
+      // store at ~/.aichemist/memory/<cwd>. Go through listMemoryFiles so the
+      // memory module's safety checks (symlinked-dir-chain refusal, regular-file
+      // filtering) apply — a raw readdir could surface symlinked .md entries that
+      // READ_FILE would then follow to arbitrary paths.
       if (provider === "ollama" || provider === "openai-compatible") {
-        memDir = memoryDir(projectPath);
-      } else {
-        const projectDir = await resolveProjectDir(projectPath);
-        memDir = projectDir ? path.join(projectDir, "memory") : null;
+        return { files: listMemoryFiles(projectPath) };
       }
-      if (!memDir) return { files: [] };
+      // Claude's store is owned by the SDK under ~/.claude/projects/<cwd>/memory.
+      const projectDir = await resolveProjectDir(projectPath);
+      if (!projectDir) return { files: [] };
+      const memDir = path.join(projectDir, "memory");
       let names: string[];
       try {
         names = await fs.promises.readdir(memDir);
@@ -156,7 +157,7 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
       const files = names
         .filter((n) => n.toLowerCase().endsWith(".md"))
         .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-        .map((name) => ({ name, path: path.join(memDir!, name) }));
+        .map((name) => ({ name, path: path.join(memDir, name) }));
       return { files };
     } catch {
       return { files: [] };

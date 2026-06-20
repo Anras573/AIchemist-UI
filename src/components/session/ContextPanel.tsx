@@ -260,6 +260,14 @@ export function ContextPanel({
     if (activeTab !== "memory") setViewingMemoryFile(null);
   }, [activeTab]);
 
+  // ContextPanel is not remounted across session/workspace changes, so reset the
+  // viewer state when the active session changes — otherwise a stale file view
+  // (header, back button) can carry over from the previous session.
+  useEffect(() => {
+    setViewingFile(null);
+    setViewingMemoryFile(null);
+  }, [activeSessionId, sessionPath]);
+
   // Header content depends on whether we're viewing a file
   const isViewingFile = activeTab === "files" && viewingFile !== null;
   const isViewingMemory = activeTab === "memory" && viewingMemoryFile !== null;
