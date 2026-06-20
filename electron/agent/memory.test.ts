@@ -59,6 +59,12 @@ describe("CRUD", () => {
     implWriteMemory(PROJECT, "n.md", "second");
     expect(implReadMemory(PROJECT, "n.md")).toBe("second");
   });
+
+  it("writes a large payload in full without truncation", () => {
+    const big = "λ".repeat(100 * 1024); // 100k multi-byte chars, under the cap
+    implWriteMemory(PROJECT, "big.md", big);
+    expect(implReadMemory(PROJECT, "big.md")).toBe(big);
+  });
 });
 
 describe("name validation", () => {

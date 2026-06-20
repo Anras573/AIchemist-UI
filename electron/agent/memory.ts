@@ -50,6 +50,10 @@ const MAX_MEMORY_WRITE_BYTES = 256 * 1024;
 const MAX_MEMORY_TOTAL_BYTES = 128 * 1024;
 const MAX_MEMORY_FILES = 32;
 
+/** Separator emitted between injected memory blocks (counts toward the cap). */
+const BLOCK_SEPARATOR = "\n\n---\n\n";
+const BLOCK_SEPARATOR_BYTES = Buffer.byteLength(BLOCK_SEPARATOR, "utf8");
+
 /** `O_NOFOLLOW` where supported (POSIX); 0 elsewhere so the open still works. */
 const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
 
@@ -223,7 +227,12 @@ export function implWriteMemory(projectPath: string, name: string, content: stri
     } catch {
       // ignore — not supported on this platform
     }
-    fs.writeSync(fd, content, null, "utf8");
+    // writeSync may write fewer bytes than requested, so loop until the whole
+    // buffer is flushed rather than silently truncating a large payload.
+    const buf = Buffer.from(content, "utf8");
+    for (let off = 0; off < buf.length; ) {
+      off += fs.writeSync(fd, buf, off, buf.length - off);
+    }
   } finally {
     fs.closeSync(fd);
   }
@@ -330,15 +339,18 @@ export function buildMemoryContext(projectPath: string): string {
     }
     if (!body) continue;
     const block = `## Memory: ${file.name}\n\n${body}`;
-    const blockBytes = Buffer.byteLength(block, "utf8");
+    // Count the join separator emitted before every block after the first so the
+    // cap reflects the actual injected size, not just the block bodies.
+    const addedBytes =
+      Buffer.byteLength(block, "utf8") + (blocks.length > 0 ? BLOCK_SEPARATOR_BYTES : 0);
     // Stop before the combined block exceeds the total cap (always keep at least
     // one so a single large file still contributes its capped slice).
-    if (blocks.length > 0 && totalBytes + blockBytes > MAX_MEMORY_TOTAL_BYTES) {
+    if (blocks.length > 0 && totalBytes + addedBytes > MAX_MEMORY_TOTAL_BYTES) {
       truncatedBlock = true;
       break;
     }
     blocks.push(block);
-    totalBytes += blockBytes;
+    totalBytes += addedBytes;
   }
 
   if (blocks.length === 0) return "";
@@ -351,7 +363,7 @@ export function buildMemoryContext(projectPath: string): string {
     "\n\n---\n# Project Memory\n\n" +
     "Notes you previously saved for this project. Use write_memory to persist " +
     "durable facts (conventions, decisions, gotchas) and keep them up to date.\n\n" +
-    blocks.join("\n\n---\n\n") +
+    blocks.join(BLOCK_SEPARATOR) +
     footer
   );
 }
