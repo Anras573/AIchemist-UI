@@ -99,7 +99,7 @@ export type IpcContract = {
   // ── File system ───────────────────────────────────────────────────────────
   [CH.LIST_DIRECTORY]: { args: [path: string]; result: DirectoryListing };
   [CH.READ_FILE]: { args: [path: string]; result: { content: string } | { error: string } };
-  [CH.LIST_MEMORY]: { args: [args: { projectPath: string; provider?: string }]; result: { files: Array<{ name: string; path: string }> } };
+  [CH.LIST_MEMORY]: { args: [args: { projectPath: string; provider?: Provider }]; result: { files: Array<{ name: string; path: string }> } };
 
   // ── Settings ──────────────────────────────────────────────────────────────
   [CH.SETTINGS_READ]: { args: []; result: SettingsMap };

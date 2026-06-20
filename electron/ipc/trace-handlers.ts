@@ -3,7 +3,7 @@ import * as path from "path";
 import type { Database } from "better-sqlite3";
 import type { BrowserWindow } from "electron";
 import * as CH from "../ipc-channels";
-import type { TraceSpan } from "../../src/types/index";
+import type { Provider, TraceSpan } from "../../src/types/index";
 import {
   findTranscriptFile,
   parseTranscript,
@@ -129,7 +129,7 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     }
   });
 
-  handle(CH.LIST_MEMORY, async (_event, args: string | { projectPath: string; provider?: string }) => {
+  handle(CH.LIST_MEMORY, async (_event, args: string | { projectPath: string; provider?: Provider }) => {
     // Accept a bare projectPath string for back-compat (treated as Claude),
     // exactly as LIST_SKILLS does.
     const projectPath = typeof args === "string" ? args : args.projectPath;
