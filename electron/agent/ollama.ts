@@ -1,5 +1,6 @@
 import type { Database } from "better-sqlite3";
 import { buildSkillsContext } from "./skills";
+import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory } from "./memory";
 import { readAgentFileSystemPrompt } from "./claude";
 import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
@@ -114,6 +115,7 @@ const OLLAMA_SYSTEM_PROMPT = [
   "Use the available tools to inspect and modify the project, run commands, fetch URLs, and ask the user questions when needed.",
   "Never invent file contents or command output. If you need more context, use a tool.",
   "When you need clarification, use ask_user instead of asking in plain text.",
+  "Use write_memory to persist durable facts about this project (conventions, decisions, gotchas) so they survive across turns, read_memory to recall a saved note, and delete_memory to remove one that is no longer accurate.",
 ].join(" ");
 
 function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
@@ -180,8 +182,9 @@ async function loadClient(): Promise<OllamaClientLike> {
 
 function buildSystemPrompt(params: AgentProviderParams): string {
   const skillsContext = buildSkillsContext(params.skills ?? [], params.projectPath);
+  const memoryContext = buildMemoryContext(params.projectPath);
   const agentBody = params.agent ? readAgentFileSystemPrompt(params.agent)?.body ?? "" : "";
-  const parts = [OLLAMA_SYSTEM_PROMPT, agentBody, skillsContext];
+  const parts = [OLLAMA_SYSTEM_PROMPT, agentBody, skillsContext, memoryContext];
   return parts.filter((part) => part.trim().length > 0).join("\n\n");
 }
 
@@ -354,6 +357,52 @@ function makeToolDefinitions(): OllamaToolDefinition[] {
     {
       type: "function",
       function: {
+        name: "write_memory",
+        description:
+          "Persist a durable note about this project to AIchemist's project memory so it is " +
+          "available on future turns. Use for conventions, decisions, and gotchas worth remembering. " +
+          "Overwrites the named memory file if it already exists.",
+        parameters: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Memory file name (a flat '.md' filename)" },
+            content: { type: "string", description: "Markdown content to save" },
+          },
+          required: ["name", "content"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "read_memory",
+        description: "Read back a previously saved project memory note by name.",
+        parameters: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Memory file name (a flat '.md' filename)" },
+          },
+          required: ["name"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "delete_memory",
+        description: "Delete a saved project memory note that is no longer accurate.",
+        parameters: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Memory file name (a flat '.md' filename)" },
+          },
+          required: ["name"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "ask_user",
         description: "Ask the user a question and wait for the answer before proceeding.",
         parameters: {
@@ -444,8 +493,11 @@ async function runDelegatedTurn(
     emitter: ctx.emitter.withoutDeltas(),
   };
   // Sub-agents do not get ask_user — questions must be resolved by the orchestrator.
-  // delegate_task is kept in the list; the depth guard inside runTool blocks further nesting.
-  const subTools = makeToolDefinitions().filter((t) => t.function.name !== "ask_user");
+  // Memory tools are also withheld: a sub-agent's context is ephemeral and must not
+  // mutate shared project memory. delegate_task is kept in the list; the depth guard
+  // inside runTool blocks further nesting.
+  const subAgentExcludedTools = new Set(["ask_user", "write_memory", "read_memory", "delete_memory"]);
+  const subTools = makeToolDefinitions().filter((t) => !subAgentExcludedTools.has(t.function.name));
   const noop = {
     hasTool: () => false as const,
     callTool: async () => "Error: MCP tools not available in delegated turns",
@@ -529,6 +581,20 @@ async function executeTool(
       }));
     case "web_fetch":
       return runTool(ctx, name, args, "web", async () => implWebFetch({ url: String(args.url ?? "") }));
+    case "write_memory":
+      // Category "custom" keeps memory un-gated: it's the model's own scratchpad,
+      // sandboxed to AIchemist's dir, and emits no FileChange (not a project edit).
+      return runTool(ctx, name, args, "custom", async () =>
+        implWriteMemory(ctx.projectPath, String(args.name ?? ""), String(args.content ?? "")),
+      );
+    case "read_memory":
+      return runTool(ctx, name, args, "custom", async () =>
+        implReadMemory(ctx.projectPath, String(args.name ?? "")),
+      );
+    case "delete_memory":
+      return runTool(ctx, name, args, "custom", async () =>
+        implDeleteMemory(ctx.projectPath, String(args.name ?? "")),
+      );
     case "ask_user":
       if (ctx.delegationDepth > 0) {
         return runTool(ctx, name, args, "custom", async () => {
