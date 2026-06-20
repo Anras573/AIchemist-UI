@@ -17,6 +17,7 @@
  * project edits and must stay out of the Changes tab).
  */
 
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -72,13 +73,17 @@ function isEnoent(err: unknown): boolean {
 
 /** `~/.aichemist/memory/<sanitized-cwd>` for the given project. */
 export function memoryDir(projectPath: string): string {
-  const sanitized = sanitizeCwd(projectPath);
-  if (!sanitized) {
-    // e.g. "/" sanitizes to "" — without a per-project segment the store would
-    // collapse to a single shared dir and collide across projects.
-    throw new Error(`Cannot derive a memory directory for project path: "${projectPath}"`);
-  }
+  // sanitizeCwd can yield "" for inputs like "/" (all chars stripped). An empty
+  // segment would collapse the store to a single shared dir and collide across
+  // projects, so fall back to a deterministic per-path hash — unique and stable
+  // for that project, and still usable for root-level projects.
+  const sanitized = sanitizeCwd(projectPath) || hashedSegment(projectPath);
   return path.join(aichemistDir(), "memory", sanitized);
+}
+
+/** Deterministic non-empty dir segment derived from the raw project path. */
+function hashedSegment(projectPath: string): string {
+  return `_${crypto.createHash("sha256").update(projectPath).digest("hex").slice(0, 16)}`;
 }
 
 /**
@@ -208,6 +213,15 @@ export function implWriteMemory(projectPath: string, name: string, content: stri
   try {
     if (!fs.fstatSync(fd).isFile()) {
       throw new Error(`Memory entry is not a regular file: "${path.basename(file)}"`);
+    }
+    // The 0o600 mode above only applies when the file is newly created; an
+    // existing file keeps its prior (possibly world-readable) permissions. Force
+    // owner-only on the open FD so a rewrite tightens perms too. Best-effort —
+    // platforms without chmod semantics (e.g. Windows) throw, which we ignore.
+    try {
+      fs.fchmodSync(fd, 0o600);
+    } catch {
+      // ignore — not supported on this platform
     }
     fs.writeSync(fd, content, null, "utf8");
   } finally {

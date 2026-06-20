@@ -81,12 +81,27 @@ describe("name validation", () => {
 });
 
 describe("memoryDir scoping", () => {
-  it("throws when the project path sanitizes to empty (e.g. '/')", () => {
-    expect(() => memoryDir("/")).toThrow(/Cannot derive a memory directory/);
+  it("falls back to a deterministic, non-empty segment when sanitize is empty", () => {
+    // "/" sanitizes to "" — must not collapse to the shared memory dir.
+    const dir = memoryDir("/");
+    expect(dir).toBe(memoryDir("/")); // deterministic
+    expect(path.basename(dir)).not.toBe("memory");
+    expect(path.basename(dir)).not.toBe("");
+    expect(dir.startsWith(path.join(root, "memory") + path.sep)).toBe(true);
   });
 
   it("scopes different projects to different dirs", () => {
     expect(memoryDir("/work/a")).not.toBe(memoryDir("/work/b"));
+  });
+});
+
+describe("permissions", () => {
+  it("tightens an existing world-readable file to 0600 on rewrite", () => {
+    implWriteMemory(PROJECT, "p.md", "v1");
+    const file = path.join(memoryDir(PROJECT), "p.md");
+    fs.chmodSync(file, 0o644);
+    implWriteMemory(PROJECT, "p.md", "v2");
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   });
 });
 
