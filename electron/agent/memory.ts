@@ -41,6 +41,14 @@ const MAX_MEMORY_FILE_BYTES = 64 * 1024;
  */
 const MAX_MEMORY_WRITE_BYTES = 256 * 1024;
 
+/**
+ * Caps on the *combined* memory block injected each turn. Even with a per-file
+ * cap, many small files could bloat the prompt and blow the context window, so
+ * we stop after MAX_MEMORY_TOTAL_BYTES or MAX_MEMORY_FILES and mark it truncated.
+ */
+const MAX_MEMORY_TOTAL_BYTES = 128 * 1024;
+const MAX_MEMORY_FILES = 32;
+
 /** `O_NOFOLLOW` where supported (POSIX); 0 elsewhere so the open still works. */
 const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
 
@@ -147,8 +155,9 @@ export function listMemoryFiles(projectPath: string): MemoryFile[] {
 
 /**
  * Write a memory file, creating the memory directory as needed. Refuses to
- * write through a pre-existing symlink (or any non-regular file), so a planted
- * link can't redirect an un-gated `write_memory` onto an arbitrary target.
+ * write through a pre-existing symlink, so a planted link can't redirect an
+ * un-gated `write_memory` onto an arbitrary target. The file is created 0600
+ * (owner-only) since memory may hold sensitive notes.
  */
 export function implWriteMemory(projectPath: string, name: string, content: string): string {
   if (Buffer.byteLength(content, "utf8") > MAX_MEMORY_WRITE_BYTES) {
@@ -158,24 +167,45 @@ export function implWriteMemory(projectPath: string, name: string, content: stri
   }
   // resolveMemoryFile validates the directory chain has no symlinked ancestors.
   const file = resolveMemoryFile(projectPath, name);
-  assertRegularFileIfExists(file);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, content, "utf8");
+  // O_NOFOLLOW makes the open fail if `file` is an existing symlink, closing the
+  // TOCTOU window an lstat-then-write would leave open. O_CREAT|O_TRUNC give the
+  // overwrite semantics; fstat confirms a regular file before writing.
+  const fd = fs.openSync(
+    file,
+    fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    if (!fs.fstatSync(fd).isFile()) {
+      throw new Error(`Memory entry is not a regular file: "${path.basename(file)}"`);
+    }
+    fs.writeSync(fd, content, null, "utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
   return `Memory saved: ${path.basename(file)}`;
 }
 
 /**
  * Read a memory file's content. Throws if it does not exist or is not a regular
- * file — symlinks are refused so `read_memory` can't follow a planted link to
- * exfiltrate a sensitive file.
+ * file. Routes through `readCapped` (O_NOFOLLOW + fstat), so a symlink swapped
+ * in after resolution fails the open rather than being followed — closing the
+ * TOCTOU window an lstat-then-readFileSync would leave. Content is bounded to
+ * MAX_MEMORY_WRITE_BYTES (the largest we ever write) with a truncation marker.
  */
 export function implReadMemory(projectPath: string, name: string): string {
   const file = resolveMemoryFile(projectPath, name);
-  const stat = assertRegularFileIfExists(file);
-  if (!stat) {
-    throw new Error(`Memory file not found: "${path.basename(file)}"`);
+  let result: { text: string; truncated: boolean };
+  try {
+    result = readCapped(file, MAX_MEMORY_WRITE_BYTES);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`Memory file not found: "${path.basename(file)}"`);
+    }
+    throw err;
   }
-  return fs.readFileSync(file, "utf8");
+  return result.truncated ? `${result.text}\n\n…[memory file truncated]` : result.text;
 }
 
 /**
@@ -225,7 +255,13 @@ export function buildMemoryContext(projectPath: string): string {
   if (files.length === 0) return "";
 
   const blocks: string[] = [];
+  let totalBytes = 0;
+  let truncatedBlock = false;
   for (const file of files) {
+    if (blocks.length >= MAX_MEMORY_FILES) {
+      truncatedBlock = true;
+      break;
+    }
     let body = "";
     try {
       // readCapped re-checks (O_NOFOLLOW + fstat) that the entry is still a
@@ -240,17 +276,29 @@ export function buildMemoryContext(projectPath: string): string {
     } catch {
       // unreadable file — skip it
     }
-    if (body) {
-      blocks.push(`## Memory: ${file.name}\n\n${body}`);
+    if (!body) continue;
+    const block = `## Memory: ${file.name}\n\n${body}`;
+    // Stop before the combined block exceeds the total cap (always keep at least
+    // one so a single large file still contributes its capped slice).
+    if (blocks.length > 0 && totalBytes + block.length > MAX_MEMORY_TOTAL_BYTES) {
+      truncatedBlock = true;
+      break;
     }
+    blocks.push(block);
+    totalBytes += block.length;
   }
 
   if (blocks.length === 0) return "";
+
+  const footer = truncatedBlock
+    ? `\n\n---\n\n…[project memory truncated: showing ${blocks.length} of ${files.length} files]`
+    : "";
 
   return (
     "\n\n---\n# Project Memory\n\n" +
     "Notes you previously saved for this project. Use write_memory to persist " +
     "durable facts (conventions, decisions, gotchas) and keep them up to date.\n\n" +
-    blocks.join("\n\n---\n\n")
+    blocks.join("\n\n---\n\n") +
+    footer
   );
 }
