@@ -52,9 +52,33 @@ const MAX_MEMORY_FILES = 32;
 /** `O_NOFOLLOW` where supported (POSIX); 0 elsewhere so the open still works. */
 const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
 
+/** Test seam: overrides the `~/.aichemist` base so tests can use a temp dir. */
+let aichemistDirOverride: string | null = null;
+
+/** Override the AIchemist base directory (testing only). Pass `null` to reset. */
+export function _setMemoryRootForTests(dir: string | null): void {
+  aichemistDirOverride = dir;
+}
+
+/** The AIchemist base dir (`~/.aichemist`), or the test override when set. */
+function aichemistDir(): string {
+  return aichemistDirOverride ?? path.join(os.homedir(), ".aichemist");
+}
+
+/** Is `err` a "no such file/directory" (ENOENT) error? */
+function isEnoent(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException)?.code === "ENOENT";
+}
+
 /** `~/.aichemist/memory/<sanitized-cwd>` for the given project. */
 export function memoryDir(projectPath: string): string {
-  return path.join(os.homedir(), ".aichemist", "memory", sanitizeCwd(projectPath));
+  const sanitized = sanitizeCwd(projectPath);
+  if (!sanitized) {
+    // e.g. "/" sanitizes to "" — without a per-project segment the store would
+    // collapse to a single shared dir and collide across projects.
+    throw new Error(`Cannot derive a memory directory for project path: "${projectPath}"`);
+  }
+  return path.join(aichemistDir(), "memory", sanitized);
 }
 
 /**
@@ -66,14 +90,15 @@ export function memoryDir(projectPath: string): string {
  * the per-project memory dir.
  */
 function assertMemoryDirChainSafe(projectPath: string): string {
-  const base = path.join(os.homedir(), ".aichemist");
+  const base = aichemistDir();
   const dir = memoryDir(projectPath);
   for (const seg of [base, path.join(base, "memory"), dir]) {
     let stat: fs.Stats;
     try {
       stat = fs.lstatSync(seg);
-    } catch {
-      continue; // doesn't exist yet — will be created as a real directory
+    } catch (err) {
+      if (isEnoent(err)) continue; // doesn't exist yet — created as a real dir
+      throw err; // permission / IO error — surface it rather than skip the check
     }
     if (stat.isSymbolicLink()) {
       throw new Error(`Refusing to use a symlinked memory directory: "${seg}"`);
@@ -121,8 +146,9 @@ function assertRegularFileIfExists(file: string): fs.Stats | null {
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(file);
-  } catch {
-    return null; // does not exist
+  } catch (err) {
+    if (isEnoent(err)) return null; // does not exist
+    throw err; // permission / IO error — don't misreport as "not found"
   }
   if (stat.isSymbolicLink() || !stat.isFile()) {
     throw new Error(`Memory entry is not a regular file: "${path.basename(file)}"`);
