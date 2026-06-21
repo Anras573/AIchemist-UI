@@ -198,6 +198,64 @@ export interface Session {
   github_issue_number?: number | null;
 }
 
+// ─── Workflows ───────────────────────────────────────────────────────────────
+
+/** How a workflow run picks its session. */
+export type WorkflowSessionStrategy = "fresh" | "reuse";
+
+/**
+ * Unattended-execution policy for a workflow run.
+ * - "interactive" — the run still pauses for approval / ask_user.
+ * - "autonomous" — approvals resolve from the project/workflow allowlist without
+ *   prompting; ask_user and un-allowlisted tools resolve immediately.
+ */
+export type WorkflowAutonomy = "interactive" | "autonomous";
+
+/** A saved, repeatable agent task bound to a project. */
+export interface Workflow {
+  id: string;
+  project_id: string;
+  name: string;
+  /** The task sent as the turn prompt. */
+  prompt: string;
+  /** Provider lock for runs. Null inherits the project default. */
+  provider: Provider | null;
+  /** Model override. Null inherits the project/provider default. */
+  model: string | null;
+  /** Selected agent name. Null means the default agent. */
+  agent: string | null;
+  /** Skills to activate for runs. Null means none. */
+  skills: string[] | null;
+  /** Cron expression. Null = manual-only workflow. */
+  cron: string | null;
+  /** The scheduler only arms enabled workflows. */
+  enabled: boolean;
+  session_strategy: WorkflowSessionStrategy;
+  /** The session reused when session_strategy === "reuse". Null until created. */
+  reuse_session_id: string | null;
+  autonomy: WorkflowAutonomy;
+  created_at: string;
+  /** ISO timestamp of the most recent run, or null if never run. */
+  last_run_at: string | null;
+}
+
+export type WorkflowRunStatus = "running" | "success" | "error" | "skipped";
+export type WorkflowRunTrigger = "cron" | "manual";
+
+/** One execution of a workflow. */
+export interface WorkflowRun {
+  id: string;
+  workflow_id: string;
+  /** The session the run executed in. Null if it never reached a session. */
+  session_id: string | null;
+  status: WorkflowRunStatus;
+  trigger: WorkflowRunTrigger;
+  started_at: string;
+  ended_at: string | null;
+  /** Error message when status === "error". */
+  error: string | null;
+}
+
 // ─── IPC event payloads ──────────────────────────────────────────────────────
 
 export interface SessionStatusEvent {
