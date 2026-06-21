@@ -231,6 +231,8 @@ export type IpcContract = {
   // ── Workflows ─────────────────────────────────────────────────────────────────
   [CH.WORKFLOW_UPSERT]: { args: [input: WorkflowUpsertInput]; result: Workflow };
   [CH.WORKFLOW_RUN_NOW]: { args: [args: { workflowId: string }]; result: WorkflowRun };
+  [CH.WORKFLOW_DELETE]: { args: [args: { workflowId: string }]; result: { ok: boolean } };
+  [CH.WORKFLOW_LIST_RUNS]: { args: [args: { workflowId: string }]; result: WorkflowRun[] };
 
   // ── Terminal ──────────────────────────────────────────────────────────────────
   [CH.TERMINAL_CREATE]: { args: [projectPath: string]; result: string };

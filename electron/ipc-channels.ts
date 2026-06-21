@@ -132,3 +132,6 @@ export const WORKTREE_WARNING          = "worktree:warning";
 // ── Workflows ───────────────────────────────────────────────────────────────────
 export const WORKFLOW_UPSERT           = "workflow:upsert";
 export const WORKFLOW_RUN_NOW          = "workflow:run-now";
+export const WORKFLOW_DELETE           = "workflow:delete";
+export const WORKFLOW_LIST_RUNS        = "workflow:list-runs";
+export const WORKFLOW_RUN_UPDATED      = "workflow:run-updated"; // push: main → renderer

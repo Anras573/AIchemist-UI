@@ -120,6 +120,8 @@ export const ipc = {
   workflowUpsert: (input: Parameters<typeof window.electronAPI.workflowUpsert>[0]) =>
     window.electronAPI.workflowUpsert(input),
   workflowRunNow: (workflowId: string) => window.electronAPI.workflowRunNow(workflowId),
+  workflowDelete: (workflowId: string) => window.electronAPI.workflowDelete(workflowId),
+  workflowListRuns: (workflowId: string) => window.electronAPI.workflowListRuns(workflowId),
 
   // Traces
   getTraces: (sessionId?: string) => window.electronAPI.getTraces(sessionId),

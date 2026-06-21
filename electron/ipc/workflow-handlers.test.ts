@@ -19,6 +19,7 @@ import { createWorkflow, getWorkflow, listWorkflows, listWorkflowRuns } from "..
 import { registerProvider } from "../agent/runner";
 import type { AgentProvider } from "../agent/provider";
 import { cleanupSessionQueueState } from "./agent-turn-queue";
+import { WorkflowScheduler } from "../agent/workflow-scheduler";
 import { registerWorkflowHandlers } from "./workflow-handlers";
 import * as CH from "../ipc-channels";
 import type { IpcEnvelope } from "./errors";
@@ -51,7 +52,8 @@ beforeEach(() => {
     projectDir,
     new Date().toISOString()
   );
-  registerWorkflowHandlers(db, new Set<string>(), () => null);
+  const scheduler = new WorkflowScheduler({ db, activeTurns: new Set<string>(), getMainWindow: () => null });
+  registerWorkflowHandlers(db, scheduler);
 });
 
 afterEach(() => {

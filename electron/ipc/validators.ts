@@ -121,6 +121,14 @@ const workflowRunNowSchema = z.object({
   workflowId: z.string().trim().min(1),
 });
 
+const workflowDeleteSchema = z.object({
+  workflowId: z.string().trim().min(1),
+});
+
+const workflowListRunsSchema = z.object({
+  workflowId: z.string().trim().min(1),
+});
+
 /** The delete channels take a bare path string rather than an options object. */
 const pathArgSchema = z.string().min(1);
 
@@ -139,4 +147,6 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.DELETE_SKILL_DIR]: unary(pathArgSchema, CH.DELETE_SKILL_DIR),
   [CH.WORKFLOW_UPSERT]: unary(workflowUpsertSchema, CH.WORKFLOW_UPSERT),
   [CH.WORKFLOW_RUN_NOW]: unary(workflowRunNowSchema, CH.WORKFLOW_RUN_NOW),
+  [CH.WORKFLOW_DELETE]: unary(workflowDeleteSchema, CH.WORKFLOW_DELETE),
+  [CH.WORKFLOW_LIST_RUNS]: unary(workflowListRunsSchema, CH.WORKFLOW_LIST_RUNS),
 };

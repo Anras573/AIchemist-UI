@@ -1,13 +1,17 @@
 import type { Database } from "better-sqlite3";
-import type { BrowserWindow } from "electron";
 import * as CH from "../ipc-channels";
-import type { Workflow } from "../../src/types/index";
+import type { Workflow, WorkflowRun } from "../../src/types/index";
 import type { WorkflowUpsertInput } from "../ipc-contract";
-import { createWorkflow, getWorkflow, updateWorkflow, type WorkflowPatch } from "../workflows";
-import { runWorkflow } from "../agent/workflow-scheduler";
+import {
+  createWorkflow,
+  getWorkflow,
+  listWorkflowRuns,
+  updateWorkflow,
+  type WorkflowPatch,
+} from "../workflows";
+import type { WorkflowScheduler } from "../agent/workflow-scheduler";
 import { handle } from "./handle";
 import { IpcError } from "./errors";
-import type { TurnQueueContext } from "./agent-turn-queue";
 
 /** Trim a nullable string; leaves null/undefined untouched (no value to clean). */
 function trimNullable(v: string | null | undefined): string | null | undefined {
@@ -26,20 +30,16 @@ function normalizeOverride(v: string | null | undefined): string | null | undefi
 }
 
 /**
- * Workflow IPC: create/update a workflow and trigger a manual "Run now".
+ * Workflow IPC: create/update/delete a workflow, list its run history, and
+ * trigger a manual "Run now".
  *
  * Cron expressions are validated (via `croner`) in `electron/ipc/validators.ts`
  * before these handlers run, so an unparseable schedule is rejected at the
- * boundary. Scheduler arming on boot/edit is a later phase — these handlers only
- * persist the workflow and run it on demand.
+ * boundary. Every mutation re-arms (or cancels) the workflow's `croner` job
+ * through the {@link WorkflowScheduler} so saved changes take effect without a
+ * restart.
  */
-export function registerWorkflowHandlers(
-  db: Database,
-  activeTurns: Set<string>,
-  getMainWindow: () => BrowserWindow | null
-): void {
-  const queue: TurnQueueContext = { db, activeTurns, getMainWindow };
-
+export function registerWorkflowHandlers(db: Database, scheduler: WorkflowScheduler): void {
   handle(CH.WORKFLOW_UPSERT, (_event, input: WorkflowUpsertInput): Workflow => {
     // Normalize free-text fields so whitespace-only values can't slip past the
     // emptiness checks and stale whitespace variants don't get persisted. The
@@ -74,6 +74,8 @@ export function registerWorkflowHandlers(
       const updated = updateWorkflow(db, id, patch);
       // getWorkflow already confirmed existence, so this is non-null; guard anyway.
       if (!updated) throw new IpcError("not_found", `Workflow not found: ${id}`);
+      // Re-arm so an edited cron / toggled enabled flag takes effect immediately.
+      scheduler.rearm(updated.id);
       return updated;
     }
 
@@ -85,7 +87,7 @@ export function registerWorkflowHandlers(
         "Creating a workflow requires projectId, name, and prompt"
       );
     }
-    return createWorkflow(db, {
+    const created = createWorkflow(db, {
       id,
       projectId,
       name,
@@ -100,9 +102,22 @@ export function registerWorkflowHandlers(
       reuseSessionId: reuseSessionId ?? null,
       autonomy: input.autonomy,
     });
+    // Arm the new workflow's job (no-op unless it is enabled and has a cron).
+    scheduler.rearm(created.id);
+    return created;
   });
 
-  handle(CH.WORKFLOW_RUN_NOW, (_event, args: { workflowId: string }) =>
-    runWorkflow(queue, args.workflowId, "manual")
+  handle(CH.WORKFLOW_RUN_NOW, (_event, args: { workflowId: string }): Promise<WorkflowRun> =>
+    scheduler.runNow(args.workflowId, "manual")
+  );
+
+  handle(CH.WORKFLOW_DELETE, (_event, args: { workflowId: string }): { ok: boolean } => {
+    // Cancel the armed job before removing rows so a tick can't fire mid-delete.
+    scheduler.delete(args.workflowId);
+    return { ok: true };
+  });
+
+  handle(CH.WORKFLOW_LIST_RUNS, (_event, args: { workflowId: string }): WorkflowRun[] =>
+    listWorkflowRuns(db, args.workflowId)
   );
 }
