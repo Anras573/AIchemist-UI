@@ -19,7 +19,7 @@ import { buildSkillsContext } from "./skills";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
 import { requestApproval, requiresApproval } from "./approval";
 import type { ToolCategory } from "./approval";
-import { classifyNativeTool } from "./tool-gate";
+import { classifyNativeTool, TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "./tool-gate";
 import { isBinaryBuffer } from "./tool-impls";
 import { saveToolCall, updateToolCallStatus, getDisabledMcpServers } from "../sessions";
 import { providerSessionStore } from "./provider-session-store";
@@ -364,9 +364,9 @@ export async function runClaudeAgentTurn(params: {
                         ? { decision: "approve" as const }
                         : {
                             decision: "block" as const,
-                            reason: nonInteractive
-                              ? "Denied automatically — unattended (non-interactive) run, tool not in allowlist."
-                              : "Denied by user.",
+                            // Reuse the shared constants so denial wording stays
+                            // consistent with runGatedTool across providers.
+                            reason: nonInteractive ? TOOL_DENIED_UNATTENDED_MESSAGE : TOOL_DENIED_MESSAGE,
                           };
                     },
                   ],

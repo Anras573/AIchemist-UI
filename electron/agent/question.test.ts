@@ -84,6 +84,7 @@ describe("requestQuestion — nonInteractive", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("resolves immediately with an empty string without emitting or waiting", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const wc = makeWebContents();
     const promise = requestQuestion(wc, "sess-1", "Pick one?", ["A", "B"], "type", {
       nonInteractive: true,
@@ -92,6 +93,8 @@ describe("requestQuestion — nonInteractive", () => {
     // No renderer event is emitted — there is no user to answer.
     expect(wc.send).not.toHaveBeenCalled();
     await expect(promise).resolves.toBe("");
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("still prompts normally when nonInteractive is false/omitted", () => {

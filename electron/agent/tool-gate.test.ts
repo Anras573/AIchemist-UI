@@ -151,6 +151,9 @@ describe("runGatedTool", () => {
 
 describe("runGatedTool — nonInteractive (unattended workflow run)", () => {
   it("denies an un-allowlisted gated tool immediately, without prompting", async () => {
+    // The unattended auto-deny path logs a warning via requestApproval — stub it
+    // so the test run stays quiet.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { ctx, send, statusUpdates } = makeCtx("all");
     const impl = vi.fn();
     const output = await runGatedTool(
@@ -163,6 +166,7 @@ describe("runGatedTool — nonInteractive (unattended workflow run)", () => {
     // Never asks the (absent) renderer to approve.
     expect(send).not.toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.anything());
     expect(statusUpdates).toEqual([{ status: "rejected", result: TOOL_DENIED_UNATTENDED_MESSAGE }]);
+    warn.mockRestore();
   });
 
   it('runs a tool trusted by approval_mode "none" (autonomous) without prompting', async () => {

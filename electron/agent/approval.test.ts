@@ -189,6 +189,7 @@ describe("requestApproval / resolveApproval", () => {
   // ── non-interactive (unattended) mode ───────────────────────────────────────
 
   it("denies immediately without emitting or waiting when nonInteractive", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const wc = makeWebContents();
     const promise = requestApproval(wc, "sess-1", "execute_bash", { command: "rm -rf /" }, {
       nonInteractive: true,
@@ -197,6 +198,8 @@ describe("requestApproval / resolveApproval", () => {
     // No renderer event is emitted — there is no user to approve.
     expect(wc.send).not.toHaveBeenCalled();
     await expect(promise).resolves.toBe(false);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("still prompts normally when nonInteractive is false/omitted", () => {
