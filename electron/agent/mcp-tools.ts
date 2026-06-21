@@ -29,7 +29,7 @@ function textResult(text: string) {
 export async function createApprovalMcpServer(
   ctx: GatedToolContext & { projectPath: string }
 ): Promise<McpSdkServerConfigWithInstance> {
-  const { sessionId, projectPath, emitter } = ctx;
+  const { sessionId, projectPath, emitter, nonInteractive } = ctx;
   const { createSdkMcpServer, tool } = await import(
     "@anthropic-ai/claude-agent-sdk"
   );
@@ -125,7 +125,8 @@ export async function createApprovalMcpServer(
         sessionId,
         args.question,
         args.options,
-        args.placeholder
+        args.placeholder,
+        { nonInteractive }
       );
       return textResult(answer || "(no answer provided)");
     }

@@ -19,7 +19,7 @@ import { buildSkillsContext } from "./skills";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
 import { requestApproval, requiresApproval } from "./approval";
 import type { ToolCategory } from "./approval";
-import { classifyNativeTool } from "./tool-gate";
+import { classifyNativeTool, TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "./tool-gate";
 import { isBinaryBuffer } from "./tool-impls";
 import { saveToolCall, updateToolCallStatus, getDisabledMcpServers } from "../sessions";
 import { providerSessionStore } from "./provider-session-store";
@@ -246,8 +246,9 @@ export async function runClaudeAgentTurn(params: {
   agent?: string;
   skills?: string[];
   noTools?: boolean;
+  nonInteractive?: boolean;
 }): Promise<string> {
-  const { db, sessionId, messageId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent, skills, noTools } =
+  const { db, sessionId, messageId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent, skills, noTools, nonInteractive } =
     params;
 
   const emitter = new TurnEmitter(webContents, sessionId);
@@ -256,7 +257,7 @@ export async function runClaudeAgentTurn(params: {
   //    Skipped when noTools is true (text-only generation turns).
   const mcpServer: McpSdkServerConfigWithInstance | null = noTools
     ? null
-    : await createApprovalMcpServer({ db, sessionId, messageId, projectPath, projectConfig, emitter });
+    : await createApprovalMcpServer({ db, sessionId, messageId, projectPath, projectConfig, emitter, nonInteractive });
 
   // 2. Resolve model — agent file can override the project model
   let effectiveModel = resolveModel(projectConfig.model);
@@ -358,10 +359,15 @@ export async function runClaudeAgentTurn(params: {
                       if (!requiresApproval(sessionId, projectConfig, category, tool_name, tool_input)) {
                         return { decision: "approve" as const };
                       }
-                      const approved = await requestApproval(webContents, sessionId, tool_name, tool_input);
+                      const approved = await requestApproval(webContents, sessionId, tool_name, tool_input, { nonInteractive });
                       return approved
                         ? { decision: "approve" as const }
-                        : { decision: "block" as const, reason: "Denied by user." };
+                        : {
+                            decision: "block" as const,
+                            // Reuse the shared constants so denial wording stays
+                            // consistent with runGatedTool across providers.
+                            reason: nonInteractive ? TOOL_DENIED_UNATTENDED_MESSAGE : TOOL_DENIED_MESSAGE,
+                          };
                     },
                   ],
                 },

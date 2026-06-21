@@ -279,15 +279,16 @@ export async function runCopilotAgentTurn(params: {
   agent?: string;
   skills?: string[];
   noTools?: boolean;
+  nonInteractive?: boolean;
 }): Promise<string> {
-  const { db, sessionId, messageId, prompt, projectPath, projectConfig, webContents, agent, skills, noTools } = params;
+  const { db, sessionId, messageId, prompt, projectPath, projectConfig, webContents, agent, skills, noTools, nonInteractive } = params;
 
   const { defineTool } = await import("@github/copilot-sdk");
 
   const client = await getClient();
 
   const emitter = new TurnEmitter(webContents, sessionId);
-  const gateCtx: GatedToolContext = { db, sessionId, messageId, projectConfig, emitter };
+  const gateCtx: GatedToolContext = { db, sessionId, messageId, projectConfig, emitter, nonInteractive };
 
   // ── Tool definitions ────────────────────────────────────────────────────────
 
@@ -410,7 +411,8 @@ export async function runCopilotAgentTurn(params: {
           sessionId,
           args.question,
           args.options,
-          args.placeholder
+          args.placeholder,
+          { nonInteractive }
         );
         return answer || "(no answer provided)";
       },
@@ -522,7 +524,8 @@ export async function runCopilotAgentTurn(params: {
       webContents,
       sessionId,
       request.kind,
-      request
+      request,
+      { nonInteractive }
     );
 
     return approved

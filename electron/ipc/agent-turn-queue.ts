@@ -23,6 +23,12 @@ export interface QueuedTurn {
   oneshotSkills?: string[];
   skipPersistence?: boolean;
   messageId?: string;
+  /**
+   * When true, the turn runs unattended (scheduled workflow run): `ask_user`
+   * and un-allowlisted approvals resolve immediately instead of hanging. Unset
+   * for user-driven turns from the renderer.
+   */
+  nonInteractive?: boolean;
 }
 
 /**
@@ -98,6 +104,12 @@ export async function executeAgentTurn(
     agent,
     skills,
     skipPersistence: turn.skipPersistence,
+    // Force non-interactive whenever no renderer is attached: a null window can
+    // never answer an approval / ask_user prompt, so without this a gated tool
+    // would hang out the full 5-min timeout before auto-denying. A workflow's
+    // own `interactive` autonomy only takes effect while a window IS attached
+    // (a babysat reuse session or a focused "Run now").
+    nonInteractive: turn.nonInteractive || win === null,
   });
 }
 

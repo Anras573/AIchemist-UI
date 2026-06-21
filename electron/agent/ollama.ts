@@ -105,6 +105,8 @@ interface ToolExecutionContext {
   client: OllamaClientLike;
   delegationDepth: number;
   recorder: NativeTranscriptRecorder | null;
+  /** Unattended turn — `ask_user` / un-allowlisted approvals resolve immediately. */
+  nonInteractive?: boolean;
 }
 
 export const OLLAMA_NO_MODELS_ERROR =
@@ -608,6 +610,7 @@ async function executeTool(
           String(args.question ?? ""),
           Array.isArray(args.options) ? args.options.filter((option): option is string => typeof option === "string") : undefined,
           typeof args.placeholder === "string" ? args.placeholder : undefined,
+          { nonInteractive: ctx.nonInteractive },
         ).then((answer) => answer || "(no answer provided)")
       );
     case "delegate_task":
@@ -765,6 +768,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
     client,
     delegationDepth: 0,
     recorder,
+    nonInteractive: params.nonInteractive,
   };
 
   const systemPrompt = buildSystemPrompt(params);
