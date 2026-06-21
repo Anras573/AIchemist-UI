@@ -118,7 +118,7 @@ const workflowUpsertSchema = z.object({
 });
 
 const workflowRunNowSchema = z.object({
-  workflowId: z.string().min(1),
+  workflowId: z.string().trim().min(1),
 });
 
 /** The delete channels take a bare path string rather than an options object. */
