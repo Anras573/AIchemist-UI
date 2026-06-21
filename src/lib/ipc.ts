@@ -116,6 +116,11 @@ export const ipc = {
   createSkill: (args: { name: string; projectPath: string; scope: "global" | "project"; content: string; provider?: string }) =>
     window.electronAPI.createSkill(args),
 
+  // Workflows
+  workflowUpsert: (input: Parameters<typeof window.electronAPI.workflowUpsert>[0]) =>
+    window.electronAPI.workflowUpsert(input),
+  workflowRunNow: (workflowId: string) => window.electronAPI.workflowRunNow(workflowId),
+
   // Traces
   getTraces: (sessionId?: string) => window.electronAPI.getTraces(sessionId),
   bindTranscript: (sessionId: string) => window.electronAPI.bindTranscript(sessionId),

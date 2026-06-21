@@ -16,6 +16,7 @@ import { registerAgentHandlers } from "./ipc/agent-handlers";
 import { registerLibraryHandlers } from "./ipc/library-handlers";
 import { registerGitHubHandlers } from "./ipc/github-handlers";
 import { registerMcpHandlers } from "./ipc/mcp-handlers";
+import { registerWorkflowHandlers } from "./ipc/workflow-handlers";
 
 // ── Prevent multiple instances ───────────────────────────────────────────────
 if (require("electron-squirrel-startup")) app.quit();
@@ -72,6 +73,7 @@ function registerAllHandlers(): void {
   registerLibraryHandlers(db);
   registerGitHubHandlers();
   registerMcpHandlers();
+  registerWorkflowHandlers(db, activeTurns, () => mainWin);
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────

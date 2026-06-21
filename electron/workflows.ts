@@ -354,6 +354,14 @@ export function setWorkflowRunSession(db: Database, id: string, sessionId: strin
   db.prepare("UPDATE workflow_runs SET session_id = ? WHERE id = ?").run(sessionId, id);
 }
 
+/** Fetch a single workflow run, or null if it does not exist. */
+export function getWorkflowRun(db: Database, id: string): WorkflowRun | null {
+  const row = db
+    .prepare(`SELECT ${WORKFLOW_RUN_COLUMNS} FROM workflow_runs WHERE id = ?`)
+    .get(id) as WorkflowRunRowShape | undefined;
+  return row ? rowToWorkflowRun(row) : null;
+}
+
 /** List a workflow's runs, most recent first. */
 export function listWorkflowRuns(db: Database, workflowId: string): WorkflowRun[] {
   const rows = db

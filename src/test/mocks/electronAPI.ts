@@ -94,6 +94,37 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     writeSkillFile: vi.fn().mockResolvedValue(undefined),
     deleteSkillDir: vi.fn().mockResolvedValue(undefined),
     createSkill: vi.fn().mockResolvedValue({ skillPath: "" }),
+    // Safe default shapes (stable ids + valid ISO timestamps) so tests that
+    // don't override still get usable, invariant-respecting objects.
+    workflowUpsert: vi.fn().mockResolvedValue({
+      id: "mock-workflow-id",
+      project_id: "mock-project-id",
+      name: "Mock workflow",
+      prompt: "mock prompt",
+      provider: null,
+      model: null,
+      agent: null,
+      skills: null,
+      cron: null,
+      enabled: true,
+      session_strategy: "fresh",
+      reuse_session_id: null,
+      autonomy: "interactive",
+      created_at: "2026-01-01T00:00:00.000Z",
+      last_run_at: null,
+    }),
+    workflowRunNow: vi.fn().mockResolvedValue({
+      id: "mock-run-id",
+      workflow_id: "mock-workflow-id",
+      // A "success" run respects the persisted invariants: it has a session and
+      // an ended_at, so UI logic doesn't treat it as still-running.
+      session_id: "mock-session-id",
+      status: "success",
+      trigger: "manual",
+      started_at: "2026-01-01T00:00:00.000Z",
+      ended_at: "2026-01-01T00:00:01.000Z",
+      error: null,
+    }),
     getTraces: vi.fn().mockResolvedValue([]),
     bindTranscript: vi.fn().mockResolvedValue({ ok: true }),
     unbindTranscript: vi.fn().mockResolvedValue({ ok: true }),

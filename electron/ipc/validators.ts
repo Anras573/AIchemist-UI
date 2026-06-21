@@ -13,6 +13,8 @@ import { z } from "zod";
 import type { RequestChannel } from "../ipc-contract";
 import * as CH from "../ipc-channels";
 import { IpcError } from "./errors";
+import { isValidCron } from "../cron";
+import { isProviderId } from "../providers";
 
 /** Parses `schema` against `value`, rethrowing zod issues as a structured IpcError. */
 function check<T>(schema: z.ZodType<T>, value: unknown, channel: string): void {
@@ -81,6 +83,44 @@ const createSkillSchema = z.object({
   provider: z.string().min(1).optional(),
 });
 
+// A workflow can schedule autonomous filesystem/shell work, so its upsert is a
+// high-impact mutation. An unparseable cron must never reach the store (it would
+// later fail to arm), so reject it here via `croner`. `null`/absent = manual-only.
+const workflowUpsertSchema = z.object({
+  // `.trim().min(1)` (on every free-text id/field below) rejects whitespace-only
+  // values ("   ") at the boundary — `min(1)` alone only checks length, which
+  // would let a caller persist a blank id / unusable workflow.
+  id: z.string().trim().min(1).optional(),
+  projectId: z.string().trim().min(1).optional(),
+  name: z.string().trim().min(1).optional(),
+  prompt: z.string().trim().min(1).optional(),
+  // Re-validate the provider against the canonical PROVIDER_IDS list (matching
+  // session-handlers' isProviderId() guard) so an untrusted renderer can't
+  // persist a row with an unknown provider the scheduler would later choke on.
+  provider: z
+    .string()
+    .min(1)
+    .nullable()
+    .optional()
+    .refine((v) => v == null || isProviderId(v), { message: "is not a known provider" }),
+  model: z.string().trim().min(1).nullable().optional(),
+  agent: z.string().trim().min(1).nullable().optional(),
+  skills: z.array(z.string().trim().min(1)).nullable().optional(),
+  cron: z
+    .string()
+    .nullable()
+    .optional()
+    .refine((v) => v == null || isValidCron(v), { message: "is not a valid cron expression" }),
+  enabled: z.boolean().optional(),
+  sessionStrategy: z.enum(["fresh", "reuse"]).optional(),
+  reuseSessionId: z.string().trim().min(1).nullable().optional(),
+  autonomy: z.enum(["interactive", "autonomous"]).optional(),
+});
+
+const workflowRunNowSchema = z.object({
+  workflowId: z.string().trim().min(1),
+});
+
 /** The delete channels take a bare path string rather than an options object. */
 const pathArgSchema = z.string().min(1);
 
@@ -97,4 +137,6 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.DELETE_AGENT_FILE]: unary(pathArgSchema, CH.DELETE_AGENT_FILE),
   [CH.CREATE_SKILL]: unary(createSkillSchema, CH.CREATE_SKILL),
   [CH.DELETE_SKILL_DIR]: unary(pathArgSchema, CH.DELETE_SKILL_DIR),
+  [CH.WORKFLOW_UPSERT]: unary(workflowUpsertSchema, CH.WORKFLOW_UPSERT),
+  [CH.WORKFLOW_RUN_NOW]: unary(workflowRunNowSchema, CH.WORKFLOW_RUN_NOW),
 };
