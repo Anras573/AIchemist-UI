@@ -21,6 +21,8 @@ import {
   type TurnQueueContext,
   enqueueTurn,
   submitTurn,
+  runTurnExclusive,
+  isSessionBusy,
   cleanupSessionQueueState,
 } from "./agent-turn-queue";
 
@@ -116,6 +118,52 @@ describe("enqueueTurn (headless / programmatic)", () => {
     expect(runAgentTurnMock.mock.calls[0][0].nonInteractive).toBe(false);
     // The drain emits the queue-turn-start signal to the renderer.
     expect(send).toHaveBeenCalled();
+
+    cleanupSessionQueueState(sessionId);
+  });
+});
+
+describe("runTurnExclusive (scheduler) — awaits + overlap detection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    runAgentTurnMock.mockResolvedValue("done");
+  });
+
+  it("runs the turn to completion and resolves { skipped: false }", async () => {
+    const sessionId = seedSession("sess-exclusive");
+    const activeTurns = new Set<string>();
+    const ctx: TurnQueueContext = { db, activeTurns, getMainWindow: () => null };
+
+    const result = await runTurnExclusive(ctx, sessionId, { prompt: "scheduled" });
+    expect(result).toEqual({ skipped: false });
+    expect(runAgentTurnMock).toHaveBeenCalledTimes(1);
+    // Session released after the awaited run settles.
+    expect(activeTurns.has(sessionId)).toBe(false);
+
+    cleanupSessionQueueState(sessionId);
+  });
+
+  it("skips without running when the session is busy", async () => {
+    const sessionId = seedSession("sess-overlap");
+    const activeTurns = new Set<string>([sessionId]); // already in flight
+    const ctx: TurnQueueContext = { db, activeTurns, getMainWindow: () => null };
+
+    expect(isSessionBusy(ctx, sessionId)).toBe(true);
+    const result = await runTurnExclusive(ctx, sessionId, { prompt: "overlap" });
+    expect(result).toEqual({ skipped: true });
+    expect(runAgentTurnMock).not.toHaveBeenCalled();
+
+    cleanupSessionQueueState(sessionId);
+  });
+
+  it("rejects and releases the session when the turn throws", async () => {
+    runAgentTurnMock.mockRejectedValueOnce(new Error("turn failed"));
+    const sessionId = seedSession("sess-exclusive-err");
+    const activeTurns = new Set<string>();
+    const ctx: TurnQueueContext = { db, activeTurns, getMainWindow: () => null };
+
+    await expect(runTurnExclusive(ctx, sessionId, { prompt: "boom" })).rejects.toThrow(/turn failed/);
+    expect(activeTurns.has(sessionId)).toBe(false);
 
     cleanupSessionQueueState(sessionId);
   });

@@ -94,6 +94,8 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     writeSkillFile: vi.fn().mockResolvedValue(undefined),
     deleteSkillDir: vi.fn().mockResolvedValue(undefined),
     createSkill: vi.fn().mockResolvedValue({ skillPath: "" }),
+    workflowUpsert: vi.fn().mockResolvedValue(undefined),
+    workflowRunNow: vi.fn().mockResolvedValue(undefined),
     getTraces: vi.fn().mockResolvedValue([]),
     bindTranscript: vi.fn().mockResolvedValue({ ok: true }),
     unbindTranscript: vi.fn().mockResolvedValue({ ok: true }),

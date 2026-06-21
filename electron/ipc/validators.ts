@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { RequestChannel } from "../ipc-contract";
 import * as CH from "../ipc-channels";
 import { IpcError } from "./errors";
+import { isValidCron } from "../agent/workflow-scheduler";
 
 /** Parses `schema` against `value`, rethrowing zod issues as a structured IpcError. */
 function check<T>(schema: z.ZodType<T>, value: unknown, channel: string): void {
@@ -81,6 +82,33 @@ const createSkillSchema = z.object({
   provider: z.string().min(1).optional(),
 });
 
+// A workflow can schedule autonomous filesystem/shell work, so its upsert is a
+// high-impact mutation. An unparseable cron must never reach the store (it would
+// later fail to arm), so reject it here via `croner`. `null`/absent = manual-only.
+const workflowUpsertSchema = z.object({
+  id: z.string().min(1).optional(),
+  projectId: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  prompt: z.string().optional(),
+  provider: z.string().min(1).nullable().optional(),
+  model: z.string().min(1).nullable().optional(),
+  agent: z.string().min(1).nullable().optional(),
+  skills: z.array(z.string().min(1)).nullable().optional(),
+  cron: z
+    .string()
+    .nullable()
+    .optional()
+    .refine((v) => v == null || isValidCron(v), { message: "is not a valid cron expression" }),
+  enabled: z.boolean().optional(),
+  sessionStrategy: z.enum(["fresh", "reuse"]).optional(),
+  reuseSessionId: z.string().min(1).nullable().optional(),
+  autonomy: z.enum(["interactive", "autonomous"]).optional(),
+});
+
+const workflowRunNowSchema = z.object({
+  workflowId: z.string().min(1),
+});
+
 /** The delete channels take a bare path string rather than an options object. */
 const pathArgSchema = z.string().min(1);
 
@@ -97,4 +125,6 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.DELETE_AGENT_FILE]: unary(pathArgSchema, CH.DELETE_AGENT_FILE),
   [CH.CREATE_SKILL]: unary(createSkillSchema, CH.CREATE_SKILL),
   [CH.DELETE_SKILL_DIR]: unary(pathArgSchema, CH.DELETE_SKILL_DIR),
+  [CH.WORKFLOW_UPSERT]: unary(workflowUpsertSchema, CH.WORKFLOW_UPSERT),
+  [CH.WORKFLOW_RUN_NOW]: unary(workflowRunNowSchema, CH.WORKFLOW_RUN_NOW),
 };

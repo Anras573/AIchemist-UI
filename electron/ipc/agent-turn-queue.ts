@@ -229,6 +229,52 @@ export async function submitTurn(
 }
 
 /**
+ * Whether a session currently has a turn running, queued, or paused awaiting
+ * recovery. Used by the workflow scheduler's overlap policy: a fire whose target
+ * session is busy is recorded as `skipped` rather than stacked.
+ */
+export function isSessionBusy(ctx: TurnQueueContext, sessionId: string): boolean {
+  return (
+    ctx.activeTurns.has(sessionId) ||
+    sessionQueues.has(sessionId) ||
+    pausedQueues.has(sessionId)
+  );
+}
+
+/**
+ * Run a turn to completion *now*, exclusively, awaiting its result. Used by the
+ * workflow scheduler so it can record the run's terminal status.
+ *
+ * If the session is already busy (a turn running, queued, or paused) it returns
+ * `{ skipped: true }` without running — the scheduler's overlap policy records the
+ * fire as `skipped` rather than stacking runs. Otherwise it claims the session,
+ * awaits the turn (headless when no window is attached), drains any follow-on
+ * queue on success, and resolves `{ skipped: false }`; it rejects if the turn
+ * throws so the caller can record an `error` run.
+ */
+export async function runTurnExclusive(
+  ctx: TurnQueueContext,
+  sessionId: string,
+  turn: QueuedTurn
+): Promise<{ skipped: boolean }> {
+  const { activeTurns, getMainWindow } = ctx;
+  if (isSessionBusy(ctx, sessionId)) return { skipped: true };
+
+  activeTurns.add(sessionId);
+  let succeeded = false;
+  try {
+    await executeAgentTurn(ctx, sessionId, turn, getMainWindow());
+    succeeded = true;
+    return { skipped: false };
+  } finally {
+    activeTurns.delete(sessionId);
+    // Only drain follow-on queued turns after a clean run. On failure the error
+    // propagates out of this finally to the caller (the scheduler records it).
+    if (succeeded) drainNextQueued(ctx, sessionId);
+  }
+}
+
+/**
  * Programmatically enqueue a turn (e.g. from the workflow scheduler). Respects
  * `activeTurns` + the FIFO queue so a scheduled run never collides with a
  * user-driven turn on the same session. Unlike {@link submitTurn} it needs no

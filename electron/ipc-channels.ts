@@ -128,3 +128,7 @@ export const AGENT_QUEUE_RECOVERY            = "agent:queue-recovery";
 // ── Startup warnings (push: main → renderer) ──────────────────────────────────
 export const CONFIG_WARNING            = "config:warning";
 export const WORKTREE_WARNING          = "worktree:warning";
+
+// ── Workflows ───────────────────────────────────────────────────────────────────
+export const WORKFLOW_UPSERT           = "workflow:upsert";
+export const WORKFLOW_RUN_NOW          = "workflow:run-now";

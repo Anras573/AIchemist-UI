@@ -43,6 +43,10 @@ import type {
   GitHubGetCiStatusResult,
   GitHubGetPrContextArgs,
   GitHubGetPrContextResult,
+  Workflow,
+  WorkflowRun,
+  WorkflowAutonomy,
+  WorkflowSessionStrategy,
 } from "../src/types";
 import type { SettingsMap } from "./settings";
 import type { OpenAiEndpointEntry, OpenAiEndpointsMap } from "./openai-endpoints";
@@ -55,6 +59,27 @@ type ModelList = Array<{ id: string; name: string }>;
 interface DirectoryListing {
   entries: Array<{ name: string; path: string; is_dir: boolean; size_bytes: number }>;
   truncated?: boolean;
+}
+
+/**
+ * Wire payload for WORKFLOW_UPSERT. With an `id` referencing an existing
+ * workflow it patches that row; otherwise it creates a new one (`projectId`,
+ * `name`, and `prompt` are required for creation).
+ */
+export interface WorkflowUpsertInput {
+  id?: string;
+  projectId?: string;
+  name?: string;
+  prompt?: string;
+  provider?: Provider | null;
+  model?: string | null;
+  agent?: string | null;
+  skills?: string[] | null;
+  cron?: string | null;
+  enabled?: boolean;
+  sessionStrategy?: WorkflowSessionStrategy;
+  reuseSessionId?: string | null;
+  autonomy?: WorkflowAutonomy;
 }
 
 /** Anthropic config snapshot from GET_ANTHROPIC_CONFIG. */
@@ -202,6 +227,10 @@ export type IpcContract = {
   // ── Changes (git) ─────────────────────────────────────────────────────────────
   [CH.GET_GIT_DIFF]: { args: [projectPath: string]; result: string | { error: string } };
   [CH.GET_GIT_BRANCH]: { args: [projectPath: string]; result: string | null };
+
+  // ── Workflows ─────────────────────────────────────────────────────────────────
+  [CH.WORKFLOW_UPSERT]: { args: [input: WorkflowUpsertInput]; result: Workflow };
+  [CH.WORKFLOW_RUN_NOW]: { args: [args: { workflowId: string }]; result: WorkflowRun };
 
   // ── Terminal ──────────────────────────────────────────────────────────────────
   [CH.TERMINAL_CREATE]: { args: [projectPath: string]; result: string };
