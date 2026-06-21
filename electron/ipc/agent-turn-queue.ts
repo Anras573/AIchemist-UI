@@ -104,7 +104,12 @@ export async function executeAgentTurn(
     agent,
     skills,
     skipPersistence: turn.skipPersistence,
-    nonInteractive: turn.nonInteractive,
+    // Force non-interactive whenever no renderer is attached: a null window can
+    // never answer an approval / ask_user prompt, so without this a gated tool
+    // would hang out the full 5-min timeout before auto-denying. A workflow's
+    // own `interactive` autonomy only takes effect while a window IS attached
+    // (a babysat reuse session or a focused "Run now").
+    nonInteractive: turn.nonInteractive || win === null,
   });
 }
 

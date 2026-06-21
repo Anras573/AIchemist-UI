@@ -73,6 +73,10 @@ describe("enqueueTurn (headless / programmatic)", () => {
     expect(params.prompt).toBe("scheduled work");
     // Headless: a no-op webContents that emits nothing, never throws.
     expect(() => params.webContents.send("anything", {})).not.toThrow();
+    // No renderer can answer a prompt, so the turn is forced non-interactive
+    // even though the caller didn't set the flag — otherwise a gated tool /
+    // ask_user would hang out the full 5-min approval timeout.
+    expect(params.nonInteractive).toBe(true);
 
     // Queue is not wedged: activeTurns is released after the turn settles.
     await vi.waitFor(() => expect(activeTurns.has(sessionId)).toBe(false));
@@ -107,6 +111,9 @@ describe("enqueueTurn (headless / programmatic)", () => {
     await vi.waitFor(() => expect(runAgentTurnMock).toHaveBeenCalledTimes(1));
 
     expect(runAgentTurnMock.mock.calls[0][0].webContents).toBe(win.webContents);
+    // A window is attached, so the turn stays interactive (the caller didn't
+    // opt into non-interactive): an attached renderer can answer prompts.
+    expect(runAgentTurnMock.mock.calls[0][0].nonInteractive).toBe(false);
     // The drain emits the queue-turn-start signal to the renderer.
     expect(send).toHaveBeenCalled();
 
