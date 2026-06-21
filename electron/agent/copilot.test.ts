@@ -122,4 +122,19 @@ describe("composeCopilotSystemMessage", () => {
     expect(content).toContain("read_memory");
     expect(content).toContain("delete_memory");
   });
+
+  it("drops tool guidance but keeps the read-only memory block in noTools turns", () => {
+    const { content } = composeCopilotSystemMessage({
+      agentBody: null,
+      skillsContext: "",
+      memoryContext: MEMORY_BLOCK,
+      noTools: true,
+    });
+
+    // Text-only generation turns have no tools, so don't tell the model to call
+    // them — but the saved notes are still useful context.
+    expect(content).not.toContain("write_memory");
+    expect(content).not.toContain("ask_user");
+    expect(content).toContain(MEMORY_BLOCK);
+  });
 });

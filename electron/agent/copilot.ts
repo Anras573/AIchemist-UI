@@ -235,6 +235,12 @@ const MEMORY_INSTRUCTION =
  *   prompt. (Skills, when present, are injected via `customAgents` instead in
  *   that path, so they are not included here.)
  *
+ * `noTools` (text-only generation turns, e.g. PR-draft) drops the tool guidance:
+ * those sessions are created with `tools: []` and reject every permission, so
+ * telling the model to call `ask_user` / the memory tools would only invite
+ * failed tool calls. The read-only saved-notes block is still appended as
+ * context — it references no unavailable tool.
+ *
  * NOTE: the saved-notes block changes whenever memory is written, but memory is
  * deliberately NOT part of the resume-invalidation fingerprint (see the
  * "customAgents vs systemMessage" footgun in CLAUDE.md). `resumeSession` ignores
@@ -249,9 +255,11 @@ export function composeCopilotSystemMessage(opts: {
   agentBody: string | null;
   skillsContext: string;
   memoryContext: string;
+  noTools?: boolean;
 }): { content: string; mode: "replace" | "append" } {
-  const { agentBody, skillsContext, memoryContext } = opts;
-  const augmentation = MEMORY_INSTRUCTION + ASK_USER_INSTRUCTION + memoryContext;
+  const { agentBody, skillsContext, memoryContext, noTools } = opts;
+  const toolGuidance = noTools ? "" : MEMORY_INSTRUCTION + ASK_USER_INSTRUCTION;
+  const augmentation = toolGuidance + memoryContext;
   if (agentBody) {
     return { content: agentBody + skillsContext + augmentation, mode: "replace" };
   }
@@ -554,6 +562,7 @@ export async function runCopilotAgentTurn(params: {
       agentBody: selected.body,
       skillsContext,
       memoryContext,
+      noTools,
     });
     systemMessageContent = composed.content;
     systemMessageMode = composed.mode;
@@ -578,6 +587,7 @@ export async function runCopilotAgentTurn(params: {
       agentBody: null,
       skillsContext,
       memoryContext,
+      noTools,
     });
     systemMessageContent = composed.content;
     systemMessageMode = composed.mode;
