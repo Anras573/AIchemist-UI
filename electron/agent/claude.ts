@@ -246,8 +246,9 @@ export async function runClaudeAgentTurn(params: {
   agent?: string;
   skills?: string[];
   noTools?: boolean;
+  nonInteractive?: boolean;
 }): Promise<string> {
-  const { db, sessionId, messageId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent, skills, noTools } =
+  const { db, sessionId, messageId, sdkSessionId, prompt, projectPath, projectConfig, webContents, agent, skills, noTools, nonInteractive } =
     params;
 
   const emitter = new TurnEmitter(webContents, sessionId);
@@ -256,7 +257,7 @@ export async function runClaudeAgentTurn(params: {
   //    Skipped when noTools is true (text-only generation turns).
   const mcpServer: McpSdkServerConfigWithInstance | null = noTools
     ? null
-    : await createApprovalMcpServer({ db, sessionId, messageId, projectPath, projectConfig, emitter });
+    : await createApprovalMcpServer({ db, sessionId, messageId, projectPath, projectConfig, emitter, nonInteractive });
 
   // 2. Resolve model — agent file can override the project model
   let effectiveModel = resolveModel(projectConfig.model);
@@ -358,7 +359,7 @@ export async function runClaudeAgentTurn(params: {
                       if (!requiresApproval(sessionId, projectConfig, category, tool_name, tool_input)) {
                         return { decision: "approve" as const };
                       }
-                      const approved = await requestApproval(webContents, sessionId, tool_name, tool_input);
+                      const approved = await requestApproval(webContents, sessionId, tool_name, tool_input, { nonInteractive });
                       return approved
                         ? { decision: "approve" as const }
                         : { decision: "block" as const, reason: "Denied by user." };

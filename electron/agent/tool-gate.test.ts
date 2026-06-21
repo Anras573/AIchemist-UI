@@ -141,3 +141,51 @@ describe("runGatedTool", () => {
     expect(send).not.toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.anything());
   });
 });
+
+// ── Unattended (nonInteractive) execution — workflow autonomy ──────────────────
+//
+// A scheduled workflow run has nobody watching. `nonInteractive` makes an
+// un-allowlisted gated tool deny immediately instead of hanging on the 5-min
+// approval timeout, while a tool trusted by the project allowlist /
+// approval_mode "none" (an "autonomous" workflow) still runs without prompting.
+
+describe("runGatedTool — nonInteractive (unattended workflow run)", () => {
+  it("denies an un-allowlisted gated tool immediately, without prompting", async () => {
+    const { ctx, send, statusUpdates } = makeCtx("all");
+    const impl = vi.fn();
+    const output = await runGatedTool(
+      { ...ctx, nonInteractive: true },
+      { name: "write_file", args: { path: "a.txt" }, category: "filesystem", impl },
+    );
+    expect(output).toBe(TOOL_DENIED_MESSAGE);
+    expect(impl).not.toHaveBeenCalled();
+    // Never asks the (absent) renderer to approve.
+    expect(send).not.toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.anything());
+    expect(statusUpdates).toEqual([{ status: "rejected", result: TOOL_DENIED_MESSAGE }]);
+  });
+
+  it('runs a tool trusted by approval_mode "none" (autonomous) without prompting', async () => {
+    const { ctx, send } = makeCtx("none");
+    const output = await runGatedTool(
+      { ...ctx, nonInteractive: true },
+      { name: "write_file", args: { path: "a.txt" }, category: "filesystem", impl: async () => "written" },
+    );
+    expect(output).toBe("written");
+    expect(send).not.toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.anything());
+  });
+
+  it("runs a project-allowlisted tool without prompting even under approval_mode all", async () => {
+    const { ctx, send } = makeCtx("all");
+    // An explicit per-workflow / project trust entry for this exact command.
+    ctx.projectConfig = {
+      ...ctx.projectConfig,
+      allowed_tools: [{ tool_name: "execute_bash", command_pattern: "git" }],
+    } as unknown as ProjectConfig;
+    const output = await runGatedTool(
+      { ...ctx, nonInteractive: true },
+      { name: "execute_bash", args: { command: "git status" }, category: "shell", impl: async () => "clean" },
+    );
+    expect(output).toBe("clean");
+    expect(send).not.toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.anything());
+  });
+});

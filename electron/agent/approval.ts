@@ -38,13 +38,26 @@ export function getPendingApprovalData(
 /**
  * Emits SESSION_APPROVAL_REQUIRED and suspends until the user approves/denies.
  * Auto-denies after 5 minutes if unanswered.
+ *
+ * In `nonInteractive` mode (unattended workflow runs) there is no renderer to
+ * answer, so an un-allowlisted approval would hang the full timeout then fail.
+ * Instead it resolves immediately as denied with a recorded reason — the caller
+ * (`requiresApproval`) has already cleared anything the project/session
+ * allowlist trusts, so reaching here means the tool genuinely isn't trusted.
  */
 export function requestApproval(
   webContents: Electron.WebContents,
   sessionId: string,
   toolName: string,
-  input: unknown
+  input: unknown,
+  opts?: { nonInteractive?: boolean }
 ): Promise<boolean> {
+  if (opts?.nonInteractive) {
+    console.warn(
+      `[approval] "${toolName}" auto-denied — non-interactive (unattended) turn, not in allowlist`
+    );
+    return Promise.resolve(false);
+  }
   const approvalId = crypto.randomUUID();
   return new Promise((resolve) => {
     const timer = setTimeout(() => {

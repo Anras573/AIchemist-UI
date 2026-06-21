@@ -52,8 +52,10 @@ export async function runAgentTurn(params: {
   agent?: string;
   skills?: string[];
   skipPersistence?: boolean;
+  nonInteractive?: boolean;
 }): Promise<void> {
-  const { db, sessionId, prompt, projectPath, projectConfig, webContents, agent, skills, skipPersistence } = params;
+  const { db, sessionId, prompt, projectPath, projectConfig, webContents, agent, skills, skipPersistence, nonInteractive } =
+    params;
 
   const emitter = new TurnEmitter(webContents, sessionId);
   emitter.status("running");
@@ -75,6 +77,7 @@ export async function runAgentTurn(params: {
     // When skipPersistence is enabled (e.g. PR description generation), disable
     // all tool access so the model cannot perform filesystem/shell side-effects.
     noTools: !!skipPersistence,
+    nonInteractive,
   };
 
   try {

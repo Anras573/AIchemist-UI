@@ -86,6 +86,8 @@ interface ToolContext {
   endpoints: OpenAiEndpointsMap;
   /** 0 for the orchestrator turn, incremented for each delegated sub-turn. */
   delegationDepth: number;
+  /** Unattended turn — `ask_user` / un-allowlisted approvals resolve immediately. */
+  nonInteractive?: boolean;
 }
 
 // ── Test seams ────────────────────────────────────────────────────────────────
@@ -586,9 +588,9 @@ function makeBuiltinTools(ctx: ToolContext): ToolSet {
           // ask_user is unavailable in delegated turns — only the orchestrator
           // (depth 0) may interact with the user.
           if (ctx.delegationDepth > 0) throw askUserUnavailableError();
-          return requestQuestion(ctx.emitter.webContents, ctx.sessionId, question, options, placeholder).then(
-            (answer) => answer || "(no answer provided)",
-          );
+          return requestQuestion(ctx.emitter.webContents, ctx.sessionId, question, options, placeholder, {
+            nonInteractive: ctx.nonInteractive,
+          }).then((answer) => answer || "(no answer provided)");
         }),
     }),
     delegate_task: tool({
@@ -758,6 +760,7 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
     recorder,
     endpoints,
     delegationDepth: 0,
+    nonInteractive: params.nonInteractive,
   };
 
   // When noTools is true (text-only generation turns), skip all tool

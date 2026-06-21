@@ -518,6 +518,14 @@ Both Claude and Copilot expose an `ask_user` tool that pauses the agent and show
 
 **Cleanup:** `clearPendingQuestions(sessionId)` is called on `SESSION_STATUS: "running"` (new turn) to discard orphaned cards.
 
+### Non-interactive (unattended) turns — `nonInteractive`
+
+Scheduled workflow runs (see `docs/plans/2026-06-21-workflow-scheduling-design.md`) execute with nobody watching, so the two interactive pause points must never hang on the 5-minute timeout. A `nonInteractive: boolean` is threaded through the turn params — `QueuedTurn` → `executeAgentTurn` → `runAgentTurn` → `AgentProviderParams` → every provider — and taps into the existing gates:
+
+- **`requestApproval(..., { nonInteractive })`** (`approval.ts`) and **`requestQuestion(..., { nonInteractive })`** (`question.ts`) take an immediate-resolve branch when `nonInteractive` is true: approvals deny (`false`), `ask_user` resolves `""` — no renderer emit, no timer. The flag is **additive**; interactive user turns omit it and keep today's behavior.
+- The flag reaches the gates two ways: via `GatedToolContext.nonInteractive` (read in `runGatedTool`, so Ollama / OpenAI-compatible / Copilot custom tools + Claude's MCP tools are covered) and via direct `{ nonInteractive }` opts on the per-provider `requestApproval`/`requestQuestion` calls (Claude's `PreToolUse` hook, Copilot's `onPermissionRequest`, and each provider's `ask_user`).
+- **Per-workflow autonomy** maps onto this: `interactive` leaves `nonInteractive` falsy (the run still pauses for approval); `autonomous` sets `nonInteractive` and pre-trusts tools through the *existing* `isProjectAllowed` + `approval_mode: "none"` mechanism — trusted tools never reach the gate, un-allowlisted ones deny immediately rather than prompting. No new approval mechanism was added.
+
 ### Session status persistence and crash recovery
 
 `sessions.status` is persisted to SQLite (`idle` / `running` / `error`) via `updateSessionStatus()` called in `runner.ts` at each transition. On `app.whenReady()`, `recoverStaleSessionStatuses()` marks any session stuck in `"running"` as `"error"` — this handles crashes and force-quits where the normal idle/error transition never ran.

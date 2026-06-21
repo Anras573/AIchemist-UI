@@ -57,6 +57,13 @@ export interface GatedToolContext {
    * SDK-backed providers, which get transcripts from their own SDKs.
    */
   recorder?: NativeTranscriptRecorder | null;
+  /**
+   * When true, the turn runs unattended (scheduled workflow): an un-allowlisted
+   * gated tool is denied immediately rather than waiting on the approval prompt.
+   * Trusted tools (project/session allowlist, `approval_mode: "none"`) never
+   * reach the gate, so they run as usual. Unset for interactive user turns.
+   */
+  nonInteractive?: boolean;
 }
 
 /**
@@ -82,7 +89,7 @@ export async function runGatedTool(
     onError?: "return" | "throw";
   },
 ): Promise<string> {
-  const { db, sessionId, messageId, projectConfig, emitter, recorder } = ctx;
+  const { db, sessionId, messageId, projectConfig, emitter, recorder, nonInteractive } = ctx;
   const { name, args, category, impl } = opts;
 
   const toolCallId = crypto.randomUUID();
@@ -101,7 +108,7 @@ export async function runGatedTool(
   });
 
   if (needsGate) {
-    const approved = await requestApproval(emitter.webContents, sessionId, name, args);
+    const approved = await requestApproval(emitter.webContents, sessionId, name, args, { nonInteractive });
     if (!approved) {
       updateToolCallStatus(db, toolCallId, "rejected", TOOL_DENIED_MESSAGE);
       emitter.toolResult(name, TOOL_DENIED_MESSAGE);

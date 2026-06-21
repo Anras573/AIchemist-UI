@@ -35,14 +35,26 @@ export function cancelSessionQuestions(sessionId: string): void {
 
 /** Emits SESSION_QUESTION_REQUIRED and suspends until the user answers.
  * Auto-resolves with an empty string after 5 minutes if unanswered.
+ *
+ * In `nonInteractive` mode (unattended workflow runs) there is no renderer to
+ * answer, so `ask_user` would hang the full timeout. Instead it resolves
+ * immediately with an empty answer and a recorded reason, letting the agent
+ * continue (it surfaces "(no answer provided)") rather than blocking.
  */
 export function requestQuestion(
   webContents: Electron.WebContents,
   sessionId: string,
   question: string,
   options?: string[],
-  placeholder?: string
+  placeholder?: string,
+  opts?: { nonInteractive?: boolean }
 ): Promise<string> {
+  if (opts?.nonInteractive) {
+    console.warn(
+      `[question] ask_user resolved empty — non-interactive (unattended) turn, no user to answer`
+    );
+    return Promise.resolve("");
+  }
   const questionId = crypto.randomUUID();
   return new Promise((resolve) => {
     const timer = setTimeout(() => {

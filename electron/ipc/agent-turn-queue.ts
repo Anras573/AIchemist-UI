@@ -23,6 +23,12 @@ export interface QueuedTurn {
   oneshotSkills?: string[];
   skipPersistence?: boolean;
   messageId?: string;
+  /**
+   * When true, the turn runs unattended (scheduled workflow run): `ask_user`
+   * and un-allowlisted approvals resolve immediately instead of hanging. Unset
+   * for user-driven turns from the renderer.
+   */
+  nonInteractive?: boolean;
 }
 
 /**
@@ -98,6 +104,7 @@ export async function executeAgentTurn(
     agent,
     skills,
     skipPersistence: turn.skipPersistence,
+    nonInteractive: turn.nonInteractive,
   });
 }
 

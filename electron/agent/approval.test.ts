@@ -185,6 +185,25 @@ describe("requestApproval / resolveApproval", () => {
     // Second call with same ID should be a no-op (entry was already deleted)
     expect(() => resolveApproval(approvalId, false)).not.toThrow();
   });
+
+  // ── non-interactive (unattended) mode ───────────────────────────────────────
+
+  it("denies immediately without emitting or waiting when nonInteractive", async () => {
+    const wc = makeWebContents();
+    const promise = requestApproval(wc, "sess-1", "execute_bash", { command: "rm -rf /" }, {
+      nonInteractive: true,
+    });
+
+    // No renderer event is emitted — there is no user to approve.
+    expect(wc.send).not.toHaveBeenCalled();
+    await expect(promise).resolves.toBe(false);
+  });
+
+  it("still prompts normally when nonInteractive is false/omitted", () => {
+    const wc = makeWebContents();
+    requestApproval(wc, "sess-1", "write_file", {}, { nonInteractive: false });
+    expect(wc.send).toHaveBeenCalledOnce();
+  });
 });
 
 // ── computeFingerprint ────────────────────────────────────────────────────────

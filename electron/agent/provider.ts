@@ -21,6 +21,16 @@ export interface AgentProviderParams {
    * generation where side-effects must be prevented.
    */
   noTools?: boolean;
+  /**
+   * When true, the turn runs unattended (e.g. a scheduled workflow) — there is
+   * no user watching to answer an `ask_user` question or approve a gated tool.
+   * The approval/question paths take an immediate-resolve branch (deny/empty)
+   * instead of waiting on the 5-minute timeout. Un-allowlisted approvals are
+   * denied; `autonomous` workflows pre-trust tools via the project allowlist /
+   * `approval_mode: "none"`, so those never reach the gate. Additive — omitted
+   * (falsy) for interactive user turns, which keep today's behavior.
+   */
+  nonInteractive?: boolean;
 }
 
 /**

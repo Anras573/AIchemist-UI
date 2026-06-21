@@ -78,6 +78,29 @@ describe("requestQuestion / resolveQuestion", () => {
   });
 });
 
+// ── non-interactive mode ──────────────────────────────────────────────────────
+
+describe("requestQuestion — nonInteractive", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("resolves immediately with an empty string without emitting or waiting", async () => {
+    const wc = makeWebContents();
+    const promise = requestQuestion(wc, "sess-1", "Pick one?", ["A", "B"], "type", {
+      nonInteractive: true,
+    });
+
+    // No renderer event is emitted — there is no user to answer.
+    expect(wc.send).not.toHaveBeenCalled();
+    await expect(promise).resolves.toBe("");
+  });
+
+  it("still prompts normally when nonInteractive is false/omitted", () => {
+    const wc = makeWebContents();
+    requestQuestion(wc, "sess-1", "Pick one?", undefined, undefined, { nonInteractive: false });
+    expect(wc.send).toHaveBeenCalledOnce();
+  });
+});
+
 // ── cancelSessionQuestions ────────────────────────────────────────────────────
 
 describe("cancelSessionQuestions", () => {
