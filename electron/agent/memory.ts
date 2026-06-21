@@ -310,8 +310,18 @@ function readCapped(filePath: string, cap: number): { text: string; truncated: b
  * Build a `# Project Memory` block to inject into the system prompt, mirroring
  * `buildSkillsContext`. Returns an empty string when there are no memory files
  * (or all are empty/unreadable).
+ *
+ * `includeToolGuidance` (default true) controls the intro line. When false, the
+ * "Use write_memory …" sentence is omitted so callers that run *without* the
+ * memory tools available (e.g. a Copilot `noTools` text-only turn) inject the
+ * saved notes as read-only context without prompting the model to call a tool
+ * that isn't registered for that turn.
  */
-export function buildMemoryContext(projectPath: string): string {
+export function buildMemoryContext(
+  projectPath: string,
+  opts: { includeToolGuidance?: boolean } = {},
+): string {
+  const { includeToolGuidance = true } = opts;
   const files = listMemoryFiles(projectPath);
   if (files.length === 0) return "";
 
@@ -359,11 +369,10 @@ export function buildMemoryContext(projectPath: string): string {
     ? `\n\n---\n\n…[project memory truncated: showing ${blocks.length} of ${files.length} files]`
     : "";
 
-  return (
-    "\n\n---\n# Project Memory\n\n" +
-    "Notes you previously saved for this project. Use write_memory to persist " +
-    "durable facts (conventions, decisions, gotchas) and keep them up to date.\n\n" +
-    blocks.join(BLOCK_SEPARATOR) +
-    footer
-  );
+  const intro = includeToolGuidance
+    ? "Notes you previously saved for this project. Use write_memory to persist " +
+      "durable facts (conventions, decisions, gotchas) and keep them up to date.\n\n"
+    : "Notes you previously saved for this project.\n\n";
+
+  return "\n\n---\n# Project Memory\n\n" + intro + blocks.join(BLOCK_SEPARATOR) + footer;
 }

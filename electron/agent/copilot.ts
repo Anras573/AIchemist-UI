@@ -536,7 +536,10 @@ export async function runCopilotAgentTurn(params: {
   // Project memory (~/.aichemist/memory/<cwd>) — the same store the self-driven
   // providers read, folded into the systemMessage. See composeCopilotSystemMessage
   // for why memory is deliberately kept out of the resume-invalidation fingerprint.
-  const memoryContext = buildMemoryContext(projectPath);
+  // In noTools (text-only) turns the memory tools aren't registered, so strip the
+  // "Use write_memory …" guidance from the block too — otherwise the model is told
+  // to call a tool that will be rejected. The saved notes themselves stay as context.
+  const memoryContext = buildMemoryContext(projectPath, { includeToolGuidance: !noTools });
 
   // When a specific agent is selected, inject its system prompt via `systemMessage`
   // using replace mode so the agent's instructions ARE the primary context.

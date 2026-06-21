@@ -160,6 +160,19 @@ describe("buildMemoryContext", () => {
     expect(ctx).toContain("# Project Memory");
     expect(ctx).toContain("## Memory: conv.md");
     expect(ctx).toContain("Always use bun.");
+    // The tool-guidance sentence is included by default.
+    expect(ctx).toContain("Use write_memory");
+  });
+
+  it("omits the write_memory guidance when includeToolGuidance is false", () => {
+    implWriteMemory(PROJECT, "conv.md", "Always use bun.");
+    const ctx = buildMemoryContext(PROJECT, { includeToolGuidance: false });
+    // The saved notes remain as read-only context …
+    expect(ctx).toContain("# Project Memory");
+    expect(ctx).toContain("Always use bun.");
+    // … but the tool-call phrasing is stripped so text-only turns don't try to
+    // call a tool that isn't registered for them.
+    expect(ctx).not.toContain("write_memory");
   });
 
   it("truncates an oversized single file", () => {
