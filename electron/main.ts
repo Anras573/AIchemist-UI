@@ -17,6 +17,7 @@ import { registerLibraryHandlers } from "./ipc/library-handlers";
 import { registerGitHubHandlers } from "./ipc/github-handlers";
 import { registerMcpHandlers } from "./ipc/mcp-handlers";
 import { registerWorkflowHandlers } from "./ipc/workflow-handlers";
+import { WorkflowScheduler } from "./agent/workflow-scheduler";
 
 // ── Prevent multiple instances ───────────────────────────────────────────────
 if (require("electron-squirrel-startup")) app.quit();
@@ -62,7 +63,12 @@ function createWindow(): BrowserWindow {
 
 let cleanupTerminals: (() => void) | undefined;
 
-function registerAllHandlers(): void {
+// The workflow cron scheduler. Created in whenReady (it needs the same
+// activeTurns / window machinery the handlers use) and armed after handlers
+// register. Module-level so before-quit can stop its jobs.
+let workflowScheduler: WorkflowScheduler | null = null;
+
+function registerAllHandlers(scheduler: WorkflowScheduler): void {
   cleanupTerminals = registerTerminalHandlers(() => mainWin);
   registerSettingsHandlers(db);
   registerTraceHandlers(db, () => mainWin);
@@ -73,7 +79,7 @@ function registerAllHandlers(): void {
   registerLibraryHandlers(db);
   registerGitHubHandlers();
   registerMcpHandlers();
-  registerWorkflowHandlers(db, activeTurns, () => mainWin);
+  registerWorkflowHandlers(db, scheduler);
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
@@ -83,8 +89,13 @@ app.whenReady().then(() => {
     console.log(`[startup] Marked ${stale} stale session(s) as "error" (were "running" at last exit)`);
   }
 
-  registerAllHandlers();
+  workflowScheduler = new WorkflowScheduler({ db, activeTurns, getMainWindow });
+  registerAllHandlers(workflowScheduler);
   const win = createWindow();
+
+  // Arm enabled cron workflows after handlers register. Forward-only: missed
+  // occurrences while the app was closed are not replayed.
+  workflowScheduler.start();
 
   // Warn if no API keys are configured — both providers missing means
   // the user won't be able to run any agent turns.
@@ -110,6 +121,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   cleanupTerminals?.();
+  workflowScheduler?.stopAll();
 
   // Gracefully shut down all registered providers that implement stop()
   for (const name of getProviderNames()) {

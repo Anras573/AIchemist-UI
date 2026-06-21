@@ -13,11 +13,18 @@ import {
   createWorkflow,
   getWorkflow,
   listWorkflowRuns,
+  updateWorkflow,
 } from "../workflows";
 import { registerProvider } from "./runner";
 import type { AgentProvider } from "./provider";
 import { cleanupSessionQueueState, type TurnQueueContext } from "../ipc/agent-turn-queue";
-import { isValidCron, runWorkflow, validateCron } from "./workflow-scheduler";
+import {
+  isValidCron,
+  runWorkflow,
+  validateCron,
+  WorkflowScheduler,
+  type WorkflowRunHooks,
+} from "./workflow-scheduler";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -225,5 +232,280 @@ describe("runWorkflow", () => {
 
   it("throws for an unknown workflow id", async () => {
     await expect(runWorkflow(makeCtx(), "nope", "manual")).rejects.toThrow(/not found/i);
+  });
+
+  it("fires the onRunUpdated hook on running and terminal state", async () => {
+    const updates: Array<{ status: string }> = [];
+    const hooks: WorkflowRunHooks = {
+      onRunUpdated: (run) => updates.push({ status: run.status }),
+    };
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Hooked",
+      prompt: "go",
+      provider: "ollama",
+    });
+
+    const run = await runWorkflow(makeCtx(), wf.id, "manual", hooks);
+
+    expect(updates.map((u) => u.status)).toEqual(["running", "success"]);
+    cleanupSessionQueueState(run.session_id!);
+  });
+
+  it("fires the onRunUpdated hook on running then skipped for an overlapping run", async () => {
+    const session = createSession(db, "proj-1", "ollama", "llama");
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Overlap hooks",
+      prompt: "work",
+      provider: "ollama",
+      sessionStrategy: "reuse",
+      reuseSessionId: session.id,
+    });
+    const ctx = makeCtx();
+    ctx.activeTurns.add(session.id); // session busy → the fire is skipped
+
+    const updates: string[] = [];
+    const hooks: WorkflowRunHooks = { onRunUpdated: (run) => updates.push(run.status) };
+
+    const run = await runWorkflow(ctx, wf.id, "cron", hooks);
+
+    expect(run.status).toBe("skipped");
+    // The skipped path still goes through running → terminal, per the contract.
+    expect(updates).toEqual(["running", "skipped"]);
+    expect(runMock).not.toHaveBeenCalled();
+
+    cleanupSessionQueueState(session.id);
+  });
+
+  it("does not let a throwing onRunUpdated hook fail the run", async () => {
+    const hooks: WorkflowRunHooks = {
+      onRunUpdated: () => {
+        throw new Error("hook boom");
+      },
+    };
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Hook thrower",
+      prompt: "go",
+      provider: "ollama",
+    });
+
+    const run = await runWorkflow(makeCtx(), wf.id, "manual", hooks);
+    expect(run.status).toBe("success");
+    cleanupSessionQueueState(run.session_id!);
+  });
+});
+
+// ─── WorkflowScheduler — arming lifecycle ────────────────────────────────────────
+
+describe("WorkflowScheduler", () => {
+  // A silent hook keeps the default OS-notification path out of these tests.
+  const silentHooks: WorkflowRunHooks = { onRunUpdated: () => {} };
+
+  function makeScheduler(): WorkflowScheduler {
+    return new WorkflowScheduler(makeCtx(), silentHooks);
+  }
+
+  it("arms only enabled workflows that declare a cron on start()", () => {
+    const armed = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Armed",
+      prompt: "p",
+      cron: "0 9 * * *",
+      enabled: true,
+    });
+    const disabled = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Disabled",
+      prompt: "p",
+      cron: "0 9 * * *",
+      enabled: false,
+    });
+    const noCron = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Manual only",
+      prompt: "p",
+    });
+
+    const scheduler = makeScheduler();
+    scheduler.start();
+
+    expect(scheduler.isArmed(armed.id)).toBe(true);
+    expect(scheduler.isArmed(disabled.id)).toBe(false);
+    expect(scheduler.isArmed(noCron.id)).toBe(false);
+    expect(scheduler.armedCount).toBe(1);
+
+    scheduler.stopAll();
+    expect(scheduler.armedCount).toBe(0);
+  });
+
+  it("start() is idempotent — a second call disarms now-disabled workflows", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Re-evaluated",
+      prompt: "p",
+      cron: "0 9 * * *",
+      enabled: true,
+    });
+    const scheduler = makeScheduler();
+    scheduler.start();
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+    expect(scheduler.armedCount).toBe(1);
+
+    // Disable the workflow in the DB, then re-run start(): the previously-armed
+    // job must be stopped (no leftover timer), and no duplicate is created.
+    updateWorkflow(db, wf.id, { enabled: false });
+    scheduler.start();
+    expect(scheduler.isArmed(wf.id)).toBe(false);
+    expect(scheduler.armedCount).toBe(0);
+
+    scheduler.stopAll();
+  });
+
+  it("re-arms on enable and disarms on disable / cron-clear", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Toggler",
+      prompt: "p",
+      cron: "0 9 * * *",
+      enabled: false,
+    });
+    const scheduler = makeScheduler();
+    scheduler.start();
+    expect(scheduler.isArmed(wf.id)).toBe(false); // disabled at boot
+
+    // Enable → armed.
+    updateWorkflow(db, wf.id, { enabled: true });
+    scheduler.rearm(wf.id);
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+
+    // Disable → disarmed.
+    updateWorkflow(db, wf.id, { enabled: false });
+    scheduler.rearm(wf.id);
+    expect(scheduler.isArmed(wf.id)).toBe(false);
+
+    // Enable again then clear the cron → disarmed (manual-only).
+    updateWorkflow(db, wf.id, { enabled: true });
+    scheduler.rearm(wf.id);
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+    updateWorkflow(db, wf.id, { cron: null });
+    scheduler.rearm(wf.id);
+    expect(scheduler.isArmed(wf.id)).toBe(false);
+
+    scheduler.stopAll();
+  });
+
+  it("re-arms (replaces the job) when the cron changes", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Reschedule",
+      prompt: "p",
+      cron: "0 9 * * *",
+      enabled: true,
+    });
+    const scheduler = makeScheduler();
+    scheduler.start();
+    expect(scheduler.armedCount).toBe(1);
+
+    updateWorkflow(db, wf.id, { cron: "0 18 * * *" });
+    scheduler.rearm(wf.id);
+    // Still exactly one armed job — re-armed, not duplicated.
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+    expect(scheduler.armedCount).toBe(1);
+
+    scheduler.stopAll();
+  });
+
+  it("cancels the job and removes rows on delete()", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Doomed",
+      prompt: "p",
+      cron: "0 9 * * *",
+      enabled: true,
+    });
+    const scheduler = makeScheduler();
+    scheduler.start();
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+
+    scheduler.delete(wf.id);
+    expect(scheduler.isArmed(wf.id)).toBe(false);
+    expect(getWorkflow(db, wf.id)).toBeNull();
+
+    scheduler.stopAll();
+  });
+
+  it("keeps the job armed after a failing run", async () => {
+    runMock.mockRejectedValueOnce(new Error("provider exploded"));
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Flaky armed",
+      prompt: "p",
+      provider: "ollama",
+      cron: "0 9 * * *",
+      enabled: true,
+    });
+    const scheduler = makeScheduler();
+    scheduler.start();
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+
+    // A failing run never disarms the workflow — one failure doesn't disable it.
+    const run = await runWorkflow(makeCtx(), wf.id, "cron", silentHooks);
+    expect(run.status).toBe("error");
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+
+    scheduler.stopAll();
+    cleanupSessionQueueState(run.session_id!);
+  });
+
+  it("runs to success with default hooks and no window (notification absent is non-fatal)", async () => {
+    // No injected hooks → exercises defaultRunHooks + the fireRunNotification
+    // guard. getMainWindow returns null, so nothing is pushed and no Notification
+    // is available — the run must still persist a success.
+    const scheduler = new WorkflowScheduler(makeCtx());
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "No window",
+      prompt: "p",
+      provider: "ollama",
+    });
+
+    const run = await scheduler.runNow(wf.id);
+    expect(run.status).toBe("success");
+    expect(listWorkflowRuns(db, wf.id)).toHaveLength(1);
+
+    scheduler.stopAll();
+    cleanupSessionQueueState(run.session_id!);
+  });
+
+  it("fires an armed cron workflow on schedule and records run history", async () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Per-second",
+      prompt: "tick",
+      provider: "ollama",
+      // 6-field cron with seconds → fires every second.
+      cron: "* * * * * *",
+      enabled: true,
+    });
+    const scheduler = makeScheduler();
+    scheduler.start();
+
+    await vi.waitFor(
+      () => {
+        expect(listWorkflowRuns(db, wf.id).length).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 3000, interval: 50 }
+    );
+
+    scheduler.stopAll();
+
+    const runs = listWorkflowRuns(db, wf.id);
+    expect(runs[0].status).toBe("success");
+    expect(runs[0].trigger).toBe("cron");
+    for (const run of runs) {
+      if (run.session_id) cleanupSessionQueueState(run.session_id);
+    }
   });
 });

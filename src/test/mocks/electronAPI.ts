@@ -125,6 +125,8 @@ export function createElectronAPIMock(): Window["electronAPI"] {
       ended_at: "2026-01-01T00:00:01.000Z",
       error: null,
     }),
+    workflowDelete: vi.fn().mockResolvedValue({ ok: true }),
+    workflowListRuns: vi.fn().mockResolvedValue([]),
     getTraces: vi.fn().mockResolvedValue([]),
     bindTranscript: vi.fn().mockResolvedValue({ ok: true }),
     unbindTranscript: vi.fn().mockResolvedValue({ ok: true }),

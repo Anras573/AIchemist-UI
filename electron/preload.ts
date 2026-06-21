@@ -148,6 +148,8 @@ export interface ElectronAPI {
     input: import("./ipc-contract").WorkflowUpsertInput
   ) => Promise<Res<typeof CH.WORKFLOW_UPSERT>>;
   workflowRunNow: (workflowId: string) => Promise<Res<typeof CH.WORKFLOW_RUN_NOW>>;
+  workflowDelete: (workflowId: string) => Promise<Res<typeof CH.WORKFLOW_DELETE>>;
+  workflowListRuns: (workflowId: string) => Promise<Res<typeof CH.WORKFLOW_LIST_RUNS>>;
 
   // ── Traces ────────────────────────────────────────────────────────────────
   getTraces: (sessionId?: string) => Promise<Res<typeof CH.GET_TRACES>>;
@@ -254,6 +256,8 @@ const api: ElectronAPI = {
   createSkill: (args) => invoke(CH.CREATE_SKILL, args),
   workflowUpsert: (input) => invoke(CH.WORKFLOW_UPSERT, input),
   workflowRunNow: (workflowId) => invoke(CH.WORKFLOW_RUN_NOW, { workflowId }),
+  workflowDelete: (workflowId) => invoke(CH.WORKFLOW_DELETE, { workflowId }),
+  workflowListRuns: (workflowId) => invoke(CH.WORKFLOW_LIST_RUNS, { workflowId }),
   getTraces: (sessionId) => invoke(CH.GET_TRACES, sessionId),
   bindTranscript: (sessionId) => invoke(CH.TRACE_BIND_TRANSCRIPT, sessionId),
   unbindTranscript: (sessionId) => invoke(CH.TRACE_UNBIND_TRANSCRIPT, sessionId),
