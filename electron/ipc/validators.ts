@@ -14,6 +14,7 @@ import type { RequestChannel } from "../ipc-contract";
 import * as CH from "../ipc-channels";
 import { IpcError } from "./errors";
 import { isValidCron } from "../agent/workflow-scheduler";
+import { isProviderId } from "../providers";
 
 /** Parses `schema` against `value`, rethrowing zod issues as a structured IpcError. */
 function check<T>(schema: z.ZodType<T>, value: unknown, channel: string): void {
@@ -93,7 +94,15 @@ const workflowUpsertSchema = z.object({
   // state (a blank name, or an effectively-empty prompt the scheduler then runs).
   name: z.string().trim().min(1).optional(),
   prompt: z.string().trim().min(1).optional(),
-  provider: z.string().min(1).nullable().optional(),
+  // Re-validate the provider against the canonical PROVIDER_IDS list (matching
+  // session-handlers' isProviderId() guard) so an untrusted renderer can't
+  // persist a row with an unknown provider the scheduler would later choke on.
+  provider: z
+    .string()
+    .min(1)
+    .nullable()
+    .optional()
+    .refine((v) => v == null || isProviderId(v), { message: "is not a known provider" }),
   model: z.string().min(1).nullable().optional(),
   agent: z.string().min(1).nullable().optional(),
   skills: z.array(z.string().min(1)).nullable().optional(),

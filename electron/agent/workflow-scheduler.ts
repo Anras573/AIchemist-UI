@@ -106,7 +106,10 @@ export async function runWorkflow(
       // A long-lived reuse session may be mid-turn (a user turn or a prior run).
       // Don't stack — record this fire as skipped.
       if (isSessionBusy(ctx, sessionId)) {
+        // A trigger fired and a run row is written, so stamp last_run_at for the
+        // skipped outcome too — consistent with the normal path below.
         const skippedRun = createWorkflowRun(db, { workflowId, trigger, sessionId });
+        updateWorkflowLastRun(db, workflowId);
         finishWorkflowRun(db, skippedRun.id, "skipped");
         return getWorkflowRun(db, skippedRun.id) ?? skippedRun;
       }

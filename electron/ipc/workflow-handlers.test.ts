@@ -15,7 +15,7 @@ vi.mock("electron", () => ({
 }));
 
 import { migrate } from "../db";
-import { createWorkflow, getWorkflow, listWorkflowRuns } from "../workflows";
+import { createWorkflow, getWorkflow, listWorkflows, listWorkflowRuns } from "../workflows";
 import { registerProvider } from "../agent/runner";
 import type { AgentProvider } from "../agent/provider";
 import { cleanupSessionQueueState } from "./agent-turn-queue";
@@ -99,8 +99,8 @@ describe("WORKFLOW_UPSERT", () => {
     expect(env.ok).toBe(false);
     if (env.ok) return;
     expect(env.error.code).toBe("invalid_input");
-    // Nothing was persisted.
-    expect(listWorkflowRuns(db, "x")).toHaveLength(0);
+    // The rejected upsert persisted no workflow row.
+    expect(listWorkflows(db, "proj-1")).toHaveLength(0);
   });
 
   it("rejects a create payload missing required fields", async () => {
@@ -115,6 +115,18 @@ describe("WORKFLOW_UPSERT", () => {
       projectId: "proj-1",
       name: "   ",
       prompt: "real",
+    });
+    expect(env.ok).toBe(false);
+    if (env.ok) return;
+    expect(env.error.code).toBe("invalid_input");
+  });
+
+  it("rejects an unknown provider", async () => {
+    const env = await call(CH.WORKFLOW_UPSERT, {
+      projectId: "proj-1",
+      name: "Bad provider",
+      prompt: "p",
+      provider: "not-a-provider",
     });
     expect(env.ok).toBe(false);
     if (env.ok) return;

@@ -23,6 +23,8 @@ import { isValidCron, runWorkflow, validateCron } from "./workflow-scheduler";
 
 let db: Database.Database;
 let projectDir: string;
+// Extra temp project dirs created by individual tests, cleaned up in afterEach.
+let extraDirs: string[];
 const runMock = vi.fn<AgentProvider["run"]>();
 
 /** A mock provider registered under the "ollama" id so runs are type-safe. */
@@ -46,12 +48,15 @@ beforeEach(() => {
   runMock.mockResolvedValue("workflow output");
   registerProvider("ollama", mockProvider);
   projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-sched-"));
+  extraDirs = [];
   db = makeDb(projectDir);
 });
 
 afterEach(() => {
   db.close();
-  fs.rmSync(projectDir, { recursive: true, force: true });
+  for (const dir of [projectDir, ...extraDirs]) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ─── validateCron ──────────────────────────────────────────────────────────────
@@ -180,6 +185,8 @@ describe("runWorkflow", () => {
     // The overlapping fire never invoked the provider.
     expect(runMock).not.toHaveBeenCalled();
     expect(listWorkflowRuns(db, wf.id)).toHaveLength(1);
+    // A trigger fired + a run row was written, so last_run_at is stamped too.
+    expect(getWorkflow(db, wf.id)!.last_run_at).not.toBeNull();
 
     cleanupSessionQueueState(session.id);
   });
@@ -188,6 +195,7 @@ describe("runWorkflow", () => {
     // A reuse_session_id pointing at a different project's session must not be
     // honored — the run would otherwise execute against the wrong project.
     const projectDir2 = fs.mkdtempSync(path.join(os.tmpdir(), "wf-sched-p2-"));
+    extraDirs.push(projectDir2);
     db.prepare("INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)").run(
       "proj-2",
       "Project Two",
