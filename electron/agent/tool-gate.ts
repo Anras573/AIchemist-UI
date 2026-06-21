@@ -11,6 +11,15 @@ import type { NativeTranscriptRecorder } from "../native-transcript";
 export const TOOL_DENIED_MESSAGE = "Tool call denied by user.";
 
 /**
+ * Result text returned to the model when a gated tool is auto-denied in an
+ * unattended (non-interactive) run. Distinct from {@link TOOL_DENIED_MESSAGE}
+ * so a workflow transcript makes clear there was no user to deny it — the tool
+ * simply wasn't in the project/workflow allowlist.
+ */
+export const TOOL_DENIED_UNATTENDED_MESSAGE =
+  "Tool call denied automatically — unattended (non-interactive) run, tool not in allowlist.";
+
+/**
  * Rules for mapping a provider's native tool names onto approval categories.
  * `shell` and `web` list the tool names in those categories; `filesystem`
  * optionally lists the write/edit tools that should gate. `normalize`
@@ -110,10 +119,11 @@ export async function runGatedTool(
   if (needsGate) {
     const approved = await requestApproval(emitter.webContents, sessionId, name, args, { nonInteractive });
     if (!approved) {
-      updateToolCallStatus(db, toolCallId, "rejected", TOOL_DENIED_MESSAGE);
-      emitter.toolResult(name, TOOL_DENIED_MESSAGE);
-      recorder?.toolResult(toolCallId, TOOL_DENIED_MESSAGE, true);
-      return TOOL_DENIED_MESSAGE;
+      const deniedMessage = nonInteractive ? TOOL_DENIED_UNATTENDED_MESSAGE : TOOL_DENIED_MESSAGE;
+      updateToolCallStatus(db, toolCallId, "rejected", deniedMessage);
+      emitter.toolResult(name, deniedMessage);
+      recorder?.toolResult(toolCallId, deniedMessage, true);
+      return deniedMessage;
     }
     updateToolCallStatus(db, toolCallId, "approved");
   }

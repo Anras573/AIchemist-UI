@@ -51,7 +51,7 @@ export function requestQuestion(
 ): Promise<string> {
   if (opts?.nonInteractive) {
     console.warn(
-      `[question] ask_user resolved empty — non-interactive (unattended) turn, no user to answer`
+      `[question] session=${sessionId} ask_user resolved empty — non-interactive (unattended) turn, no user to answer`
     );
     return Promise.resolve("");
   }

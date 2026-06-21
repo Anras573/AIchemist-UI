@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProjectConfig } from "../../src/types/index";
 import * as CH from "../ipc-channels";
 import { resolveApproval } from "./approval";
-import { runGatedTool, TOOL_DENIED_MESSAGE } from "./tool-gate";
+import { runGatedTool, TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "./tool-gate";
 import { TurnEmitter } from "./turn-emitter";
 
 function makeConfig(approvalMode: "all" | "none"): ProjectConfig {
@@ -157,11 +157,12 @@ describe("runGatedTool — nonInteractive (unattended workflow run)", () => {
       { ...ctx, nonInteractive: true },
       { name: "write_file", args: { path: "a.txt" }, category: "filesystem", impl },
     );
-    expect(output).toBe(TOOL_DENIED_MESSAGE);
+    // A distinct message makes the unattended denial clear in transcripts.
+    expect(output).toBe(TOOL_DENIED_UNATTENDED_MESSAGE);
     expect(impl).not.toHaveBeenCalled();
     // Never asks the (absent) renderer to approve.
     expect(send).not.toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.anything());
-    expect(statusUpdates).toEqual([{ status: "rejected", result: TOOL_DENIED_MESSAGE }]);
+    expect(statusUpdates).toEqual([{ status: "rejected", result: TOOL_DENIED_UNATTENDED_MESSAGE }]);
   });
 
   it('runs a tool trusted by approval_mode "none" (autonomous) without prompting', async () => {

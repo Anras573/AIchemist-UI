@@ -362,7 +362,12 @@ export async function runClaudeAgentTurn(params: {
                       const approved = await requestApproval(webContents, sessionId, tool_name, tool_input, { nonInteractive });
                       return approved
                         ? { decision: "approve" as const }
-                        : { decision: "block" as const, reason: "Denied by user." };
+                        : {
+                            decision: "block" as const,
+                            reason: nonInteractive
+                              ? "Denied automatically — unattended (non-interactive) run, tool not in allowlist."
+                              : "Denied by user.",
+                          };
                     },
                   ],
                 },

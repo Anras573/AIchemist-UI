@@ -54,7 +54,7 @@ export function requestApproval(
 ): Promise<boolean> {
   if (opts?.nonInteractive) {
     console.warn(
-      `[approval] "${toolName}" auto-denied — non-interactive (unattended) turn, not in allowlist`
+      `[approval] session=${sessionId} "${toolName}" auto-denied — non-interactive (unattended) turn, not in allowlist`
     );
     return Promise.resolve(false);
   }
