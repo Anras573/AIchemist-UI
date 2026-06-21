@@ -9,6 +9,22 @@ import { handle } from "./handle";
 import { IpcError } from "./errors";
 import type { TurnQueueContext } from "./agent-turn-queue";
 
+/** Trim a nullable string; leaves null/undefined untouched (no value to clean). */
+function trimNullable(v: string | null | undefined): string | null | undefined {
+  return v == null ? v : v.trim();
+}
+
+/**
+ * Normalize a nullable override field (model/agent): trim a provided string and
+ * coerce a whitespace-only value to `null` (a deliberate "clear"), while
+ * preserving an explicit `null` and an absent `undefined` (don't-touch).
+ */
+function normalizeOverride(v: string | null | undefined): string | null | undefined {
+  if (v == null) return v;
+  const t = v.trim();
+  return t === "" ? null : t;
+}
+
 /**
  * Workflow IPC: create/update a workflow and trigger a manual "Run now".
  *
@@ -27,21 +43,27 @@ export function registerWorkflowHandlers(
   handle(CH.WORKFLOW_UPSERT, (_event, input: WorkflowUpsertInput): Workflow => {
     // Normalize free-text fields so whitespace-only values can't slip past the
     // emptiness checks and stale whitespace variants don't get persisted. The
-    // validator already rejected whitespace-only name/prompt; trim defensively.
+    // validator already rejects whitespace-only values; trim defensively here so
+    // padded-but-valid inputs are stored clean too (the validator only checks,
+    // it doesn't transform the args the handler receives).
+    const id = input.id?.trim() || undefined; // all-whitespace id → generate a UUID
     const name = input.name?.trim();
     const prompt = input.prompt?.trim();
-    const cron = input.cron == null ? input.cron : input.cron.trim();
-    const reuseSessionId =
-      input.reuseSessionId == null ? input.reuseSessionId : input.reuseSessionId.trim();
+    const cron = trimNullable(input.cron);
+    const reuseSessionId = trimNullable(input.reuseSessionId);
+    // model/agent are nullable overrides: trim, and coerce whitespace-only to
+    // null (a "clear") while preserving an explicit null and an absent undefined.
+    const model = normalizeOverride(input.model);
+    const agent = normalizeOverride(input.agent);
 
     // Update path: an id that resolves to an existing workflow patches it.
-    if (input.id && getWorkflow(db, input.id)) {
+    if (id && getWorkflow(db, id)) {
       const patch: WorkflowPatch = {};
       if (name !== undefined) patch.name = name;
       if (prompt !== undefined) patch.prompt = prompt;
       if (input.provider !== undefined) patch.provider = input.provider;
-      if (input.model !== undefined) patch.model = input.model;
-      if (input.agent !== undefined) patch.agent = input.agent;
+      if (model !== undefined) patch.model = model;
+      if (agent !== undefined) patch.agent = agent;
       if (input.skills !== undefined) patch.skills = input.skills;
       if (cron !== undefined) patch.cron = cron;
       if (input.enabled !== undefined) patch.enabled = input.enabled;
@@ -49,9 +71,9 @@ export function registerWorkflowHandlers(
       if (reuseSessionId !== undefined) patch.reuse_session_id = reuseSessionId;
       if (input.autonomy !== undefined) patch.autonomy = input.autonomy;
 
-      const updated = updateWorkflow(db, input.id, patch);
+      const updated = updateWorkflow(db, id, patch);
       // getWorkflow already confirmed existence, so this is non-null; guard anyway.
-      if (!updated) throw new IpcError("not_found", `Workflow not found: ${input.id}`);
+      if (!updated) throw new IpcError("not_found", `Workflow not found: ${id}`);
       return updated;
     }
 
@@ -64,13 +86,13 @@ export function registerWorkflowHandlers(
       );
     }
     return createWorkflow(db, {
-      id: input.id,
+      id,
       projectId,
       name,
       prompt,
       provider: input.provider ?? null,
-      model: input.model ?? null,
-      agent: input.agent ?? null,
+      model: model ?? null,
+      agent: agent ?? null,
       skills: input.skills ?? null,
       cron: cron ?? null,
       enabled: input.enabled,

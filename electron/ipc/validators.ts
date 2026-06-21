@@ -87,10 +87,10 @@ const createSkillSchema = z.object({
 // high-impact mutation. An unparseable cron must never reach the store (it would
 // later fail to arm), so reject it here via `croner`. `null`/absent = manual-only.
 const workflowUpsertSchema = z.object({
-  id: z.string().min(1).optional(),
-  // `.trim().min(1)` (here and on name/prompt/reuseSessionId) rejects
-  // whitespace-only values ("   ") at the boundary — `min(1)` alone only checks
-  // length, which would let a caller persist a blank id / unusable workflow.
+  // `.trim().min(1)` (on every free-text id/field below) rejects whitespace-only
+  // values ("   ") at the boundary — `min(1)` alone only checks length, which
+  // would let a caller persist a blank id / unusable workflow.
+  id: z.string().trim().min(1).optional(),
   projectId: z.string().trim().min(1).optional(),
   name: z.string().trim().min(1).optional(),
   prompt: z.string().trim().min(1).optional(),
@@ -103,8 +103,8 @@ const workflowUpsertSchema = z.object({
     .nullable()
     .optional()
     .refine((v) => v == null || isProviderId(v), { message: "is not a known provider" }),
-  model: z.string().min(1).nullable().optional(),
-  agent: z.string().min(1).nullable().optional(),
+  model: z.string().trim().min(1).nullable().optional(),
+  agent: z.string().trim().min(1).nullable().optional(),
   skills: z.array(z.string().min(1)).nullable().optional(),
   cron: z
     .string()

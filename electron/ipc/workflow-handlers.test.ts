@@ -144,6 +144,41 @@ describe("WORKFLOW_UPSERT", () => {
     expect(env.error.code).toBe("invalid_input");
   });
 
+  it("trims padded model / agent and preserves an explicit null clear", async () => {
+    const created = await call(CH.WORKFLOW_UPSERT, {
+      projectId: "proj-1",
+      name: "Overrides",
+      prompt: "p",
+      provider: "ollama",
+      model: "  llama  ",
+      agent: "  fixer  ",
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const wf = created.data as { id: string; model: string | null; agent: string | null };
+    expect(wf.model).toBe("llama");
+    expect(wf.agent).toBe("fixer");
+
+    const patched = await call(CH.WORKFLOW_UPSERT, { id: wf.id, model: null });
+    expect(patched.ok).toBe(true);
+    if (!patched.ok) return;
+    expect((patched.data as { model: string | null }).model).toBeNull();
+    expect(getWorkflow(db, wf.id)!.agent).toBe("fixer"); // untouched
+  });
+
+  it("rejects whitespace-only model / id at the boundary", async () => {
+    const badModel = await call(CH.WORKFLOW_UPSERT, {
+      projectId: "proj-1",
+      name: "x",
+      prompt: "y",
+      model: "   ",
+    });
+    expect(badModel.ok).toBe(false);
+
+    const badId = await call(CH.WORKFLOW_UPSERT, { id: "   ", projectId: "proj-1", name: "x", prompt: "y" });
+    expect(badId.ok).toBe(false);
+  });
+
   it("trims and stores normalized name / prompt / cron", async () => {
     const env = await call(CH.WORKFLOW_UPSERT, {
       projectId: "proj-1",
