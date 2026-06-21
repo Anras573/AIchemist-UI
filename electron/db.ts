@@ -69,6 +69,45 @@ const MIGRATIONS: Migration[] = [
   (db) => {
     addColumnIfMissing(db, "sessions", "provider_state", "TEXT");
   },
+  // v3 — Scheduled workflows (issue #90). Adds the `workflows` + `workflow_runs`
+  // tables backing the workflow scheduler. A workflow is a saved agent task bound
+  // to a project; a workflow_run is one execution of it. `reuse_session_id` and
+  // `workflow_runs.session_id` are deliberately FK-free: deleting a session must
+  // not cascade-delete a workflow or its run history.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workflows (
+          id               TEXT PRIMARY KEY,
+          project_id       TEXT NOT NULL,
+          name             TEXT NOT NULL,
+          prompt           TEXT NOT NULL,
+          provider         TEXT,
+          model            TEXT,
+          agent            TEXT,
+          skills           TEXT,            -- JSON array of skill names
+          cron             TEXT,            -- NULL = manual-only workflow
+          enabled          INTEGER NOT NULL DEFAULT 1,
+          session_strategy TEXT NOT NULL DEFAULT 'fresh',  -- 'fresh' | 'reuse'
+          reuse_session_id TEXT,
+          autonomy         TEXT NOT NULL DEFAULT 'interactive',  -- 'interactive' | 'autonomous'
+          created_at       TEXT NOT NULL,
+          last_run_at      TEXT,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_runs (
+          id          TEXT PRIMARY KEY,
+          workflow_id TEXT NOT NULL,
+          session_id  TEXT,
+          status      TEXT NOT NULL,        -- 'running' | 'success' | 'error' | 'skipped'
+          trigger     TEXT NOT NULL,        -- 'cron' | 'manual'
+          started_at  TEXT NOT NULL,
+          ended_at    TEXT,
+          error       TEXT,
+          FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+      );
+    `);
+  },
 ];
 
 /**

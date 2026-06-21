@@ -29,12 +29,18 @@ const EXPECTED_SESSION_COLUMNS = [
   "provider_state",
 ];
 
+function tableNames(db: Database.Database): string[] {
+  return (
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]
+  ).map((t) => t.name);
+}
+
 describe("migrate", () => {
   it("brings a fresh database to the latest version with every column", () => {
     const db = new Database(":memory:");
     migrate(db);
 
-    expect(userVersion(db)).toBe(2);
+    expect(userVersion(db)).toBe(3);
     const cols = columnNames(db, "sessions");
     for (const c of EXPECTED_SESSION_COLUMNS) {
       expect(cols).toContain(c);
@@ -42,20 +48,45 @@ describe("migrate", () => {
     expect(columnNames(db, "messages")).toContain("agent");
   });
 
+  it("creates the workflows + workflow_runs tables at v3", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+
+    const tables = tableNames(db);
+    expect(tables).toContain("workflows");
+    expect(tables).toContain("workflow_runs");
+
+    for (const c of [
+      "project_id",
+      "prompt",
+      "cron",
+      "enabled",
+      "session_strategy",
+      "reuse_session_id",
+      "autonomy",
+      "last_run_at",
+    ]) {
+      expect(columnNames(db, "workflows")).toContain(c);
+    }
+    for (const c of ["workflow_id", "status", "trigger", "started_at", "ended_at", "error"]) {
+      expect(columnNames(db, "workflow_runs")).toContain(c);
+    }
+  });
+
   it("is idempotent — running twice does not error or change the version", () => {
     const db = new Database(":memory:");
     migrate(db);
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(2);
+    expect(userVersion(db)).toBe(3);
   });
 
   it("does not throw when provider_state already exists below user_version 2", () => {
     const db = new Database(":memory:");
-    migrate(db); // brings it to v2 with provider_state present
+    migrate(db); // brings it to the latest version with provider_state present
     // Simulate a dev build / partial migration: column exists but version rewound.
     db.exec("PRAGMA user_version = 1;");
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(2);
+    expect(userVersion(db)).toBe(3);
   });
 
   it("upgrades a legacy database (columns present, user_version 0) without error", () => {
@@ -80,8 +111,9 @@ describe("migrate", () => {
 
     expect(() => migrate(db)).not.toThrow();
 
-    expect(userVersion(db)).toBe(2);
+    expect(userVersion(db)).toBe(3);
     expect(columnNames(db, "sessions")).toContain("provider_state");
+    expect(tableNames(db)).toContain("workflows");
     // Existing data is preserved, including the legacy copilot id used as a dead read.
     const row = db.prepare("SELECT copilot_session_id, provider_state FROM sessions WHERE id = ?").get("s1") as {
       copilot_session_id: string | null;
