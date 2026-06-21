@@ -270,6 +270,10 @@ export class WorkflowScheduler {
   /** Arm a single workflow. Assumes the row is enabled and has a cron. */
   private arm(wf: Workflow): void {
     if (!wf.cron) return;
+    // Stop any job already armed for this id before replacing it, so arm() (and
+    // therefore start()) is idempotent and can never leave a duplicate timer
+    // firing for the same workflow.
+    this.cancel(wf.id);
     try {
       // `new Cron(pattern, fn)` arms immediately and fires forward-only.
       const job = new Cron(wf.cron, () => {

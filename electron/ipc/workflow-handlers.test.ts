@@ -53,6 +53,11 @@ beforeEach(() => {
     new Date().toISOString()
   );
   const scheduler = new WorkflowScheduler({ db, activeTurns: new Set<string>(), getMainWindow: () => null });
+  // This suite focuses on IPC validation/envelopes, not scheduler arming (covered
+  // in workflow-scheduler.test.ts). Stub rearm() so upsert payloads with a cron
+  // ("0 9 * * *") don't arm real croner timers that would leak open handles or
+  // fire later against the closed in-memory DB. runNow/delete stay real.
+  vi.spyOn(scheduler, "rearm").mockImplementation(() => {});
   registerWorkflowHandlers(db, scheduler);
 });
 
