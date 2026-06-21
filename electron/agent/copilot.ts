@@ -542,12 +542,14 @@ export async function runCopilotAgentTurn(params: {
   // agent files.
   let agentModelOverride: string | undefined;
 
-  if (agent) {
-    const selected = resolveSelectedAgent(agent, projectPath);
-    agentModelOverride = selected.model;
-    if (!selected.body) {
-      console.warn(`[copilot] Agent "${agent}" not found — running without custom system prompt`);
-    }
+  // Resolve the selected agent (if any) up front so its `model:` override is
+  // honoured even when the body can't be loaded.
+  const selected = agent ? resolveSelectedAgent(agent, projectPath) : null;
+  agentModelOverride = selected?.model;
+
+  if (selected?.body) {
+    // Agent found → its instructions ARE the primary context (replace mode), with
+    // skills + memory + the ask_user instruction appended.
     const composed = composeCopilotSystemMessage({
       agentBody: selected.body,
       skillsContext,
@@ -556,6 +558,13 @@ export async function runCopilotAgentTurn(params: {
     systemMessageContent = composed.content;
     systemMessageMode = composed.mode;
   } else {
+    // No agent selected, OR a selected agent that couldn't be resolved. Either
+    // way, degrade to the default path so oneshot skills and configured Copilot
+    // sub-agents are still injected (via customAgents) rather than silently
+    // dropped — a missing agent should behave like "no agent selected".
+    if (agent) {
+      console.warn(`[copilot] Agent "${agent}" not found — falling back to the default system prompt`);
+    }
     customAgents = toCustomAgentConfigs(projectPath);
     if (skillsContext) {
       if (customAgents.length > 0) {
