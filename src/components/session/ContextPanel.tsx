@@ -239,7 +239,8 @@ export function ContextPanel({
   const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
   const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
   // Effective provider (session lock, falling back to the project default for
-  // legacy null-provider sessions) gates the Memory tab's file viewer.
+  // legacy null-provider sessions). Used to reset the Memory file viewer when the
+  // active session's provider changes (each provider resolves its own store).
   const memoryProvider = useActiveSessionProvider();
   const [viewingFile, setViewingFile] = useState<string | null>(null);
   const [viewingMemoryFile, setViewingMemoryFile] = useState<string | null>(null);
@@ -263,20 +264,16 @@ export function ContextPanel({
   // ContextPanel is not remounted across session/workspace/provider changes, so
   // reset the viewer state when any of them change — otherwise a stale file view
   // (header, back button) can carry over from the previous session, or a memory
-  // file viewed under a memory-capable provider can resurface after the
-  // (legacy-session) provider flips to/from Copilot, which gates the viewer off.
+  // file viewed under one provider's store can resurface after the (legacy-session)
+  // provider flips and resolves to a different store.
   useEffect(() => {
     setViewingFile(null);
     setViewingMemoryFile(null);
   }, [activeSessionId, sessionPath, memoryProvider]);
 
-  // Header content depends on whether we're viewing a file. Bake the Copilot
-  // memory gate into isViewingMemory so the header (back button + title) stays
-  // in sync with the body, which renders the placeholder rather than the viewer
-  // for providers without a memory store.
+  // Header content depends on whether we're viewing a file.
   const isViewingFile = activeTab === "files" && viewingFile !== null;
-  const isViewingMemory =
-    activeTab === "memory" && viewingMemoryFile !== null && memoryProvider !== "copilot";
+  const isViewingMemory = activeTab === "memory" && viewingMemoryFile !== null;
   const fileName = (isViewingMemory ? viewingMemoryFile : viewingFile)?.split("/").pop() ?? "";
   const headerLabel =
     isViewingFile || isViewingMemory
@@ -349,9 +346,9 @@ export function ContextPanel({
         ) : activeTab === "mcp" ? (
           <McpServersPanel />
         ) : activeTab === "memory" ? (
-          // MemoryPanel owns the per-provider placeholder (e.g. Copilot has no
-          // store yet); isViewingMemory already excludes gated providers, so the
-          // viewer only shows for providers that have a store.
+          // MemoryPanel lists the per-provider store; selecting a file shows it
+          // in the viewer. Every provider now resolves a store, so there is no
+          // per-provider placeholder.
           isViewingMemory ? (
             <MemoryFileViewer filePath={viewingMemoryFile!} />
           ) : (

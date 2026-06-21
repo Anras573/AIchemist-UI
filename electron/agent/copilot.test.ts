@@ -9,7 +9,7 @@ vi.mock("./claude", () => ({
   readAgentFileSystemPrompt: vi.fn(() => agentFileMock.result),
 }));
 
-import { resolveSelectedAgent } from "./copilot";
+import { composeCopilotSystemMessage, resolveSelectedAgent } from "./copilot";
 
 const tempProjects: string[] = [];
 
@@ -71,5 +71,70 @@ describe("copilot resolveSelectedAgent", () => {
   it("returns a null body when the agent is not found in either location", () => {
     const projectPath = makeTempProject();
     expect(resolveSelectedAgent("ghost", projectPath)).toEqual({ body: null, model: undefined });
+  });
+});
+
+describe("composeCopilotSystemMessage", () => {
+  const MEMORY_BLOCK = "\n\n---\n# Project Memory\n\n## Memory: notes.md\n\nuse bun";
+
+  it("uses replace mode and includes agent body, skills, and memory when an agent body is set", () => {
+    const { content, mode } = composeCopilotSystemMessage({
+      agentBody: "Be a careful coder.",
+      skillsContext: "\n\n## Skill: lint",
+      memoryContext: MEMORY_BLOCK,
+    });
+
+    expect(mode).toBe("replace");
+    expect(content).toContain("Be a careful coder.");
+    expect(content).toContain("## Skill: lint");
+    expect(content).toContain(MEMORY_BLOCK);
+    // Memory + ask_user tool guidance are always present.
+    expect(content).toContain("write_memory");
+    expect(content).toContain("ask_user");
+    // The agent body leads, the saved-notes block trails.
+    expect(content.indexOf("Be a careful coder.")).toBeLessThan(content.indexOf(MEMORY_BLOCK));
+  });
+
+  it("uses append mode and omits skills (those go via customAgents) when no agent body is set", () => {
+    const { content, mode } = composeCopilotSystemMessage({
+      agentBody: null,
+      skillsContext: "\n\n## Skill: lint",
+      memoryContext: MEMORY_BLOCK,
+    });
+
+    expect(mode).toBe("append");
+    expect(content).not.toContain("## Skill: lint");
+    expect(content).toContain(MEMORY_BLOCK);
+    expect(content).toContain("write_memory");
+    expect(content).toContain("ask_user");
+  });
+
+  it("still mentions the memory tools even when no notes have been saved yet", () => {
+    const { content } = composeCopilotSystemMessage({
+      agentBody: null,
+      skillsContext: "",
+      memoryContext: "",
+    });
+
+    // The saved-notes block is empty, but the standing instruction must remain so
+    // the model knows it can start persisting memory.
+    expect(content).toContain("write_memory");
+    expect(content).toContain("read_memory");
+    expect(content).toContain("delete_memory");
+  });
+
+  it("drops tool guidance but keeps the read-only memory block in noTools turns", () => {
+    const { content } = composeCopilotSystemMessage({
+      agentBody: null,
+      skillsContext: "",
+      memoryContext: MEMORY_BLOCK,
+      noTools: true,
+    });
+
+    // Text-only generation turns have no tools, so don't tell the model to call
+    // them — but the saved notes are still useful context.
+    expect(content).not.toContain("write_memory");
+    expect(content).not.toContain("ask_user");
+    expect(content).toContain(MEMORY_BLOCK);
   });
 });

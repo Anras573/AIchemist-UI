@@ -136,18 +136,23 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     const provider = typeof args === "string" ? undefined : args.provider;
     if (!projectPath) return { files: [] as Array<{ name: string; path: string }> };
     try {
-      // Self-driven providers (Ollama, OpenAI-compatible) use AIchemist's own
-      // store at ~/.aichemist/memory/<cwd>. Go through listMemoryFiles so the
-      // memory module's safety checks (symlinked-dir-chain refusal, regular-file
+      // The non-Claude providers (Ollama, OpenAI-compatible, Copilot) all use
+      // AIchemist's own store at ~/.aichemist/memory/<cwd> — memory is portable
+      // across providers for a project. Go through listMemoryFiles so the memory
+      // module's safety checks (symlinked-dir-chain refusal, regular-file
       // filtering) apply — a raw readdir could surface symlinked .md entries that
       // READ_FILE would then follow to arbitrary paths.
-      if (provider === "ollama" || provider === "openai-compatible") {
+      if (
+        provider === "ollama" ||
+        provider === "openai-compatible" ||
+        provider === "copilot"
+      ) {
         return { files: listMemoryFiles(projectPath) };
       }
       // Only Claude has an SDK-owned store (under ~/.claude/projects/<cwd>/memory);
       // the bare-string / unset form is treated as Claude for back-compat. Any
-      // other provider (e.g. Copilot) has no store yet — return empty rather than
-      // falling through, which would surface Claude memory for a non-Claude caller.
+      // other (unknown) provider returns empty rather than falling through, which
+      // would surface Claude memory for a non-Claude caller.
       if (provider !== undefined && provider !== "anthropic") {
         return { files: [] };
       }
