@@ -146,6 +146,21 @@ describe("updateWorkflow", () => {
     expect(updateWorkflow(db, wf.id, { skills: [] })!.skills).toBeNull();
   });
 
+  it("ignores explicit undefined in the patch (keeps required fields)", () => {
+    const wf = createWorkflow(db, { projectId: "proj-1", name: "keep", prompt: "p" });
+    // An explicit undefined must not overwrite a required column (would throw on bind).
+    const updated = updateWorkflow(db, wf.id, { name: undefined, cron: "0 9 * * *" })!;
+    expect(updated.name).toBe("keep");
+    expect(updated.cron).toBe("0 9 * * *");
+    expect(getWorkflow(db, wf.id)!.name).toBe("keep");
+  });
+
+  it("applies an explicit null to a nullable field", () => {
+    const wf = createWorkflow(db, { projectId: "proj-1", name: "x", prompt: "p", cron: "0 9 * * *" });
+    expect(updateWorkflow(db, wf.id, { cron: null })!.cron).toBeNull();
+    expect(getWorkflow(db, wf.id)!.cron).toBeNull();
+  });
+
   it("returns null for an unknown id", () => {
     expect(updateWorkflow(db, "missing", { name: "x" })).toBeNull();
   });
@@ -239,9 +254,20 @@ describe("workflow run lifecycle", () => {
     createWorkflowRun(db, { workflowId: wf.id, trigger: "manual", id: "r1" });
     createWorkflowRun(db, { workflowId: wf.id, trigger: "cron", id: "r2" });
 
-    const runs = listWorkflowRuns(db, wf.id);
-    // Both share the same ISO second is possible; assert set membership + count.
-    expect(runs).toHaveLength(2);
-    expect(runs.map((r) => r.id).sort()).toEqual(["r1", "r2"]);
+    // Pin started_at so ordering is deterministic — creation timestamps can
+    // collide within the same millisecond in fast tests. r2 is the more recent.
+    db.prepare("UPDATE workflow_runs SET started_at = ? WHERE id = ?").run("2026-06-21T00:00:00.000Z", "r1");
+    db.prepare("UPDATE workflow_runs SET started_at = ? WHERE id = ?").run("2026-06-21T01:00:00.000Z", "r2");
+
+    expect(listWorkflowRuns(db, wf.id).map((r) => r.id)).toEqual(["r2", "r1"]);
+  });
+
+  it("clears the error message for non-error terminal statuses", () => {
+    const wf = createWorkflow(db, { projectId: "proj-1", name: "x", prompt: "p" });
+    const run = createWorkflowRun(db, { workflowId: wf.id, trigger: "cron" });
+
+    // A caller that accidentally passes a message on success must not persist it.
+    finishWorkflowRun(db, run.id, "success", "ignored");
+    expect(listWorkflowRuns(db, wf.id)[0].error).toBeNull();
   });
 });

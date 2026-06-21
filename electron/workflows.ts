@@ -35,7 +35,16 @@ function parseJsonStringArray(raw: string | null | undefined): string[] | null {
 
 function serializeSkills(skills: string[] | null | undefined): string | null {
   if (!skills || skills.length === 0) return null;
-  const cleaned = [...new Set(skills.filter((s) => typeof s === "string" && s.length > 0))];
+  // Trim before filtering so whitespace-only names ("  ") don't survive as
+  // "real" skills and produce odd lookup paths (.../skills/ /SKILL.md).
+  const cleaned = [
+    ...new Set(
+      skills
+        .filter((s): s is string => typeof s === "string")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+    ),
+  ];
   return cleaned.length > 0 ? JSON.stringify(cleaned) : null;
 }
 
@@ -193,13 +202,20 @@ export function updateWorkflow(db: Database, id: string, patch: WorkflowPatch): 
   const existing = getWorkflow(db, id);
   if (!existing) return null;
 
+  // Only apply keys that were explicitly provided. `null` is a legitimate value
+  // for nullable columns, but an `undefined` in the patch must not overwrite a
+  // required field (it would bind as undefined and throw in better-sqlite3).
+  const defined = Object.fromEntries(
+    Object.entries(patch).filter(([, v]) => v !== undefined)
+  ) as WorkflowPatch;
+
   const next: Workflow = {
     ...existing,
-    ...patch,
+    ...defined,
     // skills is stored serialized; re-normalize whatever the patch passed.
     skills:
-      patch.skills !== undefined
-        ? parseJsonStringArray(serializeSkills(patch.skills))
+      defined.skills !== undefined
+        ? parseJsonStringArray(serializeSkills(defined.skills))
         : existing.skills,
   };
 
@@ -315,9 +331,12 @@ export function finishWorkflowRun(
   status: Exclude<WorkflowRunStatus, "running">,
   error?: string | null
 ): void {
+  // Only an "error" run carries an error message; clear it for every other
+  // terminal status so a stray/reused argument can't leave stale error text.
+  const errorText = status === "error" ? (error ?? null) : null;
   db.prepare(
     "UPDATE workflow_runs SET status = ?, ended_at = ?, error = ? WHERE id = ?"
-  ).run(status, nowIso(), error ?? null, id);
+  ).run(status, nowIso(), errorText, id);
 }
 
 /** Attach (or update) the session a run executed in. */
