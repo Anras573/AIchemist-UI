@@ -88,6 +88,18 @@ describe("createWorkflow", () => {
     expect(getWorkflow(db, wf.id)!.skills).toBeNull();
   });
 
+  it("drops reuse_session_id on a non-reuse (fresh) workflow", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "x",
+      prompt: "y",
+      sessionStrategy: "fresh",
+      reuseSessionId: "sess-stale",
+    });
+    expect(wf.reuse_session_id).toBeNull();
+    expect(getWorkflow(db, wf.id)!.reuse_session_id).toBeNull();
+  });
+
   it("rejects a workflow for a non-existent project (FK enforced)", () => {
     expect(() =>
       createWorkflow(db, { projectId: "nope", name: "x", prompt: "y" })
@@ -159,6 +171,21 @@ describe("updateWorkflow", () => {
     const wf = createWorkflow(db, { projectId: "proj-1", name: "x", prompt: "p", cron: "0 9 * * *" });
     expect(updateWorkflow(db, wf.id, { cron: null })!.cron).toBeNull();
     expect(getWorkflow(db, wf.id)!.cron).toBeNull();
+  });
+
+  it("clears reuse_session_id when switching from reuse to fresh", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "x",
+      prompt: "p",
+      sessionStrategy: "reuse",
+      reuseSessionId: "sess-7",
+    });
+    expect(wf.reuse_session_id).toBe("sess-7");
+
+    const updated = updateWorkflow(db, wf.id, { session_strategy: "fresh" })!;
+    expect(updated.reuse_session_id).toBeNull();
+    expect(getWorkflow(db, wf.id)!.reuse_session_id).toBeNull();
   });
 
   it("returns null for an unknown id", () => {

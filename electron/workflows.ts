@@ -115,6 +115,9 @@ export function createWorkflow(db: Database, input: CreateWorkflowInput): Workfl
   const enabled = input.enabled ?? true;
   const sessionStrategy = input.sessionStrategy ?? "fresh";
   const autonomy = input.autonomy ?? "interactive";
+  // reuse_session_id is only meaningful for the "reuse" strategy — never persist
+  // one on a "fresh" workflow, even if the caller passed it.
+  const reuseSessionId = sessionStrategy === "reuse" ? input.reuseSessionId ?? null : null;
 
   db.prepare(
     `INSERT INTO workflows
@@ -132,7 +135,7 @@ export function createWorkflow(db: Database, input: CreateWorkflowInput): Workfl
     input.cron ?? null,
     enabled ? 1 : 0,
     sessionStrategy,
-    input.reuseSessionId ?? null,
+    reuseSessionId,
     autonomy,
     createdAt
   );
@@ -149,7 +152,7 @@ export function createWorkflow(db: Database, input: CreateWorkflowInput): Workfl
     cron: input.cron ?? null,
     enabled,
     session_strategy: sessionStrategy,
-    reuse_session_id: input.reuseSessionId ?? null,
+    reuse_session_id: reuseSessionId,
     autonomy,
     created_at: createdAt,
     last_run_at: null,
@@ -218,6 +221,13 @@ export function updateWorkflow(db: Database, id: string, patch: WorkflowPatch): 
         ? parseJsonStringArray(serializeSkills(defined.skills))
         : existing.skills,
   };
+
+  // Keep the row self-consistent: reuse_session_id is only valid under the
+  // "reuse" strategy. Switching to "fresh" (or setting an id without the
+  // strategy) must not leave a stale id the scheduler could later resume.
+  if (next.session_strategy !== "reuse") {
+    next.reuse_session_id = null;
+  }
 
   db.prepare(
     `UPDATE workflows SET
