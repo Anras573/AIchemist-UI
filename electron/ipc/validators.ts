@@ -88,10 +88,10 @@ const createSkillSchema = z.object({
 // later fail to arm), so reject it here via `croner`. `null`/absent = manual-only.
 const workflowUpsertSchema = z.object({
   id: z.string().min(1).optional(),
-  projectId: z.string().min(1).optional(),
-  // `.trim().min(1)` rejects whitespace-only values ("   ") — `min(1)` alone only
-  // checks length, which would let a caller patch a workflow into an unusable
-  // state (a blank name, or an effectively-empty prompt the scheduler then runs).
+  // `.trim().min(1)` (here and on name/prompt/reuseSessionId) rejects
+  // whitespace-only values ("   ") at the boundary — `min(1)` alone only checks
+  // length, which would let a caller persist a blank id / unusable workflow.
+  projectId: z.string().trim().min(1).optional(),
   name: z.string().trim().min(1).optional(),
   prompt: z.string().trim().min(1).optional(),
   // Re-validate the provider against the canonical PROVIDER_IDS list (matching
@@ -113,7 +113,7 @@ const workflowUpsertSchema = z.object({
     .refine((v) => v == null || isValidCron(v), { message: "is not a valid cron expression" }),
   enabled: z.boolean().optional(),
   sessionStrategy: z.enum(["fresh", "reuse"]).optional(),
-  reuseSessionId: z.string().min(1).nullable().optional(),
+  reuseSessionId: z.string().trim().min(1).nullable().optional(),
   autonomy: z.enum(["interactive", "autonomous"]).optional(),
 });
 

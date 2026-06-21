@@ -121,6 +121,17 @@ describe("WORKFLOW_UPSERT", () => {
     expect(env.error.code).toBe("invalid_input");
   });
 
+  it("rejects a whitespace-only projectId at the boundary", async () => {
+    const env = await call(CH.WORKFLOW_UPSERT, {
+      projectId: "   ",
+      name: "ok",
+      prompt: "ok",
+    });
+    expect(env.ok).toBe(false);
+    if (env.ok) return;
+    expect(env.error.code).toBe("invalid_input");
+  });
+
   it("rejects an unknown provider", async () => {
     const env = await call(CH.WORKFLOW_UPSERT, {
       projectId: "proj-1",

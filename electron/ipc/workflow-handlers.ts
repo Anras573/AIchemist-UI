@@ -31,6 +31,8 @@ export function registerWorkflowHandlers(
     const name = input.name?.trim();
     const prompt = input.prompt?.trim();
     const cron = input.cron == null ? input.cron : input.cron.trim();
+    const reuseSessionId =
+      input.reuseSessionId == null ? input.reuseSessionId : input.reuseSessionId.trim();
 
     // Update path: an id that resolves to an existing workflow patches it.
     if (input.id && getWorkflow(db, input.id)) {
@@ -44,7 +46,7 @@ export function registerWorkflowHandlers(
       if (cron !== undefined) patch.cron = cron;
       if (input.enabled !== undefined) patch.enabled = input.enabled;
       if (input.sessionStrategy !== undefined) patch.session_strategy = input.sessionStrategy;
-      if (input.reuseSessionId !== undefined) patch.reuse_session_id = input.reuseSessionId;
+      if (reuseSessionId !== undefined) patch.reuse_session_id = reuseSessionId;
       if (input.autonomy !== undefined) patch.autonomy = input.autonomy;
 
       const updated = updateWorkflow(db, input.id, patch);
@@ -73,7 +75,7 @@ export function registerWorkflowHandlers(
       cron: cron ?? null,
       enabled: input.enabled,
       sessionStrategy: input.sessionStrategy,
-      reuseSessionId: input.reuseSessionId ?? null,
+      reuseSessionId: reuseSessionId ?? null,
       autonomy: input.autonomy,
     });
   });
