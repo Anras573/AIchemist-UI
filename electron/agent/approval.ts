@@ -41,9 +41,10 @@ export function getPendingApprovalData(
  *
  * In `nonInteractive` mode (unattended workflow runs) there is no renderer to
  * answer, so an un-allowlisted approval would hang the full timeout then fail.
- * Instead it resolves immediately as denied with a recorded reason — the caller
- * (`requiresApproval`) has already cleared anything the project/session
+ * Instead it logs a warning and resolves immediately as denied (`false`) — the
+ * caller (`requiresApproval`) has already cleared anything the project/session
  * allowlist trusts, so reaching here means the tool genuinely isn't trusted.
+ * The caller records the denial reason in the transcript / tool_calls row.
  */
 export function requestApproval(
   webContents: Electron.WebContents,

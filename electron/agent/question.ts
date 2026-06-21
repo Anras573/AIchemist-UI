@@ -37,9 +37,9 @@ export function cancelSessionQuestions(sessionId: string): void {
  * Auto-resolves with an empty string after 5 minutes if unanswered.
  *
  * In `nonInteractive` mode (unattended workflow runs) there is no renderer to
- * answer, so `ask_user` would hang the full timeout. Instead it resolves
- * immediately with an empty answer and a recorded reason, letting the agent
- * continue (it surfaces "(no answer provided)") rather than blocking.
+ * answer, so `ask_user` would hang the full timeout. Instead it logs a warning
+ * and resolves immediately with an empty answer, letting the agent continue
+ * (it surfaces "(no answer provided)") rather than blocking.
  */
 export function requestQuestion(
   webContents: Electron.WebContents,
