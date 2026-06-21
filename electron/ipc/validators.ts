@@ -13,7 +13,7 @@ import { z } from "zod";
 import type { RequestChannel } from "../ipc-contract";
 import * as CH from "../ipc-channels";
 import { IpcError } from "./errors";
-import { isValidCron } from "../agent/workflow-scheduler";
+import { isValidCron } from "../cron";
 import { isProviderId } from "../providers";
 
 /** Parses `schema` against `value`, rethrowing zod issues as a structured IpcError. */
@@ -105,7 +105,7 @@ const workflowUpsertSchema = z.object({
     .refine((v) => v == null || isProviderId(v), { message: "is not a known provider" }),
   model: z.string().trim().min(1).nullable().optional(),
   agent: z.string().trim().min(1).nullable().optional(),
-  skills: z.array(z.string().min(1)).nullable().optional(),
+  skills: z.array(z.string().trim().min(1)).nullable().optional(),
   cron: z
     .string()
     .nullable()
