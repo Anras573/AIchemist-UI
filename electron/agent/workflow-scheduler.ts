@@ -57,9 +57,18 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-/** Whether a session id still resolves to a row (a reuse session may be deleted). */
-function sessionExists(db: Database, sessionId: string): boolean {
-  return !!db.prepare("SELECT 1 FROM sessions WHERE id = ?").get(sessionId);
+/**
+ * Whether a session id still resolves to a row that belongs to `projectId`. A
+ * reuse session may have been deleted, or a caller may have pointed
+ * `reuse_session_id` at a session in another project (e.g. via WORKFLOW_UPSERT);
+ * either way it must not be reused, or the turn would run against the wrong
+ * project's path / worktree / config instead of the workflow's `project_id`.
+ */
+function sessionInProject(db: Database, sessionId: string, projectId: string): boolean {
+  const row = db.prepare("SELECT project_id FROM sessions WHERE id = ?").get(sessionId) as
+    | { project_id: string }
+    | undefined;
+  return row?.project_id === projectId;
 }
 
 /**
@@ -92,7 +101,7 @@ export async function runWorkflow(
   let sessionId: string;
   if (workflow.session_strategy === "reuse") {
     const reuseId = workflow.reuse_session_id;
-    if (reuseId && sessionExists(db, reuseId)) {
+    if (reuseId && sessionInProject(db, reuseId, workflow.project_id)) {
       sessionId = reuseId;
       // A long-lived reuse session may be mid-turn (a user turn or a prior run).
       // Don't stack — record this fire as skipped.

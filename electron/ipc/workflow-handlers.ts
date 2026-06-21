@@ -25,16 +25,23 @@ export function registerWorkflowHandlers(
   const queue: TurnQueueContext = { db, activeTurns, getMainWindow };
 
   handle(CH.WORKFLOW_UPSERT, (_event, input: WorkflowUpsertInput): Workflow => {
+    // Normalize free-text fields so whitespace-only values can't slip past the
+    // emptiness checks and stale whitespace variants don't get persisted. The
+    // validator already rejected whitespace-only name/prompt; trim defensively.
+    const name = input.name?.trim();
+    const prompt = input.prompt?.trim();
+    const cron = input.cron == null ? input.cron : input.cron.trim();
+
     // Update path: an id that resolves to an existing workflow patches it.
     if (input.id && getWorkflow(db, input.id)) {
       const patch: WorkflowPatch = {};
-      if (input.name !== undefined) patch.name = input.name;
-      if (input.prompt !== undefined) patch.prompt = input.prompt;
+      if (name !== undefined) patch.name = name;
+      if (prompt !== undefined) patch.prompt = prompt;
       if (input.provider !== undefined) patch.provider = input.provider;
       if (input.model !== undefined) patch.model = input.model;
       if (input.agent !== undefined) patch.agent = input.agent;
       if (input.skills !== undefined) patch.skills = input.skills;
-      if (input.cron !== undefined) patch.cron = input.cron;
+      if (cron !== undefined) patch.cron = cron;
       if (input.enabled !== undefined) patch.enabled = input.enabled;
       if (input.sessionStrategy !== undefined) patch.session_strategy = input.sessionStrategy;
       if (input.reuseSessionId !== undefined) patch.reuse_session_id = input.reuseSessionId;
@@ -46,8 +53,9 @@ export function registerWorkflowHandlers(
       return updated;
     }
 
-    // Create path: projectId, name, and prompt are required.
-    if (!input.projectId || !input.name || !input.prompt) {
+    // Create path: projectId, name, and prompt are required (non-empty).
+    const projectId = input.projectId?.trim();
+    if (!projectId || !name || !prompt) {
       throw new IpcError(
         "invalid_input",
         "Creating a workflow requires projectId, name, and prompt"
@@ -55,14 +63,14 @@ export function registerWorkflowHandlers(
     }
     return createWorkflow(db, {
       id: input.id,
-      projectId: input.projectId,
-      name: input.name,
-      prompt: input.prompt,
+      projectId,
+      name,
+      prompt,
       provider: input.provider ?? null,
       model: input.model ?? null,
       agent: input.agent ?? null,
       skills: input.skills ?? null,
-      cron: input.cron ?? null,
+      cron: cron ?? null,
       enabled: input.enabled,
       sessionStrategy: input.sessionStrategy,
       reuseSessionId: input.reuseSessionId ?? null,

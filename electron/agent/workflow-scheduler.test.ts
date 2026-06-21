@@ -184,6 +184,37 @@ describe("runWorkflow", () => {
     cleanupSessionQueueState(session.id);
   });
 
+  it("does not reuse a session from another project (creates a fresh one in-project)", async () => {
+    // A reuse_session_id pointing at a different project's session must not be
+    // honored — the run would otherwise execute against the wrong project.
+    const projectDir2 = fs.mkdtempSync(path.join(os.tmpdir(), "wf-sched-p2-"));
+    db.prepare("INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)").run(
+      "proj-2",
+      "Project Two",
+      projectDir2,
+      new Date().toISOString()
+    );
+    const foreign = createSession(db, "proj-2", "ollama", "llama");
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Cross-project",
+      prompt: "work",
+      provider: "ollama",
+      sessionStrategy: "reuse",
+      reuseSessionId: foreign.id,
+    });
+
+    const run = await runWorkflow(makeCtx(), wf.id, "manual");
+
+    expect(run.status).toBe("success");
+    expect(run.session_id).not.toBe(foreign.id);
+    // A new in-project reuse session was created and persisted.
+    expect(getSession(db, run.session_id!).project_id).toBe("proj-1");
+    expect(getWorkflow(db, wf.id)!.reuse_session_id).toBe(run.session_id);
+
+    cleanupSessionQueueState(run.session_id!);
+  });
+
   it("throws for an unknown workflow id", async () => {
     await expect(runWorkflow(makeCtx(), "nope", "manual")).rejects.toThrow(/not found/i);
   });

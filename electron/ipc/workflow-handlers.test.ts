@@ -109,6 +109,35 @@ describe("WORKFLOW_UPSERT", () => {
     if (env.ok) return;
     expect(env.error.code).toBe("invalid_input");
   });
+
+  it("rejects whitespace-only name / prompt", async () => {
+    const env = await call(CH.WORKFLOW_UPSERT, {
+      projectId: "proj-1",
+      name: "   ",
+      prompt: "real",
+    });
+    expect(env.ok).toBe(false);
+    if (env.ok) return;
+    expect(env.error.code).toBe("invalid_input");
+  });
+
+  it("trims and stores normalized name / prompt / cron", async () => {
+    const env = await call(CH.WORKFLOW_UPSERT, {
+      projectId: "proj-1",
+      name: "  Padded  ",
+      prompt: "  do work  ",
+      cron: "  0 9 * * *  ",
+    });
+    expect(env.ok).toBe(true);
+    if (!env.ok) return;
+    const wf = env.data as { id: string; name: string; prompt: string; cron: string | null };
+    expect(wf.name).toBe("Padded");
+    expect(wf.prompt).toBe("do work");
+    expect(wf.cron).toBe("0 9 * * *");
+    const stored = getWorkflow(db, wf.id)!;
+    expect(stored.name).toBe("Padded");
+    expect(stored.cron).toBe("0 9 * * *");
+  });
 });
 
 // ─── WORKFLOW_RUN_NOW ────────────────────────────────────────────────────────────

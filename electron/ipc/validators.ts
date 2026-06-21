@@ -88,8 +88,11 @@ const createSkillSchema = z.object({
 const workflowUpsertSchema = z.object({
   id: z.string().min(1).optional(),
   projectId: z.string().min(1).optional(),
-  name: z.string().min(1).optional(),
-  prompt: z.string().optional(),
+  // `.trim().min(1)` rejects whitespace-only values ("   ") — `min(1)` alone only
+  // checks length, which would let a caller patch a workflow into an unusable
+  // state (a blank name, or an effectively-empty prompt the scheduler then runs).
+  name: z.string().trim().min(1).optional(),
+  prompt: z.string().trim().min(1).optional(),
   provider: z.string().min(1).nullable().optional(),
   model: z.string().min(1).nullable().optional(),
   agent: z.string().min(1).nullable().optional(),
