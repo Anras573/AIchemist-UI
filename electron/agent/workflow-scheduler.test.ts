@@ -252,6 +252,32 @@ describe("runWorkflow", () => {
     cleanupSessionQueueState(run.session_id!);
   });
 
+  it("fires the onRunUpdated hook on running then skipped for an overlapping run", async () => {
+    const session = createSession(db, "proj-1", "ollama", "llama");
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Overlap hooks",
+      prompt: "work",
+      provider: "ollama",
+      sessionStrategy: "reuse",
+      reuseSessionId: session.id,
+    });
+    const ctx = makeCtx();
+    ctx.activeTurns.add(session.id); // session busy → the fire is skipped
+
+    const updates: string[] = [];
+    const hooks: WorkflowRunHooks = { onRunUpdated: (run) => updates.push(run.status) };
+
+    const run = await runWorkflow(ctx, wf.id, "cron", hooks);
+
+    expect(run.status).toBe("skipped");
+    // The skipped path still goes through running → terminal, per the contract.
+    expect(updates).toEqual(["running", "skipped"]);
+    expect(runMock).not.toHaveBeenCalled();
+
+    cleanupSessionQueueState(session.id);
+  });
+
   it("does not let a throwing onRunUpdated hook fail the run", async () => {
     const hooks: WorkflowRunHooks = {
       onRunUpdated: () => {
@@ -312,6 +338,29 @@ describe("WorkflowScheduler", () => {
 
     scheduler.stopAll();
     expect(scheduler.armedCount).toBe(0);
+  });
+
+  it("start() is idempotent — a second call disarms now-disabled workflows", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Re-evaluated",
+      prompt: "p",
+      cron: "0 9 * * *",
+      enabled: true,
+    });
+    const scheduler = makeScheduler();
+    scheduler.start();
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+    expect(scheduler.armedCount).toBe(1);
+
+    // Disable the workflow in the DB, then re-run start(): the previously-armed
+    // job must be stopped (no leftover timer), and no duplicate is created.
+    updateWorkflow(db, wf.id, { enabled: false });
+    scheduler.start();
+    expect(scheduler.isArmed(wf.id)).toBe(false);
+    expect(scheduler.armedCount).toBe(0);
+
+    scheduler.stopAll();
   });
 
   it("re-arms on enable and disarms on disable / cron-clear", () => {

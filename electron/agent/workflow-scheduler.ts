@@ -104,10 +104,11 @@ export async function runWorkflow(
         // A trigger fired and a run row is written, so stamp last_run_at for the
         // skipped outcome too — consistent with the normal path below.
         const skippedRun = createWorkflowRun(db, { workflowId, trigger, sessionId });
+        emit(skippedRun); // running — the row is written `running` before skipping
         updateWorkflowLastRun(db, workflowId);
         finishWorkflowRun(db, skippedRun.id, "skipped");
         const finalized = getWorkflowRun(db, skippedRun.id) ?? skippedRun;
-        emit(finalized);
+        emit(finalized); // skipped
         return finalized;
       }
     } else {
@@ -218,8 +219,14 @@ export class WorkflowScheduler {
     this.hooks = hooks ?? defaultRunHooks(ctx);
   }
 
-  /** Arm every enabled workflow that declares a cron. Idempotent (re-arms). */
+  /**
+   * Arm every enabled workflow that declares a cron. Idempotent: re-evaluates
+   * from the DB, stopping all previously-armed jobs first so a second call after
+   * a workflow was disabled / had its cron cleared leaves it with no job (and no
+   * duplicate timers ever survive).
+   */
   start(): void {
+    this.stopAll();
     for (const wf of listWorkflows(this.ctx.db)) {
       if (wf.enabled && wf.cron) this.arm(wf);
     }
