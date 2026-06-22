@@ -144,6 +144,7 @@ export interface ElectronAPI {
   }) => Promise<Res<typeof CH.CREATE_SKILL>>;
 
   // ── Workflows ─────────────────────────────────────────────────────────────
+  workflowList: (args?: { projectId?: string }) => Promise<Res<typeof CH.WORKFLOW_LIST>>;
   workflowUpsert: (
     input: import("./ipc-contract").WorkflowUpsertInput
   ) => Promise<Res<typeof CH.WORKFLOW_UPSERT>>;
@@ -254,6 +255,7 @@ const api: ElectronAPI = {
   writeSkillFile: (args) => invoke(CH.WRITE_SKILL_FILE, args),
   deleteSkillDir: (skillPath) => invoke(CH.DELETE_SKILL_DIR, skillPath),
   createSkill: (args) => invoke(CH.CREATE_SKILL, args),
+  workflowList: (args) => invoke(CH.WORKFLOW_LIST, args ?? {}),
   workflowUpsert: (input) => invoke(CH.WORKFLOW_UPSERT, input),
   workflowRunNow: (workflowId) => invoke(CH.WORKFLOW_RUN_NOW, { workflowId }),
   workflowDelete: (workflowId) => invoke(CH.WORKFLOW_DELETE, { workflowId }),

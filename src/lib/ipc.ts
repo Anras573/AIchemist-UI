@@ -117,6 +117,7 @@ export const ipc = {
     window.electronAPI.createSkill(args),
 
   // Workflows
+  workflowList: (args?: { projectId?: string }) => window.electronAPI.workflowList(args),
   workflowUpsert: (input: Parameters<typeof window.electronAPI.workflowUpsert>[0]) =>
     window.electronAPI.workflowUpsert(input),
   workflowRunNow: (workflowId: string) => window.electronAPI.workflowRunNow(workflowId),
@@ -173,6 +174,7 @@ export const IPC_CHANNELS = {
   SESSION_QUEUE_RECOVERY_REQUIRED: "session:queue_recovery_required",
   CONFIG_WARNING: "config:warning",
   WORKTREE_WARNING: "worktree:warning",
+  WORKFLOW_RUN_UPDATED: "workflow:run-updated",
 } as const;
 
 // ── Thinking / reasoning subscription helpers ─────────────────────────────────

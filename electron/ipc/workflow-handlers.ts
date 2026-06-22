@@ -6,6 +6,7 @@ import {
   createWorkflow,
   getWorkflow,
   listWorkflowRuns,
+  listWorkflows,
   updateWorkflow,
   type WorkflowPatch,
 } from "../workflows";
@@ -40,6 +41,10 @@ function normalizeOverride(v: string | null | undefined): string | null | undefi
  * restart.
  */
 export function registerWorkflowHandlers(db: Database, scheduler: WorkflowScheduler): void {
+  handle(CH.WORKFLOW_LIST, (_event, args: { projectId?: string }): Workflow[] =>
+    listWorkflows(db, args?.projectId)
+  );
+
   handle(CH.WORKFLOW_UPSERT, (_event, input: WorkflowUpsertInput): Workflow => {
     // Normalize free-text fields so whitespace-only values can't slip past the
     // emptiness checks and stale whitespace variants don't get persisted. The

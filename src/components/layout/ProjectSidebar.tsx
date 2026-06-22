@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useMemo } from "react";
-import { Bot, ChevronDown, ChevronRight, Hash, Link, Plus, Settings, Settings2 } from "lucide-react";
+import { Bot, CalendarClock, ChevronDown, ChevronRight, Hash, Link, Plus, Settings, Settings2 } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -28,7 +28,7 @@ interface ProjectSidebarProps {
 
 export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarProps) {
   const ipc = useIpc();
-  const { projects, activeProjectId, setProjects, setActiveProject, addProject, removeProject, openSettings, openProjectSettings } =
+  const { projects, activeProjectId, setProjects, setActiveProject, addProject, removeProject, openSettings, openProjectSettings, openWorkflows } =
     useProjectStore();
   const mergeSessions = useSessionStore((s) => s.mergeSessions);
 
@@ -210,6 +210,15 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
             variant="ghost"
             size="sm"
             className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground"
+            onClick={openWorkflows}
+          >
+            <CalendarClock className="h-3.5 w-3.5 mr-2" />
+            Workflows
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground"
             onClick={openSettings}
           >
             <Settings className="h-3.5 w-3.5 mr-2" />
@@ -218,7 +227,18 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
         </div>
       )}
       {collapsed && (
-        <div className="p-1 border-t border-sidebar-border flex-shrink-0">
+        <div className="p-1 border-t border-sidebar-border flex-shrink-0 flex flex-col gap-1">
+          <WithTooltip label="Workflows" side="right">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-sidebar-foreground/60 hover:text-sidebar-foreground mx-auto flex"
+              onClick={openWorkflows}
+              aria-label="Workflows"
+            >
+              <CalendarClock className="h-4 w-4" />
+            </Button>
+          </WithTooltip>
           <WithTooltip label="Settings" side="right">
             <Button
               variant="ghost"
