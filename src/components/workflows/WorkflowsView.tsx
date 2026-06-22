@@ -27,7 +27,10 @@ export function WorkflowsView({ onClose }: WorkflowsViewProps) {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editorTarget, setEditorTarget] = useState<EditorTarget>(null);
-  const [runningId, setRunningId] = useState<string | null>(null);
+  // Per-workflow in-flight "Run now" tracking so concurrent runs (or quickly
+  // switching the selected workflow mid-request) don't clobber each other's
+  // running state.
+  const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const projectNames = useMemo(
@@ -65,7 +68,7 @@ export function WorkflowsView({ onClose }: WorkflowsViewProps) {
   const selected = workflows.find((w) => w.id === selectedId) ?? null;
 
   const handleRunNow = async (workflow: Workflow) => {
-    setRunningId(workflow.id);
+    setRunningIds((s) => new Set(s).add(workflow.id));
     try {
       const run = await ipc.workflowRunNow(workflow.id);
       applyRunUpdate(run);
@@ -75,7 +78,11 @@ export function WorkflowsView({ onClose }: WorkflowsViewProps) {
     } catch (err) {
       console.error("workflowRunNow failed:", err);
     } finally {
-      setRunningId(null);
+      setRunningIds((s) => {
+        const next = new Set(s);
+        next.delete(workflow.id);
+        return next;
+      });
     }
   };
 
@@ -188,7 +195,7 @@ export function WorkflowsView({ onClose }: WorkflowsViewProps) {
               workflow={selected}
               projectName={projectNames[selected.project_id] ?? "Unknown project"}
               runs={runsByWorkflow[selected.id] ?? []}
-              running={runningId === selected.id}
+              running={runningIds.has(selected.id)}
               onEdit={() => setEditorTarget({ workflow: selected })}
               onDelete={() => handleDelete(selected)}
               onToggleEnabled={() => handleToggleEnabled(selected)}

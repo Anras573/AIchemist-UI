@@ -103,10 +103,46 @@ describe("WorkflowEditor — autonomy warning", () => {
   });
 });
 
+describe("WorkflowEditor — agent + skills pickers", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const pickerIpc = {
+    getClaudeAgents: vi.fn().mockResolvedValue([
+      { name: "reviewer", description: "Reviews code" },
+    ]),
+    listSkills: vi.fn().mockResolvedValue([
+      { name: "code-review", description: "Reviews the diff", path: "/skills/code-review" },
+    ]),
+  };
+
+  it("lists discovered agents and skills sourced from IPC for the resolved provider", async () => {
+    renderWithProviders(
+      <WorkflowEditor
+        workflow={null}
+        defaultProjectId="proj-1"
+        projects={projects}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+      { ipc: pickerIpc }
+    );
+
+    // Skills are discovery-backed (checkbox), not free-text.
+    expect(await screen.findByLabelText("code-review")).toBeInTheDocument();
+    // The agent dropdown offers the discovered agent as an option.
+    expect(
+      await screen.findByRole("option", { name: "reviewer" })
+    ).toBeInTheDocument();
+    // The project's default provider (anthropic) drives the Claude agent loader.
+    expect(pickerIpc.getClaudeAgents).toHaveBeenCalledWith("/tmp/demo");
+    expect(pickerIpc.listSkills).toHaveBeenCalledWith("/tmp/demo", "anthropic");
+  });
+});
+
 describe("WorkflowEditor — save", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("upserts the workflow with normalized fields and reports the result", async () => {
+  it("upserts the workflow with the selected agent + skills and reports the result", async () => {
     const onSaved = vi.fn();
     const upsert = vi.fn().mockResolvedValue({
       id: "wf-1",
@@ -115,7 +151,7 @@ describe("WorkflowEditor — save", () => {
       prompt: "Triage issues",
       provider: "anthropic",
       model: null,
-      agent: null,
+      agent: "reviewer",
       skills: ["code-review"],
       cron: "0 9 * * *",
       enabled: true,
@@ -134,13 +170,26 @@ describe("WorkflowEditor — save", () => {
         onSaved={onSaved}
         onCancel={vi.fn()}
       />,
-      { ipc: { workflowUpsert: upsert } }
+      {
+        ipc: {
+          workflowUpsert: upsert,
+          getClaudeAgents: vi
+            .fn()
+            .mockResolvedValue([{ name: "reviewer", description: "Reviews code" }]),
+          listSkills: vi.fn().mockResolvedValue([
+            { name: "code-review", description: "Reviews the diff", path: "/skills/code-review" },
+          ]),
+        },
+      }
     );
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "  Triage  " } });
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Triage issues" } });
     fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "anthropic" } });
-    fireEvent.change(screen.getByLabelText("Skills"), { target: { value: "code-review, , code-review" } });
+
+    // Wait for discovery, then pick a real agent + skill.
+    fireEvent.click(await screen.findByLabelText("code-review"));
+    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "reviewer" } });
     fireEvent.change(screen.getByLabelText("Schedule (cron)"), { target: { value: "0 9 * * *" } });
 
     fireEvent.click(screen.getByRole("button", { name: /Create workflow/ }));
@@ -153,7 +202,7 @@ describe("WorkflowEditor — save", () => {
         prompt: "Triage issues",
         provider: "anthropic",
         model: null,
-        agent: null,
+        agent: "reviewer",
         skills: ["code-review"],
         cron: "0 9 * * *",
         autonomy: "interactive",
