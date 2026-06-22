@@ -211,12 +211,31 @@ function defaultRunHooks(ctx: TurnQueueContext): WorkflowRunHooks {
 export class WorkflowScheduler {
   private readonly jobs = new Map<string, Cron>();
   private readonly hooks: WorkflowRunHooks;
+  private jobsChangedListener: (() => void) | null = null;
 
   constructor(
     private readonly ctx: TurnQueueContext,
     hooks?: WorkflowRunHooks
   ) {
     this.hooks = hooks ?? defaultRunHooks(ctx);
+  }
+
+  /**
+   * Register a single listener fired whenever the set of armed jobs may have
+   * changed (boot, re-arm, cancel/delete). Used by the tray to track whether any
+   * enabled scheduled workflow exists. Fail-safe — a throwing listener never
+   * breaks scheduling.
+   */
+  onJobsChanged(listener: (() => void) | null): void {
+    this.jobsChangedListener = listener;
+  }
+
+  private notifyJobsChanged(): void {
+    try {
+      this.jobsChangedListener?.();
+    } catch (err) {
+      console.error("[workflow-scheduler] jobs-changed listener threw:", err);
+    }
   }
 
   /**
@@ -230,6 +249,7 @@ export class WorkflowScheduler {
     for (const wf of listWorkflows(this.ctx.db)) {
       if (wf.enabled && wf.cron) this.arm(wf);
     }
+    this.notifyJobsChanged();
   }
 
   /** Stop a job (if any) and, when the row is still enabled+cron, arm a fresh one. */
@@ -237,6 +257,7 @@ export class WorkflowScheduler {
     this.cancel(workflowId);
     const wf = getWorkflow(this.ctx.db, workflowId);
     if (wf && wf.enabled && wf.cron) this.arm(wf);
+    this.notifyJobsChanged();
   }
 
   /** Stop and forget a workflow's job. Safe to call when none is armed. */
@@ -245,6 +266,7 @@ export class WorkflowScheduler {
     if (!job) return;
     job.stop();
     this.jobs.delete(workflowId);
+    this.notifyJobsChanged();
   }
 
   /** Stop all jobs (app shutdown). */

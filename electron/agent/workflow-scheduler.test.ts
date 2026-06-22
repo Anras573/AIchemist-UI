@@ -436,6 +436,44 @@ describe("WorkflowScheduler", () => {
     scheduler.stopAll();
   });
 
+  it("notifies the jobs-changed listener on start / rearm / delete", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Watched",
+      prompt: "p",
+      cron: "0 9 * * *",
+      enabled: true,
+    });
+    const scheduler = makeScheduler();
+    const onChanged = vi.fn();
+    scheduler.onJobsChanged(onChanged);
+
+    // start() reconciles all jobs and fires once.
+    scheduler.start();
+    expect(onChanged).toHaveBeenCalled();
+    // The listener observes the current armed count, gating the tray.
+    expect(scheduler.armedCount).toBe(1);
+
+    // Disabling + re-arming drops the job and fires again.
+    onChanged.mockClear();
+    updateWorkflow(db, wf.id, { enabled: false });
+    scheduler.rearm(wf.id);
+    expect(onChanged).toHaveBeenCalled();
+    expect(scheduler.armedCount).toBe(0);
+
+    // A throwing listener never breaks scheduling.
+    scheduler.onJobsChanged(() => {
+      throw new Error("boom");
+    });
+    expect(() => scheduler.rearm(wf.id)).not.toThrow();
+
+    // A null listener detaches cleanly.
+    scheduler.onJobsChanged(null);
+    expect(() => scheduler.start()).not.toThrow();
+
+    scheduler.stopAll();
+  });
+
   it("keeps the job armed after a failing run", async () => {
     runMock.mockRejectedValueOnce(new Error("provider exploded"));
     const wf = createWorkflow(db, {
