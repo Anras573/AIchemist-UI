@@ -270,10 +270,11 @@ export class WorkflowScheduler {
   }
 
   /**
-   * Arm every enabled workflow that declares a cron. Idempotent: re-evaluates
-   * from the DB, stopping all previously-armed jobs first so a second call after
-   * a workflow was disabled / had its cron cleared leaves it with no job (and no
-   * duplicate timers ever survive).
+   * Arm every enabled workflow that declares at least one trigger (a `cron` or a
+   * `watch_path`). Idempotent: re-evaluates from the DB, stopping all
+   * previously-armed triggers first so a second call after a workflow was
+   * disabled / had its triggers cleared leaves it unarmed (and no duplicate
+   * timers / watchers ever survive).
    */
   start(): void {
     this.stopAll();
@@ -413,10 +414,13 @@ export class WorkflowScheduler {
         this.scheduleFileFire(wf.id);
       });
       // A delayed I/O error (the path is removed while watching) must not crash
-      // the process — drop the watcher and log.
+      // the process — drop the watcher and log. Dropping it lowers armedCount, so
+      // notify the jobs-changed listener (the tray) here: unlike start/rearm/
+      // cancel, nothing else will fire it for an async error, and the tray would
+      // otherwise stay out of sync until the next explicit op.
       watcher.on("error", (err) => {
         console.error(`[workflow-scheduler] file watcher error for ${wf.id} ("${watchPath}"):`, err);
-        this.stopFileWatcher(wf.id);
+        if (this.stopFileWatcher(wf.id)) this.notifyJobsChanged();
       });
       this.fileWatchers.set(wf.id, { watcher, debounce: null });
     } catch (err) {

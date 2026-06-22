@@ -102,6 +102,34 @@ describe("WorkflowEditor — file-watch trigger", () => {
     );
   });
 
+  it("maps a whitespace-only watch path to null in the upsert payload", async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: "wf-1" });
+
+    renderWithProviders(
+      <WorkflowEditor
+        workflow={null}
+        defaultProjectId="proj-1"
+        projects={projects}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+      { ipc: { workflowUpsert: upsert } }
+    );
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Manual" } });
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "no file trigger" } });
+    // A whitespace-only value is a deliberate "clear" — it must not persist as a
+    // blank path the watcher would then try (and fail) to arm.
+    fireEvent.change(screen.getByLabelText("Watch path (file trigger)"), {
+      target: { value: "   " },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Create workflow/ }));
+
+    await waitFor(() => expect(upsert).toHaveBeenCalledTimes(1));
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ watchPath: null }));
+  });
+
   it("fills the watch path from the folder picker", async () => {
     const openFolderDialog = vi.fn().mockResolvedValue("/picked/dir");
 
