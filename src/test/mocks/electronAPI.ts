@@ -96,6 +96,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     createSkill: vi.fn().mockResolvedValue({ skillPath: "" }),
     // Safe default shapes (stable ids + valid ISO timestamps) so tests that
     // don't override still get usable, invariant-respecting objects.
+    workflowList: vi.fn().mockResolvedValue([]),
     workflowUpsert: vi.fn().mockResolvedValue({
       id: "mock-workflow-id",
       project_id: "mock-project-id",

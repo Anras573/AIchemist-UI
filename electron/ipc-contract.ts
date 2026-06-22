@@ -229,6 +229,7 @@ export type IpcContract = {
   [CH.GET_GIT_BRANCH]: { args: [projectPath: string]; result: string | null };
 
   // ── Workflows ─────────────────────────────────────────────────────────────────
+  [CH.WORKFLOW_LIST]: { args: [args: { projectId?: string }]; result: Workflow[] };
   [CH.WORKFLOW_UPSERT]: { args: [input: WorkflowUpsertInput]; result: Workflow };
   [CH.WORKFLOW_RUN_NOW]: { args: [args: { workflowId: string }]; result: WorkflowRun };
   [CH.WORKFLOW_DELETE]: { args: [args: { workflowId: string }]; result: { ok: boolean } };

@@ -130,6 +130,7 @@ export const CONFIG_WARNING            = "config:warning";
 export const WORKTREE_WARNING          = "worktree:warning";
 
 // ── Workflows ───────────────────────────────────────────────────────────────────
+export const WORKFLOW_LIST             = "workflow:list";
 export const WORKFLOW_UPSERT           = "workflow:upsert";
 export const WORKFLOW_RUN_NOW          = "workflow:run-now";
 export const WORKFLOW_DELETE           = "workflow:delete";
