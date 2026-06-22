@@ -468,6 +468,18 @@ describe("WorkflowScheduler", () => {
     expect(onChanged).toHaveBeenCalledTimes(1);
     expect(scheduler.armedCount).toBe(0);
 
+    // delete() cancels the (re-armed) job and must notify exactly once so the
+    // tray drops the workflow from its count.
+    onChanged.mockClear();
+    updateWorkflow(db, wf.id, { enabled: true });
+    scheduler.rearm(wf.id);
+    expect(scheduler.armedCount).toBe(1);
+    onChanged.mockClear();
+    scheduler.delete(wf.id);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(scheduler.armedCount).toBe(0);
+    expect(getWorkflow(db, wf.id)).toBeNull();
+
     // A throwing listener never breaks scheduling.
     scheduler.onJobsChanged(() => {
       throw new Error("boom");
