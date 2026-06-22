@@ -58,12 +58,17 @@ describe("TrayController", () => {
   let quit: ReturnType<typeof vi.fn<() => void>>;
   let tray: TrayController;
 
+  /** Build a controller with an injected platform (defaults to process.platform). */
+  function makeTray(platform?: NodeJS.Platform): TrayController {
+    return new TrayController({ showWindow, getScheduledCount: () => count, quit, platform });
+  }
+
   beforeEach(() => {
     instances.length = 0;
     count = 0;
     showWindow = vi.fn<() => void>();
     quit = vi.fn<() => void>();
-    tray = new TrayController({ showWindow, getScheduledCount: () => count, quit });
+    tray = makeTray();
   });
 
   it("does not create a tray while no workflow is scheduled", () => {
@@ -93,7 +98,7 @@ describe("TrayController", () => {
     expect(instances[0].tooltip).toContain("1 scheduled workflow active");
   });
 
-  it("wires Open and Quit menu actions and the click handler", () => {
+  it("wires the Open and Quit menu actions", () => {
     count = 1;
     tray.refresh();
     const t = instances[0];
@@ -101,14 +106,24 @@ describe("TrayController", () => {
     expect(showWindow).toHaveBeenCalledTimes(1);
     t.menu!.template.find((m) => m.label === "Quit AIchemist")!.click!();
     expect(quit).toHaveBeenCalledTimes(1);
-    // The left-click → showWindow handler is only attached off macOS (macOS
-    // shows the context menu on click by convention).
-    if (process.platform === "darwin") {
-      expect(t.handlers["click"]).toBeUndefined();
-    } else {
-      t.handlers["click"]!();
-      expect(showWindow).toHaveBeenCalledTimes(2);
-    }
+  });
+
+  // The left-click → showWindow handler is attached off macOS only (macOS shows
+  // the context menu on click by convention). Platform is injected so both
+  // branches run deterministically on a single CI OS (CI is Ubuntu-only).
+  it("attaches the left-click → reopen handler off macOS", () => {
+    count = 1;
+    makeTray("linux").refresh();
+    const t = instances[0];
+    expect(t.handlers["click"]).toBeDefined();
+    t.handlers["click"]!();
+    expect(showWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not attach a click handler on macOS", () => {
+    count = 1;
+    makeTray("darwin").refresh();
+    expect(instances[0].handlers["click"]).toBeUndefined();
   });
 
   it("reuses the same tray across refreshes and updates the count", () => {

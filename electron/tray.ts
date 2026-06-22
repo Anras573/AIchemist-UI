@@ -21,6 +21,12 @@ export interface TrayDeps {
   getScheduledCount: () => number;
   /** Begin a real quit (sets the quitting flag, then `app.quit()`). */
   quit: () => void;
+  /**
+   * Platform identifier, defaulting to `process.platform`. Injectable so tests
+   * can deterministically exercise both the darwin and non-darwin click-handler
+   * branches on a single CI OS (CI runs Ubuntu only).
+   */
+  platform?: NodeJS.Platform;
 }
 
 /**
@@ -72,7 +78,7 @@ export class TrayController {
       // On Windows/Linux a left click should reopen the window like an app
       // launcher would. macOS shows the context menu on click by convention, so
       // attaching showWindow there would fight that — gate it to non-darwin.
-      if (process.platform !== "darwin") {
+      if ((this.deps.platform ?? process.platform) !== "darwin") {
         this.tray.on("click", () => this.deps.showWindow());
       }
     } catch (err) {
