@@ -26,7 +26,7 @@ const STATUS_LABELS: Record<WorkflowRunStatus, string> = {
   skipped: "Skipped",
 };
 
-/** Compact "12:34" style timestamp, plus the date when not today. */
+/** Compact "Jun 22, 09:00" style timestamp (always month + day + time). */
 function formatTimestamp(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;

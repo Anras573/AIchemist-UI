@@ -77,6 +77,9 @@ export function WorkflowEditor({
     if (!projectPath || !effectiveProvider) {
       setAvailableAgents([]);
       setAvailableSkills([]);
+      // Clear any leftover loading state — an in-flight fetch's .finally() was
+      // skipped by its `cancelled` guard, so reset here to avoid a stuck spinner.
+      setLoadingMeta(false);
       return;
     }
     let cancelled = false;
