@@ -40,7 +40,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
 
-    expect(userVersion(db)).toBe(3);
+    expect(userVersion(db)).toBe(4);
     const cols = columnNames(db, "sessions");
     for (const c of EXPECTED_SESSION_COLUMNS) {
       expect(cols).toContain(c);
@@ -60,6 +60,7 @@ describe("migrate", () => {
       "project_id",
       "prompt",
       "cron",
+      "watch_path",
       "enabled",
       "session_strategy",
       "reuse_session_id",
@@ -77,7 +78,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(3);
+    expect(userVersion(db)).toBe(4);
   });
 
   it("does not throw when provider_state already exists below user_version 2", () => {
@@ -86,7 +87,7 @@ describe("migrate", () => {
     // Simulate a dev build / partial migration: column exists but version rewound.
     db.exec("PRAGMA user_version = 1;");
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(3);
+    expect(userVersion(db)).toBe(4);
   });
 
   it("upgrades a legacy database (columns present, user_version 0) without error", () => {
@@ -111,7 +112,7 @@ describe("migrate", () => {
 
     expect(() => migrate(db)).not.toThrow();
 
-    expect(userVersion(db)).toBe(3);
+    expect(userVersion(db)).toBe(4);
     expect(columnNames(db, "sessions")).toContain("provider_state");
     expect(tableNames(db)).toContain("workflows");
     // Existing data is preserved, including the legacy copilot id used as a dead read.

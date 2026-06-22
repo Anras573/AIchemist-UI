@@ -58,6 +58,7 @@ interface WorkflowRowShape {
   agent: string | null;
   skills: string | null;
   cron: string | null;
+  watch_path: string | null;
   enabled: number;
   session_strategy: string;
   reuse_session_id: string | null;
@@ -77,6 +78,7 @@ function rowToWorkflow(row: WorkflowRowShape): Workflow {
     agent: row.agent,
     skills: parseJsonStringArray(row.skills),
     cron: row.cron,
+    watch_path: row.watch_path,
     enabled: row.enabled !== 0,
     session_strategy: row.session_strategy as WorkflowSessionStrategy,
     reuse_session_id: row.reuse_session_id,
@@ -87,7 +89,7 @@ function rowToWorkflow(row: WorkflowRowShape): Workflow {
 }
 
 const WORKFLOW_COLUMNS =
-  "id, project_id, name, prompt, provider, model, agent, skills, cron, enabled, session_strategy, reuse_session_id, autonomy, created_at, last_run_at";
+  "id, project_id, name, prompt, provider, model, agent, skills, cron, watch_path, enabled, session_strategy, reuse_session_id, autonomy, created_at, last_run_at";
 
 // ─── Workflow CRUD ─────────────────────────────────────────────────────────────
 
@@ -100,6 +102,7 @@ export interface CreateWorkflowInput {
   agent?: string | null;
   skills?: string[] | null;
   cron?: string | null;
+  watchPath?: string | null;
   enabled?: boolean;
   sessionStrategy?: WorkflowSessionStrategy;
   reuseSessionId?: string | null;
@@ -121,8 +124,8 @@ export function createWorkflow(db: Database, input: CreateWorkflowInput): Workfl
 
   db.prepare(
     `INSERT INTO workflows
-       (id, project_id, name, prompt, provider, model, agent, skills, cron, enabled, session_strategy, reuse_session_id, autonomy, created_at, last_run_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+       (id, project_id, name, prompt, provider, model, agent, skills, cron, watch_path, enabled, session_strategy, reuse_session_id, autonomy, created_at, last_run_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
   ).run(
     id,
     input.projectId,
@@ -133,6 +136,7 @@ export function createWorkflow(db: Database, input: CreateWorkflowInput): Workfl
     input.agent ?? null,
     serializeSkills(input.skills),
     input.cron ?? null,
+    input.watchPath ?? null,
     enabled ? 1 : 0,
     sessionStrategy,
     reuseSessionId,
@@ -150,6 +154,7 @@ export function createWorkflow(db: Database, input: CreateWorkflowInput): Workfl
     agent: input.agent ?? null,
     skills: parseJsonStringArray(serializeSkills(input.skills)),
     cron: input.cron ?? null,
+    watch_path: input.watchPath ?? null,
     enabled,
     session_strategy: sessionStrategy,
     reuse_session_id: reuseSessionId,
@@ -190,6 +195,7 @@ export type WorkflowPatch = Partial<
     | "agent"
     | "skills"
     | "cron"
+    | "watch_path"
     | "enabled"
     | "session_strategy"
     | "reuse_session_id"
@@ -232,7 +238,7 @@ export function updateWorkflow(db: Database, id: string, patch: WorkflowPatch): 
   db.prepare(
     `UPDATE workflows SET
        name = ?, prompt = ?, provider = ?, model = ?, agent = ?, skills = ?,
-       cron = ?, enabled = ?, session_strategy = ?, reuse_session_id = ?, autonomy = ?
+       cron = ?, watch_path = ?, enabled = ?, session_strategy = ?, reuse_session_id = ?, autonomy = ?
      WHERE id = ?`
   ).run(
     next.name,
@@ -242,6 +248,7 @@ export function updateWorkflow(db: Database, id: string, patch: WorkflowPatch): 
     next.agent,
     serializeSkills(next.skills),
     next.cron,
+    next.watch_path,
     next.enabled ? 1 : 0,
     next.session_strategy,
     next.reuse_session_id,

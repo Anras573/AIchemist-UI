@@ -107,6 +107,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
       agent: null,
       skills: null,
       cron: null,
+      watch_path: null,
       enabled: true,
       session_strategy: "fresh",
       reuse_session_id: null,

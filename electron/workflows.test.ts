@@ -65,6 +65,7 @@ describe("createWorkflow", () => {
       agent: "fixer",
       skills: ["code-review", "verify"],
       cron: "0 9 * * *",
+      watchPath: "/tmp/proj-1/src",
       enabled: false,
       sessionStrategy: "reuse",
       reuseSessionId: "sess-9",
@@ -77,10 +78,25 @@ describe("createWorkflow", () => {
     expect(fetched.agent).toBe("fixer");
     expect(fetched.skills).toEqual(["code-review", "verify"]);
     expect(fetched.cron).toBe("0 9 * * *");
+    expect(fetched.watch_path).toBe("/tmp/proj-1/src");
     expect(fetched.enabled).toBe(false);
     expect(fetched.session_strategy).toBe("reuse");
     expect(fetched.reuse_session_id).toBe("sess-9");
     expect(fetched.autonomy).toBe("autonomous");
+  });
+
+  it("defaults watch_path to null and round-trips an update", () => {
+    const wf = createWorkflow(db, { projectId: "proj-1", name: "w", prompt: "p" });
+    expect(wf.watch_path).toBeNull();
+    expect(getWorkflow(db, wf.id)!.watch_path).toBeNull();
+
+    const updated = updateWorkflow(db, wf.id, { watch_path: "/tmp/proj-1/watched" })!;
+    expect(updated.watch_path).toBe("/tmp/proj-1/watched");
+    expect(getWorkflow(db, wf.id)!.watch_path).toBe("/tmp/proj-1/watched");
+
+    // An explicit null clears it again.
+    expect(updateWorkflow(db, wf.id, { watch_path: null })!.watch_path).toBeNull();
+    expect(getWorkflow(db, wf.id)!.watch_path).toBeNull();
   });
 
   it("normalizes empty skills to null", () => {

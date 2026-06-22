@@ -71,6 +71,87 @@ describe("WorkflowEditor — cron preview", () => {
   });
 });
 
+describe("WorkflowEditor — file-watch trigger", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("includes the watch path in the upsert payload (trimmed, null when blank)", async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: "wf-1" });
+
+    renderWithProviders(
+      <WorkflowEditor
+        workflow={null}
+        defaultProjectId="proj-1"
+        projects={projects}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+      { ipc: { workflowUpsert: upsert } }
+    );
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Watcher" } });
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "react" } });
+    fireEvent.change(screen.getByLabelText("Watch path (file trigger)"), {
+      target: { value: "  /tmp/watched  " },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Create workflow/ }));
+
+    await waitFor(() => expect(upsert).toHaveBeenCalledTimes(1));
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ watchPath: "/tmp/watched" })
+    );
+  });
+
+  it("maps a whitespace-only watch path to null in the upsert payload", async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: "wf-1" });
+
+    renderWithProviders(
+      <WorkflowEditor
+        workflow={null}
+        defaultProjectId="proj-1"
+        projects={projects}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+      { ipc: { workflowUpsert: upsert } }
+    );
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Manual" } });
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "no file trigger" } });
+    // A whitespace-only value is a deliberate "clear" — it must not persist as a
+    // blank path the watcher would then try (and fail) to arm.
+    fireEvent.change(screen.getByLabelText("Watch path (file trigger)"), {
+      target: { value: "   " },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Create workflow/ }));
+
+    await waitFor(() => expect(upsert).toHaveBeenCalledTimes(1));
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({ watchPath: null }));
+  });
+
+  it("fills the watch path from the folder picker", async () => {
+    const openFolderDialog = vi.fn().mockResolvedValue("/picked/dir");
+
+    renderWithProviders(
+      <WorkflowEditor
+        workflow={null}
+        defaultProjectId="proj-1"
+        projects={projects}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+      { ipc: { openFolderDialog } }
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Browse/ }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Watch path (file trigger)")).toHaveValue("/picked/dir")
+    );
+  });
+});
+
 describe("WorkflowEditor — autonomy warning", () => {
   beforeEach(() => vi.clearAllMocks());
 

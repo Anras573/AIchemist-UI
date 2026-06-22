@@ -100,13 +100,20 @@ const MIGRATIONS: Migration[] = [
           workflow_id TEXT NOT NULL,
           session_id  TEXT,
           status      TEXT NOT NULL,        -- 'running' | 'success' | 'error' | 'skipped'
-          trigger     TEXT NOT NULL,        -- 'cron' | 'manual'
+          trigger     TEXT NOT NULL,        -- 'cron' | 'manual' | 'file'
           started_at  TEXT NOT NULL,
           ended_at    TEXT,
           error       TEXT,
           FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
       );
     `);
+  },
+  // v4 — Event-driven (file-watch) workflow triggers (issue #96 part two). Adds
+  // `workflows.watch_path`: a filesystem path the scheduler watches; a change
+  // under it fires a (debounced) run with trigger 'file'. Nullable and additive —
+  // a workflow may declare a cron, a watch_path, both, or neither (manual-only).
+  (db) => {
+    addColumnIfMissing(db, "workflows", "watch_path", "TEXT");
   },
 ];
 

@@ -111,6 +111,10 @@ const workflowUpsertSchema = z.object({
     .nullable()
     .optional()
     .refine((v) => v == null || isValidCron(v), { message: "is not a valid cron expression" }),
+  // A filesystem path to watch (file-driven trigger). We only reject a
+  // whitespace-only value here — existence isn't required at save time (the path
+  // may be created later), and the watcher arms fail-safe if it can't be watched.
+  watchPath: z.string().trim().min(1).nullable().optional(),
   enabled: z.boolean().optional(),
   sessionStrategy: z.enum(["fresh", "reuse"]).optional(),
   reuseSessionId: z.string().trim().min(1).nullable().optional(),

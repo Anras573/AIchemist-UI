@@ -566,3 +566,166 @@ describe("WorkflowScheduler", () => {
     }
   });
 });
+
+// ─── WorkflowScheduler — file-watch triggers ─────────────────────────────────────
+
+describe("WorkflowScheduler — file-watch triggers", () => {
+  const silentHooks: WorkflowRunHooks = { onRunUpdated: () => {} };
+
+  // A short debounce keeps the fire-on-change test fast without flaking.
+  function makeWatchScheduler(): WorkflowScheduler {
+    return new WorkflowScheduler(makeCtx(), silentHooks, { fileWatchDebounceMs: 20 });
+  }
+
+  it("arms a file watcher for an enabled workflow with a watch_path", () => {
+    const watched = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Watcher",
+      prompt: "p",
+      watchPath: projectDir,
+      enabled: true,
+    });
+    const disabled = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Disabled watcher",
+      prompt: "p",
+      watchPath: projectDir,
+      enabled: false,
+    });
+
+    const scheduler = makeWatchScheduler();
+    scheduler.start();
+
+    expect(scheduler.isArmed(watched.id)).toBe(true);
+    expect(scheduler.isArmed(disabled.id)).toBe(false);
+    expect(scheduler.armedCount).toBe(1);
+
+    scheduler.stopAll();
+    expect(scheduler.armedCount).toBe(0);
+  });
+
+  it("counts a workflow with both a cron and a watch_path only once", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Both triggers",
+      prompt: "p",
+      cron: "0 9 * * *",
+      watchPath: projectDir,
+      enabled: true,
+    });
+
+    const scheduler = makeWatchScheduler();
+    scheduler.start();
+
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+    expect(scheduler.armedCount).toBe(1);
+
+    scheduler.stopAll();
+  });
+
+  it("is fail-safe when the watch_path cannot be watched (missing path)", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Bad path",
+      prompt: "p",
+      watchPath: path.join(projectDir, "does-not-exist"),
+      enabled: true,
+    });
+
+    const scheduler = makeWatchScheduler();
+    // Arming an unwatchable path must not throw, and must leave it unarmed.
+    expect(() => scheduler.start()).not.toThrow();
+    expect(scheduler.isArmed(wf.id)).toBe(false);
+    expect(scheduler.armedCount).toBe(0);
+
+    scheduler.stopAll();
+  });
+
+  it("disarms the watcher on rearm (disabled) and on delete", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Toggle watcher",
+      prompt: "p",
+      watchPath: projectDir,
+      enabled: true,
+    });
+    const scheduler = makeWatchScheduler();
+    scheduler.start();
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+
+    updateWorkflow(db, wf.id, { enabled: false });
+    scheduler.rearm(wf.id);
+    expect(scheduler.isArmed(wf.id)).toBe(false);
+
+    // Re-enable, then delete → watcher gone and row removed.
+    updateWorkflow(db, wf.id, { enabled: true });
+    scheduler.rearm(wf.id);
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+    scheduler.delete(wf.id);
+    expect(scheduler.isArmed(wf.id)).toBe(false);
+    expect(getWorkflow(db, wf.id)).toBeNull();
+
+    scheduler.stopAll();
+  });
+
+  it("fires a debounced 'file' run when a file under the watched path changes", async () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "On change",
+      prompt: "react to change",
+      provider: "ollama",
+      watchPath: projectDir,
+      enabled: true,
+    });
+    const scheduler = makeWatchScheduler();
+    scheduler.start();
+    expect(scheduler.isArmed(wf.id)).toBe(true);
+
+    // Touch a file under the watched directory to trigger the watcher.
+    fs.writeFileSync(path.join(projectDir, "trigger.txt"), "change");
+
+    await vi.waitFor(
+      () => {
+        expect(listWorkflowRuns(db, wf.id).length).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 4000, interval: 50 }
+    );
+
+    // Stop watching before asserting so no further fires race the teardown.
+    scheduler.stopAll();
+
+    const runs = listWorkflowRuns(db, wf.id);
+    expect(runs[0].trigger).toBe("file");
+    expect(runs[0].status).toBe("success");
+    expect(runMock).toHaveBeenCalled();
+    expect(runMock.mock.calls[0][0].prompt).toBe("react to change");
+
+    for (const run of runs) {
+      if (run.session_id) cleanupSessionQueueState(run.session_id);
+    }
+  });
+
+  it("does not fire after the watcher is cancelled", async () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Cancelled",
+      prompt: "p",
+      provider: "ollama",
+      watchPath: projectDir,
+      enabled: true,
+    });
+    const scheduler = makeWatchScheduler();
+    scheduler.start();
+    scheduler.cancel(wf.id);
+    expect(scheduler.isArmed(wf.id)).toBe(false);
+
+    fs.writeFileSync(path.join(projectDir, "after-cancel.txt"), "change");
+    // Give a cancelled watcher a chance to (wrongly) fire.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(listWorkflowRuns(db, wf.id)).toHaveLength(0);
+    expect(runMock).not.toHaveBeenCalled();
+
+    scheduler.stopAll();
+  });
+});

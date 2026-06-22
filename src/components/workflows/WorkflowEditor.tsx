@@ -50,6 +50,7 @@ export function WorkflowEditor({
   const [agent, setAgent] = useState(workflow?.agent ?? "");
   const [skills, setSkills] = useState<string[]>(workflow?.skills ?? []);
   const [cron, setCron] = useState(workflow?.cron ?? "");
+  const [watchPath, setWatchPath] = useState(workflow?.watch_path ?? "");
   const [sessionStrategy, setSessionStrategy] = useState<WorkflowSessionStrategy>(
     workflow?.session_strategy ?? "fresh"
   );
@@ -139,6 +140,15 @@ export function WorkflowEditor({
     );
   };
 
+  const handleBrowseWatchPath = async () => {
+    try {
+      const dir = await ipc.openFolderDialog();
+      if (dir) setWatchPath(dir);
+    } catch (err) {
+      console.error("openFolderDialog failed:", err);
+    }
+  };
+
   const handleSave = async () => {
     if (!canSave) return;
     setSaving(true);
@@ -154,6 +164,7 @@ export function WorkflowEditor({
         agent: agent.trim() || null,
         skills: skills.length > 0 ? skills : null,
         cron: cron.trim() || null,
+        watchPath: watchPath.trim() || null,
         enabled,
         sessionStrategy,
         autonomy,
@@ -338,6 +349,26 @@ export function WorkflowEditor({
           )}
           <span>{cronPreview.label}</span>
         </p>
+      </Field>
+
+      {/* Watch path (file trigger) */}
+      <Field
+        label="Watch path (file trigger)"
+        htmlFor="wf-watch-path"
+        hint="Leave blank for no file trigger. A change under this path fires a run (debounced). Works alongside or instead of a cron schedule."
+      >
+        <div className="flex items-center gap-2">
+          <Input
+            id="wf-watch-path"
+            value={watchPath}
+            onChange={(e) => setWatchPath(e.target.value)}
+            placeholder="/path/to/watch"
+            className="font-mono"
+          />
+          <Button type="button" variant="outline" size="sm" onClick={handleBrowseWatchPath}>
+            Browse…
+          </Button>
+        </div>
       </Field>
 
       <div className="grid grid-cols-2 gap-4">

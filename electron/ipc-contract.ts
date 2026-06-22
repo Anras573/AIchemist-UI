@@ -76,6 +76,8 @@ export interface WorkflowUpsertInput {
   agent?: string | null;
   skills?: string[] | null;
   cron?: string | null;
+  /** Filesystem path to watch for changes (file-driven trigger). Null clears it. */
+  watchPath?: string | null;
   enabled?: boolean;
   sessionStrategy?: WorkflowSessionStrategy;
   reuseSessionId?: string | null;
