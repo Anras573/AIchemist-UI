@@ -42,10 +42,11 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
 
   removeWorkflow: (id) =>
     set((state) => {
-      const { [id]: _dropped, ...rest } = state.runsByWorkflow;
+      const runsByWorkflow = { ...state.runsByWorkflow };
+      delete runsByWorkflow[id];
       return {
         workflows: state.workflows.filter((w) => w.id !== id),
-        runsByWorkflow: rest,
+        runsByWorkflow,
       };
     }),
 

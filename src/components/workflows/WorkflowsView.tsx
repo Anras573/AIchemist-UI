@@ -21,7 +21,7 @@ type EditorTarget = { workflow: Workflow | null } | null;
 
 export function WorkflowsView({ onClose }: WorkflowsViewProps) {
   const ipc = useIpc();
-  const { projects, activeProjectId, setActiveProject, closeWorkflows } = useProjectStore();
+  const { projects, activeProjectId, setActiveProject } = useProjectStore();
   const { workflows, setWorkflows, upsertWorkflow, removeWorkflow, runsByWorkflow, setRuns, applyRunUpdate } =
     useWorkflowStore();
 
@@ -121,7 +121,7 @@ export function WorkflowsView({ onClose }: WorkflowsViewProps) {
     }
     setActiveProject(projectId);
     useSessionStore.getState().setActiveSession(sessionId);
-    closeWorkflows();
+    onClose();
   };
 
   return (
