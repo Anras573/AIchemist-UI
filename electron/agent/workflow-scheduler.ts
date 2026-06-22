@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import { Cron } from "croner";
 import { Notification } from "electron";
 import type { Database } from "better-sqlite3";
@@ -24,6 +25,14 @@ import {
 // Cron validation lives in the dependency-light `../cron` module; re-exported
 // here for the scheduler's public surface (and its existing tests).
 export { validateCron, isValidCron } from "../cron";
+
+/**
+ * Coalescing window for file-watch triggers. A single save (or a `git checkout`,
+ * a build, an editor's atomic-rename write) emits a burst of `fs.watch` events;
+ * we wait for the burst to settle before firing exactly one run. Overridable per
+ * scheduler instance (tests use a short window).
+ */
+export const FILE_WATCH_DEBOUNCE_MS = 500;
 
 /**
  * Side-effect hooks fired as a run's state changes. The scheduler wires its
@@ -193,31 +202,53 @@ function defaultRunHooks(ctx: TurnQueueContext): WorkflowRunHooks {
 
 // ── Scheduler ────────────────────────────────────────────────────────────────────
 
+/** A live file watcher plus its pending debounce timer (if any). */
+interface FileWatchHandle {
+  watcher: fs.FSWatcher;
+  debounce: ReturnType<typeof setTimeout> | null;
+}
+
 /**
- * Cron scheduler for enabled workflows. Arms one `croner` job per enabled
- * workflow that declares a `cron`, started from `app.whenReady()`.
+ * Trigger manager for enabled workflows. Arms two kinds of trigger, started from
+ * `app.whenReady()`:
  *
- * - **Boot:** {@link WorkflowScheduler.start} arms every enabled+cron workflow.
- * - **Edit:** {@link WorkflowScheduler.rearm} stops the old job and re-arms from
- *   the current DB row, so create/update/enable/disable take effect without a
- *   restart. A disabled / cron-cleared workflow ends up with no job.
- * - **Delete:** {@link WorkflowScheduler.cancel} stops a job before its rows go.
- * - **Forward-only:** `croner` fires forward from now; missed occurrences while
- *   the app was closed are not replayed.
+ * - **cron** — one `croner` job per enabled workflow that declares a `cron`.
+ * - **file** — one `fs.watch` watcher per enabled workflow that declares a
+ *   `watch_path`; a change under the path fires a (debounced) run.
  *
- * A run that throws is recorded `error` by {@link runWorkflow}; the job stays
+ * A workflow may declare a cron, a watch_path, both, or neither (manual-only).
+ *
+ * - **Boot:** {@link WorkflowScheduler.start} arms every enabled workflow that
+ *   has at least one trigger.
+ * - **Edit:** {@link WorkflowScheduler.rearm} stops the old triggers and re-arms
+ *   from the current DB row, so create/update/enable/disable take effect without
+ *   a restart. A disabled / trigger-cleared workflow ends up with no triggers.
+ * - **Delete:** {@link WorkflowScheduler.cancel} stops a workflow's triggers
+ *   before its rows go.
+ * - **Forward-only:** `croner` fires forward from now and file events only fire
+ *   for changes made while watching; neither replays anything missed while the
+ *   app was closed.
+ *
+ * A run that throws is recorded `error` by {@link runWorkflow}; the triggers stay
  * armed for the next occurrence (one failure never disarms the workflow).
+ *
+ * `armedCount` / `isArmed` count a workflow once if it has *any* armed trigger,
+ * so the tray + survive-window-close behavior covers file-watch workflows too.
  */
 export class WorkflowScheduler {
   private readonly jobs = new Map<string, Cron>();
+  private readonly fileWatchers = new Map<string, FileWatchHandle>();
   private readonly hooks: WorkflowRunHooks;
+  private readonly fileWatchDebounceMs: number;
   private jobsChangedListener: (() => void) | null = null;
 
   constructor(
     private readonly ctx: TurnQueueContext,
-    hooks?: WorkflowRunHooks
+    hooks?: WorkflowRunHooks,
+    options?: { fileWatchDebounceMs?: number }
   ) {
     this.hooks = hooks ?? defaultRunHooks(ctx);
+    this.fileWatchDebounceMs = options?.fileWatchDebounceMs ?? FILE_WATCH_DEBOUNCE_MS;
   }
 
   /**
@@ -247,20 +278,20 @@ export class WorkflowScheduler {
   start(): void {
     this.stopAll();
     for (const wf of listWorkflows(this.ctx.db)) {
-      if (wf.enabled && wf.cron) this.arm(wf);
+      if (wf.enabled && hasTrigger(wf)) this.arm(wf);
     }
     // One notification after the full armed set is stable — never per-arm.
     this.notifyJobsChanged();
   }
 
-  /** Stop a job (if any) and, when the row is still enabled+cron, arm a fresh one. */
+  /** Stop a workflow's triggers and, when it is still enabled+triggered, re-arm them. */
   rearm(workflowId: string): void {
     // Use the silent low-level stop here; `rearm` emits a single notification
     // after the final armed set is settled, so the tray sees one stable count
     // change rather than a transient drop-then-restore (which could flicker it).
     this.stopJob(workflowId);
     const wf = getWorkflow(this.ctx.db, workflowId);
-    if (wf && wf.enabled && wf.cron) this.arm(wf);
+    if (wf && wf.enabled && hasTrigger(wf)) this.arm(wf);
     this.notifyJobsChanged();
   }
 
@@ -270,22 +301,43 @@ export class WorkflowScheduler {
   }
 
   /**
-   * Low-level: stop and forget a single job, returning whether one existed.
-   * Does NOT notify — callers emit a single jobs-changed notification once the
-   * armed set is stable, so high-level ops never fire the listener twice.
+   * Low-level: stop and forget *all* of a workflow's triggers (cron job + file
+   * watcher), returning whether any existed. Does NOT notify — callers emit a
+   * single jobs-changed notification once the armed set is stable, so high-level
+   * ops never fire the listener twice.
    */
   private stopJob(workflowId: string): boolean {
+    let existed = false;
     const job = this.jobs.get(workflowId);
-    if (!job) return false;
-    job.stop();
-    this.jobs.delete(workflowId);
+    if (job) {
+      job.stop();
+      this.jobs.delete(workflowId);
+      existed = true;
+    }
+    if (this.stopFileWatcher(workflowId)) existed = true;
+    return existed;
+  }
+
+  /** Stop and forget a workflow's file watcher (clearing any pending debounce). */
+  private stopFileWatcher(workflowId: string): boolean {
+    const handle = this.fileWatchers.get(workflowId);
+    if (!handle) return false;
+    if (handle.debounce) clearTimeout(handle.debounce);
+    try {
+      handle.watcher.close();
+    } catch {
+      // Closing an already-errored watcher can throw; the watcher is being
+      // forgotten regardless, so swallow.
+    }
+    this.fileWatchers.delete(workflowId);
     return true;
   }
 
-  /** Stop all jobs (app shutdown). */
+  /** Stop all triggers (app shutdown). */
   stopAll(): void {
     for (const job of this.jobs.values()) job.stop();
     this.jobs.clear();
+    for (const workflowId of [...this.fileWatchers.keys()]) this.stopFileWatcher(workflowId);
   }
 
   /** Run a workflow now with the scheduler's notification + push hooks. */
@@ -293,14 +345,22 @@ export class WorkflowScheduler {
     return runWorkflow(this.ctx, workflowId, trigger, this.hooks);
   }
 
-  /** Whether a workflow currently has an armed job. */
+  /** Whether a workflow currently has any armed trigger (cron or file watcher). */
   isArmed(workflowId: string): boolean {
-    return this.jobs.has(workflowId);
+    return this.jobs.has(workflowId) || this.fileWatchers.has(workflowId);
   }
 
-  /** Count of armed jobs (introspection / tests). */
+  /**
+   * Count of workflows with at least one armed trigger (introspection / tests).
+   * A workflow armed with both a cron and a file watcher counts once, so this is
+   * the live number of enabled scheduled workflows the tray gates on.
+   */
   get armedCount(): number {
-    return this.jobs.size;
+    let count = this.jobs.size;
+    for (const id of this.fileWatchers.keys()) {
+      if (!this.jobs.has(id)) count++;
+    }
+    return count;
   }
 
   /** Delete a workflow's job + rows, cancelling the job first. */
@@ -309,35 +369,94 @@ export class WorkflowScheduler {
     deleteWorkflow(this.ctx.db, workflowId);
   }
 
-  /** Arm a single workflow. Assumes the row is enabled and has a cron. */
+  /**
+   * Arm a single workflow's triggers. Assumes the row is enabled and has at
+   * least one trigger; arms whichever of cron / file-watch it declares.
+   */
   private arm(wf: Workflow): void {
-    if (!wf.cron) return;
-    // Stop any job already armed for this id before replacing it, so arm() (and
-    // therefore start()) is idempotent and can never leave a duplicate timer
-    // firing for the same workflow. Silent stop — the caller (start/rearm) owns
-    // the single jobs-changed notification.
+    // Stop anything already armed for this id before replacing it, so arm() (and
+    // therefore start()) is idempotent and can never leave a duplicate timer /
+    // watcher firing for the same workflow. Silent stop — the caller (start/
+    // rearm) owns the single jobs-changed notification.
     this.stopJob(wf.id);
+    if (wf.cron) this.armCron(wf);
+    if (wf.watch_path) this.armFileWatch(wf);
+  }
+
+  /** Arm the cron job for a workflow (assumes `wf.cron` is set). */
+  private armCron(wf: Workflow): void {
     try {
       // `new Cron(pattern, fn)` arms immediately and fires forward-only.
-      const job = new Cron(wf.cron, () => {
-        void this.fire(wf.id);
+      const job = new Cron(wf.cron!, () => {
+        void this.fire(wf.id, "cron");
       });
       this.jobs.set(wf.id, job);
     } catch (err) {
       // A row with an unparseable cron should have been rejected at upsert, but
       // guard so one bad row can't abort arming the rest on boot.
-      console.error(`[workflow-scheduler] failed to arm ${wf.id} ("${wf.cron}"):`, err);
+      console.error(`[workflow-scheduler] failed to arm cron for ${wf.id} ("${wf.cron}"):`, err);
     }
   }
 
-  /** Cron tick: run the workflow, swallowing+logging any unexpected throw. */
-  private async fire(workflowId: string): Promise<void> {
+  /**
+   * Arm the file watcher for a workflow (assumes `wf.watch_path` is set). A
+   * change under the path schedules a debounced run. Fail-safe: an unwatchable
+   * path (missing, permission denied, recursive-watch unsupported) is logged and
+   * skipped, never aborting the arming of the rest.
+   */
+  private armFileWatch(wf: Workflow): void {
+    const watchPath = wf.watch_path!;
     try {
-      await runWorkflow(this.ctx, workflowId, "cron", this.hooks);
+      // `recursive: true` covers a watched directory tree (supported on macOS,
+      // Windows, and modern Linux). On a single file it is harmless.
+      const watcher = fs.watch(watchPath, { recursive: true }, () => {
+        this.scheduleFileFire(wf.id);
+      });
+      // A delayed I/O error (the path is removed while watching) must not crash
+      // the process — drop the watcher and log.
+      watcher.on("error", (err) => {
+        console.error(`[workflow-scheduler] file watcher error for ${wf.id} ("${watchPath}"):`, err);
+        this.stopFileWatcher(wf.id);
+      });
+      this.fileWatchers.set(wf.id, { watcher, debounce: null });
     } catch (err) {
-      // runWorkflow only rejects for an unknown id (e.g. deleted mid-tick); the
-      // job stays armed for the next occurrence regardless.
-      console.error(`[workflow-scheduler] cron run failed for ${workflowId}:`, err);
+      console.error(
+        `[workflow-scheduler] failed to watch "${watchPath}" for ${wf.id}:`,
+        err
+      );
     }
   }
+
+  /**
+   * Coalesce a burst of file events into a single run: reset the per-workflow
+   * debounce timer on each event and fire only once it settles.
+   */
+  private scheduleFileFire(workflowId: string): void {
+    const handle = this.fileWatchers.get(workflowId);
+    if (!handle) return; // watcher was stopped between event and dispatch
+    if (handle.debounce) clearTimeout(handle.debounce);
+    handle.debounce = setTimeout(() => {
+      handle.debounce = null;
+      void this.fire(workflowId, "file");
+    }, this.fileWatchDebounceMs);
+  }
+
+  /**
+   * Trigger tick (cron or file): run the workflow, swallowing+logging any
+   * unexpected throw so the triggers stay armed for the next occurrence.
+   */
+  private async fire(workflowId: string, trigger: WorkflowRunTrigger): Promise<void> {
+    try {
+      await runWorkflow(this.ctx, workflowId, trigger, this.hooks);
+    } catch (err) {
+      // runWorkflow only rejects for an unknown id (e.g. deleted mid-tick); the
+      // triggers stay armed for the next occurrence regardless.
+      console.error(`[workflow-scheduler] ${trigger} run failed for ${workflowId}:`, err);
+    }
+  }
+}
+
+/** Whether a workflow declares at least one automatic trigger (cron or file). */
+function hasTrigger(wf: Workflow): boolean {
+  return Boolean(wf.cron || wf.watch_path);
 }

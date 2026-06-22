@@ -228,6 +228,13 @@ export interface Workflow {
   skills: string[] | null;
   /** Cron expression. Null = manual-only workflow. */
   cron: string | null;
+  /**
+   * Filesystem path watched for changes. When set on an enabled workflow, the
+   * scheduler arms a (debounced) file watcher that fires a run on any change
+   * under the path. Null = no file trigger. Independent of `cron` — a workflow
+   * may declare both, either, or neither (manual-only).
+   */
+  watch_path: string | null;
   /** The scheduler only arms enabled workflows. */
   enabled: boolean;
   session_strategy: WorkflowSessionStrategy;
@@ -240,7 +247,7 @@ export interface Workflow {
 }
 
 export type WorkflowRunStatus = "running" | "success" | "error" | "skipped";
-export type WorkflowRunTrigger = "cron" | "manual";
+export type WorkflowRunTrigger = "cron" | "manual" | "file";
 
 /** One execution of a workflow. */
 export interface WorkflowRun {

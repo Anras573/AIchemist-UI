@@ -55,6 +55,7 @@ export function registerWorkflowHandlers(db: Database, scheduler: WorkflowSchedu
     const name = input.name?.trim();
     const prompt = input.prompt?.trim();
     const cron = trimNullable(input.cron);
+    const watchPath = trimNullable(input.watchPath);
     const reuseSessionId = trimNullable(input.reuseSessionId);
     // model/agent are nullable overrides: trim, and coerce whitespace-only to
     // null (a "clear") while preserving an explicit null and an absent undefined.
@@ -71,6 +72,7 @@ export function registerWorkflowHandlers(db: Database, scheduler: WorkflowSchedu
       if (agent !== undefined) patch.agent = agent;
       if (input.skills !== undefined) patch.skills = input.skills;
       if (cron !== undefined) patch.cron = cron;
+      if (watchPath !== undefined) patch.watch_path = watchPath;
       if (input.enabled !== undefined) patch.enabled = input.enabled;
       if (input.sessionStrategy !== undefined) patch.session_strategy = input.sessionStrategy;
       if (reuseSessionId !== undefined) patch.reuse_session_id = reuseSessionId;
@@ -102,6 +104,7 @@ export function registerWorkflowHandlers(db: Database, scheduler: WorkflowSchedu
       agent: agent ?? null,
       skills: input.skills ?? null,
       cron: cron ?? null,
+      watchPath: watchPath ?? null,
       enabled: input.enabled,
       sessionStrategy: input.sessionStrategy,
       reuseSessionId: reuseSessionId ?? null,

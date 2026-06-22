@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { WithTooltip } from "@/components/ui/with-tooltip";
 import { WorkflowEditor } from "./WorkflowEditor";
 import { WorkflowRunHistory } from "./WorkflowRunHistory";
-import { X, Plus, Clock, Hand, Bot, Trash2, Pencil } from "lucide-react";
+import { X, Plus, Clock, Hand, Bot, Trash2, Pencil, Eye } from "lucide-react";
 import type { Provider, Workflow, WorkflowRun } from "@/types";
 
 interface WorkflowsViewProps {
@@ -245,10 +245,14 @@ function WorkflowListItem({
           aria-label={workflow.enabled ? "Enabled" : "Disabled"}
         />
         <span className="flex-1 truncate font-medium text-foreground">{workflow.name}</span>
-        {workflow.cron ? (
-          <Clock className="h-3 w-3 flex-shrink-0" />
-        ) : (
-          <Hand className="h-3 w-3 flex-shrink-0" />
+        {workflow.cron && (
+          <Clock className="h-3 w-3 flex-shrink-0" aria-label="Cron trigger" />
+        )}
+        {workflow.watch_path && (
+          <Eye className="h-3 w-3 flex-shrink-0" aria-label="File trigger" />
+        )}
+        {!workflow.cron && !workflow.watch_path && (
+          <Hand className="h-3 w-3 flex-shrink-0" aria-label="Manual only" />
         )}
       </div>
       <span className="block truncate text-xs text-muted-foreground pl-3">{projectName}</span>
@@ -328,6 +332,16 @@ function WorkflowDetail({
             )}
           </span>
           {workflow.cron && <span className="text-xs text-muted-foreground">{preview.label}</span>}
+        </Meta>
+        <Meta label="File trigger">
+          {workflow.watch_path ? (
+            <span className="flex items-center gap-1.5">
+              <Eye className="h-3.5 w-3.5 flex-shrink-0" />
+              <code className="font-mono text-xs truncate">{workflow.watch_path}</code>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">None</span>
+          )}
         </Meta>
         <Meta label="Provider / model">
           <span>{providerLabel}</span>
