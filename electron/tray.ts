@@ -50,6 +50,15 @@ export class TrayController {
     }
   }
 
+  /**
+   * Whether a tray icon currently exists. `main.ts` gates survive-window-close on
+   * this so a failed tray creation falls back to quitting on window close rather
+   * than stranding a windowless background process with no handle to reopen/quit.
+   */
+  isActive(): boolean {
+    return this.tray !== null;
+  }
+
   /** Remove the tray icon (app shutdown, or no scheduled workflows remain). */
   destroy(): void {
     this.tray?.destroy();
@@ -61,8 +70,11 @@ export class TrayController {
       this.tray = new Tray(trayImage());
       this.tray.setToolTip("AIchemist");
       // On Windows/Linux a left click should reopen the window like an app
-      // launcher would; macOS shows the menu on click by convention.
-      this.tray.on("click", () => this.deps.showWindow());
+      // launcher would. macOS shows the context menu on click by convention, so
+      // attaching showWindow there would fight that — gate it to non-darwin.
+      if (process.platform !== "darwin") {
+        this.tray.on("click", () => this.deps.showWindow());
+      }
     } catch (err) {
       // Some headless / unsupported environments have no tray. Never let that
       // break startup — the app simply runs without a tray (and then quits on

@@ -448,17 +448,24 @@ describe("WorkflowScheduler", () => {
     const onChanged = vi.fn();
     scheduler.onJobsChanged(onChanged);
 
-    // start() reconciles all jobs and fires once.
+    // start() reconciles all jobs and fires exactly once (never per-arm).
     scheduler.start();
-    expect(onChanged).toHaveBeenCalled();
+    expect(onChanged).toHaveBeenCalledTimes(1);
     // The listener observes the current armed count, gating the tray.
     expect(scheduler.armedCount).toBe(1);
 
-    // Disabling + re-arming drops the job and fires again.
+    // Re-arming a previously-armed job must fire exactly once — not twice (a
+    // transient drop-then-restore would flicker the tray).
+    onChanged.mockClear();
+    scheduler.rearm(wf.id);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(scheduler.armedCount).toBe(1);
+
+    // Disabling + re-arming drops the job and still fires exactly once.
     onChanged.mockClear();
     updateWorkflow(db, wf.id, { enabled: false });
     scheduler.rearm(wf.id);
-    expect(onChanged).toHaveBeenCalled();
+    expect(onChanged).toHaveBeenCalledTimes(1);
     expect(scheduler.armedCount).toBe(0);
 
     // A throwing listener never breaks scheduling.

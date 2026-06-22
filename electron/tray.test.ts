@@ -69,6 +69,7 @@ describe("TrayController", () => {
   it("does not create a tray while no workflow is scheduled", () => {
     tray.refresh();
     expect(instances).toHaveLength(0);
+    expect(tray.isActive()).toBe(false);
   });
 
   it("creates the tray when the scheduled count rises above zero", () => {
@@ -100,8 +101,14 @@ describe("TrayController", () => {
     expect(showWindow).toHaveBeenCalledTimes(1);
     t.menu!.template.find((m) => m.label === "Quit AIchemist")!.click!();
     expect(quit).toHaveBeenCalledTimes(1);
-    t.handlers["click"]?.();
-    expect(showWindow).toHaveBeenCalledTimes(2);
+    // The left-click → showWindow handler is only attached off macOS (macOS
+    // shows the context menu on click by convention).
+    if (process.platform === "darwin") {
+      expect(t.handlers["click"]).toBeUndefined();
+    } else {
+      t.handlers["click"]!();
+      expect(showWindow).toHaveBeenCalledTimes(2);
+    }
   });
 
   it("reuses the same tray across refreshes and updates the count", () => {
@@ -116,10 +123,12 @@ describe("TrayController", () => {
   it("destroys the tray when the scheduled count returns to zero", () => {
     count = 1;
     tray.refresh();
+    expect(tray.isActive()).toBe(true);
     const t = instances[0];
     count = 0;
     tray.refresh();
     expect(t.destroyed).toBe(true);
+    expect(tray.isActive()).toBe(false);
   });
 
   it("destroy() tears down an existing tray", () => {

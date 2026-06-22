@@ -162,10 +162,12 @@ app.on("window-all-closed", () => {
     app.quit();
     return;
   }
-  // Otherwise survive window close *only* while the scheduler has armed jobs, so
-  // those cron workflows keep firing in the background (the tray provides the
-  // reopen/quit controls). With no scheduled work, quit as before.
-  if (workflowScheduler && workflowScheduler.armedCount > 0) return;
+  // Otherwise survive window close *only* while the scheduler has armed jobs AND
+  // a tray icon actually exists, so those cron workflows keep firing in the
+  // background with the tray providing the reopen/quit controls. If the tray
+  // failed to create there would be no way to restore/quit a windowless process,
+  // so fall back to quitting (as before this feature). No scheduled work → quit.
+  if (workflowScheduler && workflowScheduler.armedCount > 0 && tray?.isActive()) return;
   app.quit();
 });
 

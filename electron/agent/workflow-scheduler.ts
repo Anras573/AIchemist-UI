@@ -249,12 +249,16 @@ export class WorkflowScheduler {
     for (const wf of listWorkflows(this.ctx.db)) {
       if (wf.enabled && wf.cron) this.arm(wf);
     }
+    // One notification after the full armed set is stable — never per-arm.
     this.notifyJobsChanged();
   }
 
   /** Stop a job (if any) and, when the row is still enabled+cron, arm a fresh one. */
   rearm(workflowId: string): void {
-    this.cancel(workflowId);
+    // Use the silent low-level stop here; `rearm` emits a single notification
+    // after the final armed set is settled, so the tray sees one stable count
+    // change rather than a transient drop-then-restore (which could flicker it).
+    this.stopJob(workflowId);
     const wf = getWorkflow(this.ctx.db, workflowId);
     if (wf && wf.enabled && wf.cron) this.arm(wf);
     this.notifyJobsChanged();
@@ -262,11 +266,20 @@ export class WorkflowScheduler {
 
   /** Stop and forget a workflow's job. Safe to call when none is armed. */
   cancel(workflowId: string): void {
+    if (this.stopJob(workflowId)) this.notifyJobsChanged();
+  }
+
+  /**
+   * Low-level: stop and forget a single job, returning whether one existed.
+   * Does NOT notify — callers emit a single jobs-changed notification once the
+   * armed set is stable, so high-level ops never fire the listener twice.
+   */
+  private stopJob(workflowId: string): boolean {
     const job = this.jobs.get(workflowId);
-    if (!job) return;
+    if (!job) return false;
     job.stop();
     this.jobs.delete(workflowId);
-    this.notifyJobsChanged();
+    return true;
   }
 
   /** Stop all jobs (app shutdown). */
@@ -301,8 +314,9 @@ export class WorkflowScheduler {
     if (!wf.cron) return;
     // Stop any job already armed for this id before replacing it, so arm() (and
     // therefore start()) is idempotent and can never leave a duplicate timer
-    // firing for the same workflow.
-    this.cancel(wf.id);
+    // firing for the same workflow. Silent stop — the caller (start/rearm) owns
+    // the single jobs-changed notification.
+    this.stopJob(wf.id);
     try {
       // `new Cron(pattern, fn)` arms immediately and fires forward-only.
       const job = new Cron(wf.cron, () => {
