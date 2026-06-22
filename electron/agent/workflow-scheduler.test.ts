@@ -436,6 +436,63 @@ describe("WorkflowScheduler", () => {
     scheduler.stopAll();
   });
 
+  it("notifies the jobs-changed listener on start / rearm / delete", () => {
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Watched",
+      prompt: "p",
+      cron: "0 9 * * *",
+      enabled: true,
+    });
+    const scheduler = makeScheduler();
+    const onChanged = vi.fn();
+    scheduler.onJobsChanged(onChanged);
+
+    // start() reconciles all jobs and fires exactly once (never per-arm).
+    scheduler.start();
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    // The listener observes the current armed count, gating the tray.
+    expect(scheduler.armedCount).toBe(1);
+
+    // Re-arming a previously-armed job must fire exactly once — not twice (a
+    // transient drop-then-restore would flicker the tray).
+    onChanged.mockClear();
+    scheduler.rearm(wf.id);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(scheduler.armedCount).toBe(1);
+
+    // Disabling + re-arming drops the job and still fires exactly once.
+    onChanged.mockClear();
+    updateWorkflow(db, wf.id, { enabled: false });
+    scheduler.rearm(wf.id);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(scheduler.armedCount).toBe(0);
+
+    // delete() cancels the (re-armed) job and must notify exactly once so the
+    // tray drops the workflow from its count.
+    onChanged.mockClear();
+    updateWorkflow(db, wf.id, { enabled: true });
+    scheduler.rearm(wf.id);
+    expect(scheduler.armedCount).toBe(1);
+    onChanged.mockClear();
+    scheduler.delete(wf.id);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(scheduler.armedCount).toBe(0);
+    expect(getWorkflow(db, wf.id)).toBeNull();
+
+    // A throwing listener never breaks scheduling.
+    scheduler.onJobsChanged(() => {
+      throw new Error("boom");
+    });
+    expect(() => scheduler.rearm(wf.id)).not.toThrow();
+
+    // A null listener detaches cleanly.
+    scheduler.onJobsChanged(null);
+    expect(() => scheduler.start()).not.toThrow();
+
+    scheduler.stopAll();
+  });
+
   it("keeps the job armed after a failing run", async () => {
     runMock.mockRejectedValueOnce(new Error("provider exploded"));
     const wf = createWorkflow(db, {

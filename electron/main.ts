@@ -18,6 +18,7 @@ import { registerGitHubHandlers } from "./ipc/github-handlers";
 import { registerMcpHandlers } from "./ipc/mcp-handlers";
 import { registerWorkflowHandlers } from "./ipc/workflow-handlers";
 import { WorkflowScheduler } from "./agent/workflow-scheduler";
+import { TrayController } from "./tray";
 
 // ── Prevent multiple instances ───────────────────────────────────────────────
 if (require("electron-squirrel-startup")) app.quit();
@@ -28,12 +29,29 @@ const db = openDb();
 
 let mainWin: BrowserWindow | null = null;
 
+// Set once the user (or the system) has asked for a real quit. Distinguishes a
+// genuine quit from a plain window close: when scheduled workflows are armed we
+// keep the app alive on window-all-closed (tray-only) instead of quitting, but
+// an explicit quit must still go through.
+let isQuitting = false;
+
 // Sessions that currently have an agent turn in progress.
 // Prevents concurrent turns on the same session (e.g. rapid double-send).
 const activeTurns = new Set<string>();
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWin;
+}
+
+/** Focus the existing window, recreating it if it was closed (tray "Open"). */
+function showWindow(): void {
+  if (mainWin) {
+    if (mainWin.isMinimized()) mainWin.restore();
+    mainWin.show();
+    mainWin.focus();
+  } else {
+    createWindow();
+  }
 }
 
 function createWindow(): BrowserWindow {
@@ -68,6 +86,11 @@ let cleanupTerminals: (() => void) | undefined;
 // register. Module-level so before-quit can stop its jobs.
 let workflowScheduler: WorkflowScheduler | null = null;
 
+// Optional menu-bar/system-tray icon. Present only while ≥1 enabled scheduled
+// workflow is armed — that is exactly when the app survives window close, so the
+// tray is the user's handle on the otherwise windowless process.
+let tray: TrayController | null = null;
+
 function registerAllHandlers(scheduler: WorkflowScheduler): void {
   cleanupTerminals = registerTerminalHandlers(() => mainWin);
   registerSettingsHandlers(db);
@@ -93,8 +116,24 @@ app.whenReady().then(() => {
   registerAllHandlers(workflowScheduler);
   const win = createWindow();
 
+  // The tray appears whenever the scheduler has at least one armed job and lets
+  // the user reopen the window or quit while it runs in the background.
+  const scheduler = workflowScheduler;
+  tray = new TrayController({
+    showWindow,
+    getScheduledCount: () => scheduler.armedCount,
+    quit: () => {
+      isQuitting = true;
+      app.quit();
+    },
+  });
+  // Re-evaluate the tray whenever workflows are armed/disarmed (boot, upsert,
+  // delete, enable/disable) so it tracks the live scheduled-workflow count.
+  scheduler.onJobsChanged(() => tray?.refresh());
+
   // Arm enabled cron workflows after handlers register. Forward-only: missed
-  // occurrences while the app was closed are not replayed.
+  // occurrences while the app was closed are not replayed. `start()` fires the
+  // jobs-changed listener, which performs the initial tray reconcile.
   workflowScheduler.start();
 
   // Warn if no API keys are configured — both providers missing means
@@ -116,11 +155,26 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // macOS apps conventionally stay alive with no windows; nothing to decide.
+  if (process.platform === "darwin") return;
+  // An explicit quit (tray "Quit", before-quit already fired) always proceeds.
+  if (isQuitting) {
+    app.quit();
+    return;
+  }
+  // Otherwise survive window close *only* while the scheduler has armed jobs AND
+  // a tray icon actually exists, so those cron workflows keep firing in the
+  // background with the tray providing the reopen/quit controls. If the tray
+  // failed to create there would be no way to restore/quit a windowless process,
+  // so fall back to quitting (as before this feature). No scheduled work → quit.
+  if (workflowScheduler && workflowScheduler.armedCount > 0 && tray?.isActive()) return;
+  app.quit();
 });
 
 app.on("before-quit", () => {
+  isQuitting = true;
   cleanupTerminals?.();
+  tray?.destroy();
   workflowScheduler?.stopAll();
 
   // Gracefully shut down all registered providers that implement stop()
