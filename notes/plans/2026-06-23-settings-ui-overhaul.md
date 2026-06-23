@@ -198,5 +198,3 @@ Each step compiles, passes `bun run typecheck`, and is independently reviewable.
   selection must stay session-scoped (they write session rows, not global config).
 - **Secret handling unchanged.** Keys still land in `~/.aichemist/.env`; keep the
   show/hide masking. No new exposure surface.
-</content>
-</invoke>
