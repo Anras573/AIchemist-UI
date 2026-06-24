@@ -56,19 +56,19 @@ Single full-screen view, two-tier searchable nav:
 
 ## Existing code inventory (what we touch)
 
-| File | LOC | Fate |
-|---|---|---|
-| `src/components/settings/SettingsView.tsx` | 744 | **Rewrite** — becomes the hub shell + section router |
-| `src/components/settings/ProjectSettingsContent.tsx` | 399 | **Refactor** — drop save-row, autosave; reused by hub |
-| `src/components/settings/ProjectSettingsSheet.tsx` | 54 | **Delete** — single entry point now |
-| `src/components/session/McpConfigEditorDialog.tsx` | 482 | **Extract** core into a hub section; keep a thin dialog or retire |
-| `src/components/session/McpServersPanel.tsx` | 323 | **Trim** — quick-toggle + "Manage in Settings" deep link |
-| `src/components/session/SkillsPanel.tsx` | 372 | **Trim** — keep per-session toggle; "New/Edit" deep-links to hub |
-| `src/components/session/SkillEditorModal.tsx` | 285 | **Reuse** as inline editor in Skills section |
-| `src/components/session/AgentsPanel.tsx` | 222 | **Trim** similarly |
-| `src/components/session/AgentEditorModal.tsx` | 294 | **Reuse** as inline editor in Agents section |
-| `src/components/layout/AppShell.tsx` | — | Remove `ProjectSettingsSheet` mount |
-| `src/lib/store/useProjectStore.ts` | 66 | Drop `projectSettingsOpen`; add hub nav state (below) |
+| File | Fate |
+|---|---|
+| `src/components/settings/SettingsView.tsx` | **Rewrite** — becomes the hub shell + section router |
+| `src/components/settings/ProjectSettingsContent.tsx` | **Refactor** — drop save-row, autosave; reused by hub |
+| `src/components/settings/ProjectSettingsSheet.tsx` | **Delete** — single entry point now |
+| `src/components/session/McpConfigEditorDialog.tsx` | **Extract** core into a hub section; keep a thin dialog or retire |
+| `src/components/session/McpServersPanel.tsx` | **Trim** — quick-toggle + "Manage in Settings" deep link |
+| `src/components/session/SkillsPanel.tsx` | **Trim** — keep per-session toggle; "New/Edit" deep-links to hub |
+| `src/components/session/SkillEditorModal.tsx` | **Reuse** as inline editor in Skills section |
+| `src/components/session/AgentsPanel.tsx` | **Trim** similarly |
+| `src/components/session/AgentEditorModal.tsx` | **Reuse** as inline editor in Agents section |
+| `src/components/layout/AppShell.tsx` | Remove `ProjectSettingsSheet` mount |
+| `src/lib/store/useProjectStore.ts` | Drop `projectSettingsOpen`; add hub nav state (below) |
 
 ### IPC already available (no backend work)
 
@@ -133,7 +133,7 @@ Each step compiles, passes `bun run typecheck`, and is independently reviewable.
   - OpenAI-compatible: inline endpoints manager (port `OpenAiEndpointsSection`),
     per-endpoint probe badge.
 - Enabled toggle writes `AICHEMIST_DISABLED_PROVIDERS` (reuse
-  `parse/serializeDisabledProviders`). Keep the "all disabled" guard.
+  `parseDisabledProviders` / `serializeDisabledProviders`). Keep the "all disabled" guard.
 - Autosave on blur for keys/URLs → trigger `probeProviders({ force: true })`.
 - Retire the old `API Keys` / `Model Overrides` / `Providers` section bodies.
 
@@ -148,7 +148,7 @@ Each step compiles, passes `bun run typecheck`, and is independently reviewable.
 
 ### Step 5 — MCP Servers section
 - Promote `McpConfigEditorDialog`'s editor into a hub section: list + add/edit/delete
-  via `mcpReadConfig/Write/Delete`, with live `mcpProbeManaged` health per row
+  via `mcpReadConfig`, `mcpWriteConfig`, and `mcpDeleteServer`, with live `mcpProbeManaged` health per row
   (connected / tools / error) + a force-refresh.
 - `McpServersPanel` keeps its per-session **disable toggle**
   (`updateSessionDisabledMcp`) and gets a "Manage servers →" deep link
