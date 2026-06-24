@@ -39,7 +39,7 @@ Single full-screen view, two-tier searchable nav:
 ```
 ┌ Search settings…                                              ┐
 │ APPLICATION                                                   │
-│   Providers & Keys     (Anthropic / Copilot / Ollama / OAI)   │
+│   Providers & Keys     (Anthropic / Copilot / Ollama / OpenAI)│
 │   MCP Servers          (~/.aichemist/mcp.json CRUD + probes)  │
 │   Skills               (global / plugin skill management)     │
 │   Agents               (global agent files)                   │
@@ -75,8 +75,8 @@ Single full-screen view, two-tier searchable nav:
 - Settings: `ipc.settingsRead()`, `ipc.settingsWrite(updates)`
 - Probes: `ipc.probeProviders({ projectId?, force? })` + `useProviderProbes()`
 - OpenAI endpoints: `readOpenAiEndpoints` / `upsertOpenAiEndpoint` / `deleteOpenAiEndpoint`
-- MCP: `listMcpServers`, `mcpProbeManaged`, `mcpReadConfig`, `mcpWriteConfig`, `mcpDeleteServer`
-- Skills: `listSkills(projectPath, provider)`, `updateSessionSkills`, `updateSessionDisabledMcp`
+- MCP: `listMcpServers`, `mcpProbeManaged`, `mcpReadConfig`, `mcpWriteConfig`, `mcpDeleteServer`, `updateSessionDisabledMcp`
+- Skills: `listSkills(projectPath, provider)`, `updateSessionSkills`
 - Agents: `getClaudeAgents` / `getCopilotAgents`, `updateSessionAgent`
 - Project config: `getProjectConfig` / `saveProjectConfig`
 
