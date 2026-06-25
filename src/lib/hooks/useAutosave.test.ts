@@ -159,4 +159,24 @@ describe("useAutosave", () => {
     expect(save).toHaveBeenCalledWith("same");
     expect(result.current.canUndo).toBe(false);
   });
+
+  it("clears a prior undo window when a later no-op save does not qualify", async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      useAutosave(save, { debounceMs: 0, undoMs: 5000, initialValue: "a" }),
+    );
+
+    // First change opens an undo window back to "a".
+    await act(async () => {
+      result.current.commit("b");
+    });
+    expect(result.current.canUndo).toBe(true);
+
+    // Re-saving the current baseline doesn't qualify for a new undo target; the
+    // stale "a" window must be cleared rather than leak into this saved state.
+    await act(async () => {
+      result.current.commit("b");
+    });
+    expect(result.current.canUndo).toBe(false);
+  });
 });

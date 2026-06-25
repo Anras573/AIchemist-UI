@@ -98,9 +98,16 @@ export function useAutosave<T>(
         if (seq !== seqRef.current) return;
         baselineRef.current = value;
         setStatus("saved");
+        // Each completed save fully owns the undo state: arm it when the new
+        // value differs from the prior baseline, otherwise clear any window left
+        // over from an earlier save so a no-op re-save can't offer a stale Undo
+        // that reverts too far back.
         if (trackUndo && undoTo !== undefined && !Object.is(undoTo, value)) {
           undoTargetRef.current = undoTo;
           setCanUndo(true);
+        } else {
+          undoTargetRef.current = undefined;
+          setCanUndo(false);
         }
         // One timer both fades "Saved ✓" back to idle and closes the undo window.
         windowTimer.current = setTimeout(() => {
