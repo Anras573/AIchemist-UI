@@ -28,7 +28,7 @@ interface ProjectSidebarProps {
 
 export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarProps) {
   const ipc = useIpc();
-  const { projects, activeProjectId, setProjects, setActiveProject, addProject, removeProject, openSettings, openProjectSettings, openWorkflows } =
+  const { projects, activeProjectId, setProjects, setActiveProject, addProject, removeProject, openSettings, openWorkflows } =
     useProjectStore();
   const mergeSessions = useSessionStore((s) => s.mergeSessions);
 
@@ -189,7 +189,7 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
             onExpand={() => handleExpand(project.id)}
             onExpandSidebar={() => onCollapsedChange(false)}
             onRemoveProject={(e) => handleRemoveProject(e, project.id)}
-            onOpenProjectSettings={openProjectSettings}
+            onOpenProjectSettings={() => openSettings({ scope: "project", id: "general" })}
             onSetActiveProject={setActiveProject}
           />
         ))}
@@ -219,7 +219,7 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
             variant="ghost"
             size="sm"
             className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground"
-            onClick={openSettings}
+            onClick={() => openSettings()}
           >
             <Settings className="h-3.5 w-3.5 mr-2" />
             Settings
@@ -244,7 +244,7 @@ export function ProjectSidebar({ collapsed, onCollapsedChange }: ProjectSidebarP
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-sidebar-foreground/60 hover:text-sidebar-foreground mx-auto flex"
-              onClick={openSettings}
+              onClick={() => openSettings()}
               aria-label="Settings"
             >
               <Settings className="h-4 w-4" />

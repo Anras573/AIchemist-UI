@@ -4,7 +4,6 @@ import { WorkspaceView } from "@/components/layout/WorkspaceView";
 import { CommandPalette } from "@/components/layout/CommandPalette";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { WorkflowsView } from "@/components/workflows/WorkflowsView";
-import { ProjectSettingsSheet } from "@/components/settings/ProjectSettingsSheet";
 import { useSessionEvents } from "@/lib/hooks/useSessionEvents";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { TitleBar } from "@/components/layout/TitleBar";
@@ -12,7 +11,7 @@ import { TitleBar } from "@/components/layout/TitleBar";
 export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const { settingsOpen, openSettings, closeSettings, projectSettingsOpen, closeProjectSettings, workflowsOpen, closeWorkflows, activeProjectId } = useProjectStore();
+  const { settingsOpen, openSettings, closeSettings, workflowsOpen, closeWorkflows } = useProjectStore();
 
   // Subscribe to all session:* events for the lifetime of the app
   useSessionEvents();
@@ -53,13 +52,6 @@ export function AppShell() {
           )}
         </main>
       </div>
-
-      {projectSettingsOpen && activeProjectId && (
-        <ProjectSettingsSheet
-          projectId={activeProjectId}
-          onClose={closeProjectSettings}
-        />
-      )}
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </div>

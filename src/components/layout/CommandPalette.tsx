@@ -37,7 +37,7 @@ type Page = "root" | "agent";
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const ipc = useIpc();
-  const { projects, setActiveProject, activeProjectId, openSettings, openProjectSettings } = useProjectStore();
+  const { projects, setActiveProject, activeProjectId, openSettings } = useProjectStore();
   const {
     sessions,
     setActiveSession,
@@ -121,7 +121,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     if (!activeProjectId) return;
     // Custom approval rules can't be meaningfully toggled — send to project settings
     if (approvalMode === "custom") {
-      openProjectSettings();
+      openSettings({ scope: "project", id: "general" });
       close();
       return;
     }
