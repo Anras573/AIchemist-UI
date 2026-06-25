@@ -165,6 +165,38 @@ describe("SettingsView — Project section", () => {
       expect(screen.getByText(/No active project selected/i)).toBeInTheDocument(),
     );
   });
+
+  it("shows a loading message when activeProjectId is set but projects haven't loaded", async () => {
+    // Persisted activeProjectId can resolve before the async projects list.
+    useProjectStore.setState({
+      projects: [],
+      activeProjectId: "proj-pending",
+      settingsOpen: true,
+      settingsSection: { scope: "project", id: "general" },
+    });
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+    // Both the nav ("Loading projects…") and the content body ("Loading
+    // project…") report the pending state.
+    await waitFor(() =>
+      expect(screen.getByText("Loading project…")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("Loading projects…")).toBeInTheDocument();
+    expect(screen.queryByText(/No active project/i)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the default section title on an unknown app section id", async () => {
+    useProjectStore.setState({
+      settingsOpen: true,
+      settingsSection: { scope: "app", id: "does-not-exist" },
+    });
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+    // Header shows a stable "Settings" title rather than going blank, and the
+    // API Keys body (the safe default section) renders.
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("Anthropic API Key")).toBeInTheDocument();
+  });
 });
 
 describe("SettingsView — OpenAI-compatible endpoints error feedback", () => {

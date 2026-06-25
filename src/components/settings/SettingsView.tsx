@@ -447,9 +447,17 @@ export function SettingsView({ onClose }: SettingsViewProps) {
   );
 
   // App-tier section currently selected (null when a project section is active).
+  // `settingsSection.id` is typed as `string` (deep links can carry anything),
+  // so validate against APP_NAV and fall back to a safe default rather than
+  // casting blindly — an unknown id would otherwise render a blank panel.
   const activeSection: Section | null =
-    settingsSection.scope === "app" ? (settingsSection.id as Section) : null;
+    settingsSection.scope === "app"
+      ? APP_NAV.find((n) => n.id === settingsSection.id)?.id ?? "api-keys"
+      : null;
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
+  // A persisted activeProjectId can resolve before the async-loaded projects
+  // list arrives; treat that window as "loading" rather than "no project".
+  const projectsLoading = activeProjectId !== null && activeProject === null && projects.length === 0;
 
   // Case-insensitive nav filter over section labels.
   const q = search.trim().toLowerCase();
@@ -459,9 +467,10 @@ export function SettingsView({ onClose }: SettingsViewProps) {
 
   const getTitle = (): string => {
     if (settingsSection.scope === "app") {
-      return APP_NAV.find((n) => n.id === settingsSection.id)?.label ?? "";
+      // Stable fallback so the header never goes blank on an unknown id.
+      return APP_NAV.find((n) => n.id === settingsSection.id)?.label ?? "Settings";
     }
-    const sectionLabel = PROJECT_NAV.find((n) => n.id === settingsSection.id)?.label ?? "";
+    const sectionLabel = PROJECT_NAV.find((n) => n.id === settingsSection.id)?.label ?? "Settings";
     return activeProject ? `${activeProject.name} — ${sectionLabel}` : sectionLabel;
   };
 
@@ -535,7 +544,9 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                   </button>
                 ))
               ) : (
-                <p className="px-3 py-1.5 text-xs text-muted-foreground">No active project.</p>
+                <p className="px-3 py-1.5 text-xs text-muted-foreground">
+                  {projectsLoading ? "Loading projects…" : "No active project."}
+                </p>
               )}
             </div>
           )}
@@ -769,7 +780,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
               <ProjectSettingsContent projectId={activeProject.id} />
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm p-8">
-                No active project selected.
+                {projectsLoading ? "Loading project…" : "No active project selected."}
               </div>
             )}
           </div>
