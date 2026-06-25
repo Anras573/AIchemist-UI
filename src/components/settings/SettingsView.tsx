@@ -17,21 +17,27 @@ import {
 } from "../../../electron/providers";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { ProjectSettingsContent } from "@/components/settings/ProjectSettingsContent";
+import { useAutosave } from "@/lib/hooks/useAutosave";
+import { SettingsSection } from "@/components/settings/primitives/SettingsSection";
+import { SettingField, SettingStatus } from "@/components/settings/primitives/SettingField";
 
 interface SettingsViewProps {
   onClose: () => void;
 }
 
-type Section = "api-keys" | "model-overrides" | "defaults" | "providers" | "appearance";
+type Section = "api-keys" | "model-overrides" | "advanced" | "providers" | "appearance";
+// Sections that still persist via an explicit Save button. Appearance and
+// Advanced autosave instead (see useAutosave wiring below).
+type ManualSection = "api-keys" | "model-overrides" | "providers";
 
 // Application-tier nav rows. Project-tier rows are derived from the active
 // project at render time (see PROJECT_NAV).
 const APP_NAV: { id: Section; label: string }[] = [
   { id: "api-keys", label: "API Keys" },
   { id: "model-overrides", label: "Model Overrides" },
-  { id: "defaults", label: "Defaults" },
   { id: "providers", label: "Providers" },
   { id: "appearance", label: "Appearance" },
+  { id: "advanced", label: "Advanced" },
 ];
 
 // Project-tier nav rows. Step 1 keeps a single section that renders the existing
@@ -384,12 +390,12 @@ export function SettingsView({ onClose }: SettingsViewProps) {
   const [search, setSearch] = useState("");
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [draft, setDraft] = useState<Partial<SettingsMap>>({});
-  const [saveStatus, setSaveStatus] = useState<Record<Section, SaveStatus>>({
+  // Manual Save sections (still using the SaveRow). Appearance and Advanced were
+  // converted to autosave (useAutosave) and no longer appear here.
+  const [saveStatus, setSaveStatus] = useState<Record<ManualSection, SaveStatus>>({
     "api-keys": "idle",
     "model-overrides": "idle",
-    defaults: "idle",
     providers: "idle",
-    appearance: "idle",
   });
 
   const { theme, setTheme } = useTheme();
@@ -405,12 +411,38 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     setDraft((d) => ({ ...d, [key]: val }));
   }, []);
 
+  // ── Autosave wiring for Appearance + Advanced ──────────────────────────────
+  // Persist a single setting key, mirroring it into local state so the field
+  // reflects the saved (optionally normalized) value and undo can restore it.
+  const writeSetting = useCallback(
+    async (key: keyof SettingsMap, value: string) => {
+      await ipc.settingsWrite({ [key]: value } as Partial<SettingsMap>);
+      setSettings((s) => (s ? { ...s, [key]: value } : s));
+      setDraft((d) => ({ ...d, [key]: value }));
+    },
+    [ipc],
+  );
+
+  const themeSave = useAutosave<Theme>((v) => setTheme(v), { initialValue: theme });
+  const providerSave = useAutosave<string>(
+    (v) => writeSetting("AICHEMIST_DEFAULT_PROVIDER", v),
+    { initialValue: normalizeProvider(draft.AICHEMIST_DEFAULT_PROVIDER) },
+  );
+  const approvalSave = useAutosave<string>(
+    (v) => writeSetting("AICHEMIST_DEFAULT_APPROVAL_MODE", v),
+    { initialValue: normalizeApprovalMode(draft.AICHEMIST_DEFAULT_APPROVAL_MODE) },
+  );
+  const toolRoundsSave = useAutosave<string>(
+    (v) => writeSetting("AICHEMIST_MAX_TOOL_ROUNDS", normalizeMaxToolRounds(v)),
+    { initialValue: draft.AICHEMIST_MAX_TOOL_ROUNDS ?? "" },
+  );
+
   const saveSection = useCallback(
-    async (section: Section) => {
+    async (section: ManualSection) => {
       if (!settings) return;
       setSaveStatus((s) => ({ ...s, [section]: "saving" }));
 
-      const sectionKeys: Record<Section, (keyof SettingsMap)[]> = {
+      const sectionKeys: Record<ManualSection, (keyof SettingsMap)[]> = {
         "api-keys": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN"],
         "model-overrides": [
           "ANTHROPIC_BASE_URL",
@@ -418,18 +450,12 @@ export function SettingsView({ onClose }: SettingsViewProps) {
           "ANTHROPIC_DEFAULT_HAIKU_MODEL",
           "ANTHROPIC_DEFAULT_OPUS_MODEL",
         ],
-        defaults: ["AICHEMIST_DEFAULT_PROVIDER", "AICHEMIST_DEFAULT_APPROVAL_MODE", "AICHEMIST_MAX_TOOL_ROUNDS"],
         providers: ["AICHEMIST_DISABLED_PROVIDERS"],
-        appearance: [],
       };
 
       const updates: Partial<SettingsMap> = {};
       for (const k of sectionKeys[section]) {
         updates[k] = (draft[k] ?? "") as string & SettingsMap[typeof k];
-      }
-      // Clamp the raw input so the saved value matches what the app uses.
-      if ("AICHEMIST_MAX_TOOL_ROUNDS" in updates) {
-        updates.AICHEMIST_MAX_TOOL_ROUNDS = normalizeMaxToolRounds(updates.AICHEMIST_MAX_TOOL_ROUNDS);
       }
 
       try {
@@ -654,66 +680,73 @@ export function SettingsView({ onClose }: SettingsViewProps) {
               </>
             )}
 
-            {/* ── Defaults ── */}
-            {activeSection === "defaults" && (
-              <>
-                <p className="text-sm text-muted-foreground">
-                  Global defaults applied to new projects. Per-project settings always take
-                  precedence.
-                </p>
-                <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label htmlFor="default-provider" className="text-sm font-medium leading-none">Default Provider</label>
-                    <select
-                      id="default-provider"
-                      value={normalizeProvider(draft.AICHEMIST_DEFAULT_PROVIDER)}
-                      onChange={(e) => set("AICHEMIST_DEFAULT_PROVIDER", e.target.value)}
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    >
-                      {PROVIDER_IDS.map((p) => (
-                        <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="default-approval" className="text-sm font-medium leading-none">Default Approval Mode</label>
-                    <select
-                      id="default-approval"
-                      value={normalizeApprovalMode(draft.AICHEMIST_DEFAULT_APPROVAL_MODE)}
-                      onChange={(e) => set("AICHEMIST_DEFAULT_APPROVAL_MODE", e.target.value)}
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    >
-                      <option value="none">None — never ask for approval</option>
-                      <option value="custom">Custom — approve risky tools only</option>
-                      <option value="all">All — approve every tool call</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="max-tool-rounds" className="text-sm font-medium leading-none">Max tool rounds</label>
-                    <Input
-                      id="max-tool-rounds"
-                      type="number"
-                      min={MIN_MAX_TOOL_ROUNDS}
-                      max={MAX_MAX_TOOL_ROUNDS}
-                      step={1}
-                      value={draft.AICHEMIST_MAX_TOOL_ROUNDS ?? ""}
-                      onChange={(e) => set("AICHEMIST_MAX_TOOL_ROUNDS", e.target.value)}
-                      placeholder={String(DEFAULT_MAX_TOOL_ROUNDS)}
-                      className="font-mono text-sm w-32"
-                    />
-                    <p className="text-xs text-muted-foreground">
+            {/* ── Advanced (autosave) ── */}
+            {activeSection === "advanced" && (
+              <SettingsSection
+                title="Advanced"
+                description="Global defaults applied to new projects. Per-project settings always take precedence."
+              >
+                <SettingField
+                  variant="select"
+                  id="default-provider"
+                  label="Default Provider"
+                  value={normalizeProvider(draft.AICHEMIST_DEFAULT_PROVIDER)}
+                  options={PROVIDER_IDS.map((p) => ({ value: p, label: PROVIDER_LABELS[p] }))}
+                  onChange={(v) => {
+                    set("AICHEMIST_DEFAULT_PROVIDER", v);
+                    providerSave.commit(v, { immediate: true });
+                  }}
+                  status={providerSave.status}
+                  canUndo={providerSave.canUndo}
+                  onUndo={providerSave.undo}
+                  error={providerSave.error}
+                />
+                <SettingField
+                  variant="select"
+                  id="default-approval"
+                  label="Default Approval Mode"
+                  value={normalizeApprovalMode(draft.AICHEMIST_DEFAULT_APPROVAL_MODE)}
+                  options={[
+                    { value: "none", label: "None — never ask for approval" },
+                    { value: "custom", label: "Custom — approve risky tools only" },
+                    { value: "all", label: "All — approve every tool call" },
+                  ]}
+                  onChange={(v) => {
+                    set("AICHEMIST_DEFAULT_APPROVAL_MODE", v);
+                    approvalSave.commit(v, { immediate: true });
+                  }}
+                  status={approvalSave.status}
+                  canUndo={approvalSave.canUndo}
+                  onUndo={approvalSave.undo}
+                  error={approvalSave.error}
+                />
+                <SettingField
+                  variant="number"
+                  id="max-tool-rounds"
+                  label="Max tool rounds"
+                  min={MIN_MAX_TOOL_ROUNDS}
+                  max={MAX_MAX_TOOL_ROUNDS}
+                  step={1}
+                  value={draft.AICHEMIST_MAX_TOOL_ROUNDS ?? ""}
+                  placeholder={String(DEFAULT_MAX_TOOL_ROUNDS)}
+                  onChange={(v) => {
+                    set("AICHEMIST_MAX_TOOL_ROUNDS", v);
+                    toolRoundsSave.commit(v);
+                  }}
+                  status={toolRoundsSave.status}
+                  canUndo={toolRoundsSave.canUndo}
+                  onUndo={toolRoundsSave.undo}
+                  error={toolRoundsSave.error}
+                  helper={
+                    <>
                       Caps the in-process tool loop for the Ollama and OpenAI-compatible
                       providers so long tasks aren&apos;t cut off silently. Leave blank for
                       the default ({DEFAULT_MAX_TOOL_ROUNDS}). Range {MIN_MAX_TOOL_ROUNDS}–{MAX_MAX_TOOL_ROUNDS}.
                       Claude and Copilot ignore this (they&apos;re bounded by the context window).
-                    </p>
-                  </div>
-                </div>
-                <SaveRow
-                  status={saveStatus["defaults"]}
-                  onSave={() => saveSection("defaults")}
+                    </>
+                  }
                 />
-              </>
+              </SettingsSection>
             )}
 
             {/* ── Providers ── */}
@@ -729,14 +762,21 @@ export function SettingsView({ onClose }: SettingsViewProps) {
               </>
             )}
 
-            {/* ── Appearance ── */}
+            {/* ── Appearance (autosave) ── */}
             {activeSection === "appearance" && (
-              <>
-                <p className="text-sm text-muted-foreground">
-                  Choose how AIchemist looks. System follows your OS setting.
-                </p>
+              <SettingsSection
+                title="Theme"
+                description="Choose how AIchemist looks. System follows your OS setting."
+                action={
+                  <SettingStatus
+                    status={themeSave.status}
+                    canUndo={themeSave.canUndo}
+                    onUndo={themeSave.undo}
+                  />
+                }
+              >
                 <fieldset className="space-y-2">
-                  <legend className="text-sm font-medium leading-none mb-3">Theme</legend>
+                  <legend className="sr-only">Theme</legend>
                   {(
                     [
                       { value: "system", label: "System", description: "Matches your OS preference" },
@@ -758,7 +798,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                         name="theme"
                         value={value}
                         checked={theme === value}
-                        onChange={() => setTheme(value)}
+                        onChange={() => themeSave.commit(value, { immediate: true })}
                         className="no-drag-region accent-primary"
                       />
                       <div>
@@ -768,7 +808,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                     </label>
                   ))}
                 </fieldset>
-              </>
+              </SettingsSection>
             )}
           </div>
         )}

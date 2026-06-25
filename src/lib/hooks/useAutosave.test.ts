@@ -1,0 +1,123 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { renderHook, act } from "@testing-library/react";
+import { useAutosave } from "./useAutosave";
+
+describe("useAutosave", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("debounces text commits into a single save with the latest value", async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useAutosave(save, { debounceMs: 500 }));
+
+    act(() => {
+      result.current.commit("a");
+      result.current.commit("ab");
+      result.current.commit("abc");
+    });
+
+    // Nothing fires until the debounce window elapses.
+    expect(save).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith("abc");
+    expect(result.current.status).toBe("saved");
+  });
+
+  it("saves immediately when commit is marked immediate (toggles)", async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useAutosave(save, { debounceMs: 500 }));
+
+    await act(async () => {
+      result.current.commit(true, { immediate: true });
+    });
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith(true);
+    expect(result.current.status).toBe("saved");
+  });
+
+  it("opens an undo window and restores the previous value", async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      useAutosave(save, { debounceMs: 0, undoMs: 5000, initialValue: "before" }),
+    );
+
+    await act(async () => {
+      result.current.commit("after");
+    });
+
+    expect(save).toHaveBeenLastCalledWith("after");
+    expect(result.current.canUndo).toBe(true);
+
+    await act(async () => {
+      result.current.undo();
+    });
+
+    // Undo re-persists the value that was in effect before the change.
+    expect(save).toHaveBeenLastCalledWith("before");
+    expect(result.current.canUndo).toBe(false);
+  });
+
+  it("closes the undo window and returns to idle after undoMs", async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      useAutosave(save, { debounceMs: 0, undoMs: 5000, initialValue: "x" }),
+    );
+
+    await act(async () => {
+      result.current.commit("y");
+    });
+    expect(result.current.canUndo).toBe(true);
+    expect(result.current.status).toBe("saved");
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    expect(result.current.canUndo).toBe(false);
+    expect(result.current.status).toBe("idle");
+
+    // Undo after the window has closed is a no-op.
+    await act(async () => {
+      result.current.undo();
+    });
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces a save failure as error status", async () => {
+    const save = vi.fn().mockRejectedValue(new Error("disk full"));
+    const { result } = renderHook(() => useAutosave(save, { debounceMs: 0 }));
+
+    await act(async () => {
+      result.current.commit("oops");
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.error).toBeInstanceOf(Error);
+    expect(result.current.error?.message).toBe("disk full");
+    expect(result.current.canUndo).toBe(false);
+  });
+
+  it("does not offer undo when the committed value equals the baseline", async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      useAutosave(save, { debounceMs: 0, initialValue: "same" }),
+    );
+
+    await act(async () => {
+      result.current.commit("same");
+    });
+
+    expect(save).toHaveBeenCalledWith("same");
+    expect(result.current.canUndo).toBe(false);
+  });
+});
