@@ -7,6 +7,9 @@ describe("useAutosave", () => {
     vi.useFakeTimers();
   });
   afterEach(() => {
+    // Drop any undo-window / debounce timer still armed so it can't leak into
+    // the next test and make failures order-dependent.
+    vi.clearAllTimers();
     vi.useRealTimers();
   });
 
@@ -105,6 +108,42 @@ describe("useAutosave", () => {
     expect(result.current.error).toBeInstanceOf(Error);
     expect(result.current.error?.message).toBe("disk full");
     expect(result.current.canUndo).toBe(false);
+  });
+
+  it("ignores a stale save that resolves after a newer commit", async () => {
+    let resolveFirst!: () => void;
+    const save = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<void>((r) => { resolveFirst = r; })) // "b" hangs
+      .mockImplementation(() => Promise.resolve()); // "c" and the undo resolve immediately
+
+    const { result } = renderHook(() =>
+      useAutosave(save, { debounceMs: 0, undoMs: 5000, initialValue: "a" }),
+    );
+
+    // First commit stays pending; a second commit supersedes it and resolves.
+    act(() => {
+      result.current.commit("b", { immediate: true });
+    });
+    await act(async () => {
+      result.current.commit("c", { immediate: true });
+    });
+    expect(result.current.status).toBe("saved");
+    expect(result.current.canUndo).toBe(true);
+
+    // The stale "b" save resolves late — it must not clobber baseline or status.
+    await act(async () => {
+      resolveFirst();
+      await Promise.resolve();
+    });
+    expect(result.current.status).toBe("saved");
+
+    // Undo restores the value from before the latest edit batch ("a"), proving
+    // the late "b" completion did not overwrite the baseline.
+    await act(async () => {
+      result.current.undo();
+    });
+    expect(save).toHaveBeenLastCalledWith("a");
   });
 
   it("does not offer undo when the committed value equals the baseline", async () => {

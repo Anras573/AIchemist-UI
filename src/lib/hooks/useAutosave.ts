@@ -65,6 +65,10 @@ export function useAutosave<T>(
   const undoTargetRef = useRef<T | undefined>(undefined);
   // True once the field has been touched; gates the initialValue re-sync below.
   const dirtyRef = useRef(false);
+  // Monotonic token per save. A save that resolves after a newer one was started
+  // is stale and must not touch baseline/status/timer, or rapid immediate commits
+  // (toggles/selects) could let an older completion clobber the newest value's state.
+  const seqRef = useRef(0);
 
   const clear = (ref: React.MutableRefObject<ReturnType<typeof setTimeout> | null>) => {
     if (ref.current) {
@@ -84,10 +88,14 @@ export function useAutosave<T>(
     async (value: T, trackUndo: boolean) => {
       clear(windowTimer);
       const undoTo = baselineRef.current;
+      const seq = ++seqRef.current;
       setStatus("saving");
       setError(null);
       try {
         await saveRef.current(value);
+        // A newer commit superseded this one — drop its result so it can't
+        // overwrite the latest value's baseline or arm a stale window timer.
+        if (seq !== seqRef.current) return;
         baselineRef.current = value;
         setStatus("saved");
         if (trackUndo && undoTo !== undefined && !Object.is(undoTo, value)) {
@@ -102,6 +110,7 @@ export function useAutosave<T>(
           dirtyRef.current = false;
         }, undoMs);
       } catch (err) {
+        if (seq !== seqRef.current) return;
         setError(err instanceof Error ? err : new Error(String(err)));
         setStatus("error");
         dirtyRef.current = false;
