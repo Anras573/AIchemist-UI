@@ -432,9 +432,11 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     (v) => writeSetting("AICHEMIST_DEFAULT_APPROVAL_MODE", v),
     { initialValue: normalizeApprovalMode(draft.AICHEMIST_DEFAULT_APPROVAL_MODE) },
   );
+  // Normalization happens at the commit boundary (see the field's onChange) so
+  // the value useAutosave tracks as the undo baseline matches what is persisted.
   const toolRoundsSave = useAutosave<string>(
-    (v) => writeSetting("AICHEMIST_MAX_TOOL_ROUNDS", normalizeMaxToolRounds(v)),
-    { initialValue: draft.AICHEMIST_MAX_TOOL_ROUNDS ?? "" },
+    (v) => writeSetting("AICHEMIST_MAX_TOOL_ROUNDS", v),
+    { initialValue: normalizeMaxToolRounds(draft.AICHEMIST_MAX_TOOL_ROUNDS) },
   );
 
   const saveSection = useCallback(
@@ -730,8 +732,10 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                   value={draft.AICHEMIST_MAX_TOOL_ROUNDS ?? ""}
                   placeholder={String(DEFAULT_MAX_TOOL_ROUNDS)}
                   onChange={(v) => {
+                    // Show the raw input while typing; persist (and track as the
+                    // undo baseline) the clamped value the app actually uses.
                     set("AICHEMIST_MAX_TOOL_ROUNDS", v);
-                    toolRoundsSave.commit(v);
+                    toolRoundsSave.commit(normalizeMaxToolRounds(v));
                   }}
                   status={toolRoundsSave.status}
                   canUndo={toolRoundsSave.canUndo}

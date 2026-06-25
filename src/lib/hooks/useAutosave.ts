@@ -120,6 +120,10 @@ export function useAutosave<T>(
         if (seq !== seqRef.current) return;
         setError(err instanceof Error ? err : new Error(String(err)));
         setStatus("error");
+        // A failed save must not leave a stale undo window from an earlier
+        // successful save — its target no longer reflects the current state.
+        setCanUndo(false);
+        undoTargetRef.current = undefined;
         dirtyRef.current = false;
       }
     },

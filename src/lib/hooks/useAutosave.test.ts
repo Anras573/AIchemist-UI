@@ -146,6 +146,29 @@ describe("useAutosave", () => {
     expect(save).toHaveBeenLastCalledWith("a");
   });
 
+  it("clears a prior undo window when a later save fails", async () => {
+    const save = vi
+      .fn()
+      .mockResolvedValueOnce(undefined) // first save opens an undo window
+      .mockRejectedValueOnce(new Error("nope")); // second save fails
+
+    const { result } = renderHook(() =>
+      useAutosave(save, { debounceMs: 0, undoMs: 5000, initialValue: "a" }),
+    );
+
+    await act(async () => {
+      result.current.commit("b");
+    });
+    expect(result.current.canUndo).toBe(true);
+
+    await act(async () => {
+      result.current.commit("c");
+    });
+    // The failed save surfaces an error and clears the stale undo affordance.
+    expect(result.current.status).toBe("error");
+    expect(result.current.canUndo).toBe(false);
+  });
+
   it("does not offer undo when the committed value equals the baseline", async () => {
     const save = vi.fn().mockResolvedValue(undefined);
     const { result } = renderHook(() =>
