@@ -23,16 +23,21 @@ interface SettingsViewProps {
 }
 
 type Section = "api-keys" | "model-overrides" | "defaults" | "providers" | "appearance";
-type ActiveItem =
-  | { kind: "section"; section: Section }
-  | { kind: "project"; projectId: string };
 
-const NAV: { id: Section; label: string }[] = [
+// Application-tier nav rows. Project-tier rows are derived from the active
+// project at render time (see PROJECT_NAV).
+const APP_NAV: { id: Section; label: string }[] = [
   { id: "api-keys", label: "API Keys" },
   { id: "model-overrides", label: "Model Overrides" },
   { id: "defaults", label: "Defaults" },
   { id: "providers", label: "Providers" },
   { id: "appearance", label: "Appearance" },
+];
+
+// Project-tier nav rows. Step 1 keeps a single section that renders the existing
+// ProjectSettingsContent (which has its own General/Approval tabs) verbatim.
+const PROJECT_NAV: { id: string; label: string }[] = [
+  { id: "general", label: "General" },
 ];
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -375,8 +380,8 @@ function normalizeApprovalMode(v: string | undefined): string {
 // ── Main view ─────────────────────────────────────────────────────────────────
 export function SettingsView({ onClose }: SettingsViewProps) {
   const ipc = useIpc();
-  const { projects } = useProjectStore();
-  const [activeItem, setActiveItem] = useState<ActiveItem>({ kind: "section", section: "api-keys" });
+  const { projects, activeProjectId, settingsSection, setSettingsSection } = useProjectStore();
+  const [search, setSearch] = useState("");
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [draft, setDraft] = useState<Partial<SettingsMap>>({});
   const [saveStatus, setSaveStatus] = useState<Record<Section, SaveStatus>>({
@@ -441,11 +446,32 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     [draft, settings]
   );
 
+  // App-tier section currently selected (null when a project section is active).
+  // `settingsSection.id` is typed as `string` (deep links can carry anything),
+  // so validate against APP_NAV and fall back to a safe default rather than
+  // casting blindly — an unknown id would otherwise render a blank panel.
+  const activeSection: Section | null =
+    settingsSection.scope === "app"
+      ? APP_NAV.find((n) => n.id === settingsSection.id)?.id ?? "api-keys"
+      : null;
+  const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
+  // A persisted activeProjectId can resolve before the async-loaded projects
+  // list arrives; treat that window as "loading" rather than "no project".
+  const projectsLoading = activeProjectId !== null && activeProject === null && projects.length === 0;
+
+  // Case-insensitive nav filter over section labels.
+  const q = search.trim().toLowerCase();
+  const matches = (label: string) => q === "" || label.toLowerCase().includes(q);
+  const appNav = APP_NAV.filter((n) => matches(n.label));
+  const projectNav = PROJECT_NAV.filter((n) => matches(n.label));
+
   const getTitle = (): string => {
-    if (activeItem.kind === "section") {
-      return NAV.find((n) => n.id === activeItem.section)?.label ?? "";
+    if (settingsSection.scope === "app") {
+      // Stable fallback so the header never goes blank on an unknown id.
+      return APP_NAV.find((n) => n.id === settingsSection.id)?.label ?? "Settings";
     }
-    return projects.find((p) => p.id === activeItem.projectId)?.name ?? "Project";
+    const sectionLabel = PROJECT_NAV.find((n) => n.id === settingsSection.id)?.label ?? "Settings";
+    return activeProject ? `${activeProject.name} — ${sectionLabel}` : sectionLabel;
   };
 
   if (!settings) {
@@ -460,55 +486,70 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     <div className="flex flex-1 overflow-hidden bg-background">
       {/* Left nav */}
       <nav className="w-52 flex-shrink-0 border-r border-border flex flex-col overflow-hidden">
-        {/* Settings tabs */}
-        <div className="flex-none pt-12 px-2 pb-3">
-          <p className="px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-            Settings
-          </p>
-          {NAV.map(({ id, label }) => (
-            <button
-              key={id}
-              onClick={() => setActiveItem({ kind: "section", section: id })}
-              className={cn(
-                "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors",
-                activeItem.kind === "section" && activeItem.section === id
-                  ? "bg-accent text-accent-foreground font-medium"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-              )}
-            >
-              {label}
-            </button>
-          ))}
+        {/* Search */}
+        <div className="flex-none pt-12 px-2 pb-2">
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search settings…"
+            aria-label="Search settings"
+            className="h-8 text-sm"
+          />
         </div>
 
-        {/* Divider */}
-        <div className="border-t border-border mx-2" />
-
-        {/* Projects */}
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden pt-3 pb-2">
-          <p className="px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex-none">
-            Projects
-          </p>
-          <div className="flex-1 overflow-y-auto px-2">
-            {projects.length === 0 ? (
-              <p className="px-3 py-1.5 text-xs text-muted-foreground">No projects yet.</p>
-            ) : (
-              projects.map((project) => (
+        <div className="flex-1 overflow-y-auto pb-2">
+          {/* Application sections */}
+          {appNav.length > 0 && (
+            <div className="px-2 pt-1 pb-3">
+              <p className="px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                Application
+              </p>
+              {appNav.map(({ id, label }) => (
                 <button
-                  key={project.id}
-                  onClick={() => setActiveItem({ kind: "project", projectId: project.id })}
+                  key={id}
+                  onClick={() => setSettingsSection({ scope: "app", id })}
                   className={cn(
-                    "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors truncate",
-                    activeItem.kind === "project" && activeItem.projectId === project.id
+                    "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors",
+                    settingsSection.scope === "app" && settingsSection.id === id
                       ? "bg-accent text-accent-foreground font-medium"
                       : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
                   )}
                 >
-                  {project.name}
+                  {label}
                 </button>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
+
+          {/* Project sections */}
+          {projectNav.length > 0 && (
+            <div className="px-2 pt-1 pb-2 border-t border-border">
+              <p className="px-2 pt-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 truncate">
+                {activeProject ? activeProject.name : "Project"}
+              </p>
+              {activeProject ? (
+                projectNav.map(({ id, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => setSettingsSection({ scope: "project", id })}
+                    className={cn(
+                      "w-full text-left px-3 py-1.5 rounded-md text-sm transition-colors",
+                      settingsSection.scope === "project" && settingsSection.id === id
+                        ? "bg-accent text-accent-foreground font-medium"
+                        : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))
+              ) : (
+                <p className="px-3 py-1.5 text-xs text-muted-foreground">
+                  {projectsLoading ? "Loading projects…" : "No active project."}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </nav>
 
@@ -525,10 +566,10 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         </div>
 
         {/* Section content */}
-        {activeItem.kind === "section" && (
+        {settingsSection.scope === "app" && (
           <div className="flex-1 overflow-y-auto px-8 py-6 max-w-xl space-y-6">
             {/* ── API Keys ── */}
-            {activeItem.section === "api-keys" && (
+            {activeSection === "api-keys" && (
               <>
                 <div className="space-y-4">
                   <SecretField
@@ -558,7 +599,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
             )}
 
             {/* ── Model Overrides ── */}
-            {activeItem.section === "model-overrides" && (
+            {activeSection === "model-overrides" && (
               <>
                 <p className="text-sm text-muted-foreground">
                   Override the Anthropic model used for each tier. Leave blank to use the
@@ -614,7 +655,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
             )}
 
             {/* ── Defaults ── */}
-            {activeItem.section === "defaults" && (
+            {activeSection === "defaults" && (
               <>
                 <p className="text-sm text-muted-foreground">
                   Global defaults applied to new projects. Per-project settings always take
@@ -676,7 +717,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
             )}
 
             {/* ── Providers ── */}
-            {activeItem.section === "providers" && (
+            {activeSection === "providers" && (
               <>
                 <ProvidersSection
                   value={draft.AICHEMIST_DISABLED_PROVIDERS ?? ""}
@@ -689,7 +730,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
             )}
 
             {/* ── Appearance ── */}
-            {activeItem.section === "appearance" && (
+            {activeSection === "appearance" && (
               <>
                 <p className="text-sm text-muted-foreground">
                   Choose how AIchemist looks. System follows your OS setting.
@@ -733,9 +774,15 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         )}
 
         {/* Project settings content */}
-        {activeItem.kind === "project" && (
+        {settingsSection.scope === "project" && (
           <div className="flex-1 overflow-hidden">
-            <ProjectSettingsContent projectId={activeItem.projectId} />
+            {activeProject ? (
+              <ProjectSettingsContent projectId={activeProject.id} />
+            ) : (
+              <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm p-8">
+                {projectsLoading ? "Loading project…" : "No active project selected."}
+              </div>
+            )}
           </div>
         )}
       </div>

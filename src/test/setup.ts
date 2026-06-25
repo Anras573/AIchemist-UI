@@ -51,6 +51,8 @@ const initialProjectState = {
   projects: [],
   activeProjectId: null,
   settingsOpen: false,
+  settingsSection: { scope: "app" as const, id: "api-keys" },
+  workflowsOpen: false,
 };
 
 afterEach(cleanup);

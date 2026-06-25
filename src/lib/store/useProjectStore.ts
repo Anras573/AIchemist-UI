@@ -2,21 +2,32 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { Project } from "@/types";
 
+/**
+ * Identifies which section of the Settings hub is active. `scope` selects the
+ * application-wide vs. active-project tier; `id` names the section within that
+ * tier (so deep links can target a specific section).
+ */
+export interface SettingsSection {
+  scope: "app" | "project";
+  id: string;
+}
+
+const DEFAULT_SETTINGS_SECTION: SettingsSection = { scope: "app", id: "api-keys" };
+
 interface ProjectStore {
   projects: Project[];
   activeProjectId: string | null;
   settingsOpen: boolean;
-  projectSettingsOpen: boolean;
+  settingsSection: SettingsSection;
   workflowsOpen: boolean;
   setProjects: (projects: Project[]) => void;
   setActiveProject: (id: string | null) => void;
   addProject: (project: Project) => void;
   removeProject: (id: string) => void;
   updateProject: (project: Project) => void;
-  openSettings: () => void;
+  openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
-  openProjectSettings: () => void;
-  closeProjectSettings: () => void;
+  setSettingsSection: (section: SettingsSection) => void;
   openWorkflows: () => void;
   closeWorkflows: () => void;
 }
@@ -27,7 +38,7 @@ export const useProjectStore = create<ProjectStore>()(
       projects: [],
       activeProjectId: null,
       settingsOpen: false,
-      projectSettingsOpen: false,
+      settingsSection: DEFAULT_SETTINGS_SECTION,
       workflowsOpen: false,
 
       setProjects: (projects) => set({ projects }),
@@ -48,10 +59,14 @@ export const useProjectStore = create<ProjectStore>()(
           projects: state.projects.map((p) => (p.id === project.id ? project : p)),
         })),
 
-      openSettings: () => set({ settingsOpen: true, workflowsOpen: false }),
+      openSettings: (section) =>
+        set({
+          settingsOpen: true,
+          workflowsOpen: false,
+          ...(section ? { settingsSection: section } : {}),
+        }),
       closeSettings: () => set({ settingsOpen: false }),
-      openProjectSettings: () => set({ projectSettingsOpen: true }),
-      closeProjectSettings: () => set({ projectSettingsOpen: false }),
+      setSettingsSection: (section) => set({ settingsSection: section }),
       // Workflows is a full-screen view, mutually exclusive with Settings.
       openWorkflows: () => set({ workflowsOpen: true, settingsOpen: false }),
       closeWorkflows: () => set({ workflowsOpen: false }),
