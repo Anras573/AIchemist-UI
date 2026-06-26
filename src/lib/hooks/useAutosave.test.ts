@@ -96,6 +96,71 @@ describe("useAutosave", () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
+  it("flushes a pending debounced edit on unmount instead of dropping it", async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { result, unmount } = renderHook(() =>
+      useAutosave(save, { debounceMs: 500 }),
+    );
+
+    act(() => {
+      result.current.commit("typed");
+    });
+    // Still within the debounce window — nothing persisted yet.
+    expect(save).not.toHaveBeenCalled();
+
+    await act(async () => {
+      unmount();
+    });
+
+    // The pending value is flushed rather than silently discarded.
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith("typed");
+  });
+
+  it("flush() persists a pending debounced edit immediately", async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useAutosave(save, { debounceMs: 500 }));
+
+    act(() => {
+      result.current.commit("draft");
+    });
+    expect(save).not.toHaveBeenCalled();
+
+    await act(async () => {
+      result.current.flush();
+    });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith("draft");
+  });
+
+  it("supports undoing back to an undefined persisted value", async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      useAutosave<string | undefined>(save, { debounceMs: 0, initialValue: undefined }),
+    );
+
+    // initialValue undefined means "no baseline yet" — the first save can't undo.
+    await act(async () => {
+      result.current.commit("a");
+    });
+    expect(result.current.canUndo).toBe(false);
+
+    // Now baseline is "a"; committing undefined is a real value change and is undoable.
+    await act(async () => {
+      result.current.commit(undefined);
+    });
+    expect(result.current.canUndo).toBe(true);
+
+    await act(async () => {
+      result.current.commit("b");
+    });
+    // Undo restores the prior baseline, which was a legitimate `undefined`.
+    await act(async () => {
+      result.current.undo();
+    });
+    expect(save).toHaveBeenLastCalledWith(undefined);
+  });
+
   it("surfaces a save failure as error status", async () => {
     const save = vi.fn().mockRejectedValue(new Error("disk full"));
     const { result } = renderHook(() => useAutosave(save, { debounceMs: 0 }));
