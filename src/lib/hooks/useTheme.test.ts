@@ -68,6 +68,39 @@ describe("useTheme", () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBe("light");
   });
 
+  it("does not roll back a stale write failure over a newer theme selection", async () => {
+    localStorage.setItem(STORAGE_KEY, "light");
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({
+      AICHEMIST_THEME: "light",
+    } as never);
+    let rejectFirst!: (e: Error) => void;
+    vi.mocked(window.electronAPI.settingsWrite)
+      .mockImplementationOnce(
+        () => new Promise<void>((_, rej) => { rejectFirst = rej; }), // "dark" hangs, then fails
+      )
+      .mockResolvedValueOnce(undefined); // "system" succeeds
+
+    const { result } = renderHook(() => useTheme());
+
+    // First change is left pending; a second change supersedes it and succeeds.
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.setTheme("dark");
+    });
+    await act(async () => {
+      await result.current.setTheme("system");
+    });
+    expect(result.current.theme).toBe("system");
+
+    // The stale "dark" write now fails — it must NOT roll back to "light".
+    await act(async () => {
+      rejectFirst(new Error("late fail"));
+      await pending.catch(() => {});
+    });
+    expect(result.current.theme).toBe("system");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("system");
+  });
+
   it("applies the 'dark' class to <html> when theme is dark", async () => {
     const { result } = renderHook(() => useTheme());
 

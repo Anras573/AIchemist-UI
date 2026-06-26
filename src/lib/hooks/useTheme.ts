@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useIpc } from "@/lib/ipc";
 
 export type Theme = "system" | "light" | "dark";
@@ -27,6 +27,9 @@ export function useTheme() {
   const [theme, setThemeState] = useState<Theme>(
     () => (localStorage.getItem(STORAGE_KEY) as Theme) ?? "system"
   );
+  // Monotonic token per setTheme call so a slow/failed write can't roll back
+  // over a newer selection (latest-wins).
+  const themeSeqRef = useRef(0);
 
   // Keep the <html> class in sync whenever theme changes
   useEffect(() => {
@@ -57,7 +60,10 @@ export function useTheme() {
   }, []);
 
   const setTheme = useCallback(async (next: Theme) => {
-    const prev = (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? theme;
+    // Roll back to the current validated theme state (not a possibly-invalid
+    // raw localStorage string) if this write fails.
+    const prev = theme;
+    const seq = ++themeSeqRef.current;
     localStorage.setItem(STORAGE_KEY, next);
     setThemeState(next);
     try {
@@ -65,14 +71,18 @@ export function useTheme() {
     } catch (err) {
       // Roll back the optimistic local update so the visible theme matches what
       // is actually persisted — otherwise the mount-time settingsRead sync would
-      // override localStorage on next start. Then log + rethrow so a caller
-      // awaiting this (e.g. useAutosave) can surface "Save failed".
-      localStorage.setItem(STORAGE_KEY, prev);
-      setThemeState(prev);
+      // override localStorage on next start. Skip the rollback if a newer
+      // setTheme already superseded this one, so a stale failure can't clobber a
+      // newer successful selection. Then log + rethrow so a caller awaiting this
+      // (e.g. useAutosave) can surface "Save failed".
+      if (seq === themeSeqRef.current) {
+        localStorage.setItem(STORAGE_KEY, prev);
+        setThemeState(prev);
+      }
       console.error(err);
       throw err;
     }
-  }, [theme]);
+  }, [theme, ipc]);
 
   return { theme, setTheme };
 }
