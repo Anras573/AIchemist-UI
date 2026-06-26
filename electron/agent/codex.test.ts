@@ -303,7 +303,7 @@ describe("codexProvider", () => {
 
   it("should create a fresh thread when the stored thread no longer exists", async () => {
     const retrieve = vi.fn(async () => {
-      throw new Error("missing thread");
+      throw new Error("thread not found");
     });
     const create = vi.fn(async () => ({ id: "thread-recreated", created_at: 1719360000 }));
     vi.mocked(providerSessionStore.get).mockReturnValueOnce({ threadId: "thread-stale" });
@@ -345,6 +345,33 @@ describe("codexProvider", () => {
     expect(providerSessionStore.set).toHaveBeenCalledWith(expect.anything(), "session-123", "codex", {
       threadId: "thread-recreated",
     });
+  });
+
+  it("should rethrow transient thread retrieval failures instead of recreating the thread", async () => {
+    const retrieve = vi.fn(async () => {
+      throw new Error("connection reset");
+    });
+    const create = vi.fn(async () => ({ id: "thread-recreated", created_at: 1719360000 }));
+    vi.mocked(providerSessionStore.get).mockReturnValueOnce({ threadId: "thread-stale" });
+
+    _setClientForTests({
+      threads: {
+        create,
+        retrieve,
+      },
+      messages: {
+        create: vi.fn(),
+      },
+      runs: {
+        stream: vi.fn(),
+      },
+    } as any);
+
+    await expect(codexProvider.run(makeParams())).rejects.toThrow("connection reset");
+
+    expect(retrieve).toHaveBeenCalledWith("thread-stale");
+    expect(create).not.toHaveBeenCalled();
+    expect(providerSessionStore.set).not.toHaveBeenCalled();
   });
 
   it("should stream only normalized text deltas", async () => {

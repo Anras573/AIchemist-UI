@@ -17,6 +17,7 @@ describe("provider-probe", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_AUTH_TOKEN;
     delete process.env.GITHUB_TOKEN;
+    delete process.env.OPENAI_API_KEY;
     delete process.env.ANTHROPIC_BASE_URL;
   });
 

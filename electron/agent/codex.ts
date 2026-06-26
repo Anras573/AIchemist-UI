@@ -91,6 +91,34 @@ function normalizeTextContent(value: unknown): string | undefined {
   return undefined;
 }
 
+function isMissingThreadError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const candidate = error as {
+    status?: unknown;
+    code?: unknown;
+    message?: unknown;
+    error?: {
+      code?: unknown;
+      message?: unknown;
+    };
+  };
+
+  if (candidate.status === 404 || candidate.code === "not_found" || candidate.error?.code === "not_found") {
+    return true;
+  }
+
+  const message =
+    typeof candidate.message === "string"
+      ? candidate.message
+      : typeof candidate.error?.message === "string"
+        ? candidate.error.message
+        : "";
+  return /\b(not found|missing thread|unknown thread|no such thread)\b/i.test(message);
+}
+
 async function getClient(): Promise<CodexClient> {
   if (clientInstance) return clientInstance;
 
@@ -204,7 +232,10 @@ export const codexProvider: AgentProvider = {
       try {
         const thread = await client.threads.retrieve(resumeId);
         threadId = thread.id;
-      } catch {
+      } catch (error) {
+        if (!isMissingThreadError(error)) {
+          throw error;
+        }
         // Thread not found, create a new one
         const thread = await client.threads.create();
         threadId = thread.id;
