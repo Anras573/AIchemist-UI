@@ -41,7 +41,9 @@ const DEFAULT_UNDO_MS = 5000;
 // A value slot that distinguishes "no value tracked" from a tracked value that
 // may itself be `undefined`, so the hook stays correct for `T` that includes
 // `undefined` (e.g. `string | undefined`) instead of overloading `undefined` as
-// the empty sentinel.
+// the empty sentinel. Note this precision applies to *committed* values; the
+// `initialValue` option is the one boundary where `undefined` still means "no
+// baseline seeded yet" (the conventional meaning of an omitted optional prop).
 type Slot<T> = { has: true; value: T } | { has: false };
 const EMPTY: { has: false } = { has: false };
 
@@ -195,8 +197,10 @@ export function useAutosave<T>(
       const pending = pendingRef.current;
       if (pending.has) {
         pendingRef.current = EMPTY;
-        void Promise.resolve(saveRef.current(pending.value)).catch(() => {
-          /* unmounted — nothing left to surface the error to */
+        void Promise.resolve(saveRef.current(pending.value)).catch((err) => {
+          // The component is gone, so there's no UI to surface this on — but a
+          // failed final write means a lost edit, so log it for debuggability.
+          console.error("useAutosave: failed to flush pending edit on unmount", err);
         });
       }
       clear(debounceTimer);
