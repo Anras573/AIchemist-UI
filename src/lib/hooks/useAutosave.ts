@@ -194,14 +194,23 @@ export function useAutosave<T>(
   // skip the state updates persist() would make on an unmounted component.
   useEffect(
     () => () => {
+      // Invalidate any in-flight persist() so its post-await code (setState /
+      // undo-window timer) sees a stale seq and bails — no state updates on an
+      // unmounted component.
+      seqRef.current++;
       const pending = pendingRef.current;
       if (pending.has) {
         pendingRef.current = EMPTY;
-        void Promise.resolve(saveRef.current(pending.value)).catch((err) => {
-          // The component is gone, so there's no UI to surface this on — but a
-          // failed final write means a lost edit, so log it for debuggability.
+        try {
+          // try/catch handles a synchronous throw from save; .catch handles a
+          // rejected promise. The component is gone, so there's no UI to surface
+          // this on — but a failed final write means a lost edit, so log it.
+          void Promise.resolve(saveRef.current(pending.value)).catch((err) => {
+            console.error("useAutosave: failed to flush pending edit on unmount", err);
+          });
+        } catch (err) {
           console.error("useAutosave: failed to flush pending edit on unmount", err);
-        });
+        }
       }
       clear(debounceTimer);
       clear(windowTimer);
