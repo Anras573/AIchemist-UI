@@ -170,6 +170,7 @@ export type IpcContract = {
   [CH.GET_COPILOT_MODELS]: { args: []; result: ModelList };
   [CH.GET_OLLAMA_MODELS]: { args: []; result: ModelList };
   [CH.GET_OPENAI_COMPAT_MODELS]: { args: []; result: ModelList };
+  [CH.GET_CODEX_MODELS]: { args: []; result: ModelList };
   [CH.GET_CLAUDE_AGENTS]: {
     args: [projectPath: string];
     result: Array<{ name: string; description: string; model?: string }>;

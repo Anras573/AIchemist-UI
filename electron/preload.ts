@@ -90,6 +90,7 @@ export interface ElectronAPI {
   getCopilotModels: () => Promise<Res<typeof CH.GET_COPILOT_MODELS>>;
   getOllamaModels: () => Promise<Res<typeof CH.GET_OLLAMA_MODELS>>;
   getOpenAiCompatModels: () => Promise<Res<typeof CH.GET_OPENAI_COMPAT_MODELS>>;
+  getCodexModels: () => Promise<Res<typeof CH.GET_CODEX_MODELS>>;
   getClaudeAgents: (projectPath: string) => Promise<Res<typeof CH.GET_CLAUDE_AGENTS>>;
   getCopilotAgents: (projectPath: string) => Promise<Res<typeof CH.GET_COPILOT_AGENTS>>;
   githubCreatePr: (args: import("../src/types").GitHubCreatePrArgs) => Promise<Res<typeof CH.GITHUB_CREATE_PR>>;
@@ -230,6 +231,7 @@ const api: ElectronAPI = {
   getCopilotModels: () => invoke(CH.GET_COPILOT_MODELS),
   getOllamaModels: () => invoke(CH.GET_OLLAMA_MODELS),
   getOpenAiCompatModels: () => invoke(CH.GET_OPENAI_COMPAT_MODELS),
+  getCodexModels: () => invoke(CH.GET_CODEX_MODELS),
   getClaudeAgents: (projectPath) => invoke(CH.GET_CLAUDE_AGENTS, projectPath),
   getCopilotAgents: (projectPath) => invoke(CH.GET_COPILOT_AGENTS, projectPath),
   githubCreatePr: (args) => invoke(CH.GITHUB_CREATE_PR, args),

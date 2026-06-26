@@ -158,7 +158,15 @@ describe("codexProvider", () => {
     _setFetchForTests(
       vi.fn().mockResolvedValue({
         ok: true,
-        json: vi.fn().mockResolvedValue({ data: [{ id: "gpt-4o" }, { id: "gpt-4.1" }] }),
+        json: vi.fn().mockResolvedValue({
+          data: [
+            { id: "gpt-4o" },
+            { id: "gpt-4.1" },
+            { id: "gpt-5.3-codex" },
+            { id: "o3-mini" },
+            { id: "omni-moderation-latest" },
+          ],
+        }),
       }) as unknown as typeof fetch,
     );
   });
@@ -480,6 +488,8 @@ describe("codexProvider", () => {
       expect(models).toEqual([
         { id: "gpt-4o", name: "gpt-4o" },
         { id: "gpt-4.1", name: "gpt-4.1" },
+        { id: "gpt-5.3-codex", name: "gpt-5.3-codex" },
+        { id: "o3-mini", name: "o3-mini" },
       ]);
     }
   });

@@ -31,6 +31,7 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
   const [copilotModels, setCopilotModels] = useState<ModelOption[]>([]);
   const [ollamaModels, setOllamaModels] = useState<ModelOption[]>([]);
   const [openAiCompatModels, setOpenAiCompatModels] = useState<ModelOption[]>([]);
+  const [codexModels, setCodexModels] = useState<ModelOption[]>([]);
 
   // Reset cached model lists when the session changes so a fresh fetch occurs
   // for the new session's provider.
@@ -38,6 +39,7 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
     setCopilotModels([]);
     setOllamaModels([]);
     setOpenAiCompatModels([]);
+    setCodexModels([]);
   }, [sessionId]);
 
   // Provider is locked at session creation time. Only load Copilot models if
@@ -93,12 +95,29 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
       .catch(() => {/* No endpoints configured — silently hide the group */});
   }, [open, provider, openAiCompatModels.length]);
 
+  useEffect(() => {
+    if (!open || provider !== "codex" || codexModels.length > 0) return;
+    ipc.getCodexModels()
+      .then((models) => {
+        setCodexModels(
+          models.map((m) => ({
+            provider: "codex",
+            model: m.id,
+            label: m.name,
+            logoProvider: "openai",
+          }))
+        );
+      })
+      .catch(() => {/* Codex not configured — silently hide the group */});
+  }, [open, provider, codexModels.length]);
+
   // Only show the group matching the session's locked provider.
   const visibleAnthropic = provider === "anthropic" ? ANTHROPIC_MODELS : [];
   const visibleCopilot = provider === "copilot" ? copilotModels : [];
   const visibleOllama = provider === "ollama" ? ollamaModels : [];
   const visibleOpenAiCompat = provider === "openai-compatible" ? openAiCompatModels : [];
-  const allModels = [...visibleAnthropic, ...visibleCopilot, ...visibleOllama, ...visibleOpenAiCompat];
+  const visibleCodex = provider === "codex" ? codexModels : [];
+  const allModels = [...visibleAnthropic, ...visibleCopilot, ...visibleOllama, ...visibleOpenAiCompat, ...visibleCodex];
 
   const current =
     allModels.find((m) => m.provider === provider && m.model === model) ??
@@ -206,6 +225,25 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
           {visibleOpenAiCompat.length > 0 && (
             <ModelSelectorGroup heading="OpenAI-compatible">
               {visibleOpenAiCompat.map((option) => {
+                const isActive = option.provider === provider && option.model === model;
+                return (
+                  <ModelSelectorItem
+                    key={option.model}
+                    value={`${option.label} ${option.provider}`}
+                    onSelect={() => handleSelect(option)}
+                  >
+                    <ModelSelectorLogo provider={option.logoProvider} />
+                    <ModelSelectorName>{option.label}</ModelSelectorName>
+                    {isActive && <span className="text-xs text-primary">✓</span>}
+                  </ModelSelectorItem>
+                );
+              })}
+            </ModelSelectorGroup>
+          )}
+
+          {visibleCodex.length > 0 && (
+            <ModelSelectorGroup heading="OpenAI Codex">
+              {visibleCodex.map((option) => {
                 const isActive = option.provider === provider && option.model === model;
                 return (
                   <ModelSelectorItem

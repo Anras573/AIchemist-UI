@@ -73,6 +73,7 @@ let clientInstance: CodexClient | null = null;
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
 const OPENAI_MODELS_TIMEOUT_MS = 5_000;
 const PROBE_CACHE_TTL_MS = 30_000;
+const CODEX_MODEL_PREFIXES = ["gpt-", "o1", "o3"] as const;
 
 let fetchImpl: typeof fetch = (...args) => fetch(...args);
 let probeCache: { result: { ok: boolean; reason?: string; durationMs?: number }; timestamp: number } | null =
@@ -202,7 +203,7 @@ async function listCodexModels(): Promise<Array<{ id: string; name: string }>> {
 
     const data = (await response.json()) as { data: Array<{ id: string; owned_by?: string }> };
     return data.data
-      .filter((m) => m.id.includes("gpt-4") || m.id.includes("gpt-3.5"))
+      .filter((m) => CODEX_MODEL_PREFIXES.some((prefix) => m.id.startsWith(prefix)))
       .map((m) => ({ id: m.id, name: m.id }));
   } catch {
     return [];
@@ -248,7 +249,7 @@ export const codexProvider: AgentProvider = {
     }
 
     providerSessionStore.set(db, sessionId, "codex", {
-      threadId: threadId || null,
+      threadId,
     });
 
     // Build system prompt

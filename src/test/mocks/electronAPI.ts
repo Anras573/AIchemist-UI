@@ -62,6 +62,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     getCopilotModels: vi.fn().mockResolvedValue([]),
     getOllamaModels: vi.fn().mockResolvedValue([]),
     getOpenAiCompatModels: vi.fn().mockResolvedValue([]),
+    getCodexModels: vi.fn().mockResolvedValue([]),
     getClaudeAgents: vi.fn().mockResolvedValue([]),
     getCopilotAgents: vi.fn().mockResolvedValue([]),
     githubCreatePr: vi.fn().mockImplementation(githubStubResponse),

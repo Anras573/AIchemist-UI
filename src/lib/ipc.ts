@@ -77,6 +77,7 @@ export const ipc = {
   getCopilotModels: () => window.electronAPI.getCopilotModels(),
   getOllamaModels: () => window.electronAPI.getOllamaModels(),
   getOpenAiCompatModels: () => window.electronAPI.getOpenAiCompatModels(),
+  getCodexModels: () => window.electronAPI.getCodexModels(),
   getClaudeAgents: (projectPath: string) => window.electronAPI.getClaudeAgents(projectPath),
   getCopilotAgents: (projectPath: string) => window.electronAPI.getCopilotAgents(projectPath),
   githubCreatePr: (args: GitHubCreatePrArgs) => window.electronAPI.githubCreatePr(args),
