@@ -73,6 +73,19 @@ const OPENAI_MODELS_TIMEOUT_MS = 5_000;
 
 let fetchImpl: typeof fetch = (...args) => fetch(...args);
 
+function normalizeTextContent(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "value" in value &&
+    typeof value.value === "string"
+  ) {
+    return value.value;
+  }
+  return undefined;
+}
+
 async function getClient(): Promise<CodexClient> {
   if (clientInstance) return clientInstance;
 
@@ -106,7 +119,7 @@ async function getClient(): Promise<CodexClient> {
           role: msg.role as "user" | "assistant",
           content: msg.content.map((c: any) => ({
             type: c.type,
-            text: c.type === "text" ? c.text : undefined,
+            text: c.type === "text" ? normalizeTextContent(c.text) : undefined,
           })),
           created_at: msg.created_at,
         };
@@ -171,75 +184,70 @@ export const codexProvider: AgentProvider = {
 
     const emitter = new TurnEmitter(webContents, sessionId);
 
-    try {
-      const client = await getClient();
+    const client = await getClient();
 
-      // Resolve or create thread
-      let threadId: string;
-      const prior = providerSessionStore.get(db, sessionId, "codex") as CodexSessionState | null;
-      const resumeId = prior?.threadId ?? null;
+    // Resolve or create thread
+    let threadId: string;
+    const prior = providerSessionStore.get(db, sessionId, "codex") as CodexSessionState | null;
+    const resumeId = prior?.threadId ?? null;
 
-      if (!resumeId) {
+    if (!resumeId) {
+      const thread = await client.threads.create();
+      threadId = thread.id;
+    } else {
+      // Verify thread still exists
+      try {
+        const thread = await client.threads.retrieve(resumeId);
+        threadId = thread.id;
+      } catch {
+        // Thread not found, create a new one
         const thread = await client.threads.create();
         threadId = thread.id;
-      } else {
-        // Verify thread still exists
-        try {
-          const thread = await client.threads.retrieve(resumeId);
-          threadId = thread.id;
-        } catch {
-          // Thread not found, create a new one
-          const thread = await client.threads.create();
-          threadId = thread.id;
-        }
       }
+    }
 
-      providerSessionStore.set(db, sessionId, "codex", {
-        threadId: threadId || null,
-      });
+    providerSessionStore.set(db, sessionId, "codex", {
+      threadId: threadId || null,
+    });
 
-      // Build system prompt
-      const systemPrompt = buildSystemPrompt(params);
-      const model = resolveModelForTurn(params);
+    // Build system prompt
+    const systemPrompt = buildSystemPrompt(params);
+    const model = resolveModelForTurn(params);
 
-      // Add user message
-      await client.messages.create(threadId, {
-        role: "user",
-        content: prompt,
-      });
+    // Add user message
+    await client.messages.create(threadId, {
+      role: "user",
+      content: prompt,
+    });
 
-      // Stream the run
-      let fullText = "";
-      for await (const event of client.runs.stream(threadId, {
-        model,
-        instructions: systemPrompt,
-      })) {
-        if (event.event === "thread.message.delta" && event.data?.delta?.content) {
-          for (const content of event.data.delta.content) {
-            if (content.type === "text" && content.text) {
-              fullText += content.text;
-              emitter.delta(content.text);
-            }
+    // Stream the run
+    let fullText = "";
+    for await (const event of client.runs.stream(threadId, {
+      model,
+      instructions: systemPrompt,
+    })) {
+      if (event.event === "thread.message.delta" && event.data?.delta?.content) {
+        for (const content of event.data.delta.content) {
+          const textDelta = content.type === "text" ? normalizeTextContent(content.text) : undefined;
+          if (textDelta !== undefined) {
+            fullText += textDelta;
+            emitter.delta(textDelta);
           }
         }
-
-        if (event.event === "thread.run.completed" && event.data?.usage) {
-          const usage = event.data.usage;
-          emitter.usage({
-            input_tokens: usage.prompt_tokens,
-            output_tokens: usage.completion_tokens,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-          });
-        }
       }
 
-      return fullText;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      emitter.delta(`Error: ${message}`);
-      throw error;
+      if (event.event === "thread.run.completed" && event.data?.usage) {
+        const usage = event.data.usage;
+        emitter.usage({
+          input_tokens: usage.prompt_tokens,
+          output_tokens: usage.completion_tokens,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        });
+      }
     }
+
+    return fullText;
   },
 
   async listModels(): Promise<Array<{ id: string; name: string }>> {
@@ -328,4 +336,8 @@ export function _setClientForTests(client: CodexClient | null): void {
 
 export function _setFetchForTests(impl: typeof fetch | null): void {
   fetchImpl = impl ?? ((...args) => fetch(...args));
+}
+
+export function _normalizeTextContentForTests(value: unknown): string | undefined {
+  return normalizeTextContent(value);
 }

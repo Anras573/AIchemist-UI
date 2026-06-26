@@ -92,8 +92,26 @@ vi.mock("./claude", () => ({
 }));
 
 // Now import the provider
-import { codexProvider, _setClientForTests, _setFetchForTests } from "./codex";
+import {
+  codexProvider,
+  _normalizeTextContentForTests,
+  _setClientForTests,
+  _setFetchForTests,
+} from "./codex";
 import { providerSessionStore } from "./provider-session-store";
+import { TurnEmitter } from "./turn-emitter";
+
+type TurnEmitterMock = {
+  mock: {
+    instances: Array<{
+      delta: ReturnType<typeof vi.fn>;
+      usage: ReturnType<typeof vi.fn>;
+    }>;
+  };
+  mockImplementation: (impl: (this: any) => void) => unknown;
+};
+
+const mockedTurnEmitter = TurnEmitter as unknown as TurnEmitterMock;
 
 describe("codexProvider", () => {
   function makeParams(overrides: Partial<AgentProviderParams> = {}): AgentProviderParams {
@@ -145,6 +163,13 @@ describe("codexProvider", () => {
     });
   });
 
+  it("should normalize text payloads from the SDK", () => {
+    expect(_normalizeTextContentForTests("plain text")).toBe("plain text");
+    expect(_normalizeTextContentForTests({ value: "object text" })).toBe("object text");
+    expect(_normalizeTextContentForTests({ value: 123 })).toBeUndefined();
+    expect(_normalizeTextContentForTests({})).toBeUndefined();
+  });
+
   it("should fall back to the default model when project config model is null", async () => {
     const stream = vi.fn(async function* () {
       yield {
@@ -192,6 +217,13 @@ describe("codexProvider", () => {
 
   it("should persist the thread id before streaming so failures can resume", async () => {
     const mockDb = {} as any;
+    const emitterDelta = vi.fn();
+    const emitterUsage = vi.fn();
+    mockedTurnEmitter.mockImplementation(function (this: any) {
+      this.delta = emitterDelta;
+      this.usage = emitterUsage;
+    });
+
     _setClientForTests({
       threads: {
         create: vi.fn(async () => ({ id: "thread-456", created_at: 1719360000 })),
@@ -218,6 +250,58 @@ describe("codexProvider", () => {
     expect(providerSessionStore.set).toHaveBeenCalledWith(mockDb, "session-123", "codex", {
       threadId: "thread-456",
     });
+    expect(emitterDelta).not.toHaveBeenCalled();
+    expect(emitterUsage).not.toHaveBeenCalled();
+  });
+
+  it("should stream only normalized text deltas", async () => {
+    const emitterDelta = vi.fn();
+    const emitterUsage = vi.fn();
+    mockedTurnEmitter.mockImplementation(function (this: any) {
+      this.delta = emitterDelta;
+      this.usage = emitterUsage;
+    });
+
+    _setClientForTests({
+      threads: {
+        create: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
+        retrieve: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
+      },
+      messages: {
+        create: vi.fn(async () => ({
+          id: "msg-123",
+          thread_id: "thread-123",
+          role: "user",
+          content: [{ type: "text", text: "test" }],
+          created_at: 1719360000,
+        })),
+      },
+      runs: {
+        stream: vi.fn(async function* () {
+          yield {
+            event: "thread.message.delta",
+            data: {
+              delta: {
+                content: [
+                  { type: "text", text: { value: "Hello " } },
+                  { type: "text", text: { bad: true } },
+                  { type: "text", text: "Codex" },
+                ],
+              },
+            },
+          };
+        }),
+      },
+    } as any);
+
+    const result = await codexProvider.run(makeParams());
+
+    expect(result).toBe("Hello Codex");
+    expect(emitterDelta).toHaveBeenCalledTimes(2);
+    expect(emitterDelta).toHaveBeenNthCalledWith(1, "Hello ");
+    expect(emitterDelta).toHaveBeenNthCalledWith(2, "Codex");
+    expect(emitterDelta).not.toHaveBeenCalledWith("[object Object]");
+    expect(emitterUsage).not.toHaveBeenCalled();
   });
 
   it("should list models when available", async () => {
