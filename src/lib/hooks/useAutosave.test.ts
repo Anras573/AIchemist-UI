@@ -211,6 +211,25 @@ describe("useAutosave", () => {
     expect(save).toHaveBeenLastCalledWith("a");
   });
 
+  it("closes the prior undo window as soon as a new edit starts", async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      useAutosave(save, { debounceMs: 500, undoMs: 5000, initialValue: "a" }),
+    );
+
+    await act(async () => {
+      result.current.commit("b", { immediate: true });
+    });
+    expect(result.current.canUndo).toBe(true);
+
+    // A new (debounced) edit must close the prior Saved/Undo window immediately —
+    // before its timer can fire mid-edit and wrongly mark the field clean.
+    act(() => {
+      result.current.commit("c");
+    });
+    expect(result.current.canUndo).toBe(false);
+  });
+
   it("clears a prior undo window when a later save fails", async () => {
     const save = vi
       .fn()

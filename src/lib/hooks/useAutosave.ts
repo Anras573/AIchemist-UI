@@ -152,6 +152,13 @@ export function useAutosave<T>(
   const commit = useCallback(
     (value: T, opts?: { immediate?: boolean }) => {
       dirtyRef.current = true;
+      // Close any prior Saved/Undo window the moment a new edit starts. Otherwise
+      // that window's timer could fire mid-edit, clear dirtyRef while pendingRef
+      // still holds an unsaved value, and let the initialValue re-sync overwrite
+      // the undo baseline. Starting a fresh edit also invalidates the old Undo.
+      clear(windowTimer);
+      undoTargetRef.current = EMPTY;
+      setCanUndo(false);
       clear(debounceTimer);
       if (opts?.immediate || debounceMs <= 0) {
         pendingRef.current = EMPTY;

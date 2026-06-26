@@ -46,7 +46,12 @@ describe("useTheme", () => {
     });
   });
 
-  it("rethrows when the settings write fails so callers can surface the error", async () => {
+  it("rethrows and rolls back the optimistic change when the settings write fails", async () => {
+    // Keep the mount-time settingsRead sync a no-op so it doesn't change theme.
+    localStorage.setItem(STORAGE_KEY, "light");
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({
+      AICHEMIST_THEME: "light",
+    } as never);
     vi.mocked(window.electronAPI.settingsWrite).mockRejectedValueOnce(
       new Error("disk full"),
     );
@@ -57,6 +62,10 @@ describe("useTheme", () => {
         await result.current.setTheme("dark");
       }),
     ).rejects.toThrow("disk full");
+
+    // The visible theme + localStorage revert to what is actually persisted.
+    expect(result.current.theme).toBe("light");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("light");
   });
 
   it("applies the 'dark' class to <html> when theme is dark", async () => {

@@ -57,17 +57,22 @@ export function useTheme() {
   }, []);
 
   const setTheme = useCallback(async (next: Theme) => {
+    const prev = (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? theme;
     localStorage.setItem(STORAGE_KEY, next);
     setThemeState(next);
     try {
       await ipc.settingsWrite({ AICHEMIST_THEME: next });
     } catch (err) {
-      // Log, then rethrow so a caller awaiting this (e.g. useAutosave) can
-      // surface "Save failed" rather than showing a false "Saved ✓".
+      // Roll back the optimistic local update so the visible theme matches what
+      // is actually persisted — otherwise the mount-time settingsRead sync would
+      // override localStorage on next start. Then log + rethrow so a caller
+      // awaiting this (e.g. useAutosave) can surface "Save failed".
+      localStorage.setItem(STORAGE_KEY, prev);
+      setThemeState(prev);
       console.error(err);
       throw err;
     }
-  }, []);
+  }, [theme]);
 
   return { theme, setTheme };
 }
