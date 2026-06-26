@@ -96,7 +96,14 @@ function FieldShell({
           {children}
         </>
       )}
-      {helper && <p className="text-xs text-muted-foreground">{helper}</p>}
+      {helper &&
+        // String helper renders as a paragraph; a rich node uses a div so a
+        // block element in the helper can't produce invalid nested <p>.
+        (typeof helper === "string" ? (
+          <p className="text-xs text-muted-foreground">{helper}</p>
+        ) : (
+          <div className="text-xs text-muted-foreground">{helper}</div>
+        ))}
       {error && (
         <p className="flex items-start gap-1.5 text-xs text-destructive">
           <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />

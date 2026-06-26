@@ -70,7 +70,7 @@ export function useAutosave<T>(
   // (toggles/selects) could let an older completion clobber the newest value's state.
   const seqRef = useRef(0);
 
-  const clear = (ref: React.MutableRefObject<ReturnType<typeof setTimeout> | null>) => {
+  const clear = (ref: { current: ReturnType<typeof setTimeout> | null }) => {
     if (ref.current) {
       clearTimeout(ref.current);
       ref.current = null;

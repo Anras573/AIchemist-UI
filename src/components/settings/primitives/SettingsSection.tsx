@@ -21,9 +21,14 @@ export function SettingsSection({ title, description, action, children }: Settin
           <h2 className="text-sm font-semibold leading-none">{title}</h2>
           {action}
         </div>
-        {description && (
-          <p className="text-sm text-muted-foreground">{description}</p>
-        )}
+        {description &&
+          // A plain string is rendered as a paragraph; a rich node goes in a
+          // div to avoid invalid nested <p> when callers pass block elements.
+          (typeof description === "string" ? (
+            <p className="text-sm text-muted-foreground">{description}</p>
+          ) : (
+            <div className="text-sm text-muted-foreground">{description}</div>
+          ))}
       </div>
       <div className="space-y-5">{children}</div>
     </section>
