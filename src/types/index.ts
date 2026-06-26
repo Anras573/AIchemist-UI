@@ -19,7 +19,7 @@ import type { ProjectConfig } from "./schemas";
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
-export type Provider = "anthropic" | "copilot" | "ollama" | "openai-compatible";
+export type Provider = "anthropic" | "copilot" | "ollama" | "openai-compatible" | "codex";
 
 // ─── Provider availability ───────────────────────────────────────────────────
 

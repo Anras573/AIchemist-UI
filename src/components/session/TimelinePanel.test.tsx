@@ -31,6 +31,8 @@ beforeEach(() => {
     anthropic: { ok: true },
     copilot: { ok: true },
     ollama: { ok: true },
+    "openai-compatible": { ok: true },
+    codex: { ok: true },
   });
 });
 

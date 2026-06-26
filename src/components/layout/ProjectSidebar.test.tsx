@@ -207,6 +207,7 @@ describe("ProjectSidebar — provider dropdown", () => {
       copilot: { ok: false, reason: "GITHUB_TOKEN not set" },
       ollama: { ok: true },
       "openai-compatible": { ok: true },
+      codex: { ok: true },
     });
     vi.mocked(window.electronAPI.listProjects).mockResolvedValue([makeProject({ id: "proj-1", name: "alpha" })]);
     vi.mocked(window.electronAPI.listSessions).mockResolvedValue([]);
