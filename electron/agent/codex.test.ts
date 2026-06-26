@@ -99,6 +99,7 @@ import {
   _setClientForTests,
   _setFetchForTests,
 } from "./codex";
+import { getApiKey } from "../config";
 import { providerSessionStore } from "./provider-session-store";
 import { TurnEmitter } from "./turn-emitter";
 
@@ -113,6 +114,14 @@ type TurnEmitterMock = {
 };
 
 const mockedTurnEmitter = TurnEmitter as unknown as TurnEmitterMock;
+
+function installDefaultTurnEmitterMock() {
+  mockedTurnEmitter.mockImplementation(function (this: any) {
+    this.isDefault = true;
+    this.delta = vi.fn();
+    this.usage = vi.fn();
+  });
+}
 
 describe("codexProvider", () => {
   function makeParams(overrides: Partial<AgentProviderParams> = {}): AgentProviderParams {
@@ -139,6 +148,11 @@ describe("codexProvider", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getApiKey).mockImplementation((key) => {
+      if (key === "openai") return "sk-test-key";
+      return null;
+    });
+    installDefaultTurnEmitterMock();
     _setClientForTests(null); // Reset client singleton
     _resetProbeCacheForTests();
     _setFetchForTests(
@@ -424,6 +438,42 @@ describe("codexProvider", () => {
     expect(emitterUsage).not.toHaveBeenCalled();
   });
 
+  it("should restore the default TurnEmitter mock between tests", async () => {
+    _setClientForTests({
+      threads: {
+        create: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
+        retrieve: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
+      },
+      messages: {
+        create: vi.fn(async () => ({
+          id: "msg-123",
+          thread_id: "thread-123",
+          role: "user",
+          content: [{ type: "text", text: "test" }],
+          created_at: 1719360000,
+        })),
+      },
+      runs: {
+        stream: vi.fn(async function* () {
+          yield {
+            event: "thread.run.completed",
+            data: {
+              usage: {
+                prompt_tokens: 1,
+                completion_tokens: 1,
+                total_tokens: 2,
+              },
+            },
+          };
+        }),
+      },
+    } as any);
+
+    await codexProvider.run(makeParams());
+
+    expect((mockedTurnEmitter as any).mock.instances.at(-1)?.isDefault).toBe(true);
+  });
+
   it("should list models when available", async () => {
     if (codexProvider.listModels) {
       const models = await codexProvider.listModels();
@@ -431,6 +481,23 @@ describe("codexProvider", () => {
         { id: "gpt-4o", name: "gpt-4o" },
         { id: "gpt-4.1", name: "gpt-4.1" },
       ]);
+    }
+  });
+
+  it("treats whitespace-only API keys as unconfigured when starting a run", async () => {
+    vi.mocked(getApiKey).mockReturnValue("   ");
+
+    await expect(codexProvider.run(makeParams())).rejects.toThrow("OpenAI API key not configured");
+  });
+
+  it("skips model fetching when the API key is whitespace only", async () => {
+    vi.mocked(getApiKey).mockReturnValue("   ");
+    const fetchSpy = vi.fn();
+    _setFetchForTests(fetchSpy as unknown as typeof fetch);
+
+    if (codexProvider.listModels) {
+      await expect(codexProvider.listModels()).resolves.toEqual([]);
+      expect(fetchSpy).not.toHaveBeenCalled();
     }
   });
 
@@ -446,6 +513,21 @@ describe("codexProvider", () => {
       const probeResult = await codexProvider.probe();
       expect(probeResult).toMatchObject({ ok: true });
       expect(probeResult.durationMs).toEqual(expect.any(Number));
+    }
+  });
+
+  it("reports whitespace-only API keys as not configured during probe", async () => {
+    vi.mocked(getApiKey).mockReturnValue("   ");
+    const fetchSpy = vi.fn();
+    _setFetchForTests(fetchSpy as unknown as typeof fetch);
+
+    if (codexProvider.probe) {
+      await expect(codexProvider.probe({ force: true })).resolves.toMatchObject({
+        ok: false,
+        reason: "OpenAI API key not configured",
+        durationMs: 0,
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
     }
   });
 

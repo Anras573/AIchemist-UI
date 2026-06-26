@@ -119,10 +119,15 @@ function isMissingThreadError(error: unknown): boolean {
   return /\b(not found|missing thread|unknown thread|no such thread)\b/i.test(message);
 }
 
+function getConfiguredOpenAiApiKey(): string | null {
+  const apiKey = getApiKey("openai")?.trim() ?? "";
+  return apiKey.length > 0 ? apiKey : null;
+}
+
 async function getClient(): Promise<CodexClient> {
   if (clientInstance) return clientInstance;
 
-  const apiKey = getApiKey("openai") ?? undefined;
+  const apiKey = getConfiguredOpenAiApiKey() ?? undefined;
   if (!apiKey) {
     throw new Error("OpenAI API key not configured. Set OPENAI_API_KEY in ~/.aichemist/.env");
   }
@@ -188,7 +193,7 @@ async function fetchModelsResponse(apiKey: string): Promise<Response> {
 
 async function listCodexModels(): Promise<Array<{ id: string; name: string }>> {
   try {
-    const apiKey = getApiKey("openai");
+    const apiKey = getConfiguredOpenAiApiKey();
     if (!apiKey) return [];
 
     const response = await fetchModelsResponse(apiKey);
@@ -302,7 +307,7 @@ export const codexProvider: AgentProvider = {
 
     let result: { ok: boolean; reason?: string; durationMs?: number };
     try {
-      const apiKey = getApiKey("openai");
+      const apiKey = getConfiguredOpenAiApiKey();
       if (!apiKey) {
         result = {
           ok: false,
