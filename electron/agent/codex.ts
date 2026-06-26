@@ -2,7 +2,6 @@ import type { AgentInfo } from "../../src/types/index";
 import { getApiKey } from "../config";
 import { TurnEmitter } from "./turn-emitter";
 import { providerSessionStore } from "./provider-session-store";
-import type { CodexSessionState } from "./provider-session-store";
 import { buildSkillsContext } from "./skills";
 import { buildMemoryContext } from "./memory";
 import { readAgentFileSystemPrompt } from "./claude";
@@ -31,7 +30,7 @@ interface CodexStreamEvent {
     delta?: {
       content?: Array<{
         type: string;
-        text?: string;
+        text?: unknown;
       }>;
     };
     usage?: {
@@ -191,7 +190,7 @@ export const codexProvider: AgentProvider = {
 
     // Resolve or create thread
     let threadId: string;
-    const prior = providerSessionStore.get(db, sessionId, "codex") as CodexSessionState | null;
+    const prior = providerSessionStore.get(db, sessionId, "codex");
     const resumeId = prior?.threadId ?? null;
 
     if (!resumeId) {
@@ -308,8 +307,8 @@ export const codexProvider: AgentProvider = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /**
- * Build the system prompt for Codex by combining project instructions,
- * agent body (if selected), skills context, and memory context.
+ * Build the Codex system prompt from the provider intro, selected agent body
+ * (if any), active skills context, and project memory context.
  */
 function buildSystemPrompt(params: AgentProviderParams): string {
   const skillsContext = buildSkillsContext(params.skills ?? [], params.projectPath);
