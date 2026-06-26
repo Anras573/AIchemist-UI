@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { AgentProviderParams } from "./provider";
 
 // Mock OpenAI SDK first (before any imports)
@@ -92,12 +92,22 @@ vi.mock("./claude", () => ({
 }));
 
 // Now import the provider
-import { codexProvider, _setClientForTests } from "./codex";
+import { codexProvider, _setClientForTests, _setFetchForTests } from "./codex";
 
 describe("codexProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _setClientForTests(null); // Reset client singleton
+    _setFetchForTests(
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ data: [{ id: "gpt-4o" }, { id: "gpt-4.1" }] }),
+      }) as unknown as typeof fetch,
+    );
+  });
+
+  afterEach(() => {
+    _setFetchForTests(null);
   });
 
   it("should create a new thread when none exists", async () => {
@@ -131,8 +141,10 @@ describe("codexProvider", () => {
   it("should list models when available", async () => {
     if (codexProvider.listModels) {
       const models = await codexProvider.listModels();
-      // Should return empty or a list of available models
-      expect(Array.isArray(models)).toBe(true);
+      expect(models).toEqual([
+        { id: "gpt-4o", name: "gpt-4o" },
+        { id: "gpt-4.1", name: "gpt-4.1" },
+      ]);
     }
   });
 
@@ -146,7 +158,7 @@ describe("codexProvider", () => {
   it("should probe successfully with valid API key", async () => {
     if (codexProvider.probe) {
       const probeResult = await codexProvider.probe();
-      expect(probeResult).toHaveProperty("ok");
+      expect(probeResult).toEqual({ ok: true });
     }
   });
 

@@ -2,6 +2,7 @@ import type { AgentInfo } from "../../src/types/index";
 import { getApiKey } from "../config";
 import { TurnEmitter } from "./turn-emitter";
 import { providerSessionStore } from "./provider-session-store";
+import type { CodexSessionState } from "./provider-session-store";
 import { buildSkillsContext } from "./skills";
 import { buildMemoryContext } from "./memory";
 import { readAgentFileSystemPrompt } from "./claude";
@@ -64,16 +65,13 @@ interface CodexClient {
   };
 }
 
-// ── Session state extension for Codex ──────────────────────────────────────────
-
-export interface CodexSessionState {
-  threadId?: string | null;
-}
-
 // ── Singleton client ──────────────────────────────────────────────────────────
 
 let clientInstance: CodexClient | null = null;
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
+const OPENAI_MODELS_TIMEOUT_MS = 5_000;
+
+let fetchImpl: typeof fetch = (...args) => fetch(...args);
 
 async function getClient(): Promise<CodexClient> {
   if (clientInstance) return clientInstance;
@@ -127,6 +125,19 @@ async function getClient(): Promise<CodexClient> {
   return clientInstance;
 }
 
+async function fetchModelsResponse(apiKey: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OPENAI_MODELS_TIMEOUT_MS);
+  try {
+    return await fetchImpl(`${OPENAI_API_BASE_URL}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // ── Model listing ─────────────────────────────────────────────────────────────
 
 async function listCodexModels(): Promise<Array<{ id: string; name: string }>> {
@@ -134,9 +145,7 @@ async function listCodexModels(): Promise<Array<{ id: string; name: string }>> {
     const apiKey = getApiKey("openai");
     if (!apiKey) return [];
 
-    const response = await fetch(`${OPENAI_API_BASE_URL}/models`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
+    const response = await fetchModelsResponse(apiKey);
 
     if (!response.ok) return [];
 
@@ -157,10 +166,7 @@ export const codexProvider: AgentProvider = {
       db,
       sessionId,
       prompt,
-      projectPath,
       webContents,
-      skills,
-      agent,
     } = params;
 
     const emitter = new TurnEmitter(webContents, sessionId);
@@ -189,7 +195,8 @@ export const codexProvider: AgentProvider = {
       }
 
       // Build system prompt
-      const systemPrompt = buildSystemPrompt(projectPath, skills, agent);
+      const systemPrompt = buildSystemPrompt(params);
+      const model = resolveModelForTurn(params);
 
       // Add user message
       await client.messages.create(threadId, {
@@ -200,7 +207,7 @@ export const codexProvider: AgentProvider = {
       // Stream the run
       let fullText = "";
       for await (const event of client.runs.stream(threadId, {
-        model: "gpt-4",
+        model,
         instructions: systemPrompt,
       })) {
         if (event.event === "thread.message.delta" && event.data?.delta?.content) {
@@ -256,16 +263,8 @@ export const codexProvider: AgentProvider = {
       }
 
       // Quick connectivity check with timeout
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-
       try {
-        const response = await fetch(`${OPENAI_API_BASE_URL}/models`, {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeout);
+        const response = await fetchModelsResponse(apiKey);
 
         if (response.ok) {
           return { ok: true };
@@ -277,7 +276,6 @@ export const codexProvider: AgentProvider = {
 
         return { ok: false, reason: `OpenAI API error: ${response.status}` };
       } catch (error) {
-        clearTimeout(timeout);
         if (error instanceof Error && error.name === "AbortError") {
           return { ok: false, reason: "OpenAI API timeout" };
         }
@@ -303,56 +301,32 @@ export const codexProvider: AgentProvider = {
  * Build the system prompt for Codex by combining project instructions,
  * agent body (if selected), skills context, and memory context.
  */
-function buildSystemPrompt(
-  projectPath: string,
-  skills?: string[],
-  agent?: string
-): string {
+function buildSystemPrompt(params: AgentProviderParams): string {
+  const skillsContext = buildSkillsContext(params.skills ?? [], params.projectPath);
+  const memoryContext = buildMemoryContext(params.projectPath, { includeToolGuidance: false });
+  const agentBody = params.agent ? readAgentFileSystemPrompt(params.agent)?.body ?? "" : "";
   const parts: string[] = [
     "You are AIchemist, a coding assistant running inside a desktop app.",
-    "Use the available tools to inspect and modify the project, run commands, and fetch URLs.",
+    "Answer using only the conversation and the provided project context.",
+    "Do not claim to have inspected files, run commands, or used tools that are not available in this provider.",
   ];
+  return [...parts, agentBody, skillsContext, memoryContext]
+    .filter((part) => part.trim().length > 0)
+    .join("\n\n");
+}
 
-  // Add agent system prompt if selected
-  if (agent) {
-    try {
-      const result = readAgentFileSystemPrompt(agent);
-      if (result) {
-        parts.push(result.body);
-      }
-    } catch {
-      // Agent not found, skip
-    }
-  }
-
-  // Add skills context
-  if (skills && skills.length > 0) {
-    try {
-      const skillsContext = buildSkillsContext(skills, projectPath);
-      if (skillsContext) {
-        parts.push("Available skills and capabilities:");
-        parts.push(skillsContext);
-      }
-    } catch {
-      // Skill loading error, skip
-    }
-  }
-
-  // Add memory context
-  try {
-    const memoryContext = buildMemoryContext(projectPath);
-    if (memoryContext) {
-      parts.push("Persistent project memory:");
-      parts.push(memoryContext);
-    }
-  } catch {
-    // Memory loading error, skip
-  }
-
-  return parts.join("\n\n");
+function resolveModelForTurn(params: AgentProviderParams): string {
+  const override = params.agent ? readAgentFileSystemPrompt(params.agent)?.model?.trim() : undefined;
+  if (override) return override;
+  const configured = params.projectConfig.model.trim();
+  return configured || "gpt-4";
 }
 
 // Test seams for mocking
 export function _setClientForTests(client: CodexClient | null): void {
   clientInstance = client;
+}
+
+export function _setFetchForTests(impl: typeof fetch | null): void {
+  fetchImpl = impl ?? ((...args) => fetch(...args));
 }
