@@ -7,7 +7,7 @@ import { buildMemoryContext } from "./memory";
 import { readAgentFileSystemPrompt } from "./claude";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 
-// ── Codex SDK types (based on @openai/codex-sdk interface) ────────────────────
+// ── OpenAI Assistants Threads/Runs API types used by the Codex provider ───────
 
 interface CodexThread {
   id: string;
@@ -72,8 +72,11 @@ type CodexRunStreamOptions = Parameters<CodexClient["runs"]["stream"]>[1];
 let clientInstance: CodexClient | null = null;
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
 const OPENAI_MODELS_TIMEOUT_MS = 5_000;
+const PROBE_CACHE_TTL_MS = 30_000;
 
 let fetchImpl: typeof fetch = (...args) => fetch(...args);
+let probeCache: { result: { ok: boolean; reason?: string; durationMs?: number }; timestamp: number } | null =
+  null;
 
 function normalizeTextContent(value: unknown): string | undefined {
   if (typeof value === "string") return value;
@@ -261,41 +264,52 @@ export const codexProvider: AgentProvider = {
     return [];
   },
 
-  async probe(): Promise<{ ok: boolean; reason?: string }> {
+  async probe(opts?: { force?: boolean }): Promise<{ ok: boolean; reason?: string; durationMs?: number }> {
+    if (!opts?.force && probeCache && Date.now() - probeCache.timestamp <= PROBE_CACHE_TTL_MS) {
+      return probeCache.result;
+    }
+
+    let result: { ok: boolean; reason?: string; durationMs?: number };
     try {
       const apiKey = getApiKey("openai");
       if (!apiKey) {
-        return {
+        result = {
           ok: false,
           reason: "OpenAI API key not configured",
+          durationMs: 0,
         };
+        probeCache = { result, timestamp: Date.now() };
+        return result;
       }
 
-      // Quick connectivity check with timeout
+      const start = Date.now();
       try {
         const response = await fetchModelsResponse(apiKey);
+        const durationMs = Date.now() - start;
 
         if (response.ok) {
-          return { ok: true };
+          result = { ok: true, durationMs };
+        } else if (response.status === 401 || response.status === 403) {
+          result = { ok: false, reason: "Invalid OpenAI API key", durationMs };
+        } else {
+          result = { ok: false, reason: `OpenAI API error: ${response.status}`, durationMs };
         }
-
-        if (response.status === 401 || response.status === 403) {
-          return { ok: false, reason: "Invalid OpenAI API key" };
-        }
-
-        return { ok: false, reason: `OpenAI API error: ${response.status}` };
       } catch (error) {
+        const durationMs = Date.now() - start;
         if (error instanceof Error && error.name === "AbortError") {
-          return { ok: false, reason: "OpenAI API timeout" };
+          result = { ok: false, reason: "OpenAI API timeout", durationMs };
+        } else {
+          result = { ok: false, reason: String(error), durationMs };
         }
-        return { ok: false, reason: String(error) };
       }
     } catch (error) {
-      return {
+      result = {
         ok: false,
         reason: error instanceof Error ? error.message : "Unknown error",
       };
     }
+    probeCache = { result, timestamp: Date.now() };
+    return result;
   },
 
   async stop(): Promise<void> {
@@ -338,6 +352,10 @@ export function _setClientForTests(client: CodexClient | null): void {
 
 export function _setFetchForTests(impl: typeof fetch | null): void {
   fetchImpl = impl ?? ((...args) => fetch(...args));
+}
+
+export function _resetProbeCacheForTests(): void {
+  probeCache = null;
 }
 
 export function _normalizeTextContentForTests(value: unknown): string | undefined {

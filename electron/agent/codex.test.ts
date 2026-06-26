@@ -95,6 +95,7 @@ vi.mock("./claude", () => ({
 import {
   codexProvider,
   _normalizeTextContentForTests,
+  _resetProbeCacheForTests,
   _setClientForTests,
   _setFetchForTests,
 } from "./codex";
@@ -139,6 +140,7 @@ describe("codexProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _setClientForTests(null); // Reset client singleton
+    _resetProbeCacheForTests();
     _setFetchForTests(
       vi.fn().mockResolvedValue({
         ok: true,
@@ -148,6 +150,7 @@ describe("codexProvider", () => {
   });
 
   afterEach(() => {
+    _resetProbeCacheForTests();
     _setFetchForTests(null);
   });
 
@@ -414,7 +417,24 @@ describe("codexProvider", () => {
   it("should probe successfully with valid API key", async () => {
     if (codexProvider.probe) {
       const probeResult = await codexProvider.probe();
-      expect(probeResult).toEqual({ ok: true });
+      expect(probeResult).toMatchObject({ ok: true });
+      expect(probeResult.durationMs).toEqual(expect.any(Number));
+    }
+  });
+
+  it("should cache probe results until force is requested", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ data: [{ id: "gpt-4o" }] }),
+    });
+    _setFetchForTests(fetchSpy as unknown as typeof fetch);
+
+    if (codexProvider.probe) {
+      await codexProvider.probe();
+      await codexProvider.probe();
+      await codexProvider.probe({ force: true });
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
     }
   });
 
