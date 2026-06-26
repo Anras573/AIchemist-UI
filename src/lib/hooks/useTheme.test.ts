@@ -46,6 +46,19 @@ describe("useTheme", () => {
     });
   });
 
+  it("rethrows when the settings write fails so callers can surface the error", async () => {
+    vi.mocked(window.electronAPI.settingsWrite).mockRejectedValueOnce(
+      new Error("disk full"),
+    );
+    const { result } = renderHook(() => useTheme());
+
+    await expect(
+      act(async () => {
+        await result.current.setTheme("dark");
+      }),
+    ).rejects.toThrow("disk full");
+  });
+
   it("applies the 'dark' class to <html> when theme is dark", async () => {
     const { result } = renderHook(() => useTheme());
 

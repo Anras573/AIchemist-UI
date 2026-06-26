@@ -59,7 +59,14 @@ export function useTheme() {
   const setTheme = useCallback(async (next: Theme) => {
     localStorage.setItem(STORAGE_KEY, next);
     setThemeState(next);
-    await ipc.settingsWrite({ AICHEMIST_THEME: next }).catch(console.error);
+    try {
+      await ipc.settingsWrite({ AICHEMIST_THEME: next });
+    } catch (err) {
+      // Log, then rethrow so a caller awaiting this (e.g. useAutosave) can
+      // surface "Save failed" rather than showing a false "Saved ✓".
+      console.error(err);
+      throw err;
+    }
   }, []);
 
   return { theme, setTheme };
