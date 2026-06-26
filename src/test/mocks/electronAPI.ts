@@ -78,7 +78,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
       copilot: { ok: true },
       ollama: { ok: true },
       "openai-compatible": { ok: true },
-      codex: { ok: true },
+      codex: { ok: false, reason: "Codex provider is not configured or implemented yet." },
     }),
     readOpenAiEndpoints: vi.fn().mockResolvedValue({}),
     upsertOpenAiEndpoint: vi.fn().mockResolvedValue({}),

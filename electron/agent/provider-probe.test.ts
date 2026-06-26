@@ -201,7 +201,7 @@ describe("provider-probe", () => {
   // ── probeAll ───────────────────────────────────────────────────────────────
 
   describe("probeAll", () => {
-    it("returns anthropic + copilot + ollama", async () => {
+    it("returns anthropic + copilot + ollama and marks codex unavailable", async () => {
       _setFetch(vi.fn().mockResolvedValue({ ok: true, status: 200 }) as unknown as typeof fetch);
       _setCopilotListModels(async () => [{ id: "x", name: "x" }]);
       _setOllamaListModels(async () => [{ id: "llama3.2", name: "llama3.2" }]);
@@ -211,6 +211,8 @@ describe("provider-probe", () => {
       expect(r.anthropic.ok).toBe(true);
       expect(r.copilot.ok).toBe(true);
       expect(r.ollama.ok).toBe(true);
+      expect(r.codex.ok).toBe(false);
+      expect(r.codex.reason).toMatch(/not configured or implemented/i);
     });
 
     it("treats user-disabled providers as not ok without invoking the underlying probe", async () => {

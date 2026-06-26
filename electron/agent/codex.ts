@@ -9,6 +9,12 @@ import type { AgentProvider, AgentProviderParams } from "./provider";
  */
 export const codexProvider: AgentProvider = {
   async run(_params: AgentProviderParams): Promise<string> {
-    throw new Error("Codex provider execution is not implemented yet.");
+    return "Codex provider is not available yet. Please switch this session to another provider.";
+  },
+  async probe(): Promise<{ ok: boolean; reason: string }> {
+    return {
+      ok: false,
+      reason: "Codex provider is not configured or implemented yet.",
+    };
   },
 };

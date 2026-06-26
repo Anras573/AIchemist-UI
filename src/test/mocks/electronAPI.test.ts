@@ -28,4 +28,11 @@ describe("createElectronAPIMock", () => {
       api.githubListPrs({ projectPath: "/repo" })
     ).resolves.toEqual({ error: "not implemented" });
   });
+
+  it("marks codex unavailable in default provider probes", async () => {
+    const api = createElectronAPIMock();
+    const probes = await api.probeProviders();
+    expect(probes.codex.ok).toBe(false);
+    expect(probes.codex.reason).toMatch(/not configured or implemented/i);
+  });
 });
