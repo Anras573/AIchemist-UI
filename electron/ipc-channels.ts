@@ -47,6 +47,7 @@ export const APPROVE_TOOL_CALL      = "agent:approve-tool-call";
 export const GET_COPILOT_MODELS     = "agent:get-copilot-models";
 export const GET_OLLAMA_MODELS      = "agent:get-ollama-models";
 export const GET_OPENAI_COMPAT_MODELS = "agent:get-openai-compat-models";
+export const GET_CODEX_MODELS       = "agent:get-codex-models";
 export const GET_CLAUDE_AGENTS      = "agent:get-claude-agents";
 export const GET_COPILOT_AGENTS     = "agent:get-copilot-agents";
 export const LIST_SKILLS            = "agent:list-skills";

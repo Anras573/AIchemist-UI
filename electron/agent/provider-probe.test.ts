@@ -17,6 +17,7 @@ describe("provider-probe", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_AUTH_TOKEN;
     delete process.env.GITHUB_TOKEN;
+    delete process.env.OPENAI_API_KEY;
     delete process.env.ANTHROPIC_BASE_URL;
   });
 
@@ -212,7 +213,7 @@ describe("provider-probe", () => {
       expect(r.copilot.ok).toBe(true);
       expect(r.ollama.ok).toBe(true);
       expect(r.codex.ok).toBe(false);
-      expect(r.codex.reason).toMatch(/not configured or implemented/i);
+      expect(r.codex.reason).toMatch(/not configured/i);
     });
 
     it("treats user-disabled providers as not ok without invoking the underlying probe", async () => {

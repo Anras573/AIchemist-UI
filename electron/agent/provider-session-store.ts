@@ -33,9 +33,16 @@ export interface CopilotSessionState {
   mcpFp?: string | null;
 }
 
+/** Codex (OpenAI) per-session SDK state. */
+export interface CodexSessionState {
+  /** OpenAI Codex thread id — enables thread resumption across turns and restarts. */
+  threadId?: string | null;
+}
+
 export interface ProviderSessionState {
   claude?: ClaudeSessionState;
   copilot?: CopilotSessionState;
+  codex?: CodexSessionState;
 }
 
 export type ProviderKey = keyof ProviderSessionState;

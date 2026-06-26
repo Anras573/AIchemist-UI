@@ -1,20 +1,404 @@
+import type { AgentInfo } from "../../src/types/index";
+import { getApiKey } from "../config";
+import { TurnEmitter } from "./turn-emitter";
+import { providerSessionStore } from "./provider-session-store";
+import { buildSkillsContext } from "./skills";
+import { buildMemoryContext } from "./memory";
+import { readAgentFileSystemPrompt } from "./claude";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 
-/**
- * Placeholder provider entry for Codex.
- *
- * Ticket #118 wires the provider identity through the app so sessions can be
- * created and routed without unknown-provider failures. Full turn execution is
- * implemented in the dedicated Codex provider ticket.
- */
-export const codexProvider: AgentProvider = {
-  async run(_params: AgentProviderParams): Promise<string> {
-    return "Codex provider is not available yet. Please switch this session to another provider.";
-  },
-  async probe(): Promise<{ ok: boolean; reason: string }> {
-    return {
-      ok: false,
-      reason: "Codex provider is not configured or implemented yet.",
+// ── OpenAI Assistants Threads/Runs API types used by the Codex provider ───────
+
+interface CodexThread {
+  id: string;
+  created_at: number;
+  metadata?: Record<string, unknown>;
+}
+
+interface CodexMessage {
+  id: string;
+  thread_id: string;
+  role: "user" | "assistant";
+  content: Array<{ type: string; text?: string }>;
+  created_at: number;
+}
+
+interface CodexStreamEvent {
+  event?: string;
+  data?: {
+    id?: string;
+    delta?: {
+      content?: Array<{
+        type: string;
+        text?: unknown;
+      }>;
     };
+    usage?: {
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    };
+  };
+}
+
+interface CodexClient {
+  threads: {
+    create(): Promise<CodexThread>;
+    retrieve(threadId: string): Promise<CodexThread>;
+  };
+  messages: {
+    create(
+      threadId: string,
+      options: { role: "user" | "assistant"; content: string }
+    ): Promise<CodexMessage>;
+  };
+  runs: {
+    stream(
+      threadId: string,
+      options: {
+        assistant_id?: string;
+        model?: string;
+        instructions?: string;
+      }
+    ): AsyncIterable<CodexStreamEvent>;
+  };
+}
+
+type CodexCreateMessageOptions = Parameters<CodexClient["messages"]["create"]>[1];
+type CodexRunStreamOptions = Parameters<CodexClient["runs"]["stream"]>[1];
+type CodexAgentPrompt = ReturnType<typeof readAgentFileSystemPrompt>;
+
+// ── Singleton client ──────────────────────────────────────────────────────────
+
+let clientInstance: CodexClient | null = null;
+const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
+const OPENAI_MODELS_TIMEOUT_MS = 5_000;
+const PROBE_CACHE_TTL_MS = 30_000;
+const CODEX_MODEL_PREFIXES = ["gpt-", "o1", "o3"] as const;
+
+let fetchImpl: typeof fetch = (...args) => fetch(...args);
+let probeCache: { result: { ok: boolean; reason?: string; durationMs?: number }; timestamp: number } | null =
+  null;
+
+function normalizeTextContent(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "value" in value &&
+    typeof value.value === "string"
+  ) {
+    return value.value;
+  }
+  return undefined;
+}
+
+function isMissingThreadError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const candidate = error as {
+    status?: unknown;
+    code?: unknown;
+    message?: unknown;
+    error?: {
+      code?: unknown;
+      message?: unknown;
+    };
+  };
+
+  if (candidate.status === 404 || candidate.code === "not_found" || candidate.error?.code === "not_found") {
+    return true;
+  }
+
+  const message =
+    typeof candidate.message === "string"
+      ? candidate.message
+      : typeof candidate.error?.message === "string"
+        ? candidate.error.message
+        : "";
+  return /\b(not found|missing thread|unknown thread|no such thread)\b/i.test(message);
+}
+
+function getConfiguredOpenAiApiKey(): string | null {
+  const apiKey = getApiKey("openai")?.trim() ?? "";
+  return apiKey.length > 0 ? apiKey : null;
+}
+
+async function getClient(): Promise<CodexClient> {
+  if (clientInstance) return clientInstance;
+
+  const apiKey = getConfiguredOpenAiApiKey() ?? undefined;
+  if (!apiKey) {
+    throw new Error("OpenAI API key not configured. Set OPENAI_API_KEY in ~/.aichemist/.env");
+  }
+
+  // Lazy load OpenAI SDK
+  const { default: OpenAI } = await import("openai");
+  const openaiClient = new OpenAI({ apiKey, baseURL: OPENAI_API_BASE_URL });
+
+  // Adapt OpenAI SDK to our Codex interface
+  clientInstance = {
+    threads: {
+      create: async () => {
+        const thread = await openaiClient.beta.threads.create();
+        return { id: thread.id, created_at: thread.created_at };
+      },
+      retrieve: async (threadId: string) => {
+        const thread = await openaiClient.beta.threads.retrieve(threadId);
+        return { id: thread.id, created_at: thread.created_at };
+      },
+    },
+    messages: {
+      create: async (threadId: string, options: CodexCreateMessageOptions) => {
+        const msg = await openaiClient.beta.threads.messages.create(threadId, options);
+        return {
+          id: msg.id,
+          thread_id: msg.thread_id,
+          role: msg.role as "user" | "assistant",
+          content: msg.content.map((c: any) => ({
+            type: c.type,
+            text: c.type === "text" ? normalizeTextContent(c.text) : undefined,
+          })),
+          created_at: msg.created_at,
+        };
+      },
+    },
+    runs: {
+      stream: async function* (threadId: string, options: CodexRunStreamOptions) {
+        const stream = await openaiClient.beta.threads.runs.stream(threadId, options as any);
+        for await (const event of stream) {
+          yield event as any;
+        }
+      },
+    },
+  };
+
+  return clientInstance;
+}
+
+async function fetchModelsResponse(apiKey: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OPENAI_MODELS_TIMEOUT_MS);
+  try {
+    return await fetchImpl(`${OPENAI_API_BASE_URL}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ── Model listing ─────────────────────────────────────────────────────────────
+
+async function listCodexModels(): Promise<Array<{ id: string; name: string }>> {
+  try {
+    const apiKey = getConfiguredOpenAiApiKey();
+    if (!apiKey) return [];
+
+    const response = await fetchModelsResponse(apiKey);
+
+    if (!response.ok) return [];
+
+    const data = (await response.json()) as { data: Array<{ id: string; owned_by?: string }> };
+    return data.data
+      .filter((m) => CODEX_MODEL_PREFIXES.some((prefix) => m.id.startsWith(prefix)))
+      .map((m) => ({ id: m.id, name: m.id }));
+  } catch {
+    return [];
+  }
+}
+
+// ── Provider implementation ────────────────────────────────────────────────────
+
+export const codexProvider: AgentProvider = {
+  async run(params: AgentProviderParams): Promise<string> {
+    const {
+      db,
+      sessionId,
+      prompt,
+      webContents,
+    } = params;
+
+    const emitter = new TurnEmitter(webContents, sessionId);
+
+    const client = await getClient();
+
+    // Resolve or create thread
+    let threadId: string;
+    const prior = providerSessionStore.get(db, sessionId, "codex");
+    const resumeId = prior?.threadId ?? null;
+
+    if (!resumeId) {
+      const thread = await client.threads.create();
+      threadId = thread.id;
+    } else {
+      // Verify thread still exists
+      try {
+        const thread = await client.threads.retrieve(resumeId);
+        threadId = thread.id;
+      } catch (error) {
+        if (!isMissingThreadError(error)) {
+          throw error;
+        }
+        // Thread not found, create a new one
+        const thread = await client.threads.create();
+        threadId = thread.id;
+      }
+    }
+
+    providerSessionStore.set(db, sessionId, "codex", {
+      threadId,
+    });
+
+    const agentPrompt = params.agent ? readAgentFileSystemPrompt(params.agent) : null;
+
+    // Build system prompt
+    const systemPrompt = buildSystemPrompt(params, agentPrompt);
+    const model = resolveModelForTurn(params, agentPrompt);
+
+    // Add user message
+    await client.messages.create(threadId, {
+      role: "user",
+      content: prompt,
+    });
+
+    // Stream the run
+    let fullText = "";
+    for await (const event of client.runs.stream(threadId, {
+      model,
+      instructions: systemPrompt,
+    })) {
+      if (event.event === "thread.message.delta" && event.data?.delta?.content) {
+        for (const content of event.data.delta.content) {
+          const textDelta = content.type === "text" ? normalizeTextContent(content.text) : undefined;
+          if (textDelta !== undefined) {
+            fullText += textDelta;
+            emitter.delta(textDelta);
+          }
+        }
+      }
+
+      if (event.event === "thread.run.completed" && event.data?.usage) {
+        const usage = event.data.usage;
+        emitter.usage({
+          input_tokens: usage.prompt_tokens,
+          output_tokens: usage.completion_tokens,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        });
+      }
+    }
+
+    return fullText;
+  },
+
+  async listModels(): Promise<Array<{ id: string; name: string }>> {
+    return listCodexModels();
+  },
+
+  async listAgents(_projectPath: string): Promise<AgentInfo[]> {
+    // Codex does not have agents like Claude/Copilot
+    return [];
+  },
+
+  async probe(opts?: { force?: boolean }): Promise<{ ok: boolean; reason?: string; durationMs?: number }> {
+    if (!opts?.force && probeCache && Date.now() - probeCache.timestamp <= PROBE_CACHE_TTL_MS) {
+      return probeCache.result;
+    }
+
+    let result: { ok: boolean; reason?: string; durationMs?: number };
+    try {
+      const apiKey = getConfiguredOpenAiApiKey();
+      if (!apiKey) {
+        result = {
+          ok: false,
+          reason: "OpenAI API key not configured",
+          durationMs: 0,
+        };
+        probeCache = { result, timestamp: Date.now() };
+        return result;
+      }
+
+      const start = Date.now();
+      try {
+        const response = await fetchModelsResponse(apiKey);
+        const durationMs = Date.now() - start;
+
+        if (response.ok) {
+          result = { ok: true, durationMs };
+        } else if (response.status === 401 || response.status === 403) {
+          result = { ok: false, reason: "Invalid OpenAI API key", durationMs };
+        } else {
+          result = { ok: false, reason: `OpenAI API error: ${response.status}`, durationMs };
+        }
+      } catch (error) {
+        const durationMs = Date.now() - start;
+        if (error instanceof Error && error.name === "AbortError") {
+          result = { ok: false, reason: "OpenAI API timeout", durationMs };
+        } else {
+          result = { ok: false, reason: String(error), durationMs };
+        }
+      }
+    } catch (error) {
+      result = {
+        ok: false,
+        reason: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+    probeCache = { result, timestamp: Date.now() };
+    return result;
+  },
+
+  async stop(): Promise<void> {
+    clientInstance = null;
+    probeCache = null;
+    providerSessionStore.reset();
   },
 };
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+/**
+ * Build the Codex system prompt from the provider intro, selected agent body
+ * (if any), active skills context, and project memory context.
+ */
+function buildSystemPrompt(params: AgentProviderParams, agentPrompt: CodexAgentPrompt): string {
+  const skillsContext = buildSkillsContext(params.skills ?? [], params.projectPath);
+  const memoryContext = buildMemoryContext(params.projectPath, { includeToolGuidance: false });
+  const agentBody = agentPrompt?.body ?? "";
+  const parts: string[] = [
+    "You are AIchemist, a coding assistant running inside a desktop app.",
+    "Answer using only the conversation and the provided project context.",
+    "Do not claim to have inspected files, run commands, or used tools that are not available in this provider.",
+  ];
+  return [...parts, agentBody, skillsContext, memoryContext]
+    .filter((part) => part.trim().length > 0)
+    .join("\n\n");
+}
+
+function resolveModelForTurn(params: AgentProviderParams, agentPrompt: CodexAgentPrompt): string {
+  const override = agentPrompt?.model?.trim();
+  if (override) return override;
+  const configured = params.projectConfig.model?.trim() ?? "";
+  return configured || "gpt-4";
+}
+
+// Test seams for mocking
+export function _setClientForTests(client: CodexClient | null): void {
+  clientInstance = client;
+}
+
+export function _setFetchForTests(impl: typeof fetch | null): void {
+  fetchImpl = impl ?? ((...args) => fetch(...args));
+}
+
+export function _resetProbeCacheForTests(): void {
+  probeCache = null;
+}
+
+export function _normalizeTextContentForTests(value: unknown): string | undefined {
+  return normalizeTextContent(value);
+}

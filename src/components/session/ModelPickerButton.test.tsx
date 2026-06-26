@@ -94,4 +94,24 @@ describe("ModelPickerButton", () => {
     expect(screen.queryByText("GitHub Copilot")).not.toBeInTheDocument();
     expect(window.electronAPI.getOllamaModels).toHaveBeenCalled();
   });
+
+  it("shows only Codex models for a codex-locked session", async () => {
+    vi.mocked(window.electronAPI.getCodexModels).mockResolvedValue([
+      { id: "gpt-5-codex", name: "GPT-5 Codex" },
+    ]);
+
+    renderWithProviders(
+      <ModelPickerButton sessionId="s1" provider="codex" model="gpt-5-codex" />
+    );
+
+    await userEvent.click(screen.getByText("toggle"));
+
+    await waitFor(() => {
+      expect(screen.getByText("OpenAI Codex")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
+    expect(screen.queryByText("GitHub Copilot")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ollama")).not.toBeInTheDocument();
+    expect(window.electronAPI.getCodexModels).toHaveBeenCalled();
+  });
 });
