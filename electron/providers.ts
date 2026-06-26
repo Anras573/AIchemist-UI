@@ -1,5 +1,5 @@
 /** Canonical provider ID list. Extend here when adding a new provider. */
-export const PROVIDER_IDS = ["anthropic", "copilot", "ollama", "openai-compatible"] as const;
+export const PROVIDER_IDS = ["anthropic", "copilot", "ollama", "openai-compatible", "codex"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 /** Human-readable labels for display in the UI. */
@@ -8,6 +8,7 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   copilot: "GitHub Copilot",
   ollama: "Ollama",
   "openai-compatible": "OpenAI-compatible",
+  codex: "OpenAI Codex",
 };
 
 export function isProviderId(value: string): value is ProviderId {

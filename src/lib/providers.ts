@@ -18,11 +18,13 @@ export const PROVIDER_SHORT_LABELS: Record<Provider, string> = {
   copilot: "Copilot",
   ollama: "Ollama",
   "openai-compatible": "OpenAI-compatible",
+  codex: "Codex",
 };
 
 /** models.dev logo id for ModelSelectorLogo. */
 export function getProviderLogo(provider: string): string {
   if (provider === "copilot") return "github-copilot";
+  if (provider === "codex") return "openai";
   if (provider === "openai-compatible") return "openai";
   return provider;
 }

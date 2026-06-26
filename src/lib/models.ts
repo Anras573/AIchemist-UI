@@ -27,9 +27,8 @@ export function getModelLabel(provider: string, modelId: string): string {
   );
   if (known) return known.label;
 
-  // OpenAI-compatible model ids are composite ("<endpoint>/<modelId>") — show
-  // them verbatim so the endpoint stays visible and the id isn't mangled.
-  if (provider === "openai-compatible") return modelId;
+  // OpenAI-like model ids are often composite IDs — keep them verbatim.
+  if (provider === "openai-compatible" || provider === "codex") return modelId;
 
   // For dynamic Copilot models or other unknown IDs, produce a tidy label
   return modelId

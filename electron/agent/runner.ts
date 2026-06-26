@@ -6,6 +6,7 @@ import { claudeProvider } from "./claude";
 import { copilotProvider } from "./copilot";
 import { ollamaProvider } from "./ollama";
 import { openaiCompatProvider } from "./openai-compat";
+import { codexProvider } from "./codex";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 import { TurnEmitter } from "./turn-emitter";
 
@@ -16,6 +17,7 @@ const PROVIDERS: Record<string, AgentProvider> = {
   copilot: copilotProvider,
   ollama: ollamaProvider,
   "openai-compatible": openaiCompatProvider,
+  codex: codexProvider,
 };
 
 /** Look up a provider by name. Throws for unknown providers. */

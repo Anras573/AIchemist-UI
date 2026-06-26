@@ -96,6 +96,7 @@ describe("EmptyStateNewSession", () => {
           copilot: { ok: true },
           ollama: { ok: true },
           "openai-compatible": { ok: true },
+          codex: { ok: true },
         }}
       />,
     );
@@ -121,6 +122,7 @@ describe("EmptyStateNewSession", () => {
           copilot: { ok: false, reason: "no token" },
           ollama: { ok: false, reason: "not running" },
           "openai-compatible": { ok: false, reason: "no endpoints" },
+          codex: { ok: false, reason: "not configured" },
         }}
       />,
     );
@@ -150,6 +152,7 @@ describe("EmptyStateNewSession", () => {
           copilot: { ok: true },
           ollama: { ok: true },
           "openai-compatible": { ok: true },
+          codex: { ok: true },
         }}
       />,
     );

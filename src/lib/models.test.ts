@@ -37,6 +37,16 @@ describe("getModelLabel", () => {
   it("passes through a model that is already clean", () => {
     expect(getModelLabel("custom", "mymodel")).toBe("Mymodel");
   });
+
+  it("passes through codex model IDs verbatim", () => {
+    expect(getModelLabel("codex", "gpt-5.3-codex")).toBe("gpt-5.3-codex");
+  });
+
+  it("passes through openai-compatible composite IDs verbatim", () => {
+    expect(getModelLabel("openai-compatible", "together/meta-llama/Llama-3-70b")).toBe(
+      "together/meta-llama/Llama-3-70b"
+    );
+  });
 });
 
 describe("getLogoProvider", () => {
