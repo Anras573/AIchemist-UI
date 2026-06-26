@@ -423,20 +423,23 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     [ipc],
   );
 
+  // `initialValue` seeds the undo baseline, so it must track the *persisted*
+  // value (`settings`) — not `draft`, which mirrors unsaved local edits and
+  // would otherwise let a failed/uncommitted change poison the undo baseline.
   const themeSave = useAutosave<Theme>((v) => setTheme(v), { initialValue: theme });
   const providerSave = useAutosave<string>(
     (v) => writeSetting("AICHEMIST_DEFAULT_PROVIDER", v),
-    { initialValue: normalizeProvider(draft.AICHEMIST_DEFAULT_PROVIDER) },
+    { initialValue: normalizeProvider(settings?.AICHEMIST_DEFAULT_PROVIDER) },
   );
   const approvalSave = useAutosave<string>(
     (v) => writeSetting("AICHEMIST_DEFAULT_APPROVAL_MODE", v),
-    { initialValue: normalizeApprovalMode(draft.AICHEMIST_DEFAULT_APPROVAL_MODE) },
+    { initialValue: normalizeApprovalMode(settings?.AICHEMIST_DEFAULT_APPROVAL_MODE) },
   );
   // Normalization happens at the commit boundary (see the field's onChange) so
   // the value useAutosave tracks as the undo baseline matches what is persisted.
   const toolRoundsSave = useAutosave<string>(
     (v) => writeSetting("AICHEMIST_MAX_TOOL_ROUNDS", v),
-    { initialValue: normalizeMaxToolRounds(draft.AICHEMIST_MAX_TOOL_ROUNDS) },
+    { initialValue: normalizeMaxToolRounds(settings?.AICHEMIST_MAX_TOOL_ROUNDS) },
   );
 
   const saveSection = useCallback(
