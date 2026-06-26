@@ -254,6 +254,96 @@ describe("codexProvider", () => {
     expect(emitterUsage).not.toHaveBeenCalled();
   });
 
+  it("should resume an existing thread when one is stored", async () => {
+    const retrieve = vi.fn(async () => ({ id: "thread-resumed", created_at: 1719360000 }));
+    const create = vi.fn(async () => ({ id: "thread-new", created_at: 1719360000 }));
+    vi.mocked(providerSessionStore.get).mockReturnValueOnce({ threadId: "thread-resumed" });
+
+    _setClientForTests({
+      threads: {
+        create,
+        retrieve,
+      },
+      messages: {
+        create: vi.fn(async () => ({
+          id: "msg-123",
+          thread_id: "thread-resumed",
+          role: "user" as const,
+          content: [{ type: "text", text: "test" }],
+          created_at: 1719360000,
+        })),
+      },
+      runs: {
+        stream: vi.fn(async function* () {
+          yield {
+            event: "thread.run.completed",
+            data: {
+              usage: {
+                prompt_tokens: 1,
+                completion_tokens: 1,
+                total_tokens: 2,
+              },
+            },
+          };
+        }),
+      },
+    } as any);
+
+    await codexProvider.run(makeParams());
+
+    expect(retrieve).toHaveBeenCalledWith("thread-resumed");
+    expect(create).not.toHaveBeenCalled();
+    expect(providerSessionStore.set).toHaveBeenCalledWith(expect.anything(), "session-123", "codex", {
+      threadId: "thread-resumed",
+    });
+  });
+
+  it("should create a fresh thread when the stored thread no longer exists", async () => {
+    const retrieve = vi.fn(async () => {
+      throw new Error("missing thread");
+    });
+    const create = vi.fn(async () => ({ id: "thread-recreated", created_at: 1719360000 }));
+    vi.mocked(providerSessionStore.get).mockReturnValueOnce({ threadId: "thread-stale" });
+
+    _setClientForTests({
+      threads: {
+        create,
+        retrieve,
+      },
+      messages: {
+        create: vi.fn(async () => ({
+          id: "msg-123",
+          thread_id: "thread-recreated",
+          role: "user" as const,
+          content: [{ type: "text", text: "test" }],
+          created_at: 1719360000,
+        })),
+      },
+      runs: {
+        stream: vi.fn(async function* () {
+          yield {
+            event: "thread.run.completed",
+            data: {
+              usage: {
+                prompt_tokens: 1,
+                completion_tokens: 1,
+                total_tokens: 2,
+              },
+            },
+          };
+        }),
+      },
+    } as any);
+
+    await codexProvider.run(makeParams());
+
+    expect(retrieve).toHaveBeenCalledWith("thread-stale");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(providerSessionStore.set).toHaveBeenCalledWith(expect.anything(), "session-123", "codex", {
+      threadId: "thread-recreated",
+    });
+  });
+
   it("should stream only normalized text deltas", async () => {
     const emitterDelta = vi.fn();
     const emitterUsage = vi.fn();

@@ -65,6 +65,9 @@ interface CodexClient {
   };
 }
 
+type CodexCreateMessageOptions = Parameters<CodexClient["messages"]["create"]>[1];
+type CodexRunStreamOptions = Parameters<CodexClient["runs"]["stream"]>[1];
+
 // ── Singleton client ──────────────────────────────────────────────────────────
 
 let clientInstance: CodexClient | null = null;
@@ -111,7 +114,7 @@ async function getClient(): Promise<CodexClient> {
       },
     },
     messages: {
-      create: async (threadId: string, options: any) => {
+      create: async (threadId: string, options: CodexCreateMessageOptions) => {
         const msg = await openaiClient.beta.threads.messages.create(threadId, options);
         return {
           id: msg.id,
@@ -126,8 +129,8 @@ async function getClient(): Promise<CodexClient> {
       },
     },
     runs: {
-      stream: async function* (threadId: string, options: any) {
-        const stream = await openaiClient.beta.threads.runs.stream(threadId, options);
+      stream: async function* (threadId: string, options: CodexRunStreamOptions) {
+        const stream = await openaiClient.beta.threads.runs.stream(threadId, options as any);
         for await (const event of stream) {
           yield event as any;
         }
@@ -254,7 +257,7 @@ export const codexProvider: AgentProvider = {
     return listCodexModels();
   },
 
-  async listAgents(): Promise<AgentInfo[]> {
+  async listAgents(_projectPath: string): Promise<AgentInfo[]> {
     // Codex does not have agents like Claude/Copilot
     return [];
   },
