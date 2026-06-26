@@ -66,6 +66,7 @@ interface CodexClient {
 
 type CodexCreateMessageOptions = Parameters<CodexClient["messages"]["create"]>[1];
 type CodexRunStreamOptions = Parameters<CodexClient["runs"]["stream"]>[1];
+type CodexAgentPrompt = ReturnType<typeof readAgentFileSystemPrompt>;
 
 // ── Singleton client ──────────────────────────────────────────────────────────
 
@@ -252,9 +253,11 @@ export const codexProvider: AgentProvider = {
       threadId,
     });
 
+    const agentPrompt = params.agent ? readAgentFileSystemPrompt(params.agent) : null;
+
     // Build system prompt
-    const systemPrompt = buildSystemPrompt(params);
-    const model = resolveModelForTurn(params);
+    const systemPrompt = buildSystemPrompt(params, agentPrompt);
+    const model = resolveModelForTurn(params, agentPrompt);
 
     // Add user message
     await client.messages.create(threadId, {
@@ -351,6 +354,7 @@ export const codexProvider: AgentProvider = {
 
   async stop(): Promise<void> {
     clientInstance = null;
+    probeCache = null;
     providerSessionStore.reset();
   },
 };
@@ -361,10 +365,10 @@ export const codexProvider: AgentProvider = {
  * Build the Codex system prompt from the provider intro, selected agent body
  * (if any), active skills context, and project memory context.
  */
-function buildSystemPrompt(params: AgentProviderParams): string {
+function buildSystemPrompt(params: AgentProviderParams, agentPrompt: CodexAgentPrompt): string {
   const skillsContext = buildSkillsContext(params.skills ?? [], params.projectPath);
   const memoryContext = buildMemoryContext(params.projectPath, { includeToolGuidance: false });
-  const agentBody = params.agent ? readAgentFileSystemPrompt(params.agent)?.body ?? "" : "";
+  const agentBody = agentPrompt?.body ?? "";
   const parts: string[] = [
     "You are AIchemist, a coding assistant running inside a desktop app.",
     "Answer using only the conversation and the provided project context.",
@@ -375,8 +379,8 @@ function buildSystemPrompt(params: AgentProviderParams): string {
     .join("\n\n");
 }
 
-function resolveModelForTurn(params: AgentProviderParams): string {
-  const override = params.agent ? readAgentFileSystemPrompt(params.agent)?.model?.trim() : undefined;
+function resolveModelForTurn(params: AgentProviderParams, agentPrompt: CodexAgentPrompt): string {
+  const override = agentPrompt?.model?.trim();
   if (override) return override;
   const configured = params.projectConfig.model?.trim() ?? "";
   return configured || "gpt-4";

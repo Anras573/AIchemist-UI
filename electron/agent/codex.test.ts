@@ -100,6 +100,7 @@ import {
   _setFetchForTests,
 } from "./codex";
 import { getApiKey } from "../config";
+import { readAgentFileSystemPrompt } from "./claude";
 import { providerSessionStore } from "./provider-session-store";
 import { TurnEmitter } from "./turn-emitter";
 
@@ -557,9 +558,73 @@ describe("codexProvider", () => {
     }
   });
 
+  it("reads the selected agent file once per turn", async () => {
+    vi.mocked(readAgentFileSystemPrompt).mockReturnValue({
+      body: "Agent instructions",
+      model: "gpt-5.3-codex",
+    });
+
+    const stream = vi.fn(async function* () {
+      yield {
+        event: "thread.run.completed",
+        data: {
+          usage: {
+            prompt_tokens: 1,
+            completion_tokens: 1,
+            total_tokens: 2,
+          },
+        },
+      };
+    });
+
+    _setClientForTests({
+      threads: {
+        create: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
+        retrieve: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
+      },
+      messages: {
+        create: vi.fn(async () => ({
+          id: "msg-123",
+          thread_id: "thread-123",
+          role: "user",
+          content: [{ type: "text", text: "test" }],
+          created_at: 1719360000,
+        })),
+      },
+      runs: { stream },
+    } as any);
+
+    await codexProvider.run(makeParams({ agent: "test-agent" }));
+
+    expect(readAgentFileSystemPrompt).toHaveBeenCalledTimes(1);
+    expect(readAgentFileSystemPrompt).toHaveBeenCalledWith("test-agent");
+    expect(stream).toHaveBeenCalledWith(
+      "thread-123",
+      expect.objectContaining({
+        model: "gpt-5.3-codex",
+        instructions: expect.stringContaining("Agent instructions"),
+      })
+    );
+  });
+
   it("should stop gracefully", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ data: [{ id: "gpt-4o" }] }),
+    });
+    _setFetchForTests(fetchSpy as unknown as typeof fetch);
+
+    if (codexProvider.probe) {
+      await codexProvider.probe({ force: true });
+    }
+
     if (codexProvider.stop) {
       await expect(codexProvider.stop()).resolves.toBeUndefined();
+    }
+
+    if (codexProvider.probe) {
+      await codexProvider.probe();
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
     }
   });
 });
