@@ -194,6 +194,10 @@ export const codexProvider: AgentProvider = {
         }
       }
 
+      providerSessionStore.set(db, sessionId, "codex", {
+        threadId: threadId || null,
+      });
+
       // Build system prompt
       const systemPrompt = buildSystemPrompt(params);
       const model = resolveModelForTurn(params);
@@ -229,11 +233,6 @@ export const codexProvider: AgentProvider = {
           });
         }
       }
-
-      // Persist thread ID for resume
-      providerSessionStore.set(db, sessionId, "codex", {
-        threadId: threadId || null,
-      });
 
       return fullText;
     } catch (error) {
@@ -318,7 +317,7 @@ function buildSystemPrompt(params: AgentProviderParams): string {
 function resolveModelForTurn(params: AgentProviderParams): string {
   const override = params.agent ? readAgentFileSystemPrompt(params.agent)?.model?.trim() : undefined;
   if (override) return override;
-  const configured = params.projectConfig.model.trim();
+  const configured = params.projectConfig.model?.trim() ?? "";
   return configured || "gpt-4";
 }
 
