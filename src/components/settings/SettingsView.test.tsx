@@ -159,7 +159,7 @@ describe("SettingsView — Project section", () => {
     });
   });
 
-  it("persists config changes via saveProjectConfig", async () => {
+  it("autosaves config changes via saveProjectConfig (no Save button)", async () => {
     vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(
       makeConfig({ model: "claude-haiku-4-5" }),
     );
@@ -168,16 +168,89 @@ describe("SettingsView — Project section", () => {
     renderProjectSection(makeProject("proj-42", makeConfig({ model: "claude-haiku-4-5" })));
     await screen.findByDisplayValue("claude-haiku-4-5");
 
+    // No manual Save button — editing a field autosaves (debounced for text).
+    expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument();
+
     fireEvent.change(screen.getByDisplayValue("claude-haiku-4-5"), {
       target: { value: "claude-opus-4-5" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() =>
       expect(window.electronAPI.saveProjectConfig).toHaveBeenCalledWith(
         "proj-42",
         expect.objectContaining({ model: "claude-opus-4-5" }),
       ),
+    );
+  });
+
+  it("autosaves immediately when the provider changes", async () => {
+    vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(makeConfig());
+    vi.mocked(window.electronAPI.saveProjectConfig).mockResolvedValue(undefined);
+
+    renderProjectSection(makeProject("proj-7"));
+    await screen.findByDisplayValue(DEFAULT_ANTHROPIC_MODEL);
+
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "ollama" } });
+
+    // Selects commit immediately (not debounced) and clear the model.
+    await waitFor(() =>
+      expect(window.electronAPI.saveProjectConfig).toHaveBeenCalledWith(
+        "proj-7",
+        expect.objectContaining({ provider: "ollama", model: "" }),
+      ),
+    );
+  });
+
+  it("shows inheritance ghost text against the app default provider", async () => {
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({
+      AICHEMIST_DEFAULT_PROVIDER: "anthropic",
+    } as never);
+    vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(makeConfig());
+
+    renderProjectSection();
+    // Project provider matches the app default → "Matches the app default" hint.
+    await waitFor(() =>
+      expect(screen.getByText(/Matches the app default \(Anthropic \(Claude\)\)/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("flags an overridden provider in the inheritance ghost text", async () => {
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({
+      AICHEMIST_DEFAULT_PROVIDER: "ollama",
+    } as never);
+    vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(makeConfig());
+
+    renderProjectSection();
+    // Project is Anthropic but the app default is Ollama → override hint.
+    await waitFor(() =>
+      expect(screen.getByText(/App default: Ollama — this project overrides it\./i)).toBeInTheDocument(),
+    );
+  });
+
+  it("offers a project switcher listing every project and switches the active one", async () => {
+    vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(makeConfig());
+
+    const projA = makeProject("proj-a", makeConfig());
+    const projB: Project = { id: "proj-b", name: "Second Project", path: "/tmp/b", created_at: "2026-01-02", config: makeConfig() };
+    useProjectStore.setState({
+      projects: [projA, projB],
+      activeProjectId: projA.id,
+      settingsOpen: true,
+      settingsSection: { scope: "project", id: "general" },
+    });
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+
+    const switcher = (await screen.findByLabelText("Active project")) as HTMLSelectElement;
+    expect(switcher.value).toBe("proj-a");
+    // Both projects are reachable from the switcher.
+    expect(screen.getByRole("option", { name: "My Project" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Second Project" })).toBeInTheDocument();
+
+    fireEvent.change(switcher, { target: { value: "proj-b" } });
+    // Switching makes the chosen project active and loads its config.
+    await waitFor(() => expect(useProjectStore.getState().activeProjectId).toBe("proj-b"));
+    await waitFor(() =>
+      expect(window.electronAPI.getProjectConfig).toHaveBeenCalledWith("proj-b"),
     );
   });
 

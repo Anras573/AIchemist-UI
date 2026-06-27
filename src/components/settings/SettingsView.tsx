@@ -69,7 +69,8 @@ function normalizeApprovalMode(v: string | undefined): string {
 // ── Main view ─────────────────────────────────────────────────────────────────
 export function SettingsView({ onClose }: SettingsViewProps) {
   const ipc = useIpc();
-  const { projects, activeProjectId, settingsSection, setSettingsSection } = useProjectStore();
+  const { projects, activeProjectId, settingsSection, setSettingsSection, setActiveProject } =
+    useProjectStore();
   const [search, setSearch] = useState("");
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [draft, setDraft] = useState<Partial<SettingsMap>>({});
@@ -197,10 +198,43 @@ export function SettingsView({ onClose }: SettingsViewProps) {
           {/* Project sections */}
           {projectNav.length > 0 && (
             <div className="px-2 pt-1 pb-2 border-t border-border">
-              <p className="px-2 pt-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 truncate">
-                {activeProject ? activeProject.name : "Project"}
+              <p className="px-2 pt-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                Project
               </p>
-              {activeProject ? (
+              {/* Project switcher — every project is reachable here, not just the
+                  one that happens to be active in the main view. Selecting one
+                  makes it active so the section below edits its config. */}
+              {projects.length > 0 ? (
+                <div className="px-1 mb-2">
+                  <label htmlFor="settings-project-switcher" className="sr-only">
+                    Active project
+                  </label>
+                  <select
+                    id="settings-project-switcher"
+                    value={activeProject?.id ?? ""}
+                    onChange={(e) => setActiveProject(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {!activeProject && (
+                      <option value="" disabled>
+                        Select a project…
+                      </option>
+                    )}
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <p className="px-3 py-1.5 text-xs text-muted-foreground">
+                  {projectsLoading ? "Loading projects…" : "No projects."}
+                </p>
+              )}
+              {/* Section rows only render once a project is active; the switcher
+                  above owns the empty/loading state messaging. */}
+              {activeProject &&
                 projectNav.map(({ id, label }) => (
                   <button
                     key={id}
@@ -214,12 +248,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                   >
                     {label}
                   </button>
-                ))
-              ) : (
-                <p className="px-3 py-1.5 text-xs text-muted-foreground">
-                  {projectsLoading ? "Loading projects…" : "No active project."}
-                </p>
-              )}
+                ))}
             </div>
           )}
         </div>
@@ -371,7 +400,10 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         {settingsSection.scope === "project" && (
           <div className="flex-1 overflow-hidden">
             {activeProject ? (
-              <ProjectSettingsContent projectId={activeProject.id} />
+              // Key by project id: a full remount on switch ensures a pending
+              // debounced autosave flushes to the project it was typed in, not
+              // the newly-selected one.
+              <ProjectSettingsContent key={activeProject.id} projectId={activeProject.id} />
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm p-8">
                 {projectsLoading ? "Loading project…" : "No active project selected."}
