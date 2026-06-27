@@ -51,7 +51,7 @@ const initialProjectState = {
   projects: [],
   activeProjectId: null,
   settingsOpen: false,
-  settingsSection: { scope: "app" as const, id: "api-keys" },
+  settingsSection: { scope: "app" as const, id: "providers" },
   workflowsOpen: false,
 };
 

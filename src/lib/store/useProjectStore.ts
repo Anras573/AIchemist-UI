@@ -12,7 +12,7 @@ export interface SettingsSection {
   id: string;
 }
 
-const DEFAULT_SETTINGS_SECTION: SettingsSection = { scope: "app", id: "api-keys" };
+const DEFAULT_SETTINGS_SECTION: SettingsSection = { scope: "app", id: "providers" };
 
 interface ProjectStore {
   projects: Project[];
