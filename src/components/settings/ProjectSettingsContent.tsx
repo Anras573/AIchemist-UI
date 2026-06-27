@@ -1,15 +1,17 @@
-import { useState, useEffect, useRef } from "react";
-import { AlertCircle, Check } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { AlertCircle } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
+import type { SettingsMap } from "@/lib/ipc";
 import { useProviderProbes } from "@/lib/hooks/useProviderProbes";
+import { useAutosave } from "@/lib/hooks/useAutosave";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SettingStatus } from "@/components/settings/primitives/SettingField";
 import type { ProjectConfig, ApprovalRule, ApprovalPolicy, ToolCategory } from "@/types";
 import { PROVIDER_IDS, PROVIDER_LABELS } from "../../../electron/providers";
 
 type Tab = "general" | "approval";
-type SaveStatus = "idle" | "saving" | "saved" | "error";
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 
 const TABS: { id: Tab; label: string }[] = [
@@ -29,6 +31,18 @@ const APPROVAL_POLICIES: { value: ApprovalPolicy; label: string }[] = [
   { value: "risky_only", label: "Risky only" },
 ];
 
+const APPROVAL_MODE_LABELS: Record<ProjectConfig["approval_mode"], string> = {
+  all: "All",
+  none: "None",
+  custom: "Custom",
+};
+
+// App-wide defaults surfaced as inheritance ghost text on the General tab.
+interface AppDefaults {
+  provider: string;
+  approvalMode: string;
+}
+
 // ── Field components ──────────────────────────────────────────────────────────
 
 function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: React.ReactNode }) {
@@ -43,13 +57,29 @@ function FieldRow({ children }: { children: React.ReactNode }) {
   return <div className="space-y-1.5">{children}</div>;
 }
 
+// Subtle inheritance hint shown beneath a General field: states whether the
+// project is riding the app default or overriding it.
+function InheritanceHint({ inherits, defaultLabel }: { inherits: boolean; defaultLabel: string }) {
+  return (
+    <p className="text-xs text-muted-foreground">
+      {inherits ? (
+        <>Matches the app default ({defaultLabel}).</>
+      ) : (
+        <>App default: {defaultLabel} — this project overrides it.</>
+      )}
+    </p>
+  );
+}
+
 function SelectField({
   id,
+  ariaLabel,
   value,
   options,
   onChange,
 }: {
   id?: string;
+  ariaLabel?: string;
   value: string;
   options: { value: string; label: string; disabled?: boolean; title?: string }[];
   onChange: (v: string) => void;
@@ -57,6 +87,7 @@ function SelectField({
   return (
     <select
       id={id}
+      aria-label={ariaLabel}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
@@ -70,41 +101,18 @@ function SelectField({
   );
 }
 
-// ── Save row ──────────────────────────────────────────────────────────────────
-
-function SaveRow({ status, error, onSave }: { status: SaveStatus; error: string; onSave: () => void }) {
-  return (
-    <div className="flex flex-col gap-2 pt-2">
-      <div className="flex items-center gap-3">
-        <Button onClick={onSave} disabled={status === "saving"} size="sm">
-          {status === "saving" ? "Saving…" : "Save"}
-        </Button>
-        {status === "saved" && (
-          <span className="flex items-center gap-1 text-sm text-green-600">
-            <Check className="h-3.5 w-3.5" /> Saved
-          </span>
-        )}
-      </div>
-      {status === "error" && (
-        <div className="flex items-center gap-1.5 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {error || "Failed to save. Please try again."}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── General tab ───────────────────────────────────────────────────────────────
 
 function GeneralTab({
   config,
   onChange,
   probes,
+  appDefaults,
 }: {
   config: ProjectConfig;
-  onChange: (patch: Partial<ProjectConfig>) => void;
+  onChange: (patch: Partial<ProjectConfig>, opts?: { immediate?: boolean }) => void;
   probes: import("@/types").ProviderProbes | null;
+  appDefaults: AppDefaults | null;
 }) {
   const ipc = useIpc();
   const probeFor = (
@@ -123,6 +131,15 @@ function GeneralTab({
       title: unavailable ? probe?.reason : undefined,
     };
   };
+  // Ghost text for the model field: the effective default the provider falls
+  // back to when the field is left blank (Anthropic normalizes to a known
+  // model; other providers resolve at session creation).
+  const modelPlaceholder =
+    config.provider === "anthropic" ? DEFAULT_ANTHROPIC_MODEL : "Provider default (resolved per session)";
+  const defaultProviderLabel =
+    appDefaults && (PROVIDER_IDS as readonly string[]).includes(appDefaults.provider)
+      ? PROVIDER_LABELS[appDefaults.provider as import("@/types").Provider]
+      : null;
   return (
     <div className="flex flex-col gap-5">
       <FieldRow>
@@ -134,10 +151,13 @@ function GeneralTab({
           onChange={(v) => {
             const provider = v as import("@/types").Provider;
             if (v !== config.provider) {
-              onChange({ provider, model: v === "anthropic" ? DEFAULT_ANTHROPIC_MODEL : "" });
+              onChange(
+                { provider, model: v === "anthropic" ? DEFAULT_ANTHROPIC_MODEL : "" },
+                { immediate: true },
+              );
               return;
             }
-            onChange({ provider });
+            onChange({ provider }, { immediate: true });
           }}
         />
         {probes && (() => {
@@ -152,6 +172,12 @@ function GeneralTab({
           }
           return null;
         })()}
+        {defaultProviderLabel && (
+          <InheritanceHint
+            inherits={config.provider === appDefaults?.provider}
+            defaultLabel={defaultProviderLabel}
+          />
+        )}
       </FieldRow>
       <FieldRow>
         <FieldLabel htmlFor="ps-model">Model</FieldLabel>
@@ -159,9 +185,12 @@ function GeneralTab({
           id="ps-model"
           value={config.model}
           onChange={(e) => onChange({ model: e.target.value })}
-          placeholder="e.g. claude-sonnet-4-6"
+          placeholder={modelPlaceholder}
           className="font-mono text-sm"
         />
+        <p className="text-xs text-muted-foreground">
+          Leave blank to use the provider default ({modelPlaceholder}).
+        </p>
       </FieldRow>
       <FieldRow>
         <label htmlFor="ps-create-worktree" className="flex items-start gap-2 text-sm font-medium leading-none">
@@ -169,7 +198,7 @@ function GeneralTab({
             id="ps-create-worktree"
             type="checkbox"
             checked={config.create_worktree_per_session}
-            onChange={(e) => onChange({ create_worktree_per_session: e.target.checked })}
+            onChange={(e) => onChange({ create_worktree_per_session: e.target.checked }, { immediate: true })}
             className="mt-0.5 h-4 w-4 rounded border-border"
           />
           <span className="space-y-1">
@@ -196,7 +225,7 @@ function GeneralTab({
             size="sm"
             onClick={async () => {
               const selected = await ipc.openFolderDialog();
-              if (selected) onChange({ worktree_root_path: selected });
+              if (selected) onChange({ worktree_root_path: selected }, { immediate: true });
             }}
           >
             Browse
@@ -217,18 +246,21 @@ function ApprovalTab({
   onChange,
 }: {
   config: ProjectConfig;
-  onChange: (patch: Partial<ProjectConfig>) => void;
+  onChange: (patch: Partial<ProjectConfig>, opts?: { immediate?: boolean }) => void;
 }) {
   function getPolicyForCategory(category: ToolCategory): ApprovalPolicy {
     return config.approval_rules.find((r) => r.tool_category === category)?.policy ?? "risky_only";
   }
 
   function setPolicy(category: ToolCategory, policy: ApprovalPolicy) {
-    const rules: ApprovalRule[] = TOOL_CATEGORIES.map((tc) => ({
-      tool_category: tc.category,
-      policy: tc.category === category ? policy : getPolicyForCategory(tc.category),
-    }));
-    onChange({ approval_rules: rules });
+    // Update the edited category in place and preserve every other existing
+    // rule — including categories not shown in this UI (e.g. "custom"), which a
+    // blanket TOOL_CATEGORIES rebuild would silently drop.
+    const existing = config.approval_rules;
+    const rules: ApprovalRule[] = existing.some((r) => r.tool_category === category)
+      ? existing.map((r) => (r.tool_category === category ? { ...r, policy } : r))
+      : [...existing, { tool_category: category, policy }];
+    onChange({ approval_rules: rules }, { immediate: true });
   }
 
   return (
@@ -243,7 +275,7 @@ function ApprovalTab({
             { value: "none", label: "None — never ask for approval" },
             { value: "custom", label: "Custom — per-category rules" },
           ]}
-          onChange={(v) => onChange({ approval_mode: v as ProjectConfig["approval_mode"] })}
+          onChange={(v) => onChange({ approval_mode: v as ProjectConfig["approval_mode"] }, { immediate: true })}
         />
       </FieldRow>
 
@@ -257,6 +289,7 @@ function ApprovalTab({
               <span className="text-sm w-24 shrink-0">{label}</span>
               <div className="flex-1">
                 <SelectField
+                  ariaLabel={`${label} approval policy`}
                   value={getPolicyForCategory(category)}
                   options={APPROVAL_POLICIES}
                   onChange={(v) => setPolicy(category, v as ApprovalPolicy)}
@@ -276,92 +309,130 @@ interface ProjectSettingsContentProps {
   projectId: string;
 }
 
+// Apply the Anthropic default-model normalization: an Anthropic project with a
+// blank model resolves to a known default so the turn never runs model-less.
+function normalizeConfig(config: ProjectConfig): ProjectConfig {
+  return config.provider === "anthropic" && !config.model.trim()
+    ? { ...config, model: DEFAULT_ANTHROPIC_MODEL }
+    : config;
+}
+
 export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProps) {
   const ipc = useIpc();
   const [tab, setTab] = useState<Tab>("general");
   const [config, setConfig] = useState<ProjectConfig | null>(null);
+  // The last value actually persisted (set on load + successful save). Distinct
+  // from `config`, which is the live draft and may hold an unsaved edit. This is
+  // the only thing fed to useAutosave's `initialValue` so the undo baseline can
+  // never re-sync to a value that was never written (e.g. after a failed save).
+  const [persistedConfig, setPersistedConfig] = useState<ProjectConfig | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [saveError, setSaveError] = useState("");
+  const [appDefaults, setAppDefaults] = useState<AppDefaults | null>(null);
   const { probes } = useProviderProbes(projectId);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadGenRef = useRef(0);
+  const mountedRef = useRef(true);
+  // Monotonic token per save: a slower older save must not sync its (stale)
+  // value back into local state after a newer edit has superseded it.
+  const saveSeqRef = useRef(0);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+      mountedRef.current = false;
       loadGenRef.current++;
     };
   }, []);
 
+  // Autosave the whole ProjectConfig: every field commits the full config (text
+  // fields debounced, selects/toggles immediate). The save fn mirrors the
+  // persisted value back into local state, which also lets undo — a re-persist
+  // of the prior config — visually revert the form. The committed value is
+  // already normalized (see patchConfig), so what useAutosave tracks for its
+  // undo baseline matches exactly what gets written.
+  const persistConfig = useCallback(
+    async (next: ProjectConfig) => {
+      const seq = ++saveSeqRef.current;
+      await ipc.saveProjectConfig(projectId, next);
+      // Only the latest save, and only while still mounted, may sync local
+      // state — guards against an older in-flight save clobbering a newer edit
+      // or touching an unmounted tree (e.g. the unmount flush on project switch).
+      if (!mountedRef.current || seq !== saveSeqRef.current) return;
+      setConfig(next);
+      setPersistedConfig(next);
+    },
+    [ipc, projectId],
+  );
+  const save = useAutosave<ProjectConfig>(persistConfig, {
+    initialValue: persistedConfig ?? undefined,
+  });
+
   function loadConfig() {
     const gen = ++loadGenRef.current;
     setConfig(null);
+    setPersistedConfig(null);
     setLoadError(null);
     ipc.getProjectConfig(projectId)
-      .then((c) => { if (loadGenRef.current === gen) setConfig(c); })
+      .then((c) => { if (loadGenRef.current === gen) { setConfig(c); setPersistedConfig(c); } })
       .catch((e) => { if (loadGenRef.current === gen) setLoadError(e instanceof Error ? e.message : String(e)); });
   }
 
   useEffect(() => {
     setTab("general");
-    setSaveStatus("idle");
-    if (saveTimerRef.current !== null) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
     loadConfig();
   }, [projectId]);
 
-  function patchConfig(patch: Partial<ProjectConfig>) {
-    setConfig((prev) => (prev ? { ...prev, ...patch } : prev));
-    if (saveStatus === "saved" || saveStatus === "error") setSaveStatus("idle");
+  // App-wide defaults power the General tab's inheritance ghost text. Failure to
+  // read them is non-fatal — the hints simply don't render.
+  useEffect(() => {
+    let cancelled = false;
+    ipc.settingsRead()
+      .then((s: SettingsMap) => {
+        if (cancelled) return;
+        setAppDefaults({
+          provider: (s.AICHEMIST_DEFAULT_PROVIDER || "anthropic").trim().toLowerCase(),
+          approvalMode: (s.AICHEMIST_DEFAULT_APPROVAL_MODE || "custom").trim().toLowerCase(),
+        });
+      })
+      .catch(() => { /* ghost text is best-effort */ });
+    return () => { cancelled = true; };
+  }, [ipc]);
+
+  function patchConfig(patch: Partial<ProjectConfig>, opts?: { immediate?: boolean }) {
+    if (!config) return;
+    const next = { ...config, ...patch };
+    // Reflect the raw edit immediately (a blank model stays blank while typing);
+    // commit the normalized value so autosave persists — and tracks for undo —
+    // exactly what lands in the DB.
+    setConfig(next);
+    save.commit(normalizeConfig(next), opts);
   }
 
-  async function handleSave() {
-    if (!config) return;
-    if (saveTimerRef.current !== null) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    setSaveStatus("saving");
-    setSaveError("");
-    try {
-      const normalizedConfig =
-        config.provider === "anthropic" && !config.model.trim()
-          ? { ...config, model: DEFAULT_ANTHROPIC_MODEL }
-          : config;
-      if (config.provider === "anthropic" && !config.model.trim()) {
-        setConfig(normalizedConfig);
-      }
-      await ipc.saveProjectConfig(projectId, normalizedConfig);
-      setSaveStatus("saved");
-      if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => setSaveStatus("idle"), 2500);
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : String(e));
-      setSaveStatus("error");
-    }
-  }
+  const defaultApprovalLabel =
+    appDefaults && (["all", "none", "custom"] as const).includes(appDefaults.approvalMode as ProjectConfig["approval_mode"])
+      ? APPROVAL_MODE_LABELS[appDefaults.approvalMode as ProjectConfig["approval_mode"]]
+      : null;
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tab bar */}
-      <div className="flex border-b border-border px-5 flex-shrink-0">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={cn(
-              "px-1 py-2.5 mr-5 text-sm border-b-2 -mb-px transition-colors",
-              tab === t.id
-                ? "border-foreground text-foreground font-medium"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
+      {/* Tab bar + inline autosave status */}
+      <div className="flex items-center justify-between border-b border-border px-5 flex-shrink-0">
+        <div className="flex">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "px-1 py-2.5 mr-5 text-sm border-b-2 -mb-px transition-colors",
+                tab === t.id
+                  ? "border-foreground text-foreground font-medium"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <SettingStatus status={save.status} canUndo={save.canUndo} onUndo={save.undo} />
       </div>
 
       {/* Content */}
@@ -385,12 +456,26 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
         ) : (
           <div className="flex flex-col gap-6 max-w-xl">
             {tab === "general" && (
-              <GeneralTab config={config} onChange={patchConfig} probes={probes} />
+              <GeneralTab config={config} onChange={patchConfig} probes={probes} appDefaults={appDefaults} />
             )}
             {tab === "approval" && (
-              <ApprovalTab config={config} onChange={patchConfig} />
+              <>
+                <ApprovalTab config={config} onChange={patchConfig} />
+                {defaultApprovalLabel && (
+                  <p className="text-xs text-muted-foreground">
+                    {config.approval_mode === appDefaults?.approvalMode
+                      ? `Matches the app default approval mode (${defaultApprovalLabel}).`
+                      : `App default approval mode: ${defaultApprovalLabel} — this project overrides it.`}
+                  </p>
+                )}
+              </>
             )}
-            <SaveRow status={saveStatus} error={saveError} onSave={handleSave} />
+            {save.error && (
+              <div className="flex items-center gap-1.5 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {save.error.message || "Failed to save. Please try again."}
+              </div>
+            )}
           </div>
         )}
       </div>
