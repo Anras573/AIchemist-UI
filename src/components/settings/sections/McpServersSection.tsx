@@ -1,20 +1,24 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Loader2, Plus, Trash2, AlertCircle, Check } from "lucide-react";
+import {
+  Loader2,
+  Plus,
+  Trash2,
+  AlertCircle,
+  Check,
+  RefreshCw,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+} from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { WithTooltip } from "@/components/ui/with-tooltip";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import type { McpServerInfo } from "@/types";
 
-// ── Types (mirror electron/mcp-config.ts) ────────────────────────────────────
+// ── Types (mirror electron/mcp/config.ts) ─────────────────────────────────────
 
 type McpScope = "claude-local" | "claude-project" | "claude-user" | "copilot-global" | "aichemist-global";
 
@@ -37,24 +41,23 @@ const SCOPES: Array<{
   label: string;
   sublabel: string;
   needsProject: boolean;
-  tier: "local" | "global";
 }> = [
-  { id: "aichemist-global", label: "AIchemist", sublabel: "AIchemist · ~/.aichemist/mcp.json — injected per-session into both Claude and Copilot", needsProject: false, tier: "global" },
-  { id: "claude-local",     label: "Local",     sublabel: "Claude · per-project, private (~/.claude.json)", needsProject: true,  tier: "local" },
-  { id: "claude-project",   label: "Project",   sublabel: "Claude · shared .mcp.json (committed to repo)",  needsProject: true,  tier: "local" },
-  { id: "claude-user",      label: "User",      sublabel: "Claude · global for all projects",               needsProject: false, tier: "global" },
-  { id: "copilot-global",   label: "Copilot",   sublabel: "Copilot · ~/.copilot/mcp-config.json",           needsProject: false, tier: "global" },
+  { id: "aichemist-global", label: "AIchemist", sublabel: "AIchemist · ~/.aichemist/mcp.json — injected per-session into both Claude and Copilot", needsProject: false },
+  { id: "claude-local",     label: "Local",     sublabel: "Claude · per-project, private (~/.claude.json)", needsProject: true },
+  { id: "claude-project",   label: "Project",   sublabel: "Claude · shared .mcp.json (committed to repo)",  needsProject: true },
+  { id: "claude-user",      label: "User",      sublabel: "Claude · global for all projects",               needsProject: false },
+  { id: "copilot-global",   label: "Copilot",   sublabel: "Copilot · ~/.copilot/mcp-config.json",           needsProject: false },
 ];
+
+// Live health probes (mcpProbeManaged) only cover the AIchemist-managed scope —
+// those are the servers AIchemist actually spawns and injects per-session.
+const PROBED_SCOPE: McpScope = "aichemist-global";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
-interface Props {
-  open: boolean;
-  onClose: () => void;
+interface McpServersSectionProps {
   /** Used for the project-scoped tabs. When empty, those tabs are disabled. */
   projectPath: string;
-  /** Called after a successful save so the caller can refresh its list. */
-  onSaved?: () => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -83,11 +86,42 @@ function parseRaw(raw: string): { ok: true; servers: McpServersMap } | { ok: fal
   }
 }
 
+// ── Per-row health badge (AIchemist scope only) ───────────────────────────────
+
+function HealthBadge({ health }: { health: McpServerInfo | undefined }) {
+  if (!health || health.connected === null) {
+    return null;
+  }
+  if (health.connected) {
+    const toolCount = health.tools?.length ?? 0;
+    return (
+      <span className="flex items-center gap-1 text-[11px] text-emerald-600">
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        Connected
+        {toolCount > 0 && (
+          <span className="text-muted-foreground">
+            · {toolCount} tool{toolCount === 1 ? "" : "s"}
+          </span>
+        )}
+      </span>
+    );
+  }
+  return (
+    <WithTooltip label={health.error ?? "Failed to connect"}>
+      <span className="flex items-center gap-1 text-[11px] text-destructive">
+        <XCircle className="h-3.5 w-3.5" />
+        Not connected
+      </span>
+    </WithTooltip>
+  );
+}
+
 // ── Server card (form mode) ───────────────────────────────────────────────────
 
 function ServerEditor({
   name,
   entry,
+  health,
   onChangeName,
   onChange,
   onDelete,
@@ -95,6 +129,7 @@ function ServerEditor({
 }: {
   name: string;
   entry: McpServerEntry;
+  health?: McpServerInfo;
   onChangeName: (v: string) => void;
   onChange: (e: McpServerEntry) => void;
   onDelete: () => void;
@@ -110,7 +145,10 @@ function ServerEditor({
     <div className="border rounded-md p-3 space-y-2.5 bg-card">
       <div className="flex items-start gap-2">
         <div className="flex-1 space-y-1">
-          <label className="text-xs font-medium">Name</label>
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-medium">Name</label>
+            <HealthBadge health={health} />
+          </div>
           <Input
             value={name}
             onChange={(e) => onChangeName(e.target.value)}
@@ -120,6 +158,11 @@ function ServerEditor({
           {nameError && (
             <p className="text-[11px] text-destructive flex items-center gap-1">
               <AlertCircle className="h-3 w-3" /> {nameError}
+            </p>
+          )}
+          {health?.connected === false && health.error && (
+            <p className="text-[11px] text-destructive flex items-start gap-1 font-mono break-words">
+              <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" /> {health.error}
             </p>
           )}
         </div>
@@ -202,9 +245,9 @@ function ServerEditor({
   );
 }
 
-// ── Main dialog ───────────────────────────────────────────────────────────────
+// ── The section ───────────────────────────────────────────────────────────────
 
-export function McpConfigEditorDialog({ open, onClose, projectPath, onSaved }: Props) {
+export function McpServersSection({ projectPath }: McpServersSectionProps) {
   const ipc = useIpc();
   const [scope, setScope] = useState<McpScope>("aichemist-global");
   const [servers, setServers] = useState<McpServersMap | null>(null);
@@ -217,8 +260,13 @@ export function McpConfigEditorDialog({ open, onClose, projectPath, onSaved }: P
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  // Live health for the AIchemist-managed scope, keyed by server name.
+  const [health, setHealth] = useState<Map<string, McpServerInfo>>(new Map());
+  const [probing, setProbing] = useState(false);
+
   const needsProject = SCOPES.find((s) => s.id === scope)?.needsProject ?? false;
   const missingProject = needsProject && !projectPath;
+  const isProbedScope = scope === PROBED_SCOPE;
 
   const load = useCallback(async () => {
     if (missingProject) {
@@ -243,11 +291,34 @@ export function McpConfigEditorDialog({ open, onClose, projectPath, onSaved }: P
     }
   }, [ipc, scope, projectPath, missingProject]);
 
+  // Probe the managed servers and index the live health by name. Fail-safe — a
+  // probe error never blocks editing, it just leaves the rows without a badge.
+  const refreshHealth = useCallback(async () => {
+    setProbing(true);
+    try {
+      const probed = await ipc.mcpProbeManaged();
+      const next = new Map<string, McpServerInfo>();
+      for (const s of probed) {
+        if (s.source === "aichemist") next.set(s.name, s);
+      }
+      setHealth(next);
+    } catch (e) {
+      console.error("[McpServersSection] health probe failed", e);
+    } finally {
+      setProbing(false);
+    }
+  }, [ipc]);
+
   useEffect(() => {
-    if (!open) return;
     setSaved(false);
     load();
-  }, [open, scope, projectPath, load]);
+  }, [scope, projectPath, load]);
+
+  // Fetch live health when viewing the probed (AIchemist) scope.
+  useEffect(() => {
+    if (isProbedScope) void refreshHealth();
+    else setHealth(new Map());
+  }, [isProbedScope, refreshHealth]);
 
   // ── Form mode mutations ───────────────────────────────────────────────────
   const entries = useMemo(() => {
@@ -330,7 +401,8 @@ export function McpConfigEditorDialog({ open, onClose, projectPath, onSaved }: P
       setRawJson(stringify(toWrite));
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-      onSaved?.();
+      // Re-probe so the per-row health reflects the just-saved config.
+      if (isProbedScope) void refreshHealth();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -355,128 +427,145 @@ export function McpConfigEditorDialog({ open, onClose, projectPath, onSaved }: P
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-4xl w-full flex flex-col max-h-[90vh]">
-        <DialogHeader>
-          <DialogTitle>MCP Servers</DialogTitle>
-        </DialogHeader>
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <p className="text-sm text-muted-foreground">
+          Configure MCP servers. AIchemist-managed servers
+          (<code className="font-mono text-xs">~/.aichemist/mcp.json</code>) are injected
+          per-session into both Claude and Copilot, with a live health check per row.
+          Per-session enable/disable stays in the MCP panel.
+        </p>
+      </div>
 
-        {/* Scope tabs */}
-        <div className="flex border-b gap-1 -mt-1">
-          {SCOPES.map((s) => {
-            const disabled = s.needsProject && !projectPath;
-            return (
-              <WithTooltip
-                key={s.id}
-                label={s.sublabel + (disabled ? " — requires an active project" : "")}
+      {/* Scope tabs */}
+      <div className="flex border-b gap-1">
+        {SCOPES.map((s) => {
+          const disabled = s.needsProject && !projectPath;
+          return (
+            <WithTooltip
+              key={s.id}
+              label={s.sublabel + (disabled ? " — requires an active project" : "")}
+            >
+              <button
+                onClick={() => !disabled && setScope(s.id)}
+                disabled={disabled}
+                className={cn(
+                  "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+                  scope === s.id
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                  disabled && "opacity-40 cursor-not-allowed",
+                )}
               >
-                <button
-                  onClick={() => !disabled && setScope(s.id)}
-                  disabled={disabled}
-                  className={cn(
-                    "px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-                    scope === s.id
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground",
-                    disabled && "opacity-40 cursor-not-allowed",
-                  )}
-                >
-                  {s.label}
-                </button>
-              </WithTooltip>
-            );
-          })}
-          <div className="ml-auto flex items-center gap-1 pb-1">
-            <Button
-              variant={mode === "form" ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => switchMode("form")}
-            >
-              Form
-            </Button>
-            <Button
-              variant={mode === "json" ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => switchMode("json")}
-            >
-              JSON
+                {s.label}
+              </button>
+            </WithTooltip>
+          );
+        })}
+        <div className="ml-auto flex items-center gap-1 pb-1">
+          {isProbedScope && (
+            <WithTooltip label="Re-probe server health">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => void refreshHealth()}
+                disabled={probing}
+                aria-label="Refresh health"
+              >
+                <RefreshCw className={cn("h-4 w-4", probing && "animate-spin")} />
+              </Button>
+            </WithTooltip>
+          )}
+          <Button
+            variant={mode === "form" ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => switchMode("form")}
+          >
+            Form
+          </Button>
+          <Button
+            variant={mode === "json" ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => switchMode("json")}
+          >
+            JSON
+          </Button>
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground -mt-2">
+        {SCOPES.find((s) => s.id === scope)?.sublabel}
+      </p>
+
+      {/* Body */}
+      <div className="min-h-[160px]">
+        {missingProject && (
+          <div className="p-4 text-sm text-muted-foreground">
+            This scope requires an active project. Select a project first.
+          </div>
+        )}
+        {loading && !missingProject && (
+          <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </div>
+        )}
+        {!loading && !missingProject && mode === "form" && servers !== null && (
+          <div className="space-y-3 pr-1">
+            {entries.length === 0 && (
+              <div className="text-sm text-muted-foreground py-8 text-center">
+                No servers configured in this scope.
+              </div>
+            )}
+            {entries.map(({ name, entry, index }) => (
+              <ServerEditor
+                key={index}
+                name={name}
+                entry={entry}
+                health={isProbedScope ? health.get(name) : undefined}
+                onChangeName={(v) => renameEntry(index, v)}
+                onChange={(e) => updateEntry(index, e)}
+                onDelete={() => deleteEntry(index)}
+                nameError={duplicateNames.has(name) ? "Duplicate name" : undefined}
+              />
+            ))}
+            <Button variant="outline" size="sm" onClick={addEntry} className="w-full">
+              <Plus className="h-4 w-4 mr-1" /> Add server
             </Button>
           </div>
-        </div>
+        )}
+        {!loading && !missingProject && mode === "json" && (
+          <div className="space-y-2">
+            <Textarea
+              value={rawJson}
+              onChange={(e) => { setRawJson(e.target.value); setRawError(null); }}
+              spellCheck={false}
+              className="font-mono text-xs min-h-[380px]"
+            />
+            {rawError && (
+              <p className="text-xs text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" /> {rawError}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
 
-        <p className="text-xs text-muted-foreground -mt-1">
-          {SCOPES.find((s) => s.id === scope)?.sublabel}
-        </p>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto min-h-[200px]">
-          {missingProject && (
-            <div className="p-4 text-sm text-muted-foreground">
-              This scope requires an active project. Select a project first.
-            </div>
-          )}
-          {loading && !missingProject && (
-            <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground text-sm">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-            </div>
-          )}
-          {!loading && !missingProject && mode === "form" && servers !== null && (
-            <div className="space-y-3 pr-1">
-              {entries.length === 0 && (
-                <div className="text-sm text-muted-foreground py-8 text-center">
-                  No servers configured in this scope.
-                </div>
-              )}
-              {entries.map(({ name, entry, index }) => (
-                <ServerEditor
-                  key={index}
-                  name={name}
-                  entry={entry}
-                  onChangeName={(v) => renameEntry(index, v)}
-                  onChange={(e) => updateEntry(index, e)}
-                  onDelete={() => deleteEntry(index)}
-                  nameError={duplicateNames.has(name) ? "Duplicate name" : undefined}
-                />
-              ))}
-              <Button variant="outline" size="sm" onClick={addEntry} className="w-full">
-                <Plus className="h-4 w-4 mr-1" /> Add server
-              </Button>
-            </div>
-          )}
-          {!loading && !missingProject && mode === "json" && (
-            <div className="space-y-2">
-              <Textarea
-                value={rawJson}
-                onChange={(e) => { setRawJson(e.target.value); setRawError(null); }}
-                spellCheck={false}
-                className="font-mono text-xs min-h-[380px]"
-              />
-              {rawError && (
-                <p className="text-xs text-destructive flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" /> {rawError}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-
-        <DialogFooter className="flex items-center gap-2">
-          {error && (
-            <span className="text-xs text-destructive flex items-center gap-1 mr-auto">
-              <AlertCircle className="h-3 w-3" /> {error}
-            </span>
-          )}
-          {saved && (
-            <span className="text-xs text-emerald-600 flex items-center gap-1 mr-auto">
-              <Check className="h-3 w-3" /> Saved
-            </span>
-          )}
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-          <Button onClick={save} disabled={saving || missingProject}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {/* Footer: save + status */}
+      <div className="flex items-center gap-2 border-t border-border pt-3">
+        {error && (
+          <span className="text-xs text-destructive flex items-center gap-1 mr-auto">
+            <AlertCircle className="h-3 w-3" /> {error}
+          </span>
+        )}
+        {saved && (
+          <span className="text-xs text-emerald-600 flex items-center gap-1 mr-auto">
+            <Check className="h-3 w-3" /> Saved
+          </span>
+        )}
+        <Button onClick={save} disabled={saving || missingProject} className="ml-auto">
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
-import { RefreshCw, Server, CheckCircle2, XCircle, MinusCircle, Loader2, Settings, ChevronRight, AlertTriangle } from "lucide-react";
+import { RefreshCw, Server, CheckCircle2, XCircle, MinusCircle, Loader2, SlidersHorizontal, ChevronRight, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIpc } from "@/lib/ipc";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -7,7 +7,6 @@ import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
 import { WithTooltip } from "@/components/ui/with-tooltip";
-import { McpConfigEditorDialog } from "./McpConfigEditorDialog";
 import type { McpServerInfo } from "@/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -162,9 +161,7 @@ function ServerCard({
 
 export function McpServersPanel() {
   const ipc = useIpc();
-  const { projects, activeProjectId } = useProjectStore();
-  const activeProject = projects.find((p) => p.id === activeProjectId);
-  const projectPath = activeProject?.path ?? "";
+  const openSettings = useProjectStore((s) => s.openSettings);
   const provider = useActiveSessionProvider();
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const sessionDisabledMcp = useSessionStore((s) => s.sessionDisabledMcp);
@@ -173,8 +170,6 @@ export function McpServersPanel() {
     () => new Set(activeSessionId ? sessionDisabledMcp[activeSessionId] ?? [] : []),
     [activeSessionId, sessionDisabledMcp],
   );
-
-  const [editorOpen, setEditorOpen] = useState(false);
 
   // The server list is global (not project-scoped), so a single cache key
   // suffices. The cheap `listMcpServers` read is used on mount; the refresh
@@ -241,21 +236,12 @@ export function McpServersPanel() {
         {(visibleServers === null || loading) && (
           <span className="text-[11px] text-muted-foreground">Loading…</span>
         )}
-        <WithTooltip label="Edit MCP config">
-          <button
-            onClick={() => setEditorOpen(true)}
-            className="flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-auto"
-            aria-label="Edit MCP config"
-          >
-            <Settings className="h-3.5 w-3.5" />
-          </button>
-        </WithTooltip>
         <WithTooltip label="Refresh (re-probe)">
           <button
             onClick={() => void refetch()}
             disabled={loading}
             className={cn(
-              "flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
+              "flex items-center justify-center h-6 w-6 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-auto",
               loading && "opacity-50 cursor-not-allowed"
             )}
             aria-label="Refresh"
@@ -312,12 +298,13 @@ export function McpServersPanel() {
         )}
       </div>
 
-      <McpConfigEditorDialog
-        open={editorOpen}
-        onClose={() => setEditorOpen(false)}
-        projectPath={projectPath}
-        onSaved={() => void refetch()}
-      />
+      {/* Deep link into the Settings hub for full server management. */}
+      <button
+        onClick={() => openSettings({ scope: "app", id: "mcp" })}
+        className="flex items-center justify-center gap-1 border-t px-3 py-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors shrink-0"
+      >
+        <SlidersHorizontal className="h-3 w-3" /> Manage servers →
+      </button>
     </div>
   );
 }
