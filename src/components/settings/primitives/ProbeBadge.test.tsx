@@ -42,9 +42,15 @@ describe("summarizeProbe", () => {
 });
 
 describe("ProbeBadge", () => {
-  it("renders a loading badge while the result is undefined", () => {
-    render(<ProbeBadge result={undefined} />);
+  it("renders a loading badge while a probe is in flight (result undefined, checking)", () => {
+    render(<ProbeBadge result={undefined} checking />);
     expect(screen.getByText("Checking…")).toBeInTheDocument();
+  });
+
+  it("falls back to Unavailable when the result is missing and not checking", () => {
+    render(<ProbeBadge result={undefined} />);
+    expect(screen.getByLabelText("Status: Unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Checking…")).not.toBeInTheDocument();
   });
 
   it("renders the Connected state for an ok probe", () => {

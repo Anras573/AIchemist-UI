@@ -50,10 +50,14 @@ const TONE_VARIANT = {
   muted: "outline",
 } as const;
 
+// Inline status icons are sized explicitly (the shared Badge also constrains
+// direct-child svgs) to keep badge content from jittering or oversizing.
+const ICON = "h-3 w-3";
+
 function ToneIcon({ tone }: { tone: Tone }) {
-  if (tone === "ok") return <Check aria-hidden className="text-green-600" />;
-  if (tone === "muted") return <Slash aria-hidden className="text-muted-foreground" />;
-  return <AlertCircle aria-hidden />;
+  if (tone === "ok") return <Check aria-hidden className={`${ICON} text-green-600`} />;
+  if (tone === "muted") return <Slash aria-hidden className={`${ICON} text-muted-foreground`} />;
+  return <AlertCircle aria-hidden className={ICON} />;
 }
 
 interface ProbeBadgeProps {
@@ -70,10 +74,22 @@ interface ProbeBadgeProps {
  */
 export function ProbeBadge({ result, checking }: ProbeBadgeProps) {
   if (!result) {
+    // A missing result means either a probe is in flight (`checking`) or there's
+    // genuinely no entry for this provider (e.g. a probe map mismatch). Only the
+    // former is a loading state; otherwise fall back to a deterministic
+    // "Unavailable" so the badge can't get stuck on a permanent spinner.
+    if (checking) {
+      return (
+        <Badge variant="outline" className="gap-1 text-muted-foreground" aria-label="Status: Checking">
+          <Loader2 aria-hidden className={`${ICON} animate-spin`} />
+          Checking…
+        </Badge>
+      );
+    }
     return (
-      <Badge variant="outline" className="gap-1 text-muted-foreground">
-        <Loader2 aria-hidden className="animate-spin" />
-        Checking…
+      <Badge variant="outline" className="gap-1 text-muted-foreground" aria-label="Status: Unavailable">
+        <AlertCircle aria-hidden className={ICON} />
+        Unavailable
       </Badge>
     );
   }
@@ -85,7 +101,7 @@ export function ProbeBadge({ result, checking }: ProbeBadgeProps) {
       className={tone === "ok" ? "gap-1 text-green-700 dark:text-green-500" : "gap-1"}
       aria-label={`Status: ${label}`}
     >
-      {checking ? <Loader2 aria-hidden className="animate-spin" /> : <ToneIcon tone={tone} />}
+      {checking ? <Loader2 aria-hidden className={`${ICON} animate-spin`} /> : <ToneIcon tone={tone} />}
       {label}
     </Badge>
   );

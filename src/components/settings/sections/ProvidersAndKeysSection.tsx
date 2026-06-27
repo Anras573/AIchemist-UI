@@ -399,7 +399,10 @@ export function ProvidersAndKeysSection({ settings, writeSetting }: ProvidersAnd
   const cardProps = (p: ProviderId) => ({
     provider: p as Provider,
     probe: probes?.[p as Provider],
-    checking,
+    // Before the first probe resolves (`probes === null`) there's no entry yet —
+    // treat that as "checking" so the badge shows the loading state rather than
+    // flickering through "Unavailable" on first paint.
+    checking: checking || probes === null,
     enabled: !disabled.has(p),
     onToggleEnabled: (enable: boolean) => void toggleProvider(p, enable),
     // A provider can only be disabled while it isn't the last one standing.
