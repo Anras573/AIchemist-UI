@@ -115,7 +115,11 @@ function ProviderCard({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
           <h3 className="text-sm font-semibold truncate">{PROVIDER_LABELS[provider as ProviderId]}</h3>
-          <ProbeBadge result={enabled ? probe : undefined} checking={enabled && checking} />
+          {/* Pass the probe through even when disabled — the backend reports a
+              disabled provider as `{ ok: false, reason: "Disabled in settings" }`,
+              which the badge summarizes as "Disabled" (gating on `enabled` would
+              instead show the "Checking…" loading state forever). */}
+          <ProbeBadge result={probe} checking={checking} />
         </div>
         <label className="flex items-center gap-2 flex-shrink-0">
           <span className="text-xs text-muted-foreground">{enabled ? "Enabled" : "Disabled"}</span>
@@ -197,9 +201,8 @@ function EndpointSecretField({
         <button
           type="button"
           onClick={() => setShow((s) => !s)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground hover:text-foreground"
           aria-label={show ? "Hide value" : "Show value"}
-          tabIndex={-1}
         >
           {show ? "Hide" : "Show"}
         </button>
@@ -383,7 +386,14 @@ export function ProvidersAndKeysSection({ settings, writeSetting }: ProvidersAnd
     else next.add(p);
     // Guard: never let the user disable the last remaining provider.
     if (next.size === PROVIDER_IDS.length) return;
-    await writeAndProbe("AICHEMIST_DISABLED_PROVIDERS", serializeDisabledProviders(next));
+    try {
+      await writeAndProbe("AICHEMIST_DISABLED_PROVIDERS", serializeDisabledProviders(next));
+    } catch (err) {
+      // A persist/probe failure shouldn't surface as an unhandled rejection; log
+      // it. The toggle reverts visually since `disabled` is derived from the
+      // unchanged settings (the optimistic state was never applied).
+      console.error("[ProvidersAndKeysSection] failed to toggle provider", p, err);
+    }
   };
 
   const cardProps = (p: ProviderId) => ({

@@ -284,6 +284,23 @@ describe("SettingsView — Providers & Keys", () => {
     // Codex has an invalid key in the mocked probe → Invalid key badge.
     expect(await screen.findByLabelText("Status: Invalid key")).toBeInTheDocument();
   });
+
+  it("shows a Disabled badge for a disabled provider (not the loading state)", async () => {
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({
+      AICHEMIST_DISABLED_PROVIDERS: "ollama",
+    } as never);
+    vi.mocked(window.electronAPI.probeProviders).mockResolvedValue({
+      anthropic: { ok: true },
+      copilot: { ok: true },
+      ollama: { ok: false, reason: "Disabled in settings" },
+      "openai-compatible": { ok: true },
+      codex: { ok: true },
+    } as never);
+
+    await openProvidersSection();
+
+    expect(await screen.findByLabelText("Status: Disabled")).toBeInTheDocument();
+  });
 });
 
 describe("SettingsView — OpenAI-compatible endpoints error feedback", () => {
