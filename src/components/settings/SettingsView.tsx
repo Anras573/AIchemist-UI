@@ -5,37 +5,29 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WithTooltip } from "@/components/ui/with-tooltip";
-import { X, Eye, EyeOff, Check, AlertCircle } from "lucide-react";
+import { X } from "lucide-react";
 import { useTheme } from "@/lib/hooks/useTheme";
 import type { Theme } from "@/lib/hooks/useTheme";
-import {
-  type ProviderId,
-  PROVIDER_IDS,
-  PROVIDER_LABELS,
-  parseDisabledProviders,
-  serializeDisabledProviders,
-} from "../../../electron/providers";
+import { PROVIDER_IDS, PROVIDER_LABELS } from "../../../electron/providers";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { ProjectSettingsContent } from "@/components/settings/ProjectSettingsContent";
 import { useAutosave } from "@/lib/hooks/useAutosave";
 import { SettingsSection } from "@/components/settings/primitives/SettingsSection";
 import { SettingField, SettingStatus } from "@/components/settings/primitives/SettingField";
+import { ProvidersAndKeysSection } from "@/components/settings/sections/ProvidersAndKeysSection";
 
 interface SettingsViewProps {
   onClose: () => void;
 }
 
-type Section = "api-keys" | "model-overrides" | "advanced" | "providers" | "appearance";
-// Sections that still persist via an explicit Save button. Appearance and
-// Advanced autosave instead (see useAutosave wiring below).
-type ManualSection = "api-keys" | "model-overrides" | "providers";
+type Section = "providers" | "advanced" | "appearance";
 
 // Application-tier nav rows. Project-tier rows are derived from the active
-// project at render time (see PROJECT_NAV).
+// project at render time (see PROJECT_NAV). The old "API Keys" / "Model
+// Overrides" / "Providers" trio is folded into a single "Providers & Keys"
+// section (one card per provider).
 const APP_NAV: { id: Section; label: string }[] = [
-  { id: "api-keys", label: "API Keys" },
-  { id: "model-overrides", label: "Model Overrides" },
-  { id: "providers", label: "Providers" },
+  { id: "providers", label: "Providers & Keys" },
   { id: "appearance", label: "Appearance" },
   { id: "advanced", label: "Advanced" },
 ];
@@ -45,315 +37,6 @@ const APP_NAV: { id: Section; label: string }[] = [
 const PROJECT_NAV: { id: string; label: string }[] = [
   { id: "general", label: "General" },
 ];
-
-type SaveStatus = "idle" | "saving" | "saved" | "error";
-
-// ── Password field with show/hide toggle ──────────────────────────────────────
-function SecretField({
-  id,
-  label,
-  value,
-  placeholder,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  placeholder?: string;
-  onChange: (v: string) => void;
-}) {
-  const [show, setShow] = useState(false);
-  return (
-    <div className="space-y-1.5">
-      <label htmlFor={id} className="text-sm font-medium leading-none">{label}</label>
-      <div className="relative">
-        <Input
-          id={id}
-          type={show ? "text" : "password"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder ?? "Not set"}
-          className="pr-9 font-mono text-sm"
-        />
-        <button
-          type="button"
-          onClick={() => setShow((s) => !s)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          tabIndex={-1}
-        >
-          {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Save button row ───────────────────────────────────────────────────────────
-function SaveRow({
-  status,
-  onSave,
-}: {
-  status: SaveStatus;
-  onSave: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-3 pt-2">
-      <Button onClick={onSave} disabled={status === "saving"} size="sm">
-        {status === "saving" ? "Saving…" : "Save"}
-      </Button>
-      {status === "saved" && (
-        <span className="flex items-center gap-1 text-sm text-green-600">
-          <Check className="h-4 w-4" /> Saved
-        </span>
-      )}
-      {status === "error" && (
-        <span className="flex items-center gap-1 text-sm text-destructive">
-          <AlertCircle className="h-4 w-4" /> Save failed
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ── Providers section ─────────────────────────────────────────────────────────
-function ProvidersSection({
-  value,
-  onChange,
-  status,
-  onSave,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  status: SaveStatus;
-  onSave: () => void;
-}) {
-  const disabled = parseDisabledProviders(value);
-  const allDisabled = disabled.size === PROVIDER_IDS.length;
-
-  const toggle = (p: ProviderId) => {
-    const next = new Set(disabled);
-    if (next.has(p)) next.delete(p);
-    else next.add(p);
-    onChange(serializeDisabledProviders(next));
-  };
-
-  return (
-    <>
-      <p className="text-sm text-muted-foreground">
-        Hide providers you don&apos;t want to use. Disabled providers are greyed out
-        in the new-session picker, the project provider dropdown, and the session
-        tab&apos;s split-button menu. Existing sessions keep working — sessions are
-        provider-locked at creation.
-      </p>
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium leading-none mb-3">Enabled providers</legend>
-        {PROVIDER_IDS.map((p) => {
-          const enabled = !disabled.has(p);
-          return (
-            <label
-              key={p}
-              className={cn(
-                "flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors",
-                enabled ? "border-primary bg-primary/5" : "border-border hover:bg-accent/50",
-              )}
-            >
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={() => toggle(p)}
-                className="accent-primary"
-                aria-label={PROVIDER_LABELS[p]}
-              />
-              <span className="text-sm font-medium">{PROVIDER_LABELS[p]}</span>
-            </label>
-          );
-        })}
-      </fieldset>
-      {allDisabled && (
-        <p className="flex items-start gap-1.5 text-xs text-destructive">
-          <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-          <span>
-            All providers are disabled — you won&apos;t be able to create new sessions.
-            Enable at least one before saving.
-          </span>
-        </p>
-      )}
-      <div className="flex items-center gap-3 pt-2">
-        <Button onClick={onSave} disabled={status === "saving" || allDisabled} size="sm">
-          {status === "saving" ? "Saving…" : "Save"}
-        </Button>
-        {status === "saved" && (
-          <span className="flex items-center gap-1 text-sm text-green-600">
-            <Check className="h-4 w-4" /> Saved
-          </span>
-        )}
-        {status === "error" && (
-          <span className="flex items-center gap-1 text-sm text-destructive">
-            <AlertCircle className="h-4 w-4" /> Save failed
-          </span>
-        )}
-      </div>
-    </>
-  );
-}
-
-// ── OpenAI-compatible endpoints manager ───────────────────────────────────────
-type EndpointDraft = { name: string; baseURL: string; apiKey: string };
-
-function OpenAiEndpointsSection() {
-  const ipc = useIpc();
-  const [endpoints, setEndpoints] = useState<Record<string, { baseURL: string; apiKey?: string }>>({});
-  const [draft, setDraft] = useState<EndpointDraft | null>(null);
-  const [editingName, setEditingName] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    ipc.readOpenAiEndpoints()
-      .then(setEndpoints)
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, [ipc]);
-
-  const startAdd = () => {
-    setEditingName(null);
-    setDraft({ name: "", baseURL: "", apiKey: "" });
-    setError(null);
-  };
-  const startEdit = (name: string) => {
-    const entry = endpoints[name];
-    setEditingName(name);
-    setDraft({ name, baseURL: entry?.baseURL ?? "", apiKey: entry?.apiKey ?? "" });
-    setError(null);
-  };
-  const cancel = () => {
-    setDraft(null);
-    setEditingName(null);
-    setError(null);
-  };
-
-  const save = async () => {
-    if (!draft) return;
-    const name = draft.name.trim();
-    try {
-      // Preserve fields the form doesn't edit (headers, queryParams, …).
-      const existing = editingName ? endpoints[editingName] : undefined;
-      const next = await ipc.upsertOpenAiEndpoint(name, {
-        ...(existing ?? {}),
-        baseURL: draft.baseURL.trim(),
-        ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : { apiKey: undefined }),
-      });
-      setEndpoints(next);
-      cancel();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const remove = async (name: string) => {
-    setError(null);
-    try {
-      setEndpoints(await ipc.deleteOpenAiEndpoint(name));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const names = Object.keys(endpoints);
-
-  return (
-    <div className="space-y-3 pt-4 border-t border-border">
-      <div>
-        <h2 className="text-sm font-medium leading-none">OpenAI-compatible endpoints</h2>
-        <p className="text-sm text-muted-foreground mt-1.5">
-          Connect any server that speaks the OpenAI API (LM Studio, vLLM, llama.cpp,
-          Together, …). Models from every endpoint appear in the model picker of
-          OpenAI-compatible sessions as <code className="font-mono text-xs">endpoint/model</code>.
-        </p>
-      </div>
-
-      {/* Error from loading / deleting endpoints (save errors render inside the
-          form below). Without this, a failure outside an open form would either
-          show no feedback or a misleading "no endpoints" empty state. */}
-      {error && !draft && (
-        <p className="flex items-start gap-1.5 text-xs text-destructive">
-          <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-          <span>{error}</span>
-        </p>
-      )}
-
-      {names.length === 0 && !draft && !error && (
-        <p className="text-xs text-muted-foreground">No endpoints configured yet.</p>
-      )}
-
-      {names.map((name) => (
-        <div key={name} className="flex items-center gap-3 rounded-lg border border-border p-3">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium">{name}</p>
-            <p className="text-xs text-muted-foreground font-mono truncate">
-              {endpoints[name].baseURL}
-              {endpoints[name].apiKey ? " · key set" : ""}
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => startEdit(name)}>Edit</Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            onClick={() => remove(name)}
-          >
-            Delete
-          </Button>
-        </div>
-      ))}
-
-      {draft ? (
-        <div className="space-y-3 rounded-lg border border-border p-3">
-          <div className="space-y-1.5">
-            <label htmlFor="oai-ep-name" className="text-sm font-medium leading-none">Name</label>
-            <Input
-              id="oai-ep-name"
-              value={draft.name}
-              disabled={editingName !== null}
-              onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))}
-              placeholder="lmstudio"
-              className="font-mono text-sm"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="oai-ep-url" className="text-sm font-medium leading-none">Base URL</label>
-            <Input
-              id="oai-ep-url"
-              value={draft.baseURL}
-              onChange={(e) => setDraft((d) => (d ? { ...d, baseURL: e.target.value } : d))}
-              placeholder="http://localhost:1234/v1"
-              className="font-mono text-sm"
-            />
-          </div>
-          <SecretField
-            id="oai-ep-key"
-            label="API Key (optional)"
-            value={draft.apiKey}
-            placeholder="Leave blank for local servers"
-            onChange={(v) => setDraft((d) => (d ? { ...d, apiKey: v } : d))}
-          />
-          {error && (
-            <p className="flex items-start gap-1.5 text-xs text-destructive">
-              <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-              <span>{error}</span>
-            </p>
-          )}
-          <div className="flex items-center gap-2">
-            <Button size="sm" onClick={save} disabled={!draft.name.trim() || !draft.baseURL.trim()}>
-              {editingName ? "Save endpoint" : "Add endpoint"}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={cancel}>Cancel</Button>
-          </div>
-        </div>
-      ) : (
-        <Button size="sm" variant="outline" onClick={startAdd}>Add endpoint</Button>
-      )}
-    </div>
-  );
-}
 
 const VALID_APPROVAL_MODES = ["none", "custom", "all"] as const;
 
@@ -390,13 +73,6 @@ export function SettingsView({ onClose }: SettingsViewProps) {
   const [search, setSearch] = useState("");
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [draft, setDraft] = useState<Partial<SettingsMap>>({});
-  // Manual Save sections (still using the SaveRow). Appearance and Advanced were
-  // converted to autosave (useAutosave) and no longer appear here.
-  const [saveStatus, setSaveStatus] = useState<Record<ManualSection, SaveStatus>>({
-    "api-keys": "idle",
-    "model-overrides": "idle",
-    providers: "idle",
-  });
 
   const { theme, setTheme } = useTheme();
 
@@ -442,48 +118,13 @@ export function SettingsView({ onClose }: SettingsViewProps) {
     { initialValue: normalizeMaxToolRounds(settings?.AICHEMIST_MAX_TOOL_ROUNDS) },
   );
 
-  const saveSection = useCallback(
-    async (section: ManualSection) => {
-      if (!settings) return;
-      setSaveStatus((s) => ({ ...s, [section]: "saving" }));
-
-      const sectionKeys: Record<ManualSection, (keyof SettingsMap)[]> = {
-        "api-keys": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "GITHUB_TOKEN"],
-        "model-overrides": [
-          "ANTHROPIC_BASE_URL",
-          "ANTHROPIC_DEFAULT_SONNET_MODEL",
-          "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-          "ANTHROPIC_DEFAULT_OPUS_MODEL",
-        ],
-        providers: ["AICHEMIST_DISABLED_PROVIDERS"],
-      };
-
-      const updates: Partial<SettingsMap> = {};
-      for (const k of sectionKeys[section]) {
-        updates[k] = (draft[k] ?? "") as string & SettingsMap[typeof k];
-      }
-
-      try {
-        await ipc.settingsWrite(updates);
-        setSettings((s) => (s ? { ...s, ...updates } : s));
-        // Reflect any normalization (e.g. clamped 9999 → 100) back into the field.
-        setDraft((d) => ({ ...d, ...updates }));
-        setSaveStatus((s) => ({ ...s, [section]: "saved" }));
-        setTimeout(() => setSaveStatus((s) => ({ ...s, [section]: "idle" })), 2500);
-      } catch {
-        setSaveStatus((s) => ({ ...s, [section]: "error" }));
-      }
-    },
-    [draft, settings]
-  );
-
   // App-tier section currently selected (null when a project section is active).
   // `settingsSection.id` is typed as `string` (deep links can carry anything),
   // so validate against APP_NAV and fall back to a safe default rather than
   // casting blindly — an unknown id would otherwise render a blank panel.
   const activeSection: Section | null =
     settingsSection.scope === "app"
-      ? APP_NAV.find((n) => n.id === settingsSection.id)?.id ?? "api-keys"
+      ? APP_NAV.find((n) => n.id === settingsSection.id)?.id ?? "providers"
       : null;
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
   // A persisted activeProjectId can resolve before the async-loaded projects
@@ -599,90 +240,9 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         {/* Section content */}
         {settingsSection.scope === "app" && (
           <div className="flex-1 overflow-y-auto px-8 py-6 max-w-xl space-y-6">
-            {/* ── API Keys ── */}
-            {activeSection === "api-keys" && (
-              <>
-                <div className="space-y-4">
-                  <SecretField
-                    id="anthropic-key"
-                    label="Anthropic API Key"
-                    value={draft.ANTHROPIC_API_KEY ?? ""}
-                    placeholder="sk-ant-…"
-                    onChange={(v) => set("ANTHROPIC_API_KEY", v)}
-                  />
-                  <SecretField
-                    id="anthropic-auth-token"
-                    label="Anthropic Auth Token (fallback)"
-                    value={draft.ANTHROPIC_AUTH_TOKEN ?? ""}
-                    placeholder="Only needed when ANTHROPIC_API_KEY is absent"
-                    onChange={(v) => set("ANTHROPIC_AUTH_TOKEN", v)}
-                  />
-                  <SecretField
-                    id="github-token"
-                    label="GitHub Token (Copilot)"
-                    value={draft.GITHUB_TOKEN ?? ""}
-                    placeholder="ghp_…"
-                    onChange={(v) => set("GITHUB_TOKEN", v)}
-                  />
-                </div>
-                <SaveRow status={saveStatus["api-keys"]} onSave={() => saveSection("api-keys")} />
-              </>
-            )}
-
-            {/* ── Model Overrides ── */}
-            {activeSection === "model-overrides" && (
-              <>
-                <p className="text-sm text-muted-foreground">
-                  Override the Anthropic model used for each tier. Leave blank to use the
-                  SDK default.
-                </p>
-                <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label htmlFor="base-url" className="text-sm font-medium leading-none">Anthropic Base URL</label>
-                    <Input
-                      id="base-url"
-                      value={draft.ANTHROPIC_BASE_URL ?? ""}
-                      onChange={(e) => set("ANTHROPIC_BASE_URL", e.target.value)}
-                      placeholder="https://api.anthropic.com (default)"
-                      className="font-mono text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="sonnet-model" className="text-sm font-medium leading-none">Sonnet Model Override</label>
-                    <Input
-                      id="sonnet-model"
-                      value={draft.ANTHROPIC_DEFAULT_SONNET_MODEL ?? ""}
-                      onChange={(e) => set("ANTHROPIC_DEFAULT_SONNET_MODEL", e.target.value)}
-                      placeholder="claude-sonnet-4-6"
-                      className="font-mono text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="haiku-model" className="text-sm font-medium leading-none">Haiku Model Override</label>
-                    <Input
-                      id="haiku-model"
-                      value={draft.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? ""}
-                      onChange={(e) => set("ANTHROPIC_DEFAULT_HAIKU_MODEL", e.target.value)}
-                      placeholder="claude-haiku-4-5-20251001"
-                      className="font-mono text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label htmlFor="opus-model" className="text-sm font-medium leading-none">Opus Model Override</label>
-                    <Input
-                      id="opus-model"
-                      value={draft.ANTHROPIC_DEFAULT_OPUS_MODEL ?? ""}
-                      onChange={(e) => set("ANTHROPIC_DEFAULT_OPUS_MODEL", e.target.value)}
-                      placeholder="claude-opus-4-8"
-                      className="font-mono text-sm"
-                    />
-                  </div>
-                </div>
-                <SaveRow
-                  status={saveStatus["model-overrides"]}
-                  onSave={() => saveSection("model-overrides")}
-                />
-              </>
+            {/* ── Providers & Keys ── */}
+            {activeSection === "providers" && (
+              <ProvidersAndKeysSection settings={settings} writeSetting={writeSetting} />
             )}
 
             {/* ── Advanced (autosave) ── */}
@@ -754,19 +314,6 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                   }
                 />
               </SettingsSection>
-            )}
-
-            {/* ── Providers ── */}
-            {activeSection === "providers" && (
-              <>
-                <ProvidersSection
-                  value={draft.AICHEMIST_DISABLED_PROVIDERS ?? ""}
-                  onChange={(v) => set("AICHEMIST_DISABLED_PROVIDERS", v)}
-                  status={saveStatus["providers"]}
-                  onSave={() => saveSection("providers")}
-                />
-                <OpenAiEndpointsSection />
-              </>
             )}
 
             {/* ── Appearance (autosave) ── */}

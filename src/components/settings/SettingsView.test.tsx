@@ -5,12 +5,12 @@ import { useProjectStore } from "@/lib/store/useProjectStore";
 import type { Project, ProjectConfig } from "@/types";
 import { SettingsView } from "./SettingsView";
 
-// Navigates SettingsView to the Providers section, where the OpenAI-compatible
-// endpoints manager lives.
+// Navigates SettingsView to the Providers & Keys section, where the
+// OpenAI-compatible endpoints manager lives (inside the OpenAI-compatible card).
 async function openProvidersSection() {
   renderWithProviders(<SettingsView onClose={vi.fn()} />);
   // settingsRead resolves async; wait for the nav to render, then click it.
-  fireEvent.click(await screen.findByRole("button", { name: "Providers" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Providers & Keys" }));
 }
 
 describe("SettingsView — Advanced: max tool rounds (autosave)", () => {
@@ -224,6 +224,82 @@ describe("SettingsView — Project section", () => {
       expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument(),
     );
     expect(screen.getByLabelText("Anthropic API Key")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsView — Providers & Keys", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({} as never);
+    vi.mocked(window.electronAPI.settingsWrite).mockResolvedValue(undefined as never);
+    vi.mocked(window.electronAPI.readOpenAiEndpoints).mockResolvedValue({});
+    vi.mocked(window.electronAPI.probeProviders).mockResolvedValue({
+      anthropic: { ok: true },
+      copilot: { ok: false, reason: "GITHUB_TOKEN not set in ~/.aichemist/.env" },
+      ollama: { ok: true },
+      "openai-compatible": { ok: false, reason: "No endpoints configured" },
+      codex: { ok: false, reason: "Invalid API key" },
+    } as never);
+  });
+
+  it("disabling a provider writes AICHEMIST_DISABLED_PROVIDERS and re-probes", async () => {
+    await openProvidersSection();
+
+    const toggle = await screen.findByRole("switch", { name: "Enable Ollama" });
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(window.electronAPI.settingsWrite).toHaveBeenCalledWith(
+        expect.objectContaining({ AICHEMIST_DISABLED_PROVIDERS: "ollama" }),
+      ),
+    );
+    // Connection-affecting change forces a fresh probe.
+    await waitFor(() =>
+      expect(window.electronAPI.probeProviders).toHaveBeenCalledWith(
+        expect.objectContaining({ force: true }),
+      ),
+    );
+  });
+
+  it("autosaves the Anthropic API key (debounced) and force-probes after", async () => {
+    await openProvidersSection();
+
+    const input = await screen.findByLabelText("Anthropic API Key");
+    fireEvent.change(input, { target: { value: "sk-ant-test" } });
+
+    await waitFor(() =>
+      expect(window.electronAPI.settingsWrite).toHaveBeenCalledWith(
+        expect.objectContaining({ ANTHROPIC_API_KEY: "sk-ant-test" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(window.electronAPI.probeProviders).toHaveBeenCalledWith(
+        expect.objectContaining({ force: true }),
+      ),
+    );
+  });
+
+  it("shows a per-provider probe badge reflecting the probe result", async () => {
+    await openProvidersSection();
+    // Codex has an invalid key in the mocked probe → Invalid key badge.
+    expect(await screen.findByLabelText("Status: Invalid key")).toBeInTheDocument();
+  });
+
+  it("shows a Disabled badge for a disabled provider (not the loading state)", async () => {
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({
+      AICHEMIST_DISABLED_PROVIDERS: "ollama",
+    } as never);
+    vi.mocked(window.electronAPI.probeProviders).mockResolvedValue({
+      anthropic: { ok: true },
+      copilot: { ok: true },
+      ollama: { ok: false, reason: "Disabled in settings" },
+      "openai-compatible": { ok: true },
+      codex: { ok: true },
+    } as never);
+
+    await openProvidersSection();
+
+    expect(await screen.findByLabelText("Status: Disabled")).toBeInTheDocument();
   });
 });
 
