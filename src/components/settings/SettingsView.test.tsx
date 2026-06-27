@@ -201,6 +201,27 @@ describe("SettingsView — Project section", () => {
     );
   });
 
+  it("persists the normalized Anthropic default when the model is cleared", async () => {
+    vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(
+      makeConfig({ model: "claude-opus-4-5" }),
+    );
+    vi.mocked(window.electronAPI.saveProjectConfig).mockResolvedValue(undefined);
+
+    renderProjectSection(makeProject("proj-norm", makeConfig({ model: "claude-opus-4-5" })));
+    const modelInput = await screen.findByDisplayValue("claude-opus-4-5");
+
+    // Clearing the model on an Anthropic project autosaves the normalized
+    // default — and that is exactly the value autosave tracks for undo.
+    fireEvent.change(modelInput, { target: { value: "" } });
+
+    await waitFor(() =>
+      expect(window.electronAPI.saveProjectConfig).toHaveBeenCalledWith(
+        "proj-norm",
+        expect.objectContaining({ provider: "anthropic", model: DEFAULT_ANTHROPIC_MODEL }),
+      ),
+    );
+  });
+
   it("shows inheritance ghost text against the app default provider", async () => {
     vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({
       AICHEMIST_DEFAULT_PROVIDER: "anthropic",

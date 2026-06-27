@@ -318,22 +318,34 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
   const [appDefaults, setAppDefaults] = useState<AppDefaults | null>(null);
   const { probes } = useProviderProbes(projectId);
   const loadGenRef = useRef(0);
+  const mountedRef = useRef(true);
+  // Monotonic token per save: a slower older save must not sync its (stale)
+  // value back into local state after a newer edit has superseded it.
+  const saveSeqRef = useRef(0);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       loadGenRef.current++;
     };
   }, []);
 
   // Autosave the whole ProjectConfig: every field commits the full config (text
   // fields debounced, selects/toggles immediate). The save fn mirrors the
-  // persisted (normalized) value back into local state, which also lets undo —
-  // a re-persist of the prior config — visually revert the form.
+  // persisted value back into local state, which also lets undo — a re-persist
+  // of the prior config — visually revert the form. The committed value is
+  // already normalized (see patchConfig), so what useAutosave tracks for its
+  // undo baseline matches exactly what gets written.
   const persistConfig = useCallback(
     async (next: ProjectConfig) => {
-      const normalized = normalizeConfig(next);
-      await ipc.saveProjectConfig(projectId, normalized);
-      setConfig(normalized);
+      const seq = ++saveSeqRef.current;
+      await ipc.saveProjectConfig(projectId, next);
+      // Only the latest save, and only while still mounted, may sync local
+      // state — guards against an older in-flight save clobbering a newer edit
+      // or touching an unmounted tree (e.g. the unmount flush on project switch).
+      if (!mountedRef.current || seq !== saveSeqRef.current) return;
+      setConfig(next);
     },
     [ipc, projectId],
   );
@@ -374,8 +386,11 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
   function patchConfig(patch: Partial<ProjectConfig>, opts?: { immediate?: boolean }) {
     if (!config) return;
     const next = { ...config, ...patch };
+    // Reflect the raw edit immediately (a blank model stays blank while typing);
+    // commit the normalized value so autosave persists — and tracks for undo —
+    // exactly what lands in the DB.
     setConfig(next);
-    save.commit(next, opts);
+    save.commit(normalizeConfig(next), opts);
   }
 
   const defaultApprovalLabel =
