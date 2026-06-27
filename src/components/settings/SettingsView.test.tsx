@@ -13,20 +13,22 @@ async function openProvidersSection() {
   fireEvent.click(await screen.findByRole("button", { name: "Providers" }));
 }
 
-describe("SettingsView — Defaults: max tool rounds", () => {
+describe("SettingsView — Advanced: max tool rounds (autosave)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(window.electronAPI.settingsWrite).mockResolvedValue(undefined as never);
   });
 
   it("clamps an out-of-range value to the max before persisting and reflects it in the field", async () => {
     vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({} as never);
 
     renderWithProviders(<SettingsView onClose={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Defaults" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Advanced" }));
 
     const input = (await screen.findByLabelText("Max tool rounds")) as HTMLInputElement;
+    // No Save button — the field autosaves (debounced) on change.
     fireEvent.change(input, { target: { value: "9999" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
 
     await waitFor(() =>
       expect(window.electronAPI.settingsWrite).toHaveBeenCalledWith(
@@ -41,15 +43,41 @@ describe("SettingsView — Defaults: max tool rounds", () => {
     vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({} as never);
 
     renderWithProviders(<SettingsView onClose={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Defaults" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Advanced" }));
 
     const input = (await screen.findByLabelText("Max tool rounds")) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "12" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(window.electronAPI.settingsWrite).toHaveBeenCalledWith(
         expect.objectContaining({ AICHEMIST_MAX_TOOL_ROUNDS: "12" }),
+      ),
+    );
+  });
+
+  it("autosaves the default provider immediately on change and offers undo", async () => {
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({
+      AICHEMIST_DEFAULT_PROVIDER: "anthropic",
+    } as never);
+
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Advanced" }));
+
+    const select = (await screen.findByLabelText("Default Provider")) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "ollama" } });
+
+    await waitFor(() =>
+      expect(window.electronAPI.settingsWrite).toHaveBeenCalledWith(
+        expect.objectContaining({ AICHEMIST_DEFAULT_PROVIDER: "ollama" }),
+      ),
+    );
+
+    // Saved ✓ + Undo affordance appears; undo re-persists the previous value.
+    const undo = await screen.findByRole("button", { name: "Undo" });
+    fireEvent.click(undo);
+    await waitFor(() =>
+      expect(window.electronAPI.settingsWrite).toHaveBeenLastCalledWith(
+        expect.objectContaining({ AICHEMIST_DEFAULT_PROVIDER: "anthropic" }),
       ),
     );
   });
