@@ -159,6 +159,38 @@ describe("SettingsView — Project section", () => {
     });
   });
 
+  it("preserves approval rules for categories not shown in the UI when editing a policy", async () => {
+    const cfg = makeConfig({
+      approval_mode: "custom",
+      approval_rules: [
+        { tool_category: "filesystem", policy: "risky_only" },
+        // A "custom"-category rule has no row in the UI; editing another
+        // category must not drop it.
+        { tool_category: "custom", policy: "always" },
+      ],
+    });
+    vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(cfg);
+    vi.mocked(window.electronAPI.saveProjectConfig).mockResolvedValue(undefined);
+
+    renderProjectSection(makeProject("proj-cust", cfg));
+    fireEvent.click(await screen.findByRole("button", { name: /approval/i }));
+
+    const fsSelect = await screen.findByLabelText("Filesystem approval policy");
+    fireEvent.change(fsSelect, { target: { value: "always" } });
+
+    await waitFor(() =>
+      expect(window.electronAPI.saveProjectConfig).toHaveBeenCalledWith(
+        "proj-cust",
+        expect.objectContaining({
+          approval_rules: expect.arrayContaining([
+            { tool_category: "custom", policy: "always" },
+            { tool_category: "filesystem", policy: "always" },
+          ]),
+        }),
+      ),
+    );
+  });
+
   it("autosaves config changes via saveProjectConfig (no Save button)", async () => {
     vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(
       makeConfig({ model: "claude-haiku-4-5" }),
@@ -175,11 +207,15 @@ describe("SettingsView — Project section", () => {
       target: { value: "claude-opus-4-5" },
     });
 
-    await waitFor(() =>
-      expect(window.electronAPI.saveProjectConfig).toHaveBeenCalledWith(
-        "proj-42",
-        expect.objectContaining({ model: "claude-opus-4-5" }),
-      ),
+    // Text fields autosave through useAutosave's 500ms debounce — give the
+    // assertion ample headroom so it isn't sensitive to scheduler delays.
+    await waitFor(
+      () =>
+        expect(window.electronAPI.saveProjectConfig).toHaveBeenCalledWith(
+          "proj-42",
+          expect.objectContaining({ model: "claude-opus-4-5" }),
+        ),
+      { timeout: 3000 },
     );
   });
 
@@ -214,11 +250,13 @@ describe("SettingsView — Project section", () => {
     // default — and that is exactly the value autosave tracks for undo.
     fireEvent.change(modelInput, { target: { value: "" } });
 
-    await waitFor(() =>
-      expect(window.electronAPI.saveProjectConfig).toHaveBeenCalledWith(
-        "proj-norm",
-        expect.objectContaining({ provider: "anthropic", model: DEFAULT_ANTHROPIC_MODEL }),
-      ),
+    await waitFor(
+      () =>
+        expect(window.electronAPI.saveProjectConfig).toHaveBeenCalledWith(
+          "proj-norm",
+          expect.objectContaining({ provider: "anthropic", model: DEFAULT_ANTHROPIC_MODEL }),
+        ),
+      { timeout: 3000 },
     );
   });
 

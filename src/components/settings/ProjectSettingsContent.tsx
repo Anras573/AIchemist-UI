@@ -73,11 +73,13 @@ function InheritanceHint({ inherits, defaultLabel }: { inherits: boolean; defaul
 
 function SelectField({
   id,
+  ariaLabel,
   value,
   options,
   onChange,
 }: {
   id?: string;
+  ariaLabel?: string;
   value: string;
   options: { value: string; label: string; disabled?: boolean; title?: string }[];
   onChange: (v: string) => void;
@@ -85,6 +87,7 @@ function SelectField({
   return (
     <select
       id={id}
+      aria-label={ariaLabel}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
@@ -250,10 +253,13 @@ function ApprovalTab({
   }
 
   function setPolicy(category: ToolCategory, policy: ApprovalPolicy) {
-    const rules: ApprovalRule[] = TOOL_CATEGORIES.map((tc) => ({
-      tool_category: tc.category,
-      policy: tc.category === category ? policy : getPolicyForCategory(tc.category),
-    }));
+    // Update the edited category in place and preserve every other existing
+    // rule — including categories not shown in this UI (e.g. "custom"), which a
+    // blanket TOOL_CATEGORIES rebuild would silently drop.
+    const existing = config.approval_rules;
+    const rules: ApprovalRule[] = existing.some((r) => r.tool_category === category)
+      ? existing.map((r) => (r.tool_category === category ? { ...r, policy } : r))
+      : [...existing, { tool_category: category, policy }];
     onChange({ approval_rules: rules }, { immediate: true });
   }
 
@@ -283,6 +289,7 @@ function ApprovalTab({
               <span className="text-sm w-24 shrink-0">{label}</span>
               <div className="flex-1">
                 <SelectField
+                  ariaLabel={`${label} approval policy`}
                   value={getPolicyForCategory(category)}
                   options={APPROVAL_POLICIES}
                   onChange={(v) => setPolicy(category, v as ApprovalPolicy)}
@@ -314,6 +321,11 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
   const ipc = useIpc();
   const [tab, setTab] = useState<Tab>("general");
   const [config, setConfig] = useState<ProjectConfig | null>(null);
+  // The last value actually persisted (set on load + successful save). Distinct
+  // from `config`, which is the live draft and may hold an unsaved edit. This is
+  // the only thing fed to useAutosave's `initialValue` so the undo baseline can
+  // never re-sync to a value that was never written (e.g. after a failed save).
+  const [persistedConfig, setPersistedConfig] = useState<ProjectConfig | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [appDefaults, setAppDefaults] = useState<AppDefaults | null>(null);
   const { probes } = useProviderProbes(projectId);
@@ -346,19 +358,21 @@ export function ProjectSettingsContent({ projectId }: ProjectSettingsContentProp
       // or touching an unmounted tree (e.g. the unmount flush on project switch).
       if (!mountedRef.current || seq !== saveSeqRef.current) return;
       setConfig(next);
+      setPersistedConfig(next);
     },
     [ipc, projectId],
   );
   const save = useAutosave<ProjectConfig>(persistConfig, {
-    initialValue: config ?? undefined,
+    initialValue: persistedConfig ?? undefined,
   });
 
   function loadConfig() {
     const gen = ++loadGenRef.current;
     setConfig(null);
+    setPersistedConfig(null);
     setLoadError(null);
     ipc.getProjectConfig(projectId)
-      .then((c) => { if (loadGenRef.current === gen) setConfig(c); })
+      .then((c) => { if (loadGenRef.current === gen) { setConfig(c); setPersistedConfig(c); } })
       .catch((e) => { if (loadGenRef.current === gen) setLoadError(e instanceof Error ? e.message : String(e)); });
   }
 
