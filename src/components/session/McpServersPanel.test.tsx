@@ -80,6 +80,22 @@ describe("McpServersPanel", () => {
     expect(window.electronAPI.mcpProbeManaged).not.toHaveBeenCalled();
   });
 
+  it("deep-links into the Settings MCP section instead of opening an inline editor", async () => {
+    useSessionStore.getState().addSession(makeSession());
+    useSessionStore.getState().setActiveSession("sess-1");
+    useProjectStore.getState().addProject(makeProject());
+    useProjectStore.getState().setActiveProject("proj-1");
+
+    renderWithProviders(<McpServersPanel />);
+    await screen.findByText("context7");
+
+    // The "Manage servers →" deep link opens the hub at the MCP section.
+    fireEvent.click(screen.getByRole("button", { name: /Manage servers/ }));
+
+    expect(useProjectStore.getState().settingsOpen).toBe(true);
+    expect(useProjectStore.getState().settingsSection).toEqual({ scope: "app", id: "mcp" });
+  });
+
   it("drops stale servers and shows the error when a refresh fails", async () => {
     useSessionStore.getState().addSession(makeSession());
     useSessionStore.getState().setActiveSession("sess-1");

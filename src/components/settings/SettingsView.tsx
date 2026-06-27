@@ -15,12 +15,13 @@ import { useAutosave } from "@/lib/hooks/useAutosave";
 import { SettingsSection } from "@/components/settings/primitives/SettingsSection";
 import { SettingField, SettingStatus } from "@/components/settings/primitives/SettingField";
 import { ProvidersAndKeysSection } from "@/components/settings/sections/ProvidersAndKeysSection";
+import { McpServersSection } from "@/components/settings/sections/McpServersSection";
 
 interface SettingsViewProps {
   onClose: () => void;
 }
 
-type Section = "providers" | "advanced" | "appearance";
+type Section = "providers" | "mcp" | "advanced" | "appearance";
 
 // Application-tier nav rows. Project-tier rows are derived from the active
 // project at render time (see PROJECT_NAV). The old "API Keys" / "Model
@@ -28,6 +29,7 @@ type Section = "providers" | "advanced" | "appearance";
 // section (one card per provider).
 const APP_NAV: { id: Section; label: string }[] = [
   { id: "providers", label: "Providers & Keys" },
+  { id: "mcp", label: "MCP Servers" },
   { id: "appearance", label: "Appearance" },
   { id: "advanced", label: "Advanced" },
 ];
@@ -272,6 +274,16 @@ export function SettingsView({ onClose }: SettingsViewProps) {
             {/* ── Providers & Keys ── */}
             {activeSection === "providers" && (
               <ProvidersAndKeysSection settings={settings} writeSetting={writeSetting} />
+            )}
+
+            {/* ── MCP Servers ── */}
+            {activeSection === "mcp" && (
+              <SettingsSection
+                title="MCP Servers"
+                description="Manage MCP server configuration. Per-session enable/disable lives in the MCP panel."
+              >
+                <McpServersSection projectPath={activeProject?.path ?? ""} />
+              </SettingsSection>
             )}
 
             {/* ── Advanced (autosave) ── */}
