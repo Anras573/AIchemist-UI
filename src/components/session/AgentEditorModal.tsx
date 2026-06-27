@@ -81,7 +81,11 @@ export function AgentEditorModal({
 
     if (isNew) {
       setName("");
-      setScope("project");
+      // Copilot project-scope agents are written under the project path; when the
+      // hub is opened standalone (no active project) default to global so the
+      // create doesn't resolve to an invalid empty-path project dir. (Non-Copilot
+      // agents ignore scope — they always go to ~/.claude/agents.)
+      setScope(projectPath ? "project" : "global");
       setContent(defaultAgentContent("my-agent"));
       return;
     }
@@ -112,7 +116,7 @@ export function AgentEditorModal({
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [open, agent, isNew, readOnly]);
+  }, [open, agent, isNew, readOnly, projectPath]);
 
   const handleSave = async () => {
     setError(null);
@@ -210,7 +214,10 @@ export function AgentEditorModal({
                     value={scope}
                     onChange={(e) => setScope(e.target.value as "global" | "project")}
                   >
-                    <option value="project">Project</option>
+                    {/* Project scope requires an active project to write into. */}
+                    <option value="project" disabled={!projectPath}>
+                      Project
+                    </option>
                     <option value="global">Global</option>
                   </select>
                 </div>
