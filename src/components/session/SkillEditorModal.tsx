@@ -16,7 +16,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import type { SkillInfo } from "@/types";
+import type { Provider, SkillInfo } from "@/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -47,6 +47,13 @@ interface SkillEditorModalProps {
   onSaved: () => void;
   /** When true, shows content read-only without save/delete controls. */
   readOnly?: boolean;
+  /**
+   * Overrides the provider used to resolve the global-scope skill directory.
+   * The Settings hub passes this so a skill created with no active session
+   * still lands in the correct provider's global dir (it falls back to the
+   * app default provider). When omitted, the active session's provider is used.
+   */
+  providerOverride?: Provider | null;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -58,11 +65,14 @@ export function SkillEditorModal({
   onClose,
   onSaved,
   readOnly = false,
+  providerOverride,
 }: SkillEditorModalProps) {
   const ipc = useIpc();
   // Global-scope skills go in the provider-specific global dir (Copilot scans
   // ~/.agents/skills, Claude ~/.claude/skills) so discovery can find them.
-  const provider = useActiveSessionProvider();
+  // An explicit override (from the hub) wins over the active session.
+  const sessionProvider = useActiveSessionProvider();
+  const provider = providerOverride ?? sessionProvider;
   const isNew = skill === null;
 
   const [name, setName] = useState("");

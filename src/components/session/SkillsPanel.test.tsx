@@ -102,6 +102,37 @@ describe("SkillsPanel", () => {
     );
   });
 
+  it("deep-links New Skill into the hub Skills section instead of editing inline", async () => {
+    const user = userEvent.setup();
+    setupStores();
+    vi.mocked(window.electronAPI.listSkills).mockResolvedValue([]);
+
+    renderWithProviders(<SkillsPanel />);
+
+    await user.click(await screen.findByRole("button", { name: /new skill/i }));
+
+    // No inline create modal — the panel navigates to the hub instead.
+    expect(screen.queryByRole("heading", { name: "New Skill" })).not.toBeInTheDocument();
+    const { settingsOpen, settingsSection } = useProjectStore.getState();
+    expect(settingsOpen).toBe(true);
+    expect(settingsSection).toEqual({ scope: "app", id: "skills" });
+  });
+
+  it("deep-links the edit (pencil) into the hub Skills section", async () => {
+    const user = userEvent.setup();
+    setupStores();
+    vi.mocked(window.electronAPI.listSkills).mockResolvedValue([USER_SKILL]);
+
+    renderWithProviders(<SkillsPanel />);
+
+    await waitFor(() => expect(screen.getByText("brainstorming")).toBeInTheDocument());
+    await user.click(screen.getByLabelText("Edit skill"));
+
+    const { settingsOpen, settingsSection } = useProjectStore.getState();
+    expect(settingsOpen).toBe(true);
+    expect(settingsSection).toEqual({ scope: "app", id: "skills" });
+  });
+
   it("shows empty state message when no skills are installed", async () => {
     setupStores();
     vi.mocked(window.electronAPI.listSkills).mockResolvedValue([]);

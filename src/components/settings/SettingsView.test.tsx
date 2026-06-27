@@ -435,6 +435,41 @@ describe("SettingsView — Providers & Keys", () => {
   });
 });
 
+describe("SettingsView — Skills & Agents sections", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(window.electronAPI.listSkills).mockResolvedValue([]);
+    vi.mocked(window.electronAPI.getClaudeAgents).mockResolvedValue([]);
+    vi.mocked(window.electronAPI.getCopilotAgents).mockResolvedValue([]);
+  });
+
+  it("lists skills via the app default provider when no session is active", async () => {
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({
+      AICHEMIST_DEFAULT_PROVIDER: "copilot",
+    } as never);
+
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Skills" }));
+
+    await waitFor(() =>
+      expect(window.electronAPI.listSkills).toHaveBeenCalledWith("", "copilot"),
+    );
+  });
+
+  it("lists Copilot agents via the app default provider when no session is active", async () => {
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({
+      AICHEMIST_DEFAULT_PROVIDER: "copilot",
+    } as never);
+
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Agents" }));
+
+    await waitFor(() =>
+      expect(window.electronAPI.getCopilotAgents).toHaveBeenCalledWith(""),
+    );
+  });
+});
+
 describe("SettingsView — OpenAI-compatible endpoints error feedback", () => {
   beforeEach(() => {
     vi.clearAllMocks();

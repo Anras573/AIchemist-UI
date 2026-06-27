@@ -253,10 +253,10 @@ System prompt / instructions here.
 
 ### Viewing and editing agents
 
-Both `AgentsPanel` and `AgentPickerButton` show per-agent action icons on hover:
-
-- **Eye icon** — opens `AgentEditorModal` with `readOnly=true`: renders the agent's markdown body via `Streamdown` (frontmatter stripped), no Save/Delete, "Close" instead of "Cancel". Available for all agents including SDK built-ins (which show name + description since they have no file path).
+- **Eye icon** — opens `AgentEditorModal` with `readOnly=true`: renders the agent's markdown body via `Streamdown` (frontmatter stripped), no Save/Delete, "Close" instead of "Cancel". Available for all agents including SDK built-ins (which show name + description since they have no file path). The `AgentPickerButton` keeps this inline viewer.
 - **Pencil icon** — opens `AgentEditorModal` in edit mode. Only shown for agents where `agent.editable !== false && agent.path`.
+
+> **Configuration vs activation (settings hub overhaul):** `AgentPickerButton` stays the per-session **selection** surface (and inline read-only viewer). Its **edit** (pencil) and **New agent…** affordances deep-link to the Agents hub section (`openSettings({ scope: "app", id: "agents" })`) instead of editing inline. The hub section is `src/components/settings/sections/AgentsSection.tsx` — lists `getCopilotAgents` (Copilot) / `getClaudeAgents` (every other provider, since they read Claude agent files), view/edit/create via `AgentEditorModal`. Provider-aware via the resolved hub provider (active session's, falling back to `AICHEMIST_DEFAULT_PROVIDER`), collapsed to the file provider (`copilot` vs `anthropic`) that owns the files. (`AgentsPanel` is legacy and no longer mounted.)
 
 ---
 
@@ -270,10 +270,12 @@ Both `AgentsPanel` and `AgentPickerButton` show per-agent action icons on hover:
 | **Global** | `~/.claude/skills/*/` | `~/.agents/skills/*/` |
 | **Plugin** | `~/.claude/plugins/installed_plugins.json` → each install's `skills/*/SKILL.md` | `~/.copilot/installed-plugins/<scope>/<plugin>/skills/*/SKILL.md` |
 
+> **Configuration vs activation (settings hub overhaul):** the panel is the per-session **activation** surface (the card-body click toggles a skill on/off; the eye opens a read-only viewer inline). **Creating / editing** skills moved into the hub: the panel's pencil and **New Skill** affordances now deep-link to the Skills hub section (`openSettings({ scope: "app", id: "skills" })`) rather than opening an inline editor. The hub section is `src/components/settings/sections/SkillsSection.tsx` — lists `listSkills(projectPath, provider)`, view/edit/create via `SkillEditorModal` rendered inline. It is provider-aware via the resolved hub provider (active session's provider, falling back to `AICHEMIST_DEFAULT_PROVIDER` when the hub is opened with no session); `SettingsView` passes that down, and `SkillEditorModal` gained a `providerOverride` prop so a standalone-hub create still lands in the correct provider's global dir.
+
 Skills with a higher-priority source suppress same-named skills from lower tiers. `SkillInfo.source` controls panel behaviour:
 
-- **`"user"` skills** (project/global) — show pencil icon (editable); click opens `SkillEditorModal` in edit mode.
-- **`"plugin"` skills** — pencil icon hidden (read-only); click opens viewer instead.
+- **`"user"` skills** (project/global) — show pencil icon; click deep-links to the hub Skills section.
+- **`"plugin"` skills** — pencil icon hidden (read-only); eye opens the inline viewer.
 
 Each card supports three interactions:
 
