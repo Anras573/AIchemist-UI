@@ -1,3 +1,4 @@
+import * as nodePath from "node:path";
 import type { AgentInfo } from "../../src/types/index";
 import { getApiKey } from "../config";
 import { TurnEmitter } from "./turn-emitter";
@@ -185,6 +186,34 @@ function renderMcpToolOutput(item: Extract<ThreadItem, { type: "mcp_tool_call" }
   return fallback === undefined || fallback === null ? "" : JSON.stringify(fallback);
 }
 
+/**
+ * Drive the renderer's Changes panel (SESSION_FILE_CHANGE) from a Codex
+ * `file_change` item, for parity with the other providers. Best-effort: Codex
+ * doesn't give us a diff, and a path we can't resolve is skipped rather than
+ * breaking the turn.
+ */
+function emitFileChanges(
+  emitter: TurnEmitter,
+  projectPath: string,
+  changes: Extract<ThreadItem, { type: "file_change" }>["changes"],
+): void {
+  for (const change of changes) {
+    try {
+      const abs = nodePath.isAbsolute(change.path)
+        ? nodePath.normalize(change.path)
+        : nodePath.resolve(projectPath, change.path);
+      emitter.fileChange({
+        path: abs,
+        relativePath: nodePath.relative(projectPath, abs) || nodePath.basename(abs),
+        diff: "",
+        operation: change.kind === "delete" ? "delete" : "write",
+      });
+    } catch {
+      // best-effort — never break the turn on an unresolvable path
+    }
+  }
+}
+
 /** A short, human-readable label + output for a Codex tool item, for the timeline/traces. */
 function describeToolItem(
   item: ThreadItem,
@@ -298,6 +327,11 @@ export const codexProvider: AgentProvider = {
               if (desc) {
                 emitter.toolResult(desc.name, desc.output);
                 recorder?.toolResult(item.id, desc.output, desc.isError);
+              }
+              // A successful patch also drives the Changes panel (parity with
+              // the other providers).
+              if (item.type === "file_change" && item.status === "completed") {
+                emitFileChanges(emitter, projectPath, item.changes);
               }
             }
             break;

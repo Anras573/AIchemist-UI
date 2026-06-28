@@ -32,6 +32,7 @@ vi.mock("./turn-emitter", () => ({
     this.usage = vi.fn();
     this.toolCall = vi.fn();
     this.toolResult = vi.fn();
+    this.fileChange = vi.fn();
   }),
 }));
 
@@ -78,6 +79,14 @@ const ev = {
       exit_code: failed ? 1 : 0,
       status: failed ? "failed" : "completed",
     },
+  }),
+  fileChangeCompleted: (
+    id: string,
+    changes: Array<{ path: string; kind: "add" | "delete" | "update" }>,
+    status: "completed" | "failed" = "completed",
+  ): ThreadEvent => ({
+    type: "item.completed",
+    item: { id, type: "file_change", changes, status },
   }),
   mcpCompleted: (id: string, server: string, tool: string, content: unknown[]): ThreadEvent => ({
     type: "item.completed",
@@ -219,6 +228,43 @@ describe("codexProvider (SDK-backed)", () => {
     expect(lastEmitter().toolCall).toHaveBeenCalledTimes(1); // not double-emitted on completion
     expect(lastEmitter().toolResult).toHaveBeenCalledWith("execute_bash", "total 0\n");
     expect(recorderMock.toolResult).toHaveBeenCalledWith("cmd-1", "total 0\n", false);
+  });
+
+  it("drives the Changes panel from successful file_change items", async () => {
+    _setCodexForTests(
+      makeCodex({
+        startThread: vi.fn(() =>
+          makeThread([
+            ev.fileChangeCompleted("fc-1", [
+              { path: "src/new.ts", kind: "add" },
+              { path: "/project/src/gone.ts", kind: "delete" },
+            ]),
+            ev.fileChangeCompleted("fc-2", [{ path: "src/skip.ts", kind: "update" }], "failed"),
+            ev.agentMessage("done"),
+            ev.usage(),
+          ]),
+        ),
+      }) as any,
+    );
+
+    await codexProvider.run(makeParams());
+
+    const fc = lastEmitter().fileChange;
+    // Relative path resolved against projectPath -> absolute; delete kind mapped.
+    expect(fc).toHaveBeenCalledWith({
+      path: "/project/src/new.ts",
+      relativePath: "src/new.ts",
+      diff: "",
+      operation: "write",
+    });
+    expect(fc).toHaveBeenCalledWith({
+      path: "/project/src/gone.ts",
+      relativePath: "src/gone.ts",
+      diff: "",
+      operation: "delete",
+    });
+    // The failed patch is not surfaced as a change.
+    expect(fc).toHaveBeenCalledTimes(2);
   });
 
   it("renders mcp_tool_call text content as raw text (not JSON-escaped)", async () => {
