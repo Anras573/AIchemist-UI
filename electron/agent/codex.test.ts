@@ -261,6 +261,21 @@ describe("codexProvider (SDK-backed)", () => {
     expect(recorderMock.turnStart).not.toHaveBeenCalled();
   });
 
+  it("does not read or write provider_state for noTools (skipPersistence) turns", async () => {
+    // A stored thread exists, but a throwaway noTools turn must not resume it or
+    // persist its own ephemeral thread id over it.
+    vi.mocked(providerSessionStore.get).mockReturnValue({ threadId: "real-thread" });
+    const resumeThread = vi.fn();
+    const startThread = vi.fn(() => makeThread([ev.threadStarted("ephemeral"), ev.agentMessage("draft"), ev.usage()]));
+    _setCodexForTests(makeCodex({ startThread, resumeThread }) as any);
+
+    await codexProvider.run(makeParams({ noTools: true }));
+
+    expect(providerSessionStore.get).not.toHaveBeenCalled();
+    expect(providerSessionStore.set).not.toHaveBeenCalled();
+    expect(resumeThread).not.toHaveBeenCalled(); // started fresh, didn't touch the real thread
+  });
+
   it("uses workspace-write + never-approve for nonInteractive (autonomous) turns", async () => {
     const startThread = vi.fn(() => makeThread([ev.agentMessage("auto"), ev.usage()]));
     _setCodexForTests(makeCodex({ startThread }) as any);
@@ -309,6 +324,22 @@ describe("codexProvider (SDK-backed)", () => {
       { id: "gpt-4o", name: "gpt-4o" },
       { id: "o3-mini", name: "o3-mini" },
     ]);
+  });
+
+  it("honors OPENAI_BASE_URL for model listing", async () => {
+    const prev = process.env.OPENAI_BASE_URL;
+    process.env.OPENAI_BASE_URL = "https://proxy.example.com/v1";
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ data: [{ id: "gpt-4o" }] }) });
+    _setFetchForTests(fetchSpy as unknown as typeof fetch);
+    try {
+      await codexProvider.listModels?.();
+      expect(fetchSpy).toHaveBeenCalledWith("https://proxy.example.com/v1/models", expect.anything());
+    } finally {
+      if (prev === undefined) delete process.env.OPENAI_BASE_URL;
+      else process.env.OPENAI_BASE_URL = prev;
+    }
   });
 
   it("probes successfully with a valid API key and caches until forced", async () => {

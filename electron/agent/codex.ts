@@ -66,11 +66,16 @@ async function getCodex(): Promise<Codex> {
   return codexInstance;
 }
 
+/** OpenAI API base — honors `OPENAI_BASE_URL` (proxy/enterprise) for both the SDK and `/models`. */
+function resolveOpenAiBaseUrl(): string {
+  return process.env.OPENAI_BASE_URL?.trim() || OPENAI_API_BASE_URL;
+}
+
 async function fetchModelsResponse(apiKey: string): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OPENAI_MODELS_TIMEOUT_MS);
   try {
-    return await fetchImpl(`${OPENAI_API_BASE_URL}/models`, {
+    return await fetchImpl(`${resolveOpenAiBaseUrl()}/models`, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: controller.signal,
     });
@@ -225,8 +230,12 @@ export const codexProvider: AgentProvider = {
       skipGitRepoCheck: true,
     };
 
-    // Resume the persisted Codex thread, or start a fresh one.
-    const prior = providerSessionStore.get(db, sessionId, "codex");
+    // Resume the persisted Codex thread, or start a fresh one. `noTools` turns
+    // (skipPersistence — e.g. PR-draft generation) run a throwaway thread and
+    // must NOT read or write provider_state: otherwise a discarded turn's
+    // ephemeral/read-only thread state would leak into later normal turns.
+    const persistThread = !noTools;
+    const prior = persistThread ? providerSessionStore.get(db, sessionId, "codex") : null;
     const resumeId = prior?.threadId ?? null;
     const thread: Thread = resumeId
       ? codex.resumeThread(resumeId, threadOptions)
@@ -258,7 +267,9 @@ export const codexProvider: AgentProvider = {
       for await (const event of events as AsyncGenerator<ThreadEvent>) {
         switch (event.type) {
           case "thread.started":
-            providerSessionStore.set(db, sessionId, "codex", { threadId: event.thread_id });
+            if (persistThread) {
+              providerSessionStore.set(db, sessionId, "codex", { threadId: event.thread_id });
+            }
             break;
           case "item.started":
             emitToolCall(event.item);
@@ -303,7 +314,7 @@ export const codexProvider: AgentProvider = {
       }
       // The thread id is also populated on the Thread after the first turn; back-stop
       // the persistence in case no `thread.started` event was observed on resume.
-      if (thread.id) {
+      if (persistThread && thread.id) {
         providerSessionStore.set(db, sessionId, "codex", { threadId: thread.id });
       }
       recorder?.turnEnd("success");
