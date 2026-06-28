@@ -43,6 +43,16 @@ describe("SkillEditorModal — new skill", () => {
     expect(screen.getByDisplayValue(/Describe the capability/i)).toBeInTheDocument();
   });
 
+  it("defaults to global scope and disables the Project option when no project path", () => {
+    renderModal({ skill: null, projectPath: "" });
+    // Standalone hub (no active project) — Project scope would resolve to an
+    // empty path the backend rejects, so the create defaults to Global.
+    const select = screen.getByDisplayValue(/global/i) as HTMLSelectElement;
+    expect(select.value).toBe("global");
+    const projectOption = screen.getByRole("option", { name: "Project" }) as HTMLOptionElement;
+    expect(projectOption.disabled).toBe(true);
+  });
+
   it("shows error when name is empty on create", async () => {
     renderModal({ skill: null });
     await userEvent.click(screen.getByRole("button", { name: /create/i }));

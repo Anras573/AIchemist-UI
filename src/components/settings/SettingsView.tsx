@@ -16,12 +16,16 @@ import { SettingsSection } from "@/components/settings/primitives/SettingsSectio
 import { SettingField, SettingStatus } from "@/components/settings/primitives/SettingField";
 import { ProvidersAndKeysSection } from "@/components/settings/sections/ProvidersAndKeysSection";
 import { McpServersSection } from "@/components/settings/sections/McpServersSection";
+import { SkillsSection } from "@/components/settings/sections/SkillsSection";
+import { AgentsSection } from "@/components/settings/sections/AgentsSection";
+import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
+import { isProvider } from "@/lib/providers";
 
 interface SettingsViewProps {
   onClose: () => void;
 }
 
-type Section = "providers" | "mcp" | "advanced" | "appearance";
+type Section = "providers" | "mcp" | "skills" | "agents" | "advanced" | "appearance";
 
 // Application-tier nav rows. Project-tier rows are derived from the active
 // project at render time (see PROJECT_NAV). The old "API Keys" / "Model
@@ -30,6 +34,8 @@ type Section = "providers" | "mcp" | "advanced" | "appearance";
 const APP_NAV: { id: Section; label: string }[] = [
   { id: "providers", label: "Providers & Keys" },
   { id: "mcp", label: "MCP Servers" },
+  { id: "skills", label: "Skills" },
+  { id: "agents", label: "Agents" },
   { id: "appearance", label: "Appearance" },
   { id: "advanced", label: "Advanced" },
 ];
@@ -133,6 +139,14 @@ export function SettingsView({ onClose }: SettingsViewProps) {
   // A persisted activeProjectId can resolve before the async-loaded projects
   // list arrives; treat that window as "loading" rather than "no project".
   const projectsLoading = activeProjectId !== null && activeProject === null && projects.length === 0;
+
+  // Provider context for the provider-aware Skills / Agents hub sections. The
+  // hub can be opened standalone (no active session), so fall back to the app
+  // default provider rather than assuming a session exists.
+  const sessionProvider = useActiveSessionProvider();
+  const appDefaultProvider = normalizeProvider(settings?.AICHEMIST_DEFAULT_PROVIDER);
+  const hubProvider = sessionProvider ?? (isProvider(appDefaultProvider) ? appDefaultProvider : null);
+  const hubProjectPath = activeProject?.path ?? "";
 
   // Case-insensitive nav filter over section labels.
   const q = search.trim().toLowerCase();
@@ -283,6 +297,26 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                 description="Manage MCP server configuration. Per-session enable/disable lives in the MCP panel."
               >
                 <McpServersSection projectPath={activeProject?.path ?? ""} />
+              </SettingsSection>
+            )}
+
+            {/* ── Skills ── */}
+            {activeSection === "skills" && (
+              <SettingsSection
+                title="Skills"
+                description="Create and edit skills available to your agents. Per-session enable/disable lives in the Skills panel."
+              >
+                <SkillsSection provider={hubProvider} projectPath={hubProjectPath} />
+              </SettingsSection>
+            )}
+
+            {/* ── Agents ── */}
+            {activeSection === "agents" && (
+              <SettingsSection
+                title="Agents"
+                description="Create and edit agent files. Per-session selection lives in the agent picker."
+              >
+                <AgentsSection provider={hubProvider} projectPath={hubProjectPath} />
               </SettingsSection>
             )}
 

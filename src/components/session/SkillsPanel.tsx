@@ -126,6 +126,7 @@ export function SkillsPanel() {
   const { projects, activeProjectId } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const { activeSessionId, sessionSkills, setSessionSkills, sessions } = useSessionStore();
+  const openSettings = useProjectStore((s) => s.openSettings);
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const projectPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
   const activeSkills = activeSessionId ? (sessionSkills[activeSessionId] ?? []) : [];
@@ -134,9 +135,17 @@ export function SkillsPanel() {
   // Cache the skill listing by project path + provider (the two inputs that
   // change the scanned locations) so re-mounting the panel doesn't re-scan disk.
   const skillsKey = projectPath ? `skills:${projectPath}:${provider ?? ""}` : null;
-  const { data, refetch: reloadSkills } = useIpcQuery<SkillInfo[]>(
+  const { data } = useIpcQuery<SkillInfo[]>(
     skillsKey,
     () => ipc.listSkills(projectPath, provider ?? undefined).catch(() => []),
+  );
+
+  // Creation / editing of skills lives in the Settings hub (the global config
+  // surface). The panel stays the per-session activation surface — its New /
+  // Edit affordances deep-link there rather than editing inline.
+  const manageSkills = useCallback(
+    () => openSettings({ scope: "app", id: "skills" }),
+    [openSettings],
   );
   // `null` is the loading sentinel the render below keys off of; an empty key
   // (no project) resolves to an empty list rather than a perpetual spinner.
@@ -168,10 +177,9 @@ export function SkillsPanel() {
     );
   }) ?? null;
 
-  // Modal state — undefined means closed, null means "new", SkillInfo means "edit/view"
-  const [editingSkill, setEditingSkill] = useState<SkillInfo | null | undefined>(undefined);
+  // The panel only views skills inline (read-only); creating / editing is
+  // delegated to the hub. `undefined` means the viewer is closed.
   const [viewingSkill, setViewingSkill] = useState<SkillInfo | undefined>(undefined);
-  const modalOpen = editingSkill !== undefined;
   const viewModalOpen = viewingSkill !== undefined;
 
   const handleToggle = useCallback(
@@ -186,12 +194,7 @@ export function SkillsPanel() {
     [activeSessionId, activeSkills, setSessionSkills]
   );
 
-  const handleModalClose = useCallback(() => setEditingSkill(undefined), []);
   const handleViewModalClose = useCallback(() => setViewingSkill(undefined), []);
-
-  const handleModalSaved = useCallback(() => {
-    void reloadSkills();
-  }, [reloadSkills]);
 
   return (
     <>
@@ -272,7 +275,7 @@ export function SkillsPanel() {
                 active={activeSkills.includes(skill.name)}
                 onToggle={() => handleToggle(skill.name)}
                 onView={() => setViewingSkill(skill)}
-                onEdit={() => skill.source !== "plugin" ? setEditingSkill(skill) : setViewingSkill(skill)}
+                onEdit={manageSkills}
               />
             ))
           )}
@@ -282,23 +285,13 @@ export function SkillsPanel() {
             variant="outline"
             size="sm"
             className="w-full gap-1.5 text-xs"
-            onClick={() => setEditingSkill(null)}
+            onClick={manageSkills}
           >
             <Plus className="h-3 w-3" />
             New Skill
           </Button>
         </div>
       </div>
-
-      {modalOpen && (
-        <SkillEditorModal
-          skill={editingSkill ?? null}
-          projectPath={projectPath}
-          open={modalOpen}
-          onClose={handleModalClose}
-          onSaved={handleModalSaved}
-        />
-      )}
 
       {viewModalOpen && viewingSkill && (
         <SkillEditorModal

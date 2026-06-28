@@ -54,7 +54,7 @@ function AgentSourceBadge({ source, plugin }: { source?: string; plugin?: string
 export function AgentPickerButton() {
   const ipc = useIpc();
   const { activeSessionId, sessions, sessionAgents, setSessionAgent } = useSessionStore();
-  const { projects, activeProjectId } = useProjectStore();
+  const { projects, activeProjectId, openSettings } = useProjectStore();
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
 
@@ -69,10 +69,9 @@ export function AgentPickerButton() {
   const [pendingAgent, setPendingAgent] = useState<string | null | undefined>(undefined);
   const confirmOpen = pendingAgent !== undefined;
 
-  // Editor modal state
-  const [editingAgent, setEditingAgent] = useState<AgentInfo | null | undefined>(undefined);
+  // The picker only views agents inline (read-only); creating / editing is
+  // delegated to the Settings hub.
   const [viewingAgent, setViewingAgent] = useState<AgentInfo | undefined>(undefined);
-  const modalOpen = editingAgent !== undefined;
 
   const selectedAgent = activeSessionId
     ? (sessionAgents[activeSessionId] ?? null)
@@ -138,30 +137,24 @@ export function AgentPickerButton() {
     setPendingAgent(undefined);
   }, []);
 
-  const handleEdit = useCallback((agent: AgentInfo, e: React.MouseEvent) => {
-    e.stopPropagation();
+  // Creating / editing agents lives in the Settings hub (the global config
+  // surface). The picker stays the per-session selection surface — its New /
+  // Edit affordances deep-link there rather than editing inline.
+  const manageAgents = useCallback(() => {
     setOpen(false);
-    setEditingAgent(agent);
-  }, []);
+    openSettings({ scope: "app", id: "agents" });
+  }, [openSettings]);
+
+  const handleEdit = useCallback((_agent: AgentInfo, e: React.MouseEvent) => {
+    e.stopPropagation();
+    manageAgents();
+  }, [manageAgents]);
 
   const handleView = useCallback((agent: AgentInfo, e: React.MouseEvent) => {
     e.stopPropagation();
     setOpen(false);
     setViewingAgent(agent);
   }, []);
-
-  const handleNew = useCallback(() => {
-    setOpen(false);
-    setEditingAgent(null);
-  }, []);
-
-  const handleModalClose = useCallback(() => setEditingAgent(undefined), []);
-
-  const handleModalSaved = useCallback(() => {
-    // Force reload by resetting the list
-    setAgents([]);
-    loadAgents();
-  }, [loadAgents]);
 
   // Hidden when no provider is set
   if (!provider) return null;
@@ -271,7 +264,7 @@ export function AgentPickerButton() {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="flex items-center gap-2 text-xs cursor-pointer text-muted-foreground hover:text-foreground"
-                onClick={handleNew}
+                onClick={manageAgents}
               >
                 <Plus className="h-3.5 w-3.5 shrink-0" />
                 New agent…
@@ -303,18 +296,7 @@ export function AgentPickerButton() {
         </DialogContent>
       </Dialog>
 
-      {/* Modal rendered outside dropdown to avoid z-index issues */}
-      {modalOpen && (
-        <AgentEditorModal
-          agent={editingAgent ?? null}
-          provider={provider}
-          projectPath={projectPath}
-          open={modalOpen}
-          onClose={handleModalClose}
-          onSaved={handleModalSaved}
-        />
-      )}
-
+      {/* Read-only viewer rendered outside dropdown to avoid z-index issues */}
       {viewingAgent && (
         <AgentEditorModal
           agent={viewingAgent}
