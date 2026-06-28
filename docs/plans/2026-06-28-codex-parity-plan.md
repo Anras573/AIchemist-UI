@@ -143,17 +143,32 @@ comes last.
 
 ---
 
-## Open question to resolve before #127
+## Resolved: migrated to `@openai/codex-sdk`
 
-The MVP uses the **OpenAI Assistants Threads/Runs API** (`openai` SDK's
-`beta.threads`), not `@openai/codex-sdk` as the epic title states. The tool
-loop (`requires_action` / `submit_tool_outputs`) is specific to Assistants.
-Decide before starting #127 whether to:
+The earlier open question (Assistants API vs. `@openai/codex-sdk`) is settled —
+**we migrated to `@openai/codex-sdk`.** `electron/agent/codex.ts` now drives the
+SDK (`Codex.startThread` / `resumeThread`, `thread.runStreamed`) instead of the
+`openai` `beta.threads` Assistants API.
 
-- **(a)** stay on the Assistants API and build the loop as above
-  (recommended for continuity), or
-- **(b)** migrate to `@openai/codex-sdk` first — which changes how #127 is
-  implemented.
+This **reshapes the remaining workstreams** above, because the SDK is not an
+HTTP client — it spawns the Codex CLI binary and runs Codex as a self-driving
+agent that executes its own tools inside its own sandbox:
+
+- **The `requires_action` loop is moot.** Codex executes shell/file/MCP tools
+  itself; we no longer route tool calls through `runGatedTool`. Instead we
+  configure Codex's `sandboxMode` + `approvalPolicy` (`resolveSandboxPolicy`)
+  and reflect the streamed `item.*` events (`command_execution`, `file_change`,
+  `mcp_tool_call`, …) onto the timeline + trace transcript.
+- **#127 / #128 are reframed** around mapping AIchemist's approval/trust model
+  onto Codex's sandbox/approval policy. Surfacing Codex's interactive
+  `on-request` approvals through our approval UI is the remaining hard part —
+  the non-interactive `codex exec` transport can't do interactive callbacks, so
+  it needs the app-server JSON-RPC protocol (still open).
+- **#131 (traces) is largely done** by the migration: `codex.ts` writes a native
+  transcript and `trace-handlers.ts` routes `codex` to the native branch.
+- **Runtime dependency:** the SDK resolves the `codex` binary from the bundled
+  `@openai/codex-<platform>` package (or `CODEX_CLI_PATH`); that binary must be
+  packaged with the app.
 
 ## Shared modules to reuse (do not re-implement)
 
