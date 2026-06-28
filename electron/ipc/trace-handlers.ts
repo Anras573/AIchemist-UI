@@ -93,7 +93,11 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
         effectiveProvider = "anthropic";
       }
     }
-    if (effectiveProvider === "ollama" || effectiveProvider === "openai-compatible") {
+    if (
+      effectiveProvider === "ollama" ||
+      effectiveProvider === "openai-compatible" ||
+      effectiveProvider === "codex"
+    ) {
       return { kind: "native", sessionId };
     }
     return null;

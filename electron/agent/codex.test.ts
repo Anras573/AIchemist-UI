@@ -1,130 +1,106 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { AgentProviderParams } from "./provider";
+import type { ThreadEvent } from "@openai/codex-sdk";
 
-// Mock OpenAI SDK first (before any imports)
-vi.mock("openai", () => {
-  class MockOpenAI {
-    beta = {
-      threads: {
-        create: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
-        retrieve: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
-        messages: {
-          create: vi.fn(async () => ({
-            id: "msg-123",
-            thread_id: "thread-123",
-            role: "user" as const,
-            content: [{ type: "text", text: "test" }],
-            created_at: 1719360000,
-          })),
-        },
-        runs: {
-          stream: vi.fn(async function* () {
-            yield {
-              event: "thread.message.delta",
-              data: {
-                delta: {
-                  content: [{ type: "text", text: "Hello " }],
-                },
-              },
-            };
-            yield {
-              event: "thread.message.delta",
-              data: {
-                delta: {
-                  content: [{ type: "text", text: "Codex" }],
-                },
-              },
-            };
-            yield {
-              event: "thread.run.completed",
-              data: {
-                usage: {
-                  prompt_tokens: 10,
-                  completion_tokens: 5,
-                  total_tokens: 15,
-                },
-              },
-            };
-          }),
-        },
-      },
-    };
-  }
-  return { default: MockOpenAI };
-});
-
-// Mock getApiKey
-vi.mock("../config", () => ({
-  getApiKey: vi.fn((key) => {
-    if (key === "openai") return "sk-test-key";
-    return undefined;
-  }),
-}));
-
-// Mock provider session store
-vi.mock("./provider-session-store", () => ({
-  providerSessionStore: {
-    get: vi.fn(() => ({})),
-    set: vi.fn(),
-    reset: vi.fn(),
+// ── Hoisted mock state ────────────────────────────────────────────────────────
+const { recorderMock } = vi.hoisted(() => ({
+  recorderMock: {
+    turnStart: vi.fn(),
+    reasoning: vi.fn(),
+    usage: vi.fn(),
+    turnEnd: vi.fn(),
+    toolCall: vi.fn(),
+    toolResult: vi.fn(),
   },
 }));
 
-// Mock TurnEmitter
+// Safety net: if a test path ever reaches the lazy SDK import (it shouldn't —
+// run tests inject a client via _setCodexForTests), keep it harmless.
+vi.mock("@openai/codex-sdk", () => ({ Codex: vi.fn() }));
+
+vi.mock("../config", () => ({
+  getApiKey: vi.fn((key) => (key === "openai" ? "sk-test-key" : null)),
+}));
+
+vi.mock("./provider-session-store", () => ({
+  providerSessionStore: { get: vi.fn(() => ({})), set: vi.fn(), reset: vi.fn() },
+}));
+
 vi.mock("./turn-emitter", () => ({
   TurnEmitter: vi.fn(function (this: any) {
     this.delta = vi.fn();
     this.usage = vi.fn();
+    this.toolCall = vi.fn();
+    this.toolResult = vi.fn();
   }),
 }));
 
-// Mock helper modules
-vi.mock("./skills", () => ({
-  buildSkillsContext: vi.fn(() => ""),
+vi.mock("./skills", () => ({ buildSkillsContext: vi.fn(() => "") }));
+vi.mock("./memory", () => ({ buildMemoryContext: vi.fn(() => "") }));
+vi.mock("./claude", () => ({ readAgentFileSystemPrompt: vi.fn(() => null) }));
+vi.mock("../native-transcript", () => ({
+  createNativeTranscriptRecorder: vi.fn(() => recorderMock),
 }));
 
-vi.mock("./memory", () => ({
-  buildMemoryContext: vi.fn(() => ""),
-}));
-
-vi.mock("./claude", () => ({
-  readAgentFileSystemPrompt: vi.fn(() => null),
-}));
-
-// Now import the provider
 import {
   codexProvider,
-  _normalizeTextContentForTests,
-  _resetProbeCacheForTests,
-  _setClientForTests,
+  _setCodexForTests,
   _setFetchForTests,
+  _resetProbeCacheForTests,
 } from "./codex";
 import { getApiKey } from "../config";
 import { readAgentFileSystemPrompt } from "./claude";
 import { providerSessionStore } from "./provider-session-store";
 import { TurnEmitter } from "./turn-emitter";
 
-type TurnEmitterMock = {
-  mock: {
-    instances: Array<{
-      delta: ReturnType<typeof vi.fn>;
-      usage: ReturnType<typeof vi.fn>;
-    }>;
-  };
-  mockImplementation: (impl: (this: any) => void) => unknown;
+// ── Event + client builders ───────────────────────────────────────────────────
+const ev = {
+  threadStarted: (id: string): ThreadEvent => ({ type: "thread.started", thread_id: id }),
+  agentMessage: (text: string, id = "msg-1"): ThreadEvent => ({
+    type: "item.completed",
+    item: { id, type: "agent_message", text },
+  }),
+  usage: (input = 10, output = 5, cached = 2): ThreadEvent => ({
+    type: "turn.completed",
+    usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output, reasoning_output_tokens: 0 },
+  }),
+  commandStarted: (id: string, command: string): ThreadEvent => ({
+    type: "item.started",
+    item: { id, type: "command_execution", command, aggregated_output: "", status: "in_progress" },
+  }),
+  commandCompleted: (id: string, command: string, output: string, failed = false): ThreadEvent => ({
+    type: "item.completed",
+    item: {
+      id,
+      type: "command_execution",
+      command,
+      aggregated_output: output,
+      exit_code: failed ? 1 : 0,
+      status: failed ? "failed" : "completed",
+    },
+  }),
+  turnFailed: (message: string): ThreadEvent => ({ type: "turn.failed", error: { message } }),
 };
 
-const mockedTurnEmitter = TurnEmitter as unknown as TurnEmitterMock;
-
-function installDefaultTurnEmitterMock() {
-  mockedTurnEmitter.mockImplementation(function (this: any) {
-    this.isDefault = true;
-    this.delta = vi.fn();
-    this.usage = vi.fn();
-  });
+function makeThread(events: ThreadEvent[], id: string | null = "thread-new") {
+  const runStreamed = vi.fn(async () => ({
+    events: (async function* () {
+      for (const e of events) yield e;
+    })(),
+  }));
+  return { get id() { return id; }, runStreamed };
 }
 
-describe("codexProvider", () => {
+function makeCodex(opts: { startThread?: any; resumeThread?: any } = {}) {
+  return {
+    startThread: opts.startThread ?? vi.fn(() => makeThread([ev.agentMessage("ok"), ev.usage()])),
+    resumeThread: opts.resumeThread ?? vi.fn(() => makeThread([ev.agentMessage("ok"), ev.usage()])),
+  };
+}
+
+const lastEmitter = () => (TurnEmitter as unknown as { mock: { instances: any[] } }).mock.instances.at(-1);
+
+describe("codexProvider (SDK-backed)", () => {
   function makeParams(overrides: Partial<AgentProviderParams> = {}): AgentProviderParams {
     return {
       db: {} as any,
@@ -132,13 +108,8 @@ describe("codexProvider", () => {
       messageId: "msg-123",
       prompt: "Hello, Codex!",
       projectPath: "/project",
-      projectConfig: {
-        provider: "codex",
-        model: "gpt-4",
-      } as any,
-      webContents: {
-        send: vi.fn(),
-      } as any,
+      projectConfig: { provider: "codex", model: "gpt-5.1-codex" } as any,
+      webContents: { send: vi.fn() } as any,
       skills: [],
       agent: undefined,
       noTools: false,
@@ -149,482 +120,192 @@ describe("codexProvider", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getApiKey).mockImplementation((key) => {
-      if (key === "openai") return "sk-test-key";
-      return null;
-    });
-    installDefaultTurnEmitterMock();
-    _setClientForTests(null); // Reset client singleton
+    vi.mocked(getApiKey).mockImplementation((key) => (key === "openai" ? "sk-test-key" : null));
+    vi.mocked(providerSessionStore.get).mockReturnValue({});
+    _setCodexForTests(makeCodex() as any);
     _resetProbeCacheForTests();
     _setFetchForTests(
       vi.fn().mockResolvedValue({
         ok: true,
         json: vi.fn().mockResolvedValue({
-          data: [
-            { id: "gpt-4o" },
-            { id: "gpt-4.1" },
-            { id: "gpt-5.3-codex" },
-            { id: "o3-mini" },
-            { id: "omni-moderation-latest" },
-          ],
+          data: [{ id: "gpt-4o" }, { id: "o3-mini" }, { id: "omni-moderation-latest" }],
         }),
       }) as unknown as typeof fetch,
     );
   });
 
   afterEach(() => {
-    _resetProbeCacheForTests();
+    _setCodexForTests(null);
     _setFetchForTests(null);
+    _resetProbeCacheForTests();
   });
 
-  it("should create a new thread when none exists", async () => {
-    const mockDb = {} as any;
-    const params = makeParams({ db: mockDb });
+  it("starts a new thread and streams agent_message text", async () => {
+    const startThread = vi.fn(() =>
+      makeThread([ev.threadStarted("thread-abc"), ev.agentMessage("Hello "), ev.agentMessage("Codex"), ev.usage()]),
+    );
+    _setCodexForTests(makeCodex({ startThread }) as any);
 
-    const result = await codexProvider.run(params);
+    const result = await codexProvider.run(makeParams({ db: {} as any }));
 
     expect(result).toBe("Hello Codex");
-    expect(providerSessionStore.set).toHaveBeenCalledWith(mockDb, "session-123", "codex", {
-      threadId: "thread-123",
-    });
-  });
-
-  it("should normalize text payloads from the SDK", () => {
-    expect(_normalizeTextContentForTests("plain text")).toBe("plain text");
-    expect(_normalizeTextContentForTests({ value: "object text" })).toBe("object text");
-    expect(_normalizeTextContentForTests({ value: 123 })).toBeUndefined();
-    expect(_normalizeTextContentForTests({})).toBeUndefined();
-  });
-
-  it("should fall back to the default model when project config model is null", async () => {
-    const stream = vi.fn(async function* () {
-      yield {
-        event: "thread.run.completed",
-        data: {
-          usage: {
-            prompt_tokens: 1,
-            completion_tokens: 1,
-            total_tokens: 2,
-          },
-        },
-      };
-    });
-    _setClientForTests({
-      threads: {
-        create: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
-        retrieve: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
-      },
-      messages: {
-        create: vi.fn(async () => ({
-          id: "msg-123",
-          thread_id: "thread-123",
-          role: "user",
-          content: [{ type: "text", text: "test" }],
-          created_at: 1719360000,
-        })),
-      },
-      runs: { stream },
-    } as any);
-
-    await codexProvider.run(
-      makeParams({
-        projectConfig: {
-          provider: "codex",
-          model: null,
-        } as any,
-      })
+    expect(startThread).toHaveBeenCalledTimes(1);
+    // Thread options carry the resolved model + workspace sandbox.
+    expect(startThread).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gpt-5.1-codex", sandboxMode: "workspace-write", workingDirectory: "/project" }),
     );
-
-    expect(stream).toHaveBeenCalledWith(
-      "thread-123",
-      expect.objectContaining({ model: "gpt-4" })
-    );
+    expect(providerSessionStore.set).toHaveBeenCalledWith({}, "session-123", "codex", { threadId: "thread-abc" });
+    expect(lastEmitter().delta).toHaveBeenCalledWith("Hello ");
+    expect(lastEmitter().delta).toHaveBeenCalledWith("Codex");
   });
 
-  it("should persist the thread id before streaming so failures can resume", async () => {
-    const mockDb = {} as any;
-    const emitterDelta = vi.fn();
-    const emitterUsage = vi.fn();
-    mockedTurnEmitter.mockImplementation(function (this: any) {
-      this.delta = emitterDelta;
-      this.usage = emitterUsage;
-    });
-
-    _setClientForTests({
-      threads: {
-        create: vi.fn(async () => ({ id: "thread-456", created_at: 1719360000 })),
-        retrieve: vi.fn(async () => ({ id: "thread-456", created_at: 1719360000 })),
-      },
-      messages: {
-        create: vi.fn(async () => ({
-          id: "msg-123",
-          thread_id: "thread-456",
-          role: "user" as const,
-          content: [{ type: "text", text: "test" }],
-          created_at: 1719360000,
-        })),
-      },
-      runs: {
-        stream: vi.fn(async function* () {
-          throw new Error("stream failed");
-        }),
-      },
-    } as any);
-
-    await expect(codexProvider.run(makeParams({ db: mockDb }))).rejects.toThrow("stream failed");
-
-    expect(providerSessionStore.set).toHaveBeenCalledWith(mockDb, "session-123", "codex", {
-      threadId: "thread-456",
-    });
-    expect(emitterDelta).not.toHaveBeenCalled();
-    expect(emitterUsage).not.toHaveBeenCalled();
-  });
-
-  it("should resume an existing thread when one is stored", async () => {
-    const retrieve = vi.fn(async () => ({ id: "thread-resumed", created_at: 1719360000 }));
-    const create = vi.fn(async () => ({ id: "thread-new", created_at: 1719360000 }));
-    vi.mocked(providerSessionStore.get).mockReturnValueOnce({ threadId: "thread-resumed" });
-
-    _setClientForTests({
-      threads: {
-        create,
-        retrieve,
-      },
-      messages: {
-        create: vi.fn(async () => ({
-          id: "msg-123",
-          thread_id: "thread-resumed",
-          role: "user" as const,
-          content: [{ type: "text", text: "test" }],
-          created_at: 1719360000,
-        })),
-      },
-      runs: {
-        stream: vi.fn(async function* () {
-          yield {
-            event: "thread.run.completed",
-            data: {
-              usage: {
-                prompt_tokens: 1,
-                completion_tokens: 1,
-                total_tokens: 2,
-              },
-            },
-          };
-        }),
-      },
-    } as any);
-
-    await codexProvider.run(makeParams());
-
-    expect(retrieve).toHaveBeenCalledWith("thread-resumed");
-    expect(create).not.toHaveBeenCalled();
-    expect(providerSessionStore.set).toHaveBeenCalledWith(expect.anything(), "session-123", "codex", {
-      threadId: "thread-resumed",
-    });
-  });
-
-  it("should create a fresh thread when the stored thread no longer exists", async () => {
-    const retrieve = vi.fn(async () => {
-      throw new Error("thread not found");
-    });
-    const create = vi.fn(async () => ({ id: "thread-recreated", created_at: 1719360000 }));
-    vi.mocked(providerSessionStore.get).mockReturnValueOnce({ threadId: "thread-stale" });
-
-    _setClientForTests({
-      threads: {
-        create,
-        retrieve,
-      },
-      messages: {
-        create: vi.fn(async () => ({
-          id: "msg-123",
-          thread_id: "thread-recreated",
-          role: "user" as const,
-          content: [{ type: "text", text: "test" }],
-          created_at: 1719360000,
-        })),
-      },
-      runs: {
-        stream: vi.fn(async function* () {
-          yield {
-            event: "thread.run.completed",
-            data: {
-              usage: {
-                prompt_tokens: 1,
-                completion_tokens: 1,
-                total_tokens: 2,
-              },
-            },
-          };
-        }),
-      },
-    } as any);
-
-    await codexProvider.run(makeParams());
-
-    expect(retrieve).toHaveBeenCalledWith("thread-stale");
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(providerSessionStore.set).toHaveBeenCalledWith(expect.anything(), "session-123", "codex", {
-      threadId: "thread-recreated",
-    });
-  });
-
-  it("should rethrow transient thread retrieval failures instead of recreating the thread", async () => {
-    const retrieve = vi.fn(async () => {
-      throw new Error("connection reset");
-    });
-    const create = vi.fn(async () => ({ id: "thread-recreated", created_at: 1719360000 }));
-    vi.mocked(providerSessionStore.get).mockReturnValueOnce({ threadId: "thread-stale" });
-
-    _setClientForTests({
-      threads: {
-        create,
-        retrieve,
-      },
-      messages: {
-        create: vi.fn(),
-      },
-      runs: {
-        stream: vi.fn(),
-      },
-    } as any);
-
-    await expect(codexProvider.run(makeParams())).rejects.toThrow("connection reset");
-
-    expect(retrieve).toHaveBeenCalledWith("thread-stale");
-    expect(create).not.toHaveBeenCalled();
-    expect(providerSessionStore.set).not.toHaveBeenCalled();
-  });
-
-  it("should stream only normalized text deltas", async () => {
-    const emitterDelta = vi.fn();
-    const emitterUsage = vi.fn();
-    mockedTurnEmitter.mockImplementation(function (this: any) {
-      this.delta = emitterDelta;
-      this.usage = emitterUsage;
-    });
-
-    _setClientForTests({
-      threads: {
-        create: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
-        retrieve: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
-      },
-      messages: {
-        create: vi.fn(async () => ({
-          id: "msg-123",
-          thread_id: "thread-123",
-          role: "user",
-          content: [{ type: "text", text: "test" }],
-          created_at: 1719360000,
-        })),
-      },
-      runs: {
-        stream: vi.fn(async function* () {
-          yield {
-            event: "thread.message.delta",
-            data: {
-              delta: {
-                content: [
-                  { type: "text", text: { value: "Hello " } },
-                  { type: "text", text: { bad: true } },
-                  { type: "text", text: "Codex" },
-                ],
-              },
-            },
-          };
-        }),
-      },
-    } as any);
+  it("resumes the stored thread instead of starting a new one", async () => {
+    vi.mocked(providerSessionStore.get).mockReturnValue({ threadId: "thread-resumed" });
+    const resumeThread = vi.fn(() => makeThread([ev.agentMessage("resumed")], "thread-resumed"));
+    const startThread = vi.fn();
+    _setCodexForTests(makeCodex({ startThread, resumeThread }) as any);
 
     const result = await codexProvider.run(makeParams());
 
-    expect(result).toBe("Hello Codex");
-    expect(emitterDelta).toHaveBeenCalledTimes(2);
-    expect(emitterDelta).toHaveBeenNthCalledWith(1, "Hello ");
-    expect(emitterDelta).toHaveBeenNthCalledWith(2, "Codex");
-    expect(emitterDelta).not.toHaveBeenCalledWith("[object Object]");
-    expect(emitterUsage).not.toHaveBeenCalled();
+    expect(resumeThread).toHaveBeenCalledWith("thread-resumed", expect.objectContaining({ skipGitRepoCheck: true }));
+    expect(startThread).not.toHaveBeenCalled();
+    expect(result).toBe("resumed");
   });
 
-  it("should restore the default TurnEmitter mock between tests", async () => {
-    _setClientForTests({
-      threads: {
-        create: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
-        retrieve: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
-      },
-      messages: {
-        create: vi.fn(async () => ({
-          id: "msg-123",
-          thread_id: "thread-123",
-          role: "user",
-          content: [{ type: "text", text: "test" }],
-          created_at: 1719360000,
-        })),
-      },
-      runs: {
-        stream: vi.fn(async function* () {
-          yield {
-            event: "thread.run.completed",
-            data: {
-              usage: {
-                prompt_tokens: 1,
-                completion_tokens: 1,
-                total_tokens: 2,
-              },
-            },
-          };
-        }),
-      },
-    } as any);
+  it("maps token usage onto the emitter (cached → cache_read)", async () => {
+    _setCodexForTests(makeCodex({ startThread: vi.fn(() => makeThread([ev.agentMessage("x"), ev.usage(100, 40, 7)])) }) as any);
 
     await codexProvider.run(makeParams());
 
-    expect((mockedTurnEmitter as any).mock.instances.at(-1)?.isDefault).toBe(true);
+    expect(lastEmitter().usage).toHaveBeenCalledWith({
+      input_tokens: 100,
+      output_tokens: 40,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 7,
+    });
+    expect(recorderMock.usage).toHaveBeenCalledWith({ input: 100, output: 40, cacheRead: 7, cacheCreation: 0 });
   });
 
-  it("should list models when available", async () => {
-    if (codexProvider.listModels) {
-      const models = await codexProvider.listModels();
-      expect(models).toEqual([
-        { id: "gpt-4o", name: "gpt-4o" },
-        { id: "gpt-4.1", name: "gpt-4.1" },
-        { id: "gpt-5.3-codex", name: "gpt-5.3-codex" },
-        { id: "o3-mini", name: "o3-mini" },
-      ]);
-    }
+  it("surfaces command_execution items as tool call + result on the timeline and recorder", async () => {
+    _setCodexForTests(
+      makeCodex({
+        startThread: vi.fn(() =>
+          makeThread([
+            ev.commandStarted("cmd-1", "ls -la"),
+            ev.commandCompleted("cmd-1", "ls -la", "total 0\n"),
+            ev.agentMessage("done"),
+            ev.usage(),
+          ]),
+        ),
+      }) as any,
+    );
+
+    const result = await codexProvider.run(makeParams());
+
+    expect(result).toBe("done");
+    expect(lastEmitter().toolCall).toHaveBeenCalledWith("cmd-1", "execute_bash", { command: "ls -la" });
+    expect(lastEmitter().toolCall).toHaveBeenCalledTimes(1); // not double-emitted on completion
+    expect(lastEmitter().toolResult).toHaveBeenCalledWith("execute_bash", "total 0\n");
+    expect(recorderMock.toolResult).toHaveBeenCalledWith("cmd-1", "total 0\n", false);
   });
 
-  it("treats whitespace-only API keys as unconfigured when starting a run", async () => {
+  it("throws on turn.failed and finalizes the transcript as error", async () => {
+    _setCodexForTests(
+      makeCodex({ startThread: vi.fn(() => makeThread([ev.turnFailed("model exploded")])) }) as any,
+    );
+
+    await expect(codexProvider.run(makeParams())).rejects.toThrow("model exploded");
+    expect(recorderMock.turnEnd).toHaveBeenCalledWith("error");
+  });
+
+  it("uses read-only sandbox and skips the transcript for noTools turns", async () => {
+    const startThread = vi.fn(() => makeThread([ev.agentMessage("text only"), ev.usage()]));
+    _setCodexForTests(makeCodex({ startThread }) as any);
+
+    await codexProvider.run(makeParams({ noTools: true }));
+
+    expect(startThread).toHaveBeenCalledWith(
+      expect.objectContaining({ sandboxMode: "read-only", approvalPolicy: "never" }),
+    );
+    expect(recorderMock.turnStart).not.toHaveBeenCalled();
+  });
+
+  it("uses workspace-write + never-approve for nonInteractive (autonomous) turns", async () => {
+    const startThread = vi.fn(() => makeThread([ev.agentMessage("auto"), ev.usage()]));
+    _setCodexForTests(makeCodex({ startThread }) as any);
+
+    await codexProvider.run(makeParams({ nonInteractive: true }));
+
+    expect(startThread).toHaveBeenCalledWith(
+      expect.objectContaining({ sandboxMode: "workspace-write", approvalPolicy: "never" }),
+    );
+  });
+
+  it("honors a selected agent's model override and prepends its body to the input", async () => {
+    vi.mocked(readAgentFileSystemPrompt).mockReturnValue({ body: "Agent instructions", model: "gpt-5.3-codex" });
+    const thread = makeThread([ev.agentMessage("ok"), ev.usage()]);
+    const startThread = vi.fn(() => thread);
+    _setCodexForTests(makeCodex({ startThread }) as any);
+
+    await codexProvider.run(makeParams({ agent: "my-agent" }));
+
+    expect(readAgentFileSystemPrompt).toHaveBeenCalledWith("my-agent");
+    expect(startThread).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.3-codex" }));
+    expect(thread.runStreamed).toHaveBeenCalledWith(
+      expect.stringContaining("Agent instructions"),
+    );
+  });
+
+  it("omits the model so Codex uses its default when none is configured", async () => {
+    const startThread = vi.fn(() => makeThread([ev.agentMessage("ok"), ev.usage()]));
+    _setCodexForTests(makeCodex({ startThread }) as any);
+
+    await codexProvider.run(makeParams({ projectConfig: { provider: "codex", model: null } as any }));
+
+    expect(startThread).toHaveBeenCalledWith(expect.objectContaining({ model: undefined }));
+  });
+
+  it("throws when the API key is unconfigured", async () => {
     vi.mocked(getApiKey).mockReturnValue("   ");
+    _setCodexForTests(null);
 
     await expect(codexProvider.run(makeParams())).rejects.toThrow("OpenAI API key not configured");
   });
 
-  it("skips model fetching when the API key is whitespace only", async () => {
+  it("lists only Codex-capable models", async () => {
+    const models = await codexProvider.listModels?.();
+    expect(models).toEqual([
+      { id: "gpt-4o", name: "gpt-4o" },
+      { id: "o3-mini", name: "o3-mini" },
+    ]);
+  });
+
+  it("probes successfully with a valid API key and caches until forced", async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ data: [{ id: "gpt-4o" }] }) });
+    _setFetchForTests(fetchSpy as unknown as typeof fetch);
+
+    await expect(codexProvider.probe?.()).resolves.toMatchObject({ ok: true });
+    await codexProvider.probe?.();
+    await codexProvider.probe?.({ force: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports an unconfigured key during probe without fetching", async () => {
     vi.mocked(getApiKey).mockReturnValue("   ");
     const fetchSpy = vi.fn();
     _setFetchForTests(fetchSpy as unknown as typeof fetch);
 
-    if (codexProvider.listModels) {
-      await expect(codexProvider.listModels()).resolves.toEqual([]);
-      expect(fetchSpy).not.toHaveBeenCalled();
-    }
-  });
-
-  it("should list agents with project path", async () => {
-    if (codexProvider.listAgents) {
-      const agents = await codexProvider.listAgents("/project");
-      expect(Array.isArray(agents)).toBe(true);
-    }
-  });
-
-  it("should probe successfully with valid API key", async () => {
-    if (codexProvider.probe) {
-      const probeResult = await codexProvider.probe();
-      expect(probeResult).toMatchObject({ ok: true });
-      expect(probeResult.durationMs).toEqual(expect.any(Number));
-    }
-  });
-
-  it("reports whitespace-only API keys as not configured during probe", async () => {
-    vi.mocked(getApiKey).mockReturnValue("   ");
-    const fetchSpy = vi.fn();
-    _setFetchForTests(fetchSpy as unknown as typeof fetch);
-
-    if (codexProvider.probe) {
-      await expect(codexProvider.probe({ force: true })).resolves.toMatchObject({
-        ok: false,
-        reason: "OpenAI API key not configured",
-        durationMs: 0,
-      });
-      expect(fetchSpy).not.toHaveBeenCalled();
-    }
-  });
-
-  it("should cache probe results until force is requested", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({ data: [{ id: "gpt-4o" }] }),
+    await expect(codexProvider.probe?.({ force: true })).resolves.toMatchObject({
+      ok: false,
+      reason: "OpenAI API key not configured",
+      durationMs: 0,
     });
-    _setFetchForTests(fetchSpy as unknown as typeof fetch);
-
-    if (codexProvider.probe) {
-      await codexProvider.probe();
-      await codexProvider.probe();
-      await codexProvider.probe({ force: true });
-
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-    }
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("reads the selected agent file once per turn", async () => {
-    vi.mocked(readAgentFileSystemPrompt).mockReturnValue({
-      body: "Agent instructions",
-      model: "gpt-5.3-codex",
-    });
-
-    const stream = vi.fn(async function* () {
-      yield {
-        event: "thread.run.completed",
-        data: {
-          usage: {
-            prompt_tokens: 1,
-            completion_tokens: 1,
-            total_tokens: 2,
-          },
-        },
-      };
-    });
-
-    _setClientForTests({
-      threads: {
-        create: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
-        retrieve: vi.fn(async () => ({ id: "thread-123", created_at: 1719360000 })),
-      },
-      messages: {
-        create: vi.fn(async () => ({
-          id: "msg-123",
-          thread_id: "thread-123",
-          role: "user",
-          content: [{ type: "text", text: "test" }],
-          created_at: 1719360000,
-        })),
-      },
-      runs: { stream },
-    } as any);
-
-    await codexProvider.run(makeParams({ agent: "test-agent" }));
-
-    expect(readAgentFileSystemPrompt).toHaveBeenCalledTimes(1);
-    expect(readAgentFileSystemPrompt).toHaveBeenCalledWith("test-agent");
-    expect(stream).toHaveBeenCalledWith(
-      "thread-123",
-      expect.objectContaining({
-        model: "gpt-5.3-codex",
-        instructions: expect.stringContaining("Agent instructions"),
-      })
-    );
-  });
-
-  it("should stop gracefully", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({ data: [{ id: "gpt-4o" }] }),
-    });
-    _setFetchForTests(fetchSpy as unknown as typeof fetch);
-
-    if (codexProvider.probe) {
-      await codexProvider.probe({ force: true });
-    }
-
-    if (codexProvider.stop) {
-      await expect(codexProvider.stop()).resolves.toBeUndefined();
-    }
-
-    if (codexProvider.probe) {
-      await codexProvider.probe();
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-    }
+  it("stops gracefully", async () => {
+    await expect(codexProvider.stop?.()).resolves.toBeUndefined();
   });
 });
