@@ -470,6 +470,82 @@ describe("SettingsView — Skills & Agents sections", () => {
   });
 });
 
+describe("SettingsView — search + focus", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({} as never);
+    // Park the hub on a section with no heavy IPC so the search/nav assertions
+    // don't depend on provider probes.
+    useProjectStore.setState({
+      settingsOpen: true,
+      settingsSection: { scope: "app", id: "appearance" },
+    });
+  });
+
+  it("focuses the search input once settings have loaded", async () => {
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+    const searchInput = await screen.findByLabelText("Search settings");
+    await waitFor(() => expect(searchInput).toHaveFocus());
+  });
+
+  it("does not steal focus back to the search box on an autosave settings update", async () => {
+    vi.mocked(window.electronAPI.settingsWrite).mockResolvedValue(undefined as never);
+    // Advanced has editable fields whose autosave calls setSettings() — exactly
+    // the update that must NOT re-trigger the one-time search autofocus.
+    useProjectStore.setState({ settingsSection: { scope: "app", id: "advanced" } });
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+
+    const select = (await screen.findByLabelText("Default Provider")) as HTMLSelectElement;
+    select.focus();
+    expect(select).toHaveFocus();
+
+    // Changing the select autosaves (settingsWrite → setSettings), updating the
+    // `settings` state the focus effect depends on.
+    fireEvent.change(select, { target: { value: "ollama" } });
+    await waitFor(() => expect(window.electronAPI.settingsWrite).toHaveBeenCalled());
+
+    // Focus stays on the field the user was editing, not the search box.
+    expect(select).toHaveFocus();
+    expect(screen.getByLabelText("Search settings")).not.toHaveFocus();
+  });
+
+  it("filters nav rows by a field keyword, not just the section label", async () => {
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+    const searchInput = await screen.findByLabelText("Search settings");
+
+    // "api key" is a field inside Providers & Keys — its label has no "key"
+    // string match on its own beyond the literal label, but "theme" proves the
+    // keyword index surfaces a section whose label doesn't contain the query.
+    fireEvent.change(searchInput, { target: { value: "theme" } });
+
+    // Appearance owns the "theme" keyword and stays visible.
+    expect(screen.getByRole("button", { name: "Appearance" })).toBeInTheDocument();
+    // Unrelated sections are filtered out.
+    expect(screen.queryByRole("button", { name: "MCP Servers" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skills" })).not.toBeInTheDocument();
+  });
+
+  it("surfaces the Providers & Keys section for an 'api key' query", async () => {
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+    const searchInput = await screen.findByLabelText("Search settings");
+
+    fireEvent.change(searchInput, { target: { value: "api key" } });
+
+    expect(screen.getByRole("button", { name: "Providers & Keys" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Appearance" })).not.toBeInTheDocument();
+  });
+
+  it("shows a no-match empty state when nothing matches the query", async () => {
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+    const searchInput = await screen.findByLabelText("Search settings");
+
+    fireEvent.change(searchInput, { target: { value: "zzzznomatch" } });
+
+    expect(screen.getByText(/No settings match/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Appearance" })).not.toBeInTheDocument();
+  });
+});
+
 describe("SettingsView — OpenAI-compatible endpoints error feedback", () => {
   beforeEach(() => {
     vi.clearAllMocks();

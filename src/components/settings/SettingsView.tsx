@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useIpc } from "@/lib/ipc";
 import type { SettingsMap } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
@@ -46,6 +46,31 @@ const PROJECT_NAV: { id: string; label: string }[] = [
   { id: "general", label: "General" },
 ];
 
+// Keyword index for the settings search. Each entry lists the field labels (and
+// a few synonyms) that live inside a section so a query like "api key", "theme",
+// or "tool rounds" surfaces the owning nav row — not just literal section-label
+// matches. Keys are section ids (app + project share the namespace; the only
+// project id is "general"). Keep these in sync with the field labels rendered in
+// the corresponding section body.
+const SECTION_KEYWORDS: Record<string, string[]> = {
+  providers: [
+    "anthropic", "claude", "api key", "auth token", "base url", "github token",
+    "copilot", "ollama", "openai", "codex", "endpoint", "model override",
+    "sonnet", "haiku", "opus", "provider", "key", "token", "enable",
+  ],
+  mcp: ["mcp", "server", "model context protocol", "command", "stdio", "http", "sse"],
+  skills: ["skill", "plugin"],
+  agents: ["agent", "frontmatter"],
+  appearance: ["theme", "light", "dark", "system", "color", "look"],
+  advanced: [
+    "default provider", "approval mode", "max tool rounds", "tool rounds",
+    "defaults", "tool loop", "cap",
+  ],
+  general: [
+    "provider", "model", "worktree", "approval", "safety", "rules", "tools",
+  ],
+};
+
 const VALID_APPROVAL_MODES = ["none", "custom", "all"] as const;
 
 // Mirror of the bounds in electron/settings.ts (kept as plain numbers here so
@@ -82,6 +107,8 @@ export function SettingsView({ onClose }: SettingsViewProps) {
   const [search, setSearch] = useState("");
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [draft, setDraft] = useState<Partial<SettingsMap>>({});
+  const searchRef = useRef<HTMLInputElement>(null);
+  const didAutofocus = useRef(false);
 
   const { theme, setTheme } = useTheme();
 
@@ -91,6 +118,19 @@ export function SettingsView({ onClose }: SettingsViewProps) {
       setDraft(s);
     }).catch(console.error);
   }, []);
+
+  // Focus management: move focus into the hub's search box once settings have
+  // *first* loaded (the nav — and the input — only mount after the loading state
+  // ends), so the keyboard lands somewhere useful on open. Guarded by a ref so
+  // it fires exactly once: autosave writes call setSettings(), and re-focusing on
+  // every settings change would steal focus from the field being edited.
+  // Esc-to-close is handled at the AppShell level and remains unaffected.
+  useEffect(() => {
+    if (settings && !didAutofocus.current) {
+      didAutofocus.current = true;
+      searchRef.current?.focus();
+    }
+  }, [settings]);
 
   const set = useCallback((key: keyof SettingsMap, val: string) => {
     setDraft((d) => ({ ...d, [key]: val }));
@@ -148,11 +188,17 @@ export function SettingsView({ onClose }: SettingsViewProps) {
   const hubProvider = sessionProvider ?? (isProvider(appDefaultProvider) ? appDefaultProvider : null);
   const hubProjectPath = activeProject?.path ?? "";
 
-  // Case-insensitive nav filter over section labels.
+  // Case-insensitive nav filter over section labels AND their field keyword
+  // index, so a query for a field (e.g. "api key", "theme") surfaces the owning
+  // section even though that text isn't in the nav-row label itself.
   const q = search.trim().toLowerCase();
-  const matches = (label: string) => q === "" || label.toLowerCase().includes(q);
-  const appNav = APP_NAV.filter((n) => matches(n.label));
-  const projectNav = PROJECT_NAV.filter((n) => matches(n.label));
+  const matches = (id: string, label: string) =>
+    q === "" ||
+    label.toLowerCase().includes(q) ||
+    (SECTION_KEYWORDS[id]?.some((kw) => kw.includes(q)) ?? false);
+  const appNav = APP_NAV.filter((n) => matches(n.id, n.label));
+  const projectNav = PROJECT_NAV.filter((n) => matches(n.id, n.label));
+  const noNavMatches = q !== "" && appNav.length === 0 && projectNav.length === 0;
 
   const getTitle = (): string => {
     if (settingsSection.scope === "app") {
@@ -178,6 +224,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         {/* Search */}
         <div className="flex-none pt-12 px-2 pb-2">
           <Input
+            ref={searchRef}
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -188,6 +235,13 @@ export function SettingsView({ onClose }: SettingsViewProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto pb-2">
+          {/* No-match empty state for the search filter. */}
+          {noNavMatches && (
+            <p className="px-4 py-6 text-sm text-muted-foreground">
+              No settings match &ldquo;{search.trim()}&rdquo;.
+            </p>
+          )}
+
           {/* Application sections */}
           {appNav.length > 0 && (
             <div className="px-2 pt-1 pb-3">
