@@ -49,9 +49,13 @@ design note, minimal code.
   `runGatedTool` (`electron/agent/tool-gate.ts`), exactly like Ollama /
   OpenAI-compatible — so `requiresApproval()` / `requestApproval()` are reused
   as-is and there is no separate OpenAI "sandbox" to reconcile.
-- Decide the tool surface (mirror `electron/agent/tool-impls.ts`:
-  `write_file`, `delete_file`, `execute_bash`, `web_fetch`, read/list,
-  `ask_user`) and each tool's `ToolCategory` classification.
+- Decide the tool surface. The FS/shell/web tools mirror
+  `electron/agent/tool-impls.ts` (`implWriteFile`, `implDeleteFile`,
+  `implExecuteBash`, `implWebFetch`, plus the read/list/glob helpers); decide
+  each tool's `ToolCategory` classification. `ask_user` is **not** in
+  `tool-impls.ts` — it is registered per-provider and plumbed through
+  `electron/agent/question.ts` (`requestQuestion` / `resolveQuestion`), so
+  wire it the same way for Codex.
 - **Deliverable:** this note + a checklist #127 implements against. Close #128
   when the decision lands.
 
@@ -155,7 +159,7 @@ Decide before starting #127 whether to:
 |---|---|
 | Approval gate + tool_call persistence + timeline | `electron/agent/tool-gate.ts` (`runGatedTool`, `GatedToolContext`) |
 | Built-in tool implementations | `electron/agent/tool-impls.ts` |
-| Managed MCP loading / adapters | `electron/agent/mcp-managed.ts` |
+| Managed MCP loading / adapters | `electron/mcp/managed.ts` (`loadManagedMcpServers`) |
 | Native transcript recorder | `electron/native-transcript.ts` (`createNativeTranscriptRecorder`) |
 | Tool-round cap + truncation notice | `readMaxToolRounds()`, `emitToolRoundLimitNotice()` (`electron/agent/turn-emitter.ts`) |
 | Trace dispatch | `electron/ipc/trace-handlers.ts` |
