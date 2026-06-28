@@ -488,6 +488,27 @@ describe("SettingsView — search + focus", () => {
     await waitFor(() => expect(searchInput).toHaveFocus());
   });
 
+  it("does not steal focus back to the search box on an autosave settings update", async () => {
+    vi.mocked(window.electronAPI.settingsWrite).mockResolvedValue(undefined as never);
+    // Advanced has editable fields whose autosave calls setSettings() — exactly
+    // the update that must NOT re-trigger the one-time search autofocus.
+    useProjectStore.setState({ settingsSection: { scope: "app", id: "advanced" } });
+    renderWithProviders(<SettingsView onClose={vi.fn()} />);
+
+    const select = (await screen.findByLabelText("Default Provider")) as HTMLSelectElement;
+    select.focus();
+    expect(select).toHaveFocus();
+
+    // Changing the select autosaves (settingsWrite → setSettings), updating the
+    // `settings` state the focus effect depends on.
+    fireEvent.change(select, { target: { value: "ollama" } });
+    await waitFor(() => expect(window.electronAPI.settingsWrite).toHaveBeenCalled());
+
+    // Focus stays on the field the user was editing, not the search box.
+    expect(select).toHaveFocus();
+    expect(screen.getByLabelText("Search settings")).not.toHaveFocus();
+  });
+
   it("filters nav rows by a field keyword, not just the section label", async () => {
     renderWithProviders(<SettingsView onClose={vi.fn()} />);
     const searchInput = await screen.findByLabelText("Search settings");

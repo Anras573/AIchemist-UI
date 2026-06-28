@@ -108,6 +108,7 @@ export function SettingsView({ onClose }: SettingsViewProps) {
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [draft, setDraft] = useState<Partial<SettingsMap>>({});
   const searchRef = useRef<HTMLInputElement>(null);
+  const didAutofocus = useRef(false);
 
   const { theme, setTheme } = useTheme();
 
@@ -119,11 +120,16 @@ export function SettingsView({ onClose }: SettingsViewProps) {
   }, []);
 
   // Focus management: move focus into the hub's search box once settings have
-  // loaded (the nav — and the input — only mount after the loading state ends),
-  // so the keyboard lands somewhere useful on open. Esc-to-close is handled at
-  // the AppShell level and remains unaffected.
+  // *first* loaded (the nav — and the input — only mount after the loading state
+  // ends), so the keyboard lands somewhere useful on open. Guarded by a ref so
+  // it fires exactly once: autosave writes call setSettings(), and re-focusing on
+  // every settings change would steal focus from the field being edited.
+  // Esc-to-close is handled at the AppShell level and remains unaffected.
   useEffect(() => {
-    if (settings) searchRef.current?.focus();
+    if (settings && !didAutofocus.current) {
+      didAutofocus.current = true;
+      searchRef.current?.focus();
+    }
   }, [settings]);
 
   const set = useCallback((key: keyof SettingsMap, val: string) => {
