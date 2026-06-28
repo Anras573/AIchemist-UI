@@ -99,8 +99,8 @@ Goal: the Traces tab works for Codex.
   `tool_result` events automatically.
 - **Wire the dispatcher:** in `electron/ipc/trace-handlers.ts` (~line 96), add
   `codex` to the native branch
-  (`effectiveProvider === "ollama" || "openai-compatible" || "codex"` →
-  `{ kind: "native" }`). Without this, traces stay empty even with a recorder.
+  (`effectiveProvider === "ollama" || effectiveProvider === "openai-compatible" || effectiveProvider === "codex"`
+  → `{ kind: "native" }`). Without this, traces stay empty even with a recorder.
 - **Acceptance:** opening Traces on a Codex session shows turn spans + tool
   spans + usage, live-updating via the watcher.
 
