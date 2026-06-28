@@ -51,7 +51,9 @@ design note, minimal code.
   as-is and there is no separate OpenAI "sandbox" to reconcile.
 - Decide the tool surface. The FS/shell/web tools mirror
   `electron/agent/tool-impls.ts` (`implWriteFile`, `implDeleteFile`,
-  `implExecuteBash`, `implWebFetch`, plus the read/list/glob helpers); decide
+  `implExecuteBash`, `implWebFetch`, plus `implReadTextFile` /
+  `implListDirectory` / `implGlobFiles` — tools `read_file`,
+  `list_directory`, `glob`); decide
   each tool's `ToolCategory` classification. `ask_user` is **not** in
   `tool-impls.ts` — it is registered per-provider and plumbed through
   `electron/agent/question.ts` (`requestQuestion` / `resolveQuestion`), so
