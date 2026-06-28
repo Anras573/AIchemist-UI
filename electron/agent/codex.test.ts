@@ -267,6 +267,36 @@ describe("codexProvider (SDK-backed)", () => {
     expect(fc).toHaveBeenCalledTimes(2);
   });
 
+  it("skips file changes that escape the workspace or live in ignored dirs", async () => {
+    _setCodexForTests(
+      makeCodex({
+        startThread: vi.fn(() =>
+          makeThread([
+            ev.fileChangeCompleted("fc-1", [
+              { path: "../outside.ts", kind: "update" },
+              { path: "node_modules/pkg/index.js", kind: "update" },
+              { path: ".git/config", kind: "update" },
+              { path: "src/keep.ts", kind: "add" },
+            ]),
+            ev.agentMessage("done"),
+            ev.usage(),
+          ]),
+        ),
+      }) as any,
+    );
+
+    await codexProvider.run(makeParams());
+
+    const fc = lastEmitter().fileChange;
+    expect(fc).toHaveBeenCalledTimes(1);
+    expect(fc).toHaveBeenCalledWith({
+      path: "/project/src/keep.ts",
+      relativePath: "src/keep.ts",
+      diff: "",
+      operation: "write",
+    });
+  });
+
   it("renders mcp_tool_call text content as raw text (not JSON-escaped)", async () => {
     _setCodexForTests(
       makeCodex({

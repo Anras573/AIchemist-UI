@@ -192,6 +192,9 @@ function renderMcpToolOutput(item: Extract<ThreadItem, { type: "mcp_tool_call" }
  * doesn't give us a diff, and a path we can't resolve is skipped rather than
  * breaking the turn.
  */
+/** Directories whose changes are noise in the Changes panel (mirrors the fs-handlers ignore list). */
+const IGNORED_CHANGE_DIRS = new Set([".git", "node_modules"]);
+
 function emitFileChanges(
   emitter: TurnEmitter,
   projectPath: string,
@@ -202,9 +205,14 @@ function emitFileChanges(
       const abs = nodePath.isAbsolute(change.path)
         ? nodePath.normalize(change.path)
         : nodePath.resolve(projectPath, change.path);
+      const rel = nodePath.relative(projectPath, abs);
+      // Only reflect in-project edits: skip paths that escape the workspace, and
+      // skip the dirs the fs tooling already ignores so the panel stays signal.
+      if (!rel || rel.startsWith("..") || nodePath.isAbsolute(rel)) continue;
+      if (rel.split(nodePath.sep).some((seg) => IGNORED_CHANGE_DIRS.has(seg))) continue;
       emitter.fileChange({
         path: abs,
-        relativePath: nodePath.relative(projectPath, abs) || nodePath.basename(abs),
+        relativePath: rel,
         diff: "",
         operation: change.kind === "delete" ? "delete" : "write",
       });
