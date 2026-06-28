@@ -142,6 +142,34 @@ function resolveSandboxPolicy(params: AgentProviderParams): {
   return { sandboxMode: "workspace-write", approvalPolicy: "on-failure" };
 }
 
+/**
+ * Render an MCP tool-call result as readable text for the timeline/traces.
+ * Prefers the raw string (text content blocks or a string `structured_content`)
+ * and only JSON-stringifies genuinely structured (non-string) results — so plain
+ * text isn't wrapped in quotes with escaped newlines.
+ */
+function renderMcpToolOutput(item: Extract<ThreadItem, { type: "mcp_tool_call" }>): string {
+  if (item.error?.message) return item.error.message;
+
+  const structured = item.result?.structured_content;
+  if (typeof structured === "string") return structured;
+
+  const content = item.result?.content;
+  if (Array.isArray(content)) {
+    const text = content
+      .map((block) => {
+        const value = (block as { text?: unknown }).text;
+        return typeof value === "string" ? value : null;
+      })
+      .filter((t): t is string => t !== null)
+      .join("\n");
+    if (text) return text;
+  }
+
+  const fallback = structured ?? content;
+  return fallback === undefined || fallback === null ? "" : JSON.stringify(fallback);
+}
+
 /** A short, human-readable label + output for a Codex tool item, for the timeline/traces. */
 function describeToolItem(
   item: ThreadItem,
@@ -165,7 +193,7 @@ function describeToolItem(
       return {
         name: `${item.server}.${item.tool}`,
         args: (item.arguments ?? {}) as Record<string, unknown>,
-        output: item.error?.message ?? JSON.stringify(item.result?.structured_content ?? item.result?.content ?? ""),
+        output: renderMcpToolOutput(item),
         isError: item.status === "failed" || !!item.error,
       };
     case "web_search":

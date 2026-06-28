@@ -79,6 +79,18 @@ const ev = {
       status: failed ? "failed" : "completed",
     },
   }),
+  mcpCompleted: (id: string, server: string, tool: string, content: unknown[]): ThreadEvent => ({
+    type: "item.completed",
+    item: {
+      id,
+      type: "mcp_tool_call",
+      server,
+      tool,
+      arguments: {},
+      result: { content: content as any, structured_content: undefined },
+      status: "completed",
+    },
+  }),
   turnFailed: (message: string): ThreadEvent => ({ type: "turn.failed", error: { message } }),
 };
 
@@ -207,6 +219,25 @@ describe("codexProvider (SDK-backed)", () => {
     expect(lastEmitter().toolCall).toHaveBeenCalledTimes(1); // not double-emitted on completion
     expect(lastEmitter().toolResult).toHaveBeenCalledWith("execute_bash", "total 0\n");
     expect(recorderMock.toolResult).toHaveBeenCalledWith("cmd-1", "total 0\n", false);
+  });
+
+  it("renders mcp_tool_call text content as raw text (not JSON-escaped)", async () => {
+    _setCodexForTests(
+      makeCodex({
+        startThread: vi.fn(() =>
+          makeThread([
+            ev.mcpCompleted("mcp-1", "tickets", "lookup", [{ type: "text", text: "ticket #42: open" }]),
+            ev.agentMessage("done"),
+            ev.usage(),
+          ]),
+        ),
+      }) as any,
+    );
+
+    await codexProvider.run(makeParams());
+
+    expect(lastEmitter().toolCall).toHaveBeenCalledWith("mcp-1", "tickets.lookup", {});
+    expect(lastEmitter().toolResult).toHaveBeenCalledWith("tickets.lookup", "ticket #42: open");
   });
 
   it("throws on turn.failed and finalizes the transcript as error", async () => {
