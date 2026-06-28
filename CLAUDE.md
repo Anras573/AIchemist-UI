@@ -173,7 +173,7 @@ Each session is locked to a single provider (`"anthropic"`, `"copilot"`, `"ollam
 - **Event mapping:** `thread.started` → persist thread id; `item.completed` `agent_message` → `emitter.delta()` (whole-message chunks, not token deltas); `reasoning` → recorder; `command_execution` / `file_change` / `mcp_tool_call` / `web_search` items → `emitter.toolCall`/`toolResult` + recorder (reflected, not gated); `turn.completed` → usage (`cached_input_tokens` → `cache_read_input_tokens`); `turn.failed` / `error` → throw.
 - **Traces:** writes a native transcript (`createNativeTranscriptRecorder(sessionId, "codex")`); `trace-handlers.ts` routes `codex` to the native branch. `noTools` turns are not recorded.
 - **Runtime binary:** the SDK resolves the `codex` binary from the bundled `@openai/codex-<platform>` package (or `CODEX_CLI_PATH` → `codexPathOverride`). That binary must be packaged with the app. Auth uses the OpenAI API key (`getApiKey("openai")`); `OPENAI_BASE_URL` → `baseUrl`.
-- **Model listing & probe** still use a plain `GET https://api.openai.com/v1/models` (filtered to `gpt-`/`o1`/`o3`) — independent of the SDK. Test seams: `_setCodexForTests`, `_setFetchForTests`, `_resetProbeCacheForTests`. Tests in `electron/agent/codex.test.ts`.
+- **Model listing & probe** use a plain `GET {base}/models` (filtered to `gpt-`/`o1`/`o3`) — independent of the SDK, where `{base}` is `OPENAI_BASE_URL` (normalized, trailing slash stripped) or `https://api.openai.com/v1`. The same base override is passed to the SDK. Test seams: `_setCodexForTests`, `_setFetchForTests`, `_resetProbeCacheForTests`. Tests in `electron/agent/codex.test.ts`.
 
 ### Configurable tool-round cap (self-driven providers)
 

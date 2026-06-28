@@ -77,8 +77,9 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     if (copilotSessionId) {
       return { kind: "copilot", copilotSessionId };
     }
-    // Self-driven providers (Ollama, OpenAI-compatible) have no SDK session id;
-    // they write their own transcript to ~/.aichemist/traces/<sessionId>/.
+    // Self-driven providers (Ollama, OpenAI-compatible, Codex) have no SDK
+    // session id; they write their own transcript to
+    // ~/.aichemist/traces/<sessionId>/.
     // Resolve by the session's effective provider (lock at creation, falling
     // back to the project default for legacy null-provider sessions) rather
     // than file existence — so binding the watcher before the first turn still

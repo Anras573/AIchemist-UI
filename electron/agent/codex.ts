@@ -60,15 +60,25 @@ async function getCodex(): Promise<Codex> {
   // Lazy-load the SDK so the (native-binary-backed) module isn't imported until
   // a Codex turn actually runs.
   const { Codex } = await import("@openai/codex-sdk");
-  const baseUrl = process.env.OPENAI_BASE_URL?.trim() || undefined;
+  const baseUrl = configuredOpenAiBaseUrl();
   const codexPathOverride = process.env.CODEX_CLI_PATH?.trim() || undefined;
   codexInstance = new Codex({ apiKey, baseUrl, codexPathOverride });
   return codexInstance;
 }
 
-/** OpenAI API base — honors `OPENAI_BASE_URL` (proxy/enterprise) for both the SDK and `/models`. */
+/**
+ * The configured `OPENAI_BASE_URL` override (proxy/enterprise), normalized
+ * without a trailing slash so `${base}/models` never double-slashes. Returns
+ * `undefined` when unset, so the SDK keeps its own default.
+ */
+function configuredOpenAiBaseUrl(): string | undefined {
+  const raw = process.env.OPENAI_BASE_URL?.trim();
+  return raw ? raw.replace(/\/+$/, "") : undefined;
+}
+
+/** OpenAI API base for `/models` — the override (normalized) or the default. */
 function resolveOpenAiBaseUrl(): string {
-  return process.env.OPENAI_BASE_URL?.trim() || OPENAI_API_BASE_URL;
+  return configuredOpenAiBaseUrl() ?? OPENAI_API_BASE_URL;
 }
 
 async function fetchModelsResponse(apiKey: string): Promise<Response> {

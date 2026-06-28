@@ -326,15 +326,16 @@ describe("codexProvider (SDK-backed)", () => {
     ]);
   });
 
-  it("honors OPENAI_BASE_URL for model listing", async () => {
+  it("honors OPENAI_BASE_URL for model listing and strips a trailing slash", async () => {
     const prev = process.env.OPENAI_BASE_URL;
-    process.env.OPENAI_BASE_URL = "https://proxy.example.com/v1";
+    process.env.OPENAI_BASE_URL = "https://proxy.example.com/v1/";
     const fetchSpy = vi
       .fn()
       .mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ data: [{ id: "gpt-4o" }] }) });
     _setFetchForTests(fetchSpy as unknown as typeof fetch);
     try {
       await codexProvider.listModels?.();
+      // No double slash despite the trailing slash in the env value.
       expect(fetchSpy).toHaveBeenCalledWith("https://proxy.example.com/v1/models", expect.anything());
     } finally {
       if (prev === undefined) delete process.env.OPENAI_BASE_URL;
