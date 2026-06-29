@@ -96,6 +96,80 @@ export function toCopilotMcpServers(map: McpServersMap): Record<string, MCPServe
   return out;
 }
 
+/**
+ * Convert the on-disk entry shape into Codex's `mcp_servers` config, passed to
+ * the Codex CLI via `CodexOptions.config` (→ `--config mcp_servers.*`). Codex
+ * supports two transports:
+ * - **stdio** → `{ command, args, env }`
+ * - **streamable HTTP** (entries with a `url`, or `type` http/sse) →
+ *   `{ url, http_headers }`
+ *
+ * Returned as plain objects (not a Codex SDK type — `CodexConfigObject` is not
+ * exported); the values are TOML-serializable and cast to the SDK's config type
+ * at the call site.
+ */
+export function toCodexMcpServers(map: McpServersMap): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [name, entry] of Object.entries(map)) {
+    if (name === RESERVED_MCP_NAME) continue;
+    const isHttp =
+      entry.type === "http" ||
+      entry.type === "sse" ||
+      (entry.url != null && entry.type !== "stdio" && entry.type !== "local");
+
+    // Validate field shapes and skip unusable entries. `readMcpServers` does no
+    // JSON validation, and Codex's `--config` parsing is all-or-nothing per
+    // spawn — a single malformed entry (e.g. `args` as a string, or an empty
+    // `url`) would otherwise break the config parse and fail EVERY turn, not
+    // just that one server (unlike the SDK providers, which degrade per-server).
+    if (isHttp) {
+      const url = nonEmptyString(entry.url);
+      if (!url) {
+        console.warn(`[managed-mcp] skipping Codex MCP server "${name}": missing/invalid url`);
+        continue;
+      }
+      const httpHeaders = stringRecord(entry.headers);
+      out[name] = { url, ...(httpHeaders ? { http_headers: httpHeaders } : {}) };
+    } else {
+      const command = nonEmptyString(entry.command);
+      if (!command) {
+        console.warn(`[managed-mcp] skipping Codex MCP server "${name}": missing/invalid command`);
+        continue;
+      }
+      const args = stringArray(entry.args);
+      const env = stringRecord(entry.env);
+      out[name] = {
+        command,
+        ...(args && args.length > 0 ? { args } : {}),
+        ...(env ? { env } : {}),
+      };
+    }
+  }
+  return out;
+}
+
+/** Trimmed string when `value` is a non-empty string, else undefined. */
+function nonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/** `value` when it is an array of strings, else undefined. */
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((v) => typeof v === "string") ? value : undefined;
+}
+
+/** A plain object filtered to its string-valued entries, or undefined when none. */
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function extractTools(entry: McpServerEntry): string[] {
   const raw = (entry as { tools?: unknown }).tools;
   if (Array.isArray(raw) && raw.every((t): t is string => typeof t === "string")) {

@@ -4,6 +4,7 @@ import {
   loadManagedMcpServers,
   toClaudeMcpServers,
   toCopilotMcpServers,
+  toCodexMcpServers,
   fingerprintManaged,
   RESERVED_MCP_NAME,
 } from "./managed";
@@ -176,6 +177,76 @@ describe("toCopilotMcpServers", () => {
     expect(toCopilotMcpServers({ x: { command: "x" } })).toEqual({
       x: { type: "local", command: "x", args: [], tools: ["*"] },
     });
+  });
+});
+
+describe("toCodexMcpServers", () => {
+  it("converts a stdio entry to command/args/env", () => {
+    expect(
+      toCodexMcpServers({ echo: { command: "node", args: ["echo.js"], env: { K: "v" } } }),
+    ).toEqual({
+      echo: { command: "node", args: ["echo.js"], env: { K: "v" } },
+    });
+  });
+
+  it("omits empty args/env", () => {
+    expect(toCodexMcpServers({ x: { command: "x", args: [], env: {} } })).toEqual({
+      x: { command: "x" },
+    });
+  });
+
+  it("infers http transport (url) and maps headers to http_headers", () => {
+    expect(toCodexMcpServers({ api: { url: "https://api/mcp", headers: { A: "1" } } })).toEqual({
+      api: { url: "https://api/mcp", http_headers: { A: "1" } },
+    });
+  });
+
+  it("maps an sse entry to the url-based (streamable HTTP) form", () => {
+    expect(toCodexMcpServers({ s: { type: "sse", url: "https://s" } })).toEqual({
+      s: { url: "https://s" },
+    });
+  });
+
+  it("respects explicit stdio type even when url present (defensive)", () => {
+    expect(toCodexMcpServers({ s: { type: "stdio", command: "x", url: "ignored" } })).toEqual({
+      s: { command: "x" },
+    });
+  });
+
+  it("treats a Copilot-style type:'local' entry as stdio, not HTTP (cross-provider consistency)", () => {
+    // A pasted `{ type: "local", url: ... }` must classify the same as Copilot's
+    // adapter (local/stdio), not get misread as an HTTP server.
+    expect(
+      toCodexMcpServers({ s: { type: "local", command: "x", url: "ignored" } as never }),
+    ).toEqual({ s: { command: "x" } });
+  });
+
+  it("filters out the reserved name", () => {
+    expect(
+      toCodexMcpServers({ [RESERVED_MCP_NAME]: { command: "x" }, good: { command: "good" } }),
+    ).toEqual({ good: { command: "good" } });
+  });
+
+  it("skips an HTTP entry with no usable url, keeping valid siblings", () => {
+    expect(
+      toCodexMcpServers({
+        bad: { type: "http" },
+        good: { url: "https://ok/mcp" },
+      }),
+    ).toEqual({ good: { url: "https://ok/mcp" } });
+  });
+
+  it("skips a stdio entry with no command", () => {
+    expect(toCodexMcpServers({ bad: { args: ["x"] } })).toEqual({});
+  });
+
+  it("drops malformed args/env/headers shapes instead of forwarding them", () => {
+    expect(
+      toCodexMcpServers({
+        s: { command: "x", args: "not-an-array" as never, env: "nope" as never },
+        h: { url: "https://h", headers: ["nope"] as never },
+      }),
+    ).toEqual({ s: { command: "x" }, h: { url: "https://h" } });
   });
 });
 

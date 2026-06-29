@@ -3,7 +3,7 @@ import type { AgentProviderParams } from "./provider";
 import type { ThreadEvent } from "@openai/codex-sdk";
 
 // ── Hoisted mock state ────────────────────────────────────────────────────────
-const { recorderMock } = vi.hoisted(() => ({
+const { recorderMock, loadManagedMcpServersMock } = vi.hoisted(() => ({
   recorderMock: {
     turnStart: vi.fn(),
     reasoning: vi.fn(),
@@ -12,6 +12,7 @@ const { recorderMock } = vi.hoisted(() => ({
     toolCall: vi.fn(),
     toolResult: vi.fn(),
   },
+  loadManagedMcpServersMock: vi.fn(() => ({})),
 }));
 
 // Safety net: if a test path ever reaches the lazy SDK import (it shouldn't —
@@ -42,14 +43,22 @@ vi.mock("./claude", () => ({ readAgentFileSystemPrompt: vi.fn(() => null) }));
 vi.mock("../native-transcript", () => ({
   createNativeTranscriptRecorder: vi.fn(() => recorderMock),
 }));
+vi.mock("../sessions", () => ({ getDisabledMcpServers: vi.fn(() => []) }));
+// Partial mock: keep the real toCodexMcpServers adapter, stub the disk loader.
+vi.mock("../mcp/managed", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../mcp/managed")>();
+  return { ...actual, loadManagedMcpServers: loadManagedMcpServersMock };
+});
 
 import {
   codexProvider,
   _setCodexForTests,
+  _setCodexFactoryForTests,
   _setFetchForTests,
   _resetProbeCacheForTests,
 } from "./codex";
 import { getApiKey } from "../config";
+import { getDisabledMcpServers } from "../sessions";
 import { readAgentFileSystemPrompt } from "./claude";
 import { providerSessionStore } from "./provider-session-store";
 import { TurnEmitter } from "./turn-emitter";
@@ -143,6 +152,8 @@ describe("codexProvider (SDK-backed)", () => {
     vi.clearAllMocks();
     vi.mocked(getApiKey).mockImplementation((key) => (key === "openai" ? "sk-test-key" : null));
     vi.mocked(providerSessionStore.get).mockReturnValue({});
+    vi.mocked(getDisabledMcpServers).mockReturnValue([]);
+    loadManagedMcpServersMock.mockReturnValue({});
     _setCodexForTests(makeCodex() as any);
     _resetProbeCacheForTests();
     _setFetchForTests(
@@ -157,8 +168,53 @@ describe("codexProvider (SDK-backed)", () => {
 
   afterEach(() => {
     _setCodexForTests(null);
+    _setCodexFactoryForTests(null);
     _setFetchForTests(null);
     _resetProbeCacheForTests();
+  });
+
+  it("injects AIchemist-managed MCP servers into the Codex config (respecting the disable set)", async () => {
+    vi.mocked(getDisabledMcpServers).mockReturnValue(["disabled-one"]);
+    loadManagedMcpServersMock.mockReturnValue({
+      docs: { command: "docs-server", args: ["--stdio"] },
+    });
+
+    let captured: { config?: unknown } | null = null;
+    _setCodexForTests(null); // let the factory path run instead of a direct client
+    _setCodexFactoryForTests((options) => {
+      captured = options;
+      return makeCodex({
+        startThread: vi.fn(() => makeThread([ev.agentMessage("ok"), ev.usage()])),
+      }) as never;
+    });
+
+    await codexProvider.run(makeParams());
+
+    // The per-session disable set is forwarded to the loader…
+    expect(loadManagedMcpServersMock).toHaveBeenCalledWith({
+      excludeNames: new Set(["disabled-one"]),
+    });
+    // …and the managed server lands in the Codex config as `mcp_servers`.
+    expect(captured!.config).toEqual({
+      mcp_servers: { docs: { command: "docs-server", args: ["--stdio"] } },
+    });
+  });
+
+  it("passes no MCP config for noTools turns", async () => {
+    loadManagedMcpServersMock.mockReturnValue({ docs: { command: "docs-server" } });
+
+    let captured: { config?: unknown } | null = null;
+    _setCodexForTests(null);
+    _setCodexFactoryForTests((options) => {
+      captured = options;
+      return makeCodex({
+        startThread: vi.fn(() => makeThread([ev.agentMessage("ok"), ev.usage()])),
+      }) as never;
+    });
+
+    await codexProvider.run(makeParams({ noTools: true }));
+
+    expect(captured!.config).toBeUndefined();
   });
 
   it("starts a new thread and streams agent_message text", async () => {
