@@ -71,7 +71,7 @@ binary in a server mode and speak JSON-RPC over stdio ourselves.
 
 ## Transport options (both confirmed in the bundled binary)
 
-| | `codex app-server` | `codex mcp-server` |
+| Aspect | `codex app-server` | `codex mcp-server` |
 |---|---|---|
 | Status | `[experimental]` | established (documented MCP interface) |
 | Model | Full thread/turn protocol; `thread/start`, `turn/start`, streamed `item/*` + `turn/*` notifications | Codex runs **as an MCP server**; client connects over stdio |
@@ -106,9 +106,10 @@ The bridge handler receives a Codex approval request and resolves it through the
 
 - **`item/commandExecution/requestApproval`** (command, cwd, optional
   `additionalPermissions`):
-  1. Build a fingerprint and check `requiresApproval(sessionId, config, "shell",
-     "execute_bash", { command })`. If already trusted (session/project
-     allowlist) → reply **allow** with no prompt.
+  1. Build a fingerprint and call `requiresApproval(sessionId, config, "shell",
+     "execute_bash", { command })`. It returns **`false` when the call is already
+     trusted** (session/project allowlist) — in that case reply **allow** with no
+     prompt; a `true` return means approval is required, so continue to step 2.
   2. Otherwise `await requestApproval(webContents, sessionId, "execute_bash",
      { command }, { nonInteractive })` → `boolean`.
   3. Map: `false` → `deny`; `true` → `allow` (scope `turn`). An **"allow for
