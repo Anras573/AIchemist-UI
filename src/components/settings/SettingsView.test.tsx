@@ -495,6 +495,15 @@ describe("SettingsView — search + focus", () => {
     useProjectStore.setState({ settingsSection: { scope: "app", id: "advanced" } });
     renderWithProviders(<SettingsView onClose={vi.fn()} />);
 
+    // Wait for the one-time load autofocus to fire (it focuses the search box when
+    // `settings` first loads). Focusing the select before that races the async
+    // settingsRead: if it resolves after select.focus(), the autofocus steals
+    // focus to the search box (the source of this test's CI flakiness). Once it
+    // has fired, its `didAutofocus` guard prevents it ever re-stealing focus —
+    // which is exactly the behavior under test.
+    const searchInput = await screen.findByLabelText("Search settings");
+    await waitFor(() => expect(searchInput).toHaveFocus());
+
     const select = (await screen.findByLabelText("Default Provider")) as HTMLSelectElement;
     select.focus();
     expect(select).toHaveFocus();
