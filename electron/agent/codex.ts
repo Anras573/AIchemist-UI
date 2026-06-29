@@ -7,9 +7,13 @@ import { buildSkillsContext } from "./skills";
 import { buildMemoryContext } from "./memory";
 import { readAgentFileSystemPrompt } from "./claude";
 import { createNativeTranscriptRecorder, type NativeTranscriptRecorder } from "../native-transcript";
+import { getDisabledMcpServers } from "../sessions";
+import { loadManagedMcpServers, toCodexMcpServers } from "../mcp/managed";
+import type { Database } from "better-sqlite3";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 import type {
   Codex,
+  CodexOptions,
   Thread,
   ThreadEvent,
   ThreadItem,
@@ -17,6 +21,9 @@ import type {
   SandboxMode,
   ApprovalMode,
 } from "@openai/codex-sdk";
+
+type CodexConfig = CodexOptions["config"];
+type CodexFactory = (options: CodexOptions) => Codex;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Codex provider — backed by `@openai/codex-sdk`.
@@ -27,11 +34,13 @@ import type {
 // executes its own tools (shell, file edits, MCP) inside its own sandbox, so we
 // do NOT route tool calls through `runGatedTool`; instead we configure Codex's
 // `sandboxMode` / `approvalPolicy` and reflect the `item.*` events it streams
-// onto the timeline + trace transcript.
+// onto the timeline + trace transcript. AIchemist-managed MCP servers are
+// injected via `CodexOptions.config` (Codex's `mcp_servers`), respecting the
+// per-session disable set; Codex then emits `mcp_tool_call` items we reflect.
 //
 // Approval parity (surfacing Codex's interactive `on-request` approvals through
 // AIchemist's approval UI) is intentionally out of scope here and tracked by
-// #128 / #127 — the non-interactive `codex exec` transport this SDK uses cannot
+// #128 — the non-interactive `codex exec` transport this SDK uses cannot
 // surface interactive approval callbacks. See docs/plans/2026-06-28-codex-parity-plan.md.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -41,6 +50,7 @@ const PROBE_CACHE_TTL_MS = 30_000;
 const CODEX_MODEL_PREFIXES = ["gpt-", "o1", "o3"] as const;
 
 let codexInstance: Codex | null = null;
+let codexFactory: CodexFactory | null = null;
 let fetchImpl: typeof fetch = (...args) => fetch(...args);
 let probeCache: { result: { ok: boolean; reason?: string; durationMs?: number }; timestamp: number } | null =
   null;
@@ -50,21 +60,49 @@ function getConfiguredOpenAiApiKey(): string | null {
   return apiKey.length > 0 ? apiKey : null;
 }
 
-async function getCodex(): Promise<Codex> {
-  if (codexInstance) return codexInstance;
+/**
+ * Build a Codex client for this turn. The MCP `config` varies per session (the
+ * per-session disable set), and `new Codex()` only stores options (the CLI is
+ * spawned per `runStreamed`), so we construct fresh per turn rather than caching
+ * a singleton — the dynamic SDK import is module-cached, so this is cheap.
+ */
+async function getCodex(config?: CodexConfig): Promise<Codex> {
+  if (codexInstance) return codexInstance; // direct client injection (test seam)
 
   const apiKey = getConfiguredOpenAiApiKey();
   if (!apiKey) {
     throw new Error("OpenAI API key not configured. Set OPENAI_API_KEY in ~/.aichemist/.env");
   }
 
+  const options: CodexOptions = {
+    apiKey,
+    baseUrl: configuredOpenAiBaseUrl(),
+    codexPathOverride: process.env.CODEX_CLI_PATH?.trim() || undefined,
+    ...(config ? { config } : {}),
+  };
+
+  if (codexFactory) return codexFactory(options);
+
   // Lazy-load the SDK so the (native-binary-backed) module isn't imported until
   // a Codex turn actually runs.
   const { Codex } = await import("@openai/codex-sdk");
-  const baseUrl = configuredOpenAiBaseUrl();
-  const codexPathOverride = process.env.CODEX_CLI_PATH?.trim() || undefined;
-  codexInstance = new Codex({ apiKey, baseUrl, codexPathOverride });
-  return codexInstance;
+  return new Codex(options);
+}
+
+/**
+ * Build the Codex `config` carrying AIchemist-managed MCP servers for this
+ * session, honoring the per-session disable set. Returns `undefined` when there
+ * are no servers to inject (so the CLI keeps its own defaults). Codex re-reads
+ * `--config` on every spawn, so toggling a server takes effect next turn with no
+ * resume-invalidation needed (unlike Copilot).
+ */
+function buildCodexMcpConfig(db: Database, sessionId: string): CodexConfig | undefined {
+  const managed = loadManagedMcpServers({
+    excludeNames: new Set(getDisabledMcpServers(db, sessionId)),
+  });
+  const mcpServers = toCodexMcpServers(managed);
+  if (Object.keys(mcpServers).length === 0) return undefined;
+  return { mcp_servers: mcpServers } as CodexConfig;
 }
 
 /**
@@ -262,7 +300,11 @@ export const codexProvider: AgentProvider = {
     const { db, sessionId, projectPath, webContents, noTools } = params;
 
     const emitter = new TurnEmitter(webContents, sessionId);
-    const codex = await getCodex();
+    // Inject AIchemist-managed MCP servers (respecting the per-session disable
+    // set) so Codex can call them; it surfaces them as `mcp_tool_call` items,
+    // already reflected onto the timeline/traces. noTools turns get none.
+    const codexConfig = noTools ? undefined : buildCodexMcpConfig(db, sessionId);
+    const codex = await getCodex(codexConfig);
 
     const agentPrompt = params.agent ? readAgentFileSystemPrompt(params.agent) : null;
     const model = resolveModelForTurn(params, agentPrompt);
@@ -443,6 +485,15 @@ function buildTurnInput(params: AgentProviderParams, agentPrompt: CodexAgentProm
 
 export function _setCodexForTests(codex: Codex | null): void {
   codexInstance = codex;
+}
+
+/**
+ * Inject a factory invoked with the resolved `CodexOptions` (including the MCP
+ * `config`) so tests can assert what reaches the SDK constructor. Takes effect
+ * only when no direct client is injected via `_setCodexForTests`.
+ */
+export function _setCodexFactoryForTests(factory: CodexFactory | null): void {
+  codexFactory = factory;
 }
 
 export function _setFetchForTests(impl: typeof fetch | null): void {

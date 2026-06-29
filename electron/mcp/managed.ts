@@ -96,6 +96,45 @@ export function toCopilotMcpServers(map: McpServersMap): Record<string, MCPServe
   return out;
 }
 
+/**
+ * Convert the on-disk entry shape into Codex's `mcp_servers` config, passed to
+ * the Codex CLI via `CodexOptions.config` (→ `--config mcp_servers.*`). Codex
+ * supports two transports:
+ * - **stdio** → `{ command, args, env }`
+ * - **streamable HTTP** (entries with a `url`, or `type` http/sse) →
+ *   `{ url, http_headers }`
+ *
+ * Returned as plain objects (not a Codex SDK type — `CodexConfigObject` is not
+ * exported); the values are TOML-serializable and cast to the SDK's config type
+ * at the call site.
+ */
+export function toCodexMcpServers(map: McpServersMap): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const [name, entry] of Object.entries(map)) {
+    if (name === RESERVED_MCP_NAME) continue;
+    const isHttp =
+      entry.type === "http" ||
+      entry.type === "sse" ||
+      (entry.url != null && entry.type !== "stdio");
+
+    if (isHttp) {
+      out[name] = {
+        url: entry.url ?? "",
+        ...(entry.headers && Object.keys(entry.headers).length > 0
+          ? { http_headers: entry.headers }
+          : {}),
+      };
+    } else {
+      out[name] = {
+        command: entry.command ?? "",
+        ...(entry.args && entry.args.length > 0 ? { args: entry.args } : {}),
+        ...(entry.env && Object.keys(entry.env).length > 0 ? { env: entry.env } : {}),
+      };
+    }
+  }
+  return out;
+}
+
 function extractTools(entry: McpServerEntry): string[] {
   const raw = (entry as { tools?: unknown }).tools;
   if (Array.isArray(raw) && raw.every((t): t is string => typeof t === "string")) {
