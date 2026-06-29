@@ -84,6 +84,15 @@ describe("LIST_MEMORY", () => {
     expect(files.map((f) => f.name)).toEqual(["copilot-note.md"]);
   });
 
+  it("returns the AIchemist memory store for a Codex session", async () => {
+    // Codex uses the same ~/.aichemist/memory store (its turns inject
+    // buildMemoryContext from memoryDir), so the panel must list it too.
+    implWriteMemory(PROJECT, "codex-note.md", "remember sandbox");
+
+    const files = await listMemory({ projectPath: PROJECT, provider: "codex" });
+    expect(files.map((f) => f.name)).toEqual(["codex-note.md"]);
+  });
+
   it("returns the SDK-owned store for a Claude session", async () => {
     const claudeProjectDir = makeTempDir("trace-claude-proj-");
     fs.mkdirSync(path.join(claudeProjectDir, "memory"));

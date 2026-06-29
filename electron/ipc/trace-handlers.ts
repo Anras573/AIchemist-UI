@@ -141,16 +141,17 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     const provider = typeof args === "string" ? undefined : args.provider;
     if (!projectPath) return { files: [] as Array<{ name: string; path: string }> };
     try {
-      // The non-Claude providers (Ollama, OpenAI-compatible, Copilot) all use
-      // AIchemist's own store at ~/.aichemist/memory/<cwd> — memory is portable
-      // across providers for a project. Go through listMemoryFiles so the memory
-      // module's safety checks (symlinked-dir-chain refusal, regular-file
+      // The non-Claude providers (Ollama, OpenAI-compatible, Copilot, Codex) all
+      // use AIchemist's own store at ~/.aichemist/memory/<cwd> — memory is
+      // portable across providers for a project. Go through listMemoryFiles so the
+      // memory module's safety checks (symlinked-dir-chain refusal, regular-file
       // filtering) apply — a raw readdir could surface symlinked .md entries that
       // READ_FILE would then follow to arbitrary paths.
       if (
         provider === "ollama" ||
         provider === "openai-compatible" ||
-        provider === "copilot"
+        provider === "copilot" ||
+        provider === "codex"
       ) {
         return { files: listMemoryFiles(projectPath) };
       }

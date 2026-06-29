@@ -258,8 +258,10 @@ export function AgentPickerButton() {
             ))
           )}
 
-          {/* New agent entry — only for file-based providers */}
-          {(provider === "anthropic" || provider === "copilot") && !loadingAgents && (
+          {/* New agent entry — every provider sources agents from files (Copilot
+              agent files for Copilot, Claude agent files for the rest), and
+              "New agent…" deep-links to the provider-aware Agents hub. */}
+          {provider && !loadingAgents && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
