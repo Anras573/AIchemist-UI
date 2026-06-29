@@ -173,7 +173,16 @@ describe("runWorkflow", () => {
       autonomy: "autonomous",
     });
 
-    const run = await runWorkflow(makeCtx(), wf.id, "manual");
+    // Use a NON-null stub window so `nonInteractive` is driven by the workflow's
+    // autonomy (turn.nonInteractive), not the headless `win === null` fallback in
+    // executeAgentTurn. With a null window the turn is forced non-interactive
+    // regardless of autonomy, so the assertion below would pass even if autonomy
+    // were ignored; a real window makes the test actually discriminate.
+    const stubWindow = { webContents: { send: vi.fn() } } as unknown as NonNullable<
+      ReturnType<TurnQueueContext["getMainWindow"]>
+    >;
+    const ctx: TurnQueueContext = { db, activeTurns: new Set<string>(), getMainWindow: () => stubWindow };
+    const run = await runWorkflow(ctx, wf.id, "manual");
 
     expect(run.status).toBe("success");
     expect(startThread).toHaveBeenCalledWith(
