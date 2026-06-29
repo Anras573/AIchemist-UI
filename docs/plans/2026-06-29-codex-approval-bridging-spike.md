@@ -106,8 +106,8 @@ The bridge handler receives a Codex approval request and resolves it through the
 
 - **`item/commandExecution/requestApproval`** (command, cwd, optional
   `additionalPermissions`):
-  1. Build a fingerprint and call `requiresApproval(sessionId, config, "shell",
-     "execute_bash", { command })`. It returns **`false` when the call is already
+  1. Call `requiresApproval(sessionId, config, "shell", "execute_bash",
+     { command })` (it fingerprints internally via `computeFingerprint`). It returns **`false` when the call is already
      trusted** (session/project allowlist) — in that case reply **allow** with no
      prompt; a `true` return means approval is required, so continue to step 2.
   2. Otherwise `await requestApproval(webContents, sessionId, "execute_bash",
