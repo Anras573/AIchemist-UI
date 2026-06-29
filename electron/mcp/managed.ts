@@ -115,7 +115,7 @@ export function toCodexMcpServers(map: McpServersMap): Record<string, Record<str
     const isHttp =
       entry.type === "http" ||
       entry.type === "sse" ||
-      (entry.url != null && entry.type !== "stdio");
+      (entry.url != null && entry.type !== "stdio" && entry.type !== "local");
 
     if (isHttp) {
       out[name] = {

@@ -213,6 +213,14 @@ describe("toCodexMcpServers", () => {
     });
   });
 
+  it("treats a Copilot-style type:'local' entry as stdio, not HTTP (cross-provider consistency)", () => {
+    // A pasted `{ type: "local", url: ... }` must classify the same as Copilot's
+    // adapter (local/stdio), not get misread as an HTTP server.
+    expect(
+      toCodexMcpServers({ s: { type: "local", command: "x", url: "ignored" } as never }),
+    ).toEqual({ s: { command: "x" } });
+  });
+
   it("filters out the reserved name", () => {
     expect(
       toCodexMcpServers({ [RESERVED_MCP_NAME]: { command: "x" }, good: { command: "good" } }),
