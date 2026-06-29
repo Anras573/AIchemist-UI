@@ -25,6 +25,8 @@ import {
   WorkflowScheduler,
   type WorkflowRunHooks,
 } from "./workflow-scheduler";
+import { _setCodexForTests } from "./codex";
+import { _setNativeTracesRootForTests } from "../native-transcript";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Reset the Codex provider's injected SDK + redirected trace root (set by the
+  // Codex workflow integration test) so they never leak into other tests.
+  _setCodexForTests(null);
+  _setNativeTracesRootForTests(null);
   db.close();
   for (const dir of [projectDir, ...extraDirs]) {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -129,6 +135,63 @@ describe("runWorkflow", () => {
     const run = await runWorkflow(makeCtx(), wf.id, "manual");
     expect(run.status).toBe("success");
     expect(runMock.mock.calls[0][0].nonInteractive).toBe(true);
+
+    cleanupSessionQueueState(run.session_id!);
+  });
+
+  it("runs an autonomous Codex workflow end-to-end with a workspace-write / never-approve thread", async () => {
+    // The real Codex provider is registered by default; inject a mock SDK (so no
+    // codex binary is spawned) and redirect its trace transcript. This exercises
+    // the full chain: autonomous workflow → nonInteractive → codex.run →
+    // resolveSandboxPolicy → thread options.
+    const tracesDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-codex-traces-"));
+    extraDirs.push(tracesDir);
+    _setNativeTracesRootForTests(tracesDir);
+
+    const startThread = vi.fn(() => ({
+      get id() {
+        return "thread-codex";
+      },
+      runStreamed: vi.fn(async () => ({
+        events: (async function* () {
+          yield { type: "thread.started", thread_id: "thread-codex" };
+          yield { type: "item.completed", item: { id: "m1", type: "agent_message", text: "fixed the build" } };
+          yield {
+            type: "turn.completed",
+            usage: { input_tokens: 5, cached_input_tokens: 0, output_tokens: 3, reasoning_output_tokens: 0 },
+          };
+        })(),
+      })),
+    }));
+    _setCodexForTests({ startThread, resumeThread: vi.fn() } as unknown as Parameters<typeof _setCodexForTests>[0]);
+
+    const wf = createWorkflow(db, {
+      projectId: "proj-1",
+      name: "Codex auto fixer",
+      prompt: "Fix the build",
+      provider: "codex",
+      autonomy: "autonomous",
+    });
+
+    // Use a NON-null stub window so `nonInteractive` is driven by the workflow's
+    // autonomy (turn.nonInteractive), not the headless `win === null` fallback in
+    // executeAgentTurn. With a null window the turn is forced non-interactive
+    // regardless of autonomy, so the assertion below would pass even if autonomy
+    // were ignored; a real window makes the test actually discriminate.
+    const stubWindow = { webContents: { send: vi.fn() } } as unknown as NonNullable<
+      ReturnType<TurnQueueContext["getMainWindow"]>
+    >;
+    const ctx: TurnQueueContext = { db, activeTurns: new Set<string>(), getMainWindow: () => stubWindow };
+    const run = await runWorkflow(ctx, wf.id, "manual");
+
+    expect(run.status).toBe("success");
+    expect(startThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sandboxMode: "workspace-write",
+        approvalPolicy: "never",
+        workingDirectory: projectDir,
+      }),
+    );
 
     cleanupSessionQueueState(run.session_id!);
   });
