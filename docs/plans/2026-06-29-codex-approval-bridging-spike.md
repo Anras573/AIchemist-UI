@@ -76,7 +76,7 @@ binary in a server mode and speak JSON-RPC over stdio ourselves.
 | Status | `[experimental]` | established (documented MCP interface) |
 | Model | Full thread/turn protocol; `thread/start`, `turn/start`, streamed `item/*` + `turn/*` notifications | Codex runs **as an MCP server**; client connects over stdio |
 | Approval requests (server→client) | `item/commandExecution/requestApproval`, `item/permissions/requestApproval` | `execCommandApproval`, `applyPatchApproval` |
-| Approval response | decision + optional `scope: "session"｜"turn"` + granted permission subset | `"allow"｜"deny"` |
+| Approval response | decision + optional `scope` (`"session"` / `"turn"`) + granted permission subset | `"allow"` / `"deny"` |
 | Streaming | `item/agentMessage/delta` → **true token deltas** (better than exec's whole-message chunks) | item events |
 | Risk | richer but experimental (protocol may shift) | simpler decision shape, more stable surface |
 
