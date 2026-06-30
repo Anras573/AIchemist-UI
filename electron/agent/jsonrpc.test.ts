@@ -129,6 +129,25 @@ describe("JsonRpcPeer", () => {
     expect(t.sent).toEqual([{ id: 7, result: { scope: "turn", allow: true } }]);
   });
 
+  it("normalizes an undefined inbound-request result to null", async () => {
+    const t = makeFakeTransport();
+    new JsonRpcPeer(t.transport, { onRequest: async () => undefined });
+    t.receive({ id: 7, method: "ack", params: {} });
+    await flush();
+    expect(t.sent).toEqual([{ id: 7, result: null }]);
+  });
+
+  it("cleans up and rejects when the transport throws on send", async () => {
+    const t = makeFakeTransport();
+    t.transport.send = () => {
+      throw new Error("transport down");
+    };
+    const peer = new JsonRpcPeer(t.transport);
+    await expect(peer.request("m")).rejects.toThrow("transport down");
+    // The pending entry was cleaned up: a late response for id 1 is a no-op.
+    expect(() => t.receive({ id: 1, result: "late" })).not.toThrow();
+  });
+
   it("answers an inbound request with an error when the handler throws", async () => {
     const t = makeFakeTransport();
     new JsonRpcPeer(t.transport, {
@@ -207,6 +226,12 @@ describe("createStdioTransport (NDJSON)", () => {
   it("skips blank and unparseable lines without throwing", () => {
     const { stdout, received } = setup();
     stdout.write(`\n   \nnot json\n{"method":"ok"}\n`);
+    expect(received).toEqual([{ method: "ok" }]);
+  });
+
+  it("drops parseable but non-object JSON (null / array / scalar)", () => {
+    const { stdout, received } = setup();
+    stdout.write(`null\n[]\n42\n"hi"\n{"method":"ok"}\n`);
     expect(received).toEqual([{ method: "ok" }]);
   });
 

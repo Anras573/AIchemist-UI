@@ -111,7 +111,15 @@ export class JsonRpcPeer {
             }, timeoutMs)
           : null;
       this.pending.set(id, { resolve, reject, timer });
-      this.transport.send({ id, method, params });
+      try {
+        this.transport.send({ id, method, params });
+      } catch (err) {
+        // A throwing transport (the peer is transport-agnostic) must not leave a
+        // pending entry + timer dangling — clean up and reject.
+        this.pending.delete(id);
+        if (timer) clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
@@ -162,7 +170,9 @@ export class JsonRpcPeer {
     }
     try {
       const result = await handler(method, params);
-      if (!this.closed) this.transport.send({ id, result });
+      // `JSON.stringify` drops an `undefined` result, producing a malformed
+      // `{ id }` response (which a peer would reject) — normalize to null.
+      if (!this.closed) this.transport.send({ id, result: result ?? null });
     } catch (err) {
       if (!this.closed) {
         this.transport.send({
@@ -221,14 +231,20 @@ export function createStdioTransport(stdout: Readable, stdin: Writable): JsonRpc
       const line = buffer.slice(0, newlineIndex).trim();
       buffer = buffer.slice(newlineIndex + 1);
       if (!line) continue;
-      let parsed: JsonRpcMessage;
+      let parsed: unknown;
       try {
-        parsed = JSON.parse(line) as JsonRpcMessage;
+        parsed = JSON.parse(line);
       } catch {
         console.error(`[jsonrpc] dropping unparseable line: ${line.slice(0, 200)}`);
         continue;
       }
-      messageHandler?.(parsed);
+      // Parseable but non-object JSON (`null`, `[]`, `42`, `"x"`) is not a valid
+      // message — forwarding it would crash the peer (e.g. `null.method`).
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        console.error(`[jsonrpc] dropping non-object message: ${line.slice(0, 200)}`);
+        continue;
+      }
+      messageHandler?.(parsed as JsonRpcMessage);
     }
   };
 
