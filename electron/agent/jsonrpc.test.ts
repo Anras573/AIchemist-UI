@@ -67,6 +67,22 @@ describe("JsonRpcPeer", () => {
     await expectation;
   });
 
+  it("resolves a response whose result is explicitly null", async () => {
+    const t = makeFakeTransport();
+    const peer = new JsonRpcPeer(t.transport);
+    const p = peer.request("m");
+    t.receive({ id: 1, result: null });
+    await expect(p).resolves.toBeNull();
+  });
+
+  it("rejects (not silently resolves) a malformed response with neither result nor error", async () => {
+    const t = makeFakeTransport();
+    const peer = new JsonRpcPeer(t.transport);
+    const p = peer.request("m");
+    t.receive({ id: 1 }); // no result, no error
+    await expect(p).rejects.toThrow(/Malformed JSON-RPC response/);
+  });
+
   it("ignores a response for an unknown / already-settled id", async () => {
     const t = makeFakeTransport();
     const peer = new JsonRpcPeer(t.transport);
@@ -206,5 +222,27 @@ describe("createStdioTransport (NDJSON)", () => {
     transport.onClose(onClose);
     stdout.emit("error", new Error("pipe broke"));
     expect(onClose).toHaveBeenCalledWith(expect.objectContaining({ message: "pipe broke" }));
+  });
+
+  it("emits onClose at most once even when error then close/end fire", () => {
+    const { stdout, transport } = setup();
+    const onClose = vi.fn();
+    transport.onClose(onClose);
+    stdout.emit("error", new Error("pipe broke"));
+    stdout.emit("close");
+    stdout.emit("end");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("detaches all stdout listeners on close (no leak, no further dispatch)", () => {
+    const { stdout, transport, received } = setup();
+    transport.close();
+    expect(stdout.listenerCount("data")).toBe(0);
+    expect(stdout.listenerCount("error")).toBe(0);
+    expect(stdout.listenerCount("close")).toBe(0);
+    expect(stdout.listenerCount("end")).toBe(0);
+    // Late data after close is not dispatched.
+    stdout.emit("data", Buffer.from(`{"method":"late"}\n`));
+    expect(received).toEqual([]);
   });
 });

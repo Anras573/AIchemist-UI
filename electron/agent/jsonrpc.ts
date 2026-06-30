@@ -178,8 +178,17 @@ export class JsonRpcPeer {
     if (!pending) return; // unknown / already-settled id
     this.pending.delete(message.id!);
     if (pending.timer) clearTimeout(pending.timer);
-    if (message.error) pending.reject(new JsonRpcRemoteError(message.error));
-    else pending.resolve(message.result);
+    if (message.error) {
+      pending.reject(new JsonRpcRemoteError(message.error));
+    } else if ("result" in message) {
+      // A `result` of `null`/`undefined` is legitimate; key presence is what
+      // distinguishes a real (if empty) response from a malformed one.
+      pending.resolve(message.result);
+    } else {
+      // Neither `result` nor `error` — malformed. Reject rather than silently
+      // resolving `undefined` (and rather than leaving the request to hang).
+      pending.reject(new Error(`Malformed JSON-RPC response for id ${String(message.id)}: missing result and error`));
+    }
   }
 
   private handleClose(err?: Error): void {
@@ -203,6 +212,7 @@ export function createStdioTransport(stdout: Readable, stdin: Writable): JsonRpc
   let messageHandler: ((message: JsonRpcMessage) => void) | null = null;
   let closeHandler: ((err?: Error) => void) | null = null;
   let buffer = "";
+  let closeEmitted = false;
 
   const onData = (chunk: Buffer | string): void => {
     buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
@@ -222,10 +232,28 @@ export function createStdioTransport(stdout: Readable, stdin: Writable): JsonRpc
     }
   };
 
+  // `error`, `close`, and `end` can all fire (and in combination) for one EOF;
+  // emit `onClose` at most once and detach every listener so repeated transport
+  // creation can't leak them.
+  const detach = (): void => {
+    stdout.off("data", onData);
+    stdout.off("error", onError);
+    stdout.off("close", onEnd);
+    stdout.off("end", onEnd);
+  };
+  const emitClose = (err?: Error): void => {
+    if (closeEmitted) return;
+    closeEmitted = true;
+    detach();
+    closeHandler?.(err);
+  };
+  const onError = (err: Error): void => emitClose(err);
+  const onEnd = (): void => emitClose();
+
   stdout.on("data", onData);
-  stdout.on("error", (err) => closeHandler?.(err));
-  stdout.on("close", () => closeHandler?.());
-  stdout.on("end", () => closeHandler?.());
+  stdout.on("error", onError);
+  stdout.on("close", onEnd);
+  stdout.on("end", onEnd);
 
   return {
     send(message: JsonRpcMessage): void {
@@ -238,7 +266,10 @@ export function createStdioTransport(stdout: Readable, stdin: Writable): JsonRpc
       closeHandler = handler;
     },
     close(): void {
-      stdout.off("data", onData);
+      // Caller-initiated shutdown: detach (idempotent via the flag) without
+      // emitting onClose — the caller already knows it's closing.
+      closeEmitted = true;
+      detach();
       try {
         stdin.end();
       } catch {
