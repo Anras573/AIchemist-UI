@@ -148,6 +148,28 @@ describe("JsonRpcPeer", () => {
     expect(() => t.receive({ id: 1, result: "late" })).not.toThrow();
   });
 
+  it("does not throw out of notify() when the transport throws; closes the peer", async () => {
+    const t = makeFakeTransport();
+    const peer = new JsonRpcPeer(t.transport);
+    const pending = peer.request("first"); // in flight before the bad send
+    t.transport.send = () => {
+      throw new Error("pipe gone");
+    };
+    expect(() => peer.notify("ping")).not.toThrow();
+    // A throwing send closes the peer, rejecting in-flight requests.
+    await expect(pending).rejects.toThrow("pipe gone");
+  });
+
+  it("does not throw when the transport throws while answering an inbound request", async () => {
+    const t = makeFakeTransport();
+    new JsonRpcPeer(t.transport, { onRequest: async () => ({ ok: true }) });
+    t.transport.send = () => {
+      throw new Error("pipe gone");
+    };
+    expect(() => t.receive({ id: 3, method: "approve", params: {} })).not.toThrow();
+    await flush();
+  });
+
   it("answers an inbound request with an error when the handler throws", async () => {
     const t = makeFakeTransport();
     new JsonRpcPeer(t.transport, {
@@ -233,6 +255,18 @@ describe("createStdioTransport (NDJSON)", () => {
     const { stdout, received } = setup();
     stdout.write(`null\n[]\n42\n"hi"\n{"method":"ok"}\n`);
     expect(received).toEqual([{ method: "ok" }]);
+  });
+
+  it("closes the transport when a single line exceeds the max length", () => {
+    const stdout = new PassThrough();
+    const stdin = new PassThrough();
+    const transport = createStdioTransport(stdout, stdin, { maxLineLength: 32 });
+    const onClose = vi.fn();
+    transport.onClose(onClose);
+    stdout.write("x".repeat(64)); // no newline, exceeds the cap
+    expect(onClose).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringMatching(/exceeded 32 bytes/) }),
+    );
   });
 
   it("serializes outbound messages as JSON + newline", () => {

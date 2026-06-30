@@ -111,22 +111,30 @@ export class JsonRpcPeer {
             }, timeoutMs)
           : null;
       this.pending.set(id, { resolve, reject, timer });
-      try {
-        this.transport.send({ id, method, params });
-      } catch (err) {
-        // A throwing transport (the peer is transport-agnostic) must not leave a
-        // pending entry + timer dangling — clean up and reject.
-        this.pending.delete(id);
-        if (timer) clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      }
+      // A throwing transport closes the peer; handleClose then rejects this
+      // pending entry (and clears its timer) too, so no cleanup is needed here.
+      this.safeSend({ id, method, params });
     });
   }
 
   /** Send an outbound notification (no response expected). */
   notify(method: string, params?: unknown): void {
     if (this.closed) return;
-    this.transport.send({ method, params });
+    this.safeSend({ method, params });
+  }
+
+  /**
+   * Send through the transport, tolerating a throwing transport (the peer is
+   * transport-agnostic). A synchronous send failure means the connection is
+   * dead, so close the peer — rejecting all in-flight requests — rather than
+   * letting the throw escape to callers (`notify`, inbound responses) and crash.
+   */
+  private safeSend(message: JsonRpcMessage): void {
+    try {
+      this.transport.send(message);
+    } catch (err) {
+      this.handleClose(err instanceof Error ? err : new Error(String(err)));
+    }
   }
 
   /** Close the peer: reject all in-flight requests and close the transport. */
@@ -165,17 +173,17 @@ export class JsonRpcPeer {
   private async handleInboundRequest(id: JsonRpcId, method: string, params: unknown): Promise<void> {
     const handler = this.options.onRequest;
     if (!handler) {
-      this.transport.send({ id, error: { code: -32601, message: `Method not found: ${method}` } });
+      this.safeSend({ id, error: { code: -32601, message: `Method not found: ${method}` } });
       return;
     }
     try {
       const result = await handler(method, params);
       // `JSON.stringify` drops an `undefined` result, producing a malformed
       // `{ id }` response (which a peer would reject) — normalize to null.
-      if (!this.closed) this.transport.send({ id, result: result ?? null });
+      if (!this.closed) this.safeSend({ id, result: result ?? null });
     } catch (err) {
       if (!this.closed) {
-        this.transport.send({
+        this.safeSend({
           id,
           error: { code: -32603, message: err instanceof Error ? err.message : String(err) },
         });
@@ -214,11 +222,24 @@ export class JsonRpcPeer {
 }
 
 /**
+ * Default cap on a single unterminated line. A child that emits a huge line (or
+ * never a newline) would otherwise grow the buffer without bound; exceeding the
+ * cap closes the transport rather than risking unbounded memory.
+ */
+export const DEFAULT_MAX_LINE_LENGTH = 16 * 1024 * 1024; // 16 MB
+
+/**
  * NDJSON transport over a child process's streams: one JSON object per line.
  * Tolerates chunk boundaries that split or merge messages, and skips blank /
- * unparseable lines (logged) rather than tearing down the peer.
+ * unparseable / non-object lines (logged) rather than tearing down the peer. A
+ * single line exceeding `maxLineLength` closes the transport (memory safety).
  */
-export function createStdioTransport(stdout: Readable, stdin: Writable): JsonRpcTransport {
+export function createStdioTransport(
+  stdout: Readable,
+  stdin: Writable,
+  options?: { maxLineLength?: number },
+): JsonRpcTransport {
+  const maxLineLength = options?.maxLineLength ?? DEFAULT_MAX_LINE_LENGTH;
   let messageHandler: ((message: JsonRpcMessage) => void) | null = null;
   let closeHandler: ((err?: Error) => void) | null = null;
   let buffer = "";
@@ -245,6 +266,11 @@ export function createStdioTransport(stdout: Readable, stdin: Writable): JsonRpc
         continue;
       }
       messageHandler?.(parsed as JsonRpcMessage);
+    }
+    // The remaining buffer is an as-yet-unterminated line; bound its growth.
+    if (buffer.length > maxLineLength) {
+      buffer = "";
+      emitClose(new Error(`JSON-RPC line exceeded ${maxLineLength} bytes without a newline`));
     }
   };
 
