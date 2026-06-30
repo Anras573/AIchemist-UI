@@ -151,6 +151,11 @@ describe("SettingsView — Project section", () => {
   it("shows per-rule rows on the Approval tab when approval_mode is custom", async () => {
     vi.mocked(window.electronAPI.getProjectConfig).mockResolvedValue(makeConfig());
     renderProjectSection();
+    // Wait for the project config to load before switching tabs. The
+    // `[projectId]` effect in ProjectSettingsContent runs `setTab("general")` +
+    // loadConfig(); clicking Approval before that effect settles can revert the
+    // tab to General (the source of the CI flake).
+    await screen.findByDisplayValue(DEFAULT_ANTHROPIC_MODEL);
     fireEvent.click(await screen.findByRole("button", { name: /approval/i }));
     await waitFor(() => {
       expect(screen.getByText("Filesystem")).toBeInTheDocument();
@@ -173,6 +178,10 @@ describe("SettingsView — Project section", () => {
     vi.mocked(window.electronAPI.saveProjectConfig).mockResolvedValue(undefined);
 
     renderProjectSection(makeProject("proj-cust", cfg));
+    // Wait for config to load before switching tabs — see the note above; the
+    // setTab("general") in the [projectId] effect can otherwise reset the
+    // Approval click on slow CI, so the policy rows never render.
+    await screen.findByDisplayValue(DEFAULT_ANTHROPIC_MODEL);
     fireEvent.click(await screen.findByRole("button", { name: /approval/i }));
 
     const fsSelect = await screen.findByLabelText("Filesystem approval policy");
