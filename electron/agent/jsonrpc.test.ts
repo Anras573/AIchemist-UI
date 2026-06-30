@@ -224,6 +224,27 @@ describe("createStdioTransport (NDJSON)", () => {
     expect(onClose).toHaveBeenCalledWith(expect.objectContaining({ message: "pipe broke" }));
   });
 
+  it("routes a synchronous write failure through onClose instead of throwing", () => {
+    const { stdin, transport } = setup();
+    const onClose = vi.fn();
+    transport.onClose(onClose);
+    stdin.write = () => {
+      throw new Error("EPIPE: broken pipe");
+    };
+    expect(() => transport.send({ method: "x" })).not.toThrow();
+    expect(onClose).toHaveBeenCalledWith(expect.objectContaining({ message: "EPIPE: broken pipe" }));
+  });
+
+  it("surfaces an async stdin error as a close (and does not crash)", () => {
+    const { stdin, transport } = setup();
+    const onClose = vi.fn();
+    transport.onClose(onClose);
+    // No "error" listener of our own — the transport's listener prevents an
+    // unhandled-error throw and routes it through onClose.
+    stdin.emit("error", new Error("pipe closed"));
+    expect(onClose).toHaveBeenCalledWith(expect.objectContaining({ message: "pipe closed" }));
+  });
+
   it("emits onClose at most once even when error then close/end fire", () => {
     const { stdout, transport } = setup();
     const onClose = vi.fn();

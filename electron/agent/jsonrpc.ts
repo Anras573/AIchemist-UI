@@ -240,6 +240,7 @@ export function createStdioTransport(stdout: Readable, stdin: Writable): JsonRpc
     stdout.off("error", onError);
     stdout.off("close", onEnd);
     stdout.off("end", onEnd);
+    stdin.off("error", onStdinError);
   };
   const emitClose = (err?: Error): void => {
     if (closeEmitted) return;
@@ -249,15 +250,27 @@ export function createStdioTransport(stdout: Readable, stdin: Writable): JsonRpc
   };
   const onError = (err: Error): void => emitClose(err);
   const onEnd = (): void => emitClose();
+  // A broken pipe usually surfaces as a stdin `error` event; route it (and any
+  // synchronous write failure in send() below) through emitClose so the peer
+  // transitions to closed and rejects in-flight requests, rather than crashing.
+  const onStdinError = (err: Error): void => emitClose(err);
 
   stdout.on("data", onData);
   stdout.on("error", onError);
   stdout.on("close", onEnd);
   stdout.on("end", onEnd);
+  stdin.on("error", onStdinError);
 
   return {
     send(message: JsonRpcMessage): void {
-      stdin.write(JSON.stringify(message) + "\n");
+      try {
+        stdin.write(JSON.stringify(message) + "\n");
+      } catch (err) {
+        // A synchronous write failure (broken pipe / write-after-end) must not
+        // propagate to callers (notify / inbound-response sends) — surface it as
+        // a transport close instead, consistent with the async error path.
+        emitClose(err instanceof Error ? err : new Error(String(err)));
+      }
     },
     onMessage(handler): void {
       messageHandler = handler;
