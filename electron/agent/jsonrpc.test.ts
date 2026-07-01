@@ -156,8 +156,10 @@ describe("JsonRpcPeer", () => {
       throw new Error("pipe gone");
     };
     expect(() => peer.notify("ping")).not.toThrow();
-    // A throwing send closes the peer, rejecting in-flight requests.
+    // A throwing send closes the peer, rejecting in-flight requests…
     await expect(pending).rejects.toThrow("pipe gone");
+    // …and tears down the transport too (detach listeners / end stdin).
+    expect(t.transport.close).toHaveBeenCalled();
   });
 
   it("does not throw when the transport throws while answering an inbound request", async () => {
@@ -265,7 +267,7 @@ describe("createStdioTransport (NDJSON)", () => {
     transport.onClose(onClose);
     stdout.write("x".repeat(64)); // no newline, exceeds the cap
     expect(onClose).toHaveBeenCalledWith(
-      expect.objectContaining({ message: expect.stringMatching(/exceeded 32 bytes/) }),
+      expect.objectContaining({ message: expect.stringMatching(/exceeded 32 characters/) }),
     );
   });
 

@@ -134,6 +134,13 @@ export class JsonRpcPeer {
       this.transport.send(message);
     } catch (err) {
       this.handleClose(err instanceof Error ? err : new Error(String(err)));
+      // Also tear down the transport itself (detach listeners, end stdin) so a
+      // broken connection doesn't leak listeners / keep the reader buffer alive.
+      try {
+        this.transport.close();
+      } catch {
+        // A broken transport's close() may throw — it's being discarded anyway.
+      }
     }
   }
 
@@ -222,11 +229,13 @@ export class JsonRpcPeer {
 }
 
 /**
- * Default cap on a single unterminated line. A child that emits a huge line (or
- * never a newline) would otherwise grow the buffer without bound; exceeding the
- * cap closes the transport rather than risking unbounded memory.
+ * Default cap on a single unterminated line, measured in characters (UTF-16 code
+ * units — the direct measure of the buffer's in-memory size). A child that emits
+ * a huge line (or never a newline) would otherwise grow the buffer without
+ * bound; exceeding the cap closes the transport rather than risking unbounded
+ * memory.
  */
-export const DEFAULT_MAX_LINE_LENGTH = 16 * 1024 * 1024; // 16 MB
+export const DEFAULT_MAX_LINE_LENGTH = 16 * 1024 * 1024; // 16M chars
 
 /**
  * NDJSON transport over a child process's streams: one JSON object per line.
@@ -270,7 +279,7 @@ export function createStdioTransport(
     // The remaining buffer is an as-yet-unterminated line; bound its growth.
     if (buffer.length > maxLineLength) {
       buffer = "";
-      emitClose(new Error(`JSON-RPC line exceeded ${maxLineLength} bytes without a newline`));
+      emitClose(new Error(`JSON-RPC line exceeded ${maxLineLength} characters without a newline`));
     }
   };
 
