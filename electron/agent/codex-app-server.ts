@@ -24,14 +24,22 @@ import { JsonRpcPeer, createStdioTransport } from "./jsonrpc";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-/** Options for `thread/start`. Values use the app-server's naming (e.g. sandbox `"workspaceWrite"`). */
+/** App-server sandbox modes (camelCase wire values, per the `thread/start` protocol). */
+export type AppServerSandbox = "readOnly" | "workspaceWrite" | "dangerFullAccess";
+
+/** App-server approval policies. Callers map their own policy onto these. */
+export type AppServerApprovalPolicy = "never" | "on-request" | "on-failure" | "untrusted";
+
+/**
+ * Options for `thread/start`, using the app-server's own wire naming — the
+ * caller (slice 3) maps AIchemist's kebab-case sandbox (`workspace-write`, …)
+ * onto {@link AppServerSandbox} (`workspaceWrite`, …).
+ */
 export interface AppServerThreadOptions {
   model?: string;
   cwd?: string;
-  /** `"never" | "on-request" | "on-failure" | "untrusted"`. */
-  approvalPolicy?: string;
-  /** `"read-only" | "workspace-write" | "danger-full-access"` mapped to the app-server's naming by the caller. */
-  sandbox?: string;
+  approvalPolicy?: AppServerApprovalPolicy;
+  sandbox?: AppServerSandbox;
   /** Extra `--config`-style overrides, e.g. `{ mcp_servers: {...} }`. */
   config?: Record<string, unknown>;
 }
@@ -71,6 +79,8 @@ export interface AppServerConnection {
 export type AppServerConnector = (handlers: {
   onNotification: (method: string, params: unknown) => void;
   onRequest: (method: string, params: unknown) => Promise<unknown>;
+  /** Fired when the underlying peer/connection closes (e.g. the process died). */
+  onClose: (err?: Error) => void;
 }) => AppServerConnection;
 
 /** Default approval handler: deny everything (real UI mapping lands in slice 4). */
@@ -83,6 +93,10 @@ class AsyncEventQueue<T> {
   private readonly buffer: T[] = [];
   private waiter: ((r: IteratorResult<T>) => void) | null = null;
   private ended = false;
+
+  get isEnded(): boolean {
+    return this.ended;
+  }
 
   push(value: T): void {
     if (this.ended) return;
@@ -127,6 +141,8 @@ export class CodexAppServerClient {
   private readonly peer: JsonRpcPeer;
   private readonly closeConn: () => void;
   private activeTurn: AsyncEventQueue<AppServerTurnEvent> | null = null;
+  /** The running turn's id (from the turn/start response) — needed to interrupt. */
+  private activeTurnId: string | null = null;
   /** Latest token usage (arrives separately via `thread/tokenUsage/updated`). */
   private lastUsage: unknown = null;
 
@@ -138,6 +154,7 @@ export class CodexAppServerClient {
       onNotification: (method, params) => this.handleNotification(method, params),
       // Inbound server→client requests are approval requests; route them.
       onRequest: (method, params) => this.onApprovalRequest({ method, params }),
+      onClose: (err) => this.handlePeerClose(err),
     });
     this.peer = conn.peer;
     this.closeConn = conn.close;
@@ -168,19 +185,48 @@ export class CodexAppServerClient {
     if (this.activeTurn) throw new Error("Codex app-server: a turn is already in progress");
     const queue = new AsyncEventQueue<AppServerTurnEvent>();
     this.activeTurn = queue;
+    this.activeTurnId = null;
     this.lastUsage = null;
     // Fire the turn and drive completion from the streamed notifications — the
-    // turn/start *response* is just the initial turn object (we don't need it),
-    // while turn/completed / turn/failed notifications end the stream. We do NOT
-    // await the response (it may be deferred); a rejection fails the turn.
-    this.peer.request("turn/start", { threadId, input: [{ type: "text", text }] }).catch((err) => {
-      queue.push({ type: "turn.failed", error: { message: err instanceof Error ? err.message : String(err) } });
-      queue.end();
-    });
+    // turn/start *response* just carries the initial turn (we capture its id so
+    // we can interrupt), while turn/completed / turn/failed notifications end the
+    // stream. We do NOT await the response (it may be deferred); a rejection
+    // fails the turn.
+    this.peer.request("turn/start", { threadId, input: [{ type: "text", text }] }).then(
+      (res) => {
+        this.activeTurnId = (res as { turn?: { id?: string } } | null)?.turn?.id ?? null;
+      },
+      (err) => {
+        queue.push({ type: "turn.failed", error: { message: err instanceof Error ? err.message : String(err) } });
+        queue.end();
+      },
+    );
     try {
       yield* queue.drain();
     } finally {
+      // If the consumer abandoned the turn before it ended (broke out of the
+      // loop), interrupt the still-running server-side turn so it can't keep
+      // executing or interleave with the next turn. Best-effort.
+      if (!queue.isEnded && this.activeTurnId) {
+        void this.peer
+          .request("turn/interrupt", { threadId, turnId: this.activeTurnId })
+          .catch(() => {});
+      }
       this.activeTurn = null;
+      this.activeTurnId = null;
+    }
+  }
+
+  /**
+   * The peer/connection closed (process died, transport error). Fail the active
+   * turn so its stream ends instead of hanging on notifications that will never
+   * arrive.
+   */
+  private handlePeerClose(err?: Error): void {
+    const queue = this.activeTurn;
+    if (queue && !queue.isEnded) {
+      queue.push({ type: "turn.failed", error: { message: err?.message ?? "app-server connection closed" } });
+      queue.end();
     }
   }
 
@@ -188,6 +234,7 @@ export class CodexAppServerClient {
   close(): void {
     this.activeTurn?.end();
     this.activeTurn = null;
+    this.activeTurnId = null;
     this.closeConn();
   }
 
@@ -267,7 +314,11 @@ export function spawnAppServerConnector(config: {
     const peer = new JsonRpcPeer(transport, {
       onNotification: handlers.onNotification,
       onRequest: handlers.onRequest,
+      onClose: handlers.onClose,
     });
+    // The process dying is a connection close too — surface it to the peer so an
+    // active turn fails rather than hanging.
+    child.on("exit", (code) => handlers.onClose(new Error(`codex app-server exited (code ${code})`)));
 
     return {
       peer,

@@ -18,18 +18,20 @@ const flush = () => new Promise((r) => setImmediate(r));
  */
 function makeClient(onApproval?: AppServerApprovalHandler) {
   let messageHandler: (m: JsonRpcMessage) => void = () => {};
+  let transportCloseHandler: ((err?: Error) => void) | null = null;
   const sent: JsonRpcMessage[] = [];
   const connClose = vi.fn();
   const transport: JsonRpcTransport = {
     send: (m) => sent.push(m),
     onMessage: (h) => { messageHandler = h; },
-    onClose: () => {},
+    onClose: (h) => { transportCloseHandler = h; },
     close: vi.fn(),
   };
   const connector: AppServerConnector = (handlers) => ({
     peer: new JsonRpcPeer(transport, {
       onNotification: handlers.onNotification,
       onRequest: handlers.onRequest,
+      onClose: handlers.onClose,
     }),
     close: connClose,
   });
@@ -39,6 +41,8 @@ function makeClient(onApproval?: AppServerApprovalHandler) {
     sent,
     connClose,
     inject: (m: JsonRpcMessage) => messageHandler(m),
+    /** Simulate the underlying transport/process closing. */
+    triggerClose: (err?: Error) => transportCloseHandler?.(err),
     respondTo: (method: string, result: unknown) => {
       const req = [...sent].reverse().find((m) => m.method === method);
       if (!req) throw new Error(`no sent request for ${method}`);
@@ -72,10 +76,15 @@ describe("CodexAppServerClient", () => {
 
   it("starts a thread and returns its id", async () => {
     const h = makeClient();
-    const p = h.client.startThread({ model: "gpt-5.1-codex", cwd: "/proj", approvalPolicy: "on-request" });
+    const p = h.client.startThread({
+      model: "gpt-5.1-codex",
+      cwd: "/proj",
+      approvalPolicy: "on-request",
+      sandbox: "workspaceWrite",
+    });
     expect(h.sent.at(-1)).toMatchObject({
       method: "thread/start",
-      params: { model: "gpt-5.1-codex", cwd: "/proj", approvalPolicy: "on-request" },
+      params: { model: "gpt-5.1-codex", cwd: "/proj", approvalPolicy: "on-request", sandbox: "workspaceWrite" },
     });
     h.respondTo("thread/start", { thread: { id: "thr_123" } });
     await expect(p).resolves.toBe("thr_123");
@@ -172,6 +181,37 @@ describe("CodexAppServerClient", () => {
     }).rejects.toThrow(/already in progress/);
     h.inject({ method: "turn/completed", params: {} });
     await first.done;
+  });
+
+  it("fails the active turn when the peer/connection closes (process died)", async () => {
+    const h = makeClient();
+    const { events, done } = collectTurn(h.client.runTurn("thr_1", "x"));
+    await flush();
+    h.triggerClose(new Error("codex app-server exited (code 1)"));
+    await done;
+    expect(events).toEqual([
+      { type: "turn.failed", error: { message: "codex app-server exited (code 1)" } },
+    ]);
+  });
+
+  it("interrupts the still-running server turn when the consumer breaks early", async () => {
+    const h = makeClient();
+    const gen = h.client.runTurn("thr_1", "x");
+    const first = gen.next();
+    await flush();
+    h.respondTo("turn/start", { turn: { id: "turn_9" } }); // captures the turn id
+    await flush();
+    h.inject({ method: "turn/started" });
+    expect((await first).value).toEqual({ type: "turn.started" });
+
+    await gen.return(undefined); // consumer breaks → finally interrupts
+    await flush();
+    expect(h.sent).toContainEqual(
+      expect.objectContaining({
+        method: "turn/interrupt",
+        params: { threadId: "thr_1", turnId: "turn_9" },
+      }),
+    );
   });
 
   it("close() ends the active turn and tears down the connection", async () => {
