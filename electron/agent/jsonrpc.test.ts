@@ -211,6 +211,24 @@ describe("JsonRpcPeer", () => {
     await expect(p).rejects.toThrow("stream died");
   });
 
+  it("fires onClose once when the peer closes (transport EOF, then idempotent)", () => {
+    const t = makeFakeTransport();
+    const onClose = vi.fn();
+    new JsonRpcPeer(t.transport, { onClose });
+    t.triggerClose(new Error("bye"));
+    expect(onClose).toHaveBeenCalledWith(expect.objectContaining({ message: "bye" }));
+    t.triggerClose(); // already closed → no re-fire
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires onClose on an explicit peer.close()", () => {
+    const t = makeFakeTransport();
+    const onClose = vi.fn();
+    const peer = new JsonRpcPeer(t.transport, { onClose });
+    peer.close();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a request issued after close", async () => {
     const t = makeFakeTransport();
     const peer = new JsonRpcPeer(t.transport);
