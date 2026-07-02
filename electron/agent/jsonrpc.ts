@@ -73,6 +73,13 @@ export interface JsonRpcPeerOptions {
    * the user (the caller owns that timeout).
    */
   onRequest?: (method: string, params: unknown) => Promise<unknown>;
+  /**
+   * Called once when the peer closes (transport EOF/error, a throwing send, or
+   * an explicit {@link JsonRpcPeer.close}), after in-flight requests are
+   * rejected. Lets a consumer react to a dead connection (e.g. fail an active
+   * turn) — the peer only rejects *pending requests*, not open streams. Fail-safe.
+   */
+  onClose?: (err?: Error) => void;
   /** Default per-request timeout (ms) for outbound {@link JsonRpcPeer.request}. 0 disables. */
   requestTimeoutMs?: number;
 }
@@ -225,6 +232,11 @@ export class JsonRpcPeer {
       pending.reject(failure);
     }
     this.pending.clear();
+    try {
+      this.options.onClose?.(err);
+    } catch (hookErr) {
+      console.error("[jsonrpc] onClose handler threw:", hookErr);
+    }
   }
 }
 
