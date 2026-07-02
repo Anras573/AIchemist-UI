@@ -20,7 +20,7 @@
  * recorder mapping is slice 3's job.
  */
 import { spawn } from "node:child_process";
-import { JsonRpcPeer, createStdioTransport } from "./jsonrpc";
+import { JsonRpcPeer, createStdioTransport, type JsonRpcTransport } from "./jsonrpc";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -350,7 +350,13 @@ export function spawnAppServerConnector(config: {
       handlers.onClose(exitReason ?? err);
     };
 
-    const transport = createStdioTransport(child.stdout!, child.stdin!);
+    // On a spawn failure (ENOENT / EACCES) the stdio streams can be null; that
+    // would crash createStdioTransport before the `error` handler below runs.
+    // Fall back to a dead transport so close is driven entirely by error/exit.
+    const transport: JsonRpcTransport =
+      child.stdout && child.stdin
+        ? createStdioTransport(child.stdout, child.stdin)
+        : { send: () => {}, onMessage: () => {}, onClose: () => {}, close: () => {} };
     const peer = new JsonRpcPeer(transport, {
       onNotification: handlers.onNotification,
       onRequest: handlers.onRequest,
