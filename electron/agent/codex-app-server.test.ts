@@ -183,6 +183,46 @@ describe("CodexAppServerClient", () => {
     await first.done;
   });
 
+  it("ignores a token-usage update with no active turn (no cross-turn leak)", async () => {
+    const h = makeClient();
+    h.inject({ method: "thread/tokenUsage/updated", params: { stale: true } }); // no active turn
+    const { events, done } = collectTurn(h.client.runTurn("thr_1", "x"));
+    await flush();
+    h.inject({ method: "turn/completed", params: {} });
+    await done;
+    // The pre-turn usage must not attach to this turn.
+    expect(events).toEqual([{ type: "turn.completed", usage: null }]);
+  });
+
+  it("a late turn/start response from a prior turn does not clobber the current turn's id", async () => {
+    const h = makeClient();
+    // Turn A: completes before its turn/start response arrives.
+    const a = collectTurn(h.client.runTurn("thr_1", "a"));
+    await flush();
+    const aReq = [...h.sent].reverse().find((m) => m.method === "turn/start")!;
+    h.inject({ method: "turn/completed", params: {} });
+    await a.done;
+
+    // Turn B: capture its id, then deliver A's late response (clobber attempt).
+    const gen = h.client.runTurn("thr_1", "b");
+    const first = gen.next();
+    await flush();
+    h.respondTo("turn/start", { turn: { id: "turn_B" } });
+    h.inject({ id: aReq.id, result: { turn: { id: "turn_A" } } }); // late A response
+    await flush();
+    h.inject({ method: "turn/started" });
+    await first;
+
+    await gen.return(undefined); // abandon B → must interrupt turn_B, not turn_A
+    await flush();
+    expect(h.sent).toContainEqual(
+      expect.objectContaining({ method: "turn/interrupt", params: { threadId: "thr_1", turnId: "turn_B" } }),
+    );
+    expect(h.sent).not.toContainEqual(
+      expect.objectContaining({ method: "turn/interrupt", params: { threadId: "thr_1", turnId: "turn_A" } }),
+    );
+  });
+
   it("fails the active turn when the peer/connection closes (process died)", async () => {
     const h = makeClient();
     const { events, done } = collectTurn(h.client.runTurn("thr_1", "x"));

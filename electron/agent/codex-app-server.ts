@@ -137,14 +137,24 @@ class AsyncEventQueue<T> {
 
 // ── Client ─────────────────────────────────────────────────────────────────────
 
+/**
+ * State for one in-flight turn. Scoping it to a per-turn object (rather than
+ * instance fields) means a late/stale callback from a superseded turn writes to
+ * its own dead context and can never clobber the current turn's id/usage.
+ */
+interface TurnContext {
+  readonly queue: AsyncEventQueue<AppServerTurnEvent>;
+  readonly threadId: string;
+  /** The running turn's id (from the turn/start response) — needed to interrupt. */
+  turnId: string | null;
+  /** Latest token usage for THIS turn (thread/tokenUsage/updated streams separately). */
+  usage: unknown;
+}
+
 export class CodexAppServerClient {
   private readonly peer: JsonRpcPeer;
   private readonly closeConn: () => void;
-  private activeTurn: AsyncEventQueue<AppServerTurnEvent> | null = null;
-  /** The running turn's id (from the turn/start response) — needed to interrupt. */
-  private activeTurnId: string | null = null;
-  /** Latest token usage (arrives separately via `thread/tokenUsage/updated`). */
-  private lastUsage: unknown = null;
+  private activeTurn: TurnContext | null = null;
 
   constructor(
     connect: AppServerConnector,
@@ -183,37 +193,38 @@ export class CodexAppServerClient {
    */
   async *runTurn(threadId: string, text: string): AsyncGenerator<AppServerTurnEvent> {
     if (this.activeTurn) throw new Error("Codex app-server: a turn is already in progress");
-    const queue = new AsyncEventQueue<AppServerTurnEvent>();
-    this.activeTurn = queue;
-    this.activeTurnId = null;
-    this.lastUsage = null;
+    const ctx: TurnContext = {
+      queue: new AsyncEventQueue<AppServerTurnEvent>(),
+      threadId,
+      turnId: null,
+      usage: null,
+    };
+    this.activeTurn = ctx;
     // Fire the turn and drive completion from the streamed notifications — the
     // turn/start *response* just carries the initial turn (we capture its id so
     // we can interrupt), while turn/completed / turn/failed notifications end the
     // stream. We do NOT await the response (it may be deferred); a rejection
-    // fails the turn.
+    // fails the turn. All writes target `ctx`, so a late response from a
+    // superseded turn updates its own dead context, never the current one.
     this.peer.request("turn/start", { threadId, input: [{ type: "text", text }] }).then(
       (res) => {
-        this.activeTurnId = (res as { turn?: { id?: string } } | null)?.turn?.id ?? null;
+        ctx.turnId = (res as { turn?: { id?: string } } | null)?.turn?.id ?? null;
       },
       (err) => {
-        queue.push({ type: "turn.failed", error: { message: err instanceof Error ? err.message : String(err) } });
-        queue.end();
+        ctx.queue.push({ type: "turn.failed", error: { message: err instanceof Error ? err.message : String(err) } });
+        ctx.queue.end();
       },
     );
     try {
-      yield* queue.drain();
+      yield* ctx.queue.drain();
     } finally {
       // If the consumer abandoned the turn before it ended (broke out of the
       // loop), interrupt the still-running server-side turn so it can't keep
       // executing or interleave with the next turn. Best-effort.
-      if (!queue.isEnded && this.activeTurnId) {
-        void this.peer
-          .request("turn/interrupt", { threadId, turnId: this.activeTurnId })
-          .catch(() => {});
+      if (!ctx.queue.isEnded && ctx.turnId) {
+        void this.peer.request("turn/interrupt", { threadId, turnId: ctx.turnId }).catch(() => {});
       }
-      this.activeTurn = null;
-      this.activeTurnId = null;
+      if (this.activeTurn === ctx) this.activeTurn = null;
     }
   }
 
@@ -223,51 +234,51 @@ export class CodexAppServerClient {
    * arrive.
    */
   private handlePeerClose(err?: Error): void {
-    const queue = this.activeTurn;
-    if (queue && !queue.isEnded) {
-      queue.push({ type: "turn.failed", error: { message: err?.message ?? "app-server connection closed" } });
-      queue.end();
+    const ctx = this.activeTurn;
+    if (ctx && !ctx.queue.isEnded) {
+      ctx.queue.push({ type: "turn.failed", error: { message: err?.message ?? "app-server connection closed" } });
+      ctx.queue.end();
     }
   }
 
   /** Tear down the turn stream and the underlying connection. */
   close(): void {
-    this.activeTurn?.end();
+    this.activeTurn?.queue.end();
     this.activeTurn = null;
-    this.activeTurnId = null;
     this.closeConn();
   }
 
   private handleNotification(method: string, params: unknown): void {
-    const queue = this.activeTurn;
+    const ctx = this.activeTurn;
     const p = (params ?? {}) as Record<string, unknown>;
     switch (method) {
       case "turn/started":
-        queue?.push({ type: "turn.started" });
+        ctx?.queue.push({ type: "turn.started" });
         break;
       case "item/started":
-        queue?.push({ type: "item.started", item: p.item });
+        ctx?.queue.push({ type: "item.started", item: p.item });
         break;
       case "item/updated":
-        queue?.push({ type: "item.updated", item: p.item });
+        ctx?.queue.push({ type: "item.updated", item: p.item });
         break;
       case "item/completed":
-        queue?.push({ type: "item.completed", item: p.item });
+        ctx?.queue.push({ type: "item.completed", item: p.item });
         break;
       case "thread/tokenUsage/updated":
-        // Usage streams separately from turn/completed; remember the latest.
-        this.lastUsage = params;
+        // Usage streams separately; attach it to the ACTIVE turn only, so a late
+        // update between turns can't leak into the next turn's turn.completed.
+        if (ctx) ctx.usage = params;
         break;
       case "turn/completed": {
         const error = extractTurnError(p);
-        if (error) queue?.push({ type: "turn.failed", error });
-        else queue?.push({ type: "turn.completed", usage: this.lastUsage });
-        queue?.end();
+        if (error) ctx?.queue.push({ type: "turn.failed", error });
+        else ctx?.queue.push({ type: "turn.completed", usage: ctx?.usage ?? null });
+        ctx?.queue.end();
         break;
       }
       case "turn/failed": {
-        queue?.push({ type: "turn.failed", error: extractTurnError(p) ?? { message: "turn failed" } });
-        queue?.end();
+        ctx?.queue.push({ type: "turn.failed", error: extractTurnError(p) ?? { message: "turn failed" } });
+        ctx?.queue.end();
         break;
       }
       // thread/started, item/agentMessage/delta, etc. are ignored in this slice.
@@ -310,15 +321,30 @@ export function spawnAppServerConnector(config: {
       stdio: ["pipe", "pipe", "inherit"],
     });
 
+    // Both the transport EOF (via the peer's onClose) and the child's `exit`
+    // signal a close; funnel them through a single one-shot so onClose fires
+    // exactly once, preferring the exit reason when we have it.
+    let closed = false;
+    let exitReason: Error | undefined;
+    const fireClose = (err?: Error): void => {
+      if (closed) return;
+      closed = true;
+      handlers.onClose(exitReason ?? err);
+    };
+
     const transport = createStdioTransport(child.stdout!, child.stdin!);
     const peer = new JsonRpcPeer(transport, {
       onNotification: handlers.onNotification,
       onRequest: handlers.onRequest,
-      onClose: handlers.onClose,
+      onClose: fireClose,
     });
-    // The process dying is a connection close too — surface it to the peer so an
-    // active turn fails rather than hanging.
-    child.on("exit", (code) => handlers.onClose(new Error(`codex app-server exited (code ${code})`)));
+    // On exit, route through peer.close() so pending requests are rejected first,
+    // then onClose fires once with the exit reason (peer.close → handleClose →
+    // fireClose, which is already guarded).
+    child.on("exit", (code) => {
+      exitReason = new Error(`codex app-server exited (code ${code})`);
+      peer.close();
+    });
 
     return {
       peer,
