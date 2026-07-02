@@ -1,7 +1,7 @@
-import * as nodePath from "node:path";
 import type { AgentInfo } from "../../src/types/index";
 import { getApiKey } from "../config";
 import { TurnEmitter } from "./turn-emitter";
+import { createCodexItemSink, type NormalizedCodexItem } from "./codex-item-mapper";
 import { providerSessionStore } from "./provider-session-store";
 import { buildSkillsContext } from "./skills";
 import { buildMemoryContext } from "./memory";
@@ -224,42 +224,6 @@ function renderMcpToolOutput(item: Extract<ThreadItem, { type: "mcp_tool_call" }
   return fallback === undefined || fallback === null ? "" : JSON.stringify(fallback);
 }
 
-/**
- * Drive the renderer's Changes panel (SESSION_FILE_CHANGE) from a Codex
- * `file_change` item, for parity with the other providers. Best-effort: Codex
- * doesn't give us a diff, and a path we can't resolve is skipped rather than
- * breaking the turn.
- */
-/** Directories whose changes are noise in the Changes panel (mirrors the fs-handlers ignore list). */
-const IGNORED_CHANGE_DIRS = new Set([".git", "node_modules"]);
-
-function emitFileChanges(
-  emitter: TurnEmitter,
-  projectPath: string,
-  changes: Extract<ThreadItem, { type: "file_change" }>["changes"],
-): void {
-  for (const change of changes) {
-    try {
-      const abs = nodePath.isAbsolute(change.path)
-        ? nodePath.normalize(change.path)
-        : nodePath.resolve(projectPath, change.path);
-      const rel = nodePath.relative(projectPath, abs);
-      // Only reflect in-project edits: skip paths that escape the workspace, and
-      // skip the dirs the fs tooling already ignores so the panel stays signal.
-      if (!rel || rel.startsWith("..") || nodePath.isAbsolute(rel)) continue;
-      if (rel.split(nodePath.sep).some((seg) => IGNORED_CHANGE_DIRS.has(seg))) continue;
-      emitter.fileChange({
-        path: abs,
-        relativePath: rel,
-        diff: "",
-        operation: change.kind === "delete" ? "delete" : "write",
-      });
-    } catch {
-      // best-effort — never break the turn on an unresolvable path
-    }
-  }
-}
-
 /** A short, human-readable label + output for a Codex tool item, for the timeline/traces. */
 function describeToolItem(
   item: ThreadItem,
@@ -291,6 +255,33 @@ function describeToolItem(
     default:
       return null;
   }
+}
+
+/**
+ * Adapt an exec-transport `ThreadItem` to the transport-agnostic
+ * {@link NormalizedCodexItem} the shared item sink consumes. The app-server
+ * transport (#128, slice 4) adds its own adapter onto the same shape.
+ */
+function fromSdkThreadItem(item: ThreadItem): NormalizedCodexItem {
+  if (item.type === "agent_message") return { kind: "message", text: item.text };
+  if (item.type === "reasoning") return { kind: "reasoning", text: item.text };
+  const desc = describeToolItem(item);
+  if (!desc) return { kind: "ignored" };
+  const tool: Extract<NormalizedCodexItem, { kind: "tool" }> = {
+    kind: "tool",
+    id: item.id,
+    name: desc.name,
+    args: desc.args,
+    output: desc.output,
+    isError: desc.isError,
+  };
+  if (item.type === "file_change") {
+    tool.fileChanges = item.changes.map((c) => ({
+      path: c.path,
+      operation: c.kind === "delete" ? "delete" : "write",
+    }));
+  }
+  return tool;
 }
 
 // ── Provider implementation ────────────────────────────────────────────────────
@@ -336,17 +327,9 @@ export const codexProvider: AgentProvider = {
       : createNativeTranscriptRecorder(sessionId, "codex");
     recorder?.turnStart(model);
 
-    // Codex tool items only carry an `item.started`/`item.completed` pair; track
-    // which ids we've already surfaced a tool-call for so we don't double-emit.
-    const startedToolIds = new Set<string>();
-
-    const emitToolCall = (item: ThreadItem) => {
-      const desc = describeToolItem(item);
-      if (!desc || startedToolIds.has(item.id)) return;
-      startedToolIds.add(item.id);
-      emitter.toolCall(item.id, desc.name, desc.args);
-      recorder?.toolCall(item.id, desc.name, desc.args);
-    };
+    // Shared reflector: normalizes each Codex item and drives the timeline +
+    // transcript. The app-server transport (#128, slice 4) feeds the same sink.
+    const itemSink = createCodexItemSink({ emitter, recorder, projectPath });
 
     const input = buildTurnInput(params, agentPrompt);
 
@@ -361,31 +344,11 @@ export const codexProvider: AgentProvider = {
             }
             break;
           case "item.started":
-            emitToolCall(event.item);
+            itemSink.started(fromSdkThreadItem(event.item));
             break;
-          case "item.completed": {
-            const item = event.item;
-            if (item.type === "agent_message") {
-              fullText += item.text;
-              emitter.delta(item.text);
-            } else if (item.type === "reasoning") {
-              recorder?.reasoning(item.text);
-            } else {
-              // A tool item — make sure the call was surfaced, then its result.
-              emitToolCall(item);
-              const desc = describeToolItem(item);
-              if (desc) {
-                emitter.toolResult(desc.name, desc.output);
-                recorder?.toolResult(item.id, desc.output, desc.isError);
-              }
-              // A successful patch also drives the Changes panel (parity with
-              // the other providers).
-              if (item.type === "file_change" && item.status === "completed") {
-                emitFileChanges(emitter, projectPath, item.changes);
-              }
-            }
+          case "item.completed":
+            fullText += itemSink.completed(fromSdkThreadItem(event.item));
             break;
-          }
           case "turn.completed":
             emitter.usage({
               input_tokens: event.usage.input_tokens,
