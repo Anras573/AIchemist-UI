@@ -121,6 +121,16 @@ describe("CodexAppServerClient", () => {
     ]);
   });
 
+  it("prefers usage carried on turn/completed over the streamed snapshot", async () => {
+    const h = makeClient();
+    const { events, done } = collectTurn(h.client.runTurn("thr_1", "x"));
+    await flush();
+    h.inject({ method: "thread/tokenUsage/updated", params: { input: 5, output: 3 } });
+    h.inject({ method: "turn/completed", params: { turn: { status: "completed", usage: { input: 9, output: 4 } } } });
+    await done;
+    expect(events).toEqual([{ type: "turn.completed", usage: { input: 9, output: 4 } }]);
+  });
+
   it("maps a turn/completed carrying an error to turn.failed", async () => {
     const h = makeClient();
     const { events, done } = collectTurn(h.client.runTurn("thr_1", "x"));

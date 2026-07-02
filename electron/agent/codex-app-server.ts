@@ -290,7 +290,12 @@ export class CodexAppServerClient {
       case "turn/completed": {
         const error = extractTurnError(p);
         if (error) ctx?.queue.push({ type: "turn.failed", error });
-        else ctx?.queue.push({ type: "turn.completed", usage: ctx?.usage ?? null });
+        else {
+          // turn/completed may carry usage inline; prefer it, falling back to the
+          // last streamed thread/tokenUsage/updated snapshot when it doesn't.
+          const inline = extractTurnUsage(p);
+          ctx?.queue.push({ type: "turn.completed", usage: inline ?? ctx?.usage ?? null });
+        }
         ctx?.queue.end();
         break;
       }
@@ -311,6 +316,12 @@ function extractTurnError(params: Record<string, unknown>): { message: string } 
   if (!raw) return null;
   if (typeof raw === "string") return { message: raw };
   return { message: typeof raw.message === "string" ? raw.message : "turn failed" };
+}
+
+/** Pull an inline usage payload out of a turn/completed body, if present. */
+function extractTurnUsage(params: Record<string, unknown>): unknown {
+  const turn = params.turn as { usage?: unknown } | undefined;
+  return turn?.usage ?? params.usage ?? null;
 }
 
 // ── Default connector: spawn the `codex app-server` binary ────────────────────
