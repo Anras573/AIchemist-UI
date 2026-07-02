@@ -176,9 +176,11 @@ describe("CodexAppServerClient", () => {
     const h = makeClient();
     const first = collectTurn(h.client.runTurn("thr_1", "a"));
     await flush();
-    await expect(async () => {
-      for await (const _ of h.client.runTurn("thr_1", "b")) void _;
-    }).rejects.toThrow(/already in progress/);
+    await expect(
+      (async () => {
+        for await (const _ of h.client.runTurn("thr_1", "b")) void _;
+      })(),
+    ).rejects.toThrow(/already in progress/);
     h.inject({ method: "turn/completed", params: {} });
     await first.done;
   });
@@ -250,6 +252,31 @@ describe("CodexAppServerClient", () => {
       expect.objectContaining({
         method: "turn/interrupt",
         params: { threadId: "thr_1", turnId: "turn_9" },
+      }),
+    );
+  });
+
+  it("interrupts once the turn id arrives if the consumer abandoned before it did", async () => {
+    const h = makeClient();
+    const gen = h.client.runTurn("thr_1", "x");
+    const first = gen.next();
+    await flush();
+    // A notification arrives before the turn/start response, so the consumer
+    // gets an event and can break — while turnId is still null.
+    h.inject({ method: "turn/started" });
+    expect((await first).value).toEqual({ type: "turn.started" });
+
+    await gen.return(undefined); // abandon before the turn id is known
+    await flush();
+    expect(h.sent).not.toContainEqual(expect.objectContaining({ method: "turn/interrupt" }));
+
+    // The late turn/start response should now trigger the deferred interrupt.
+    h.respondTo("turn/start", { turn: { id: "turn_late" } });
+    await flush();
+    expect(h.sent).toContainEqual(
+      expect.objectContaining({
+        method: "turn/interrupt",
+        params: { threadId: "thr_1", turnId: "turn_late" },
       }),
     );
   });

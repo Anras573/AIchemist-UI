@@ -149,6 +149,12 @@ interface TurnContext {
   turnId: string | null;
   /** Latest token usage for THIS turn (thread/tokenUsage/updated streams separately). */
   usage: unknown;
+  /**
+   * Set when the consumer abandoned the turn before its id was known. The
+   * turn/start response callback interrupts as soon as the id arrives, so a
+   * turn abandoned mid-flight can't keep running server-side.
+   */
+  abandoned: boolean;
 }
 
 export class CodexAppServerClient {
@@ -198,6 +204,7 @@ export class CodexAppServerClient {
       threadId,
       turnId: null,
       usage: null,
+      abandoned: false,
     };
     this.activeTurn = ctx;
     // Fire the turn and drive completion from the streamed notifications — the
@@ -209,6 +216,11 @@ export class CodexAppServerClient {
     this.peer.request("turn/start", { threadId, input: [{ type: "text", text }] }).then(
       (res) => {
         ctx.turnId = (res as { turn?: { id?: string } } | null)?.turn?.id ?? null;
+        // If the consumer already abandoned the turn while we were waiting for
+        // the id, interrupt now that we finally know it. Best-effort.
+        if (ctx.abandoned && ctx.turnId) {
+          void this.peer.request("turn/interrupt", { threadId, turnId: ctx.turnId }).catch(() => {});
+        }
       },
       (err) => {
         ctx.queue.push({ type: "turn.failed", error: { message: err instanceof Error ? err.message : String(err) } });
@@ -220,9 +232,15 @@ export class CodexAppServerClient {
     } finally {
       // If the consumer abandoned the turn before it ended (broke out of the
       // loop), interrupt the still-running server-side turn so it can't keep
-      // executing or interleave with the next turn. Best-effort.
-      if (!ctx.queue.isEnded && ctx.turnId) {
-        void this.peer.request("turn/interrupt", { threadId, turnId: ctx.turnId }).catch(() => {});
+      // executing or interleave with the next turn. Best-effort. If the turn id
+      // isn't known yet (turn/start response still pending), mark it abandoned
+      // so the response callback interrupts as soon as the id arrives.
+      if (!ctx.queue.isEnded) {
+        if (ctx.turnId) {
+          void this.peer.request("turn/interrupt", { threadId, turnId: ctx.turnId }).catch(() => {});
+        } else {
+          ctx.abandoned = true;
+        }
       }
       if (this.activeTurn === ctx) this.activeTurn = null;
     }
@@ -338,11 +356,21 @@ export function spawnAppServerConnector(config: {
       onRequest: handlers.onRequest,
       onClose: fireClose,
     });
+    // A spawn failure (e.g. ENOENT for a missing binary) emits `error`; without a
+    // listener Node throws it as an uncaught exception and crashes the process.
+    // Capture it as the close reason and tear the peer down.
+    child.on("error", (err) => {
+      exitReason = new Error(`codex app-server failed to start: ${err.message}`);
+      peer.close();
+    });
     // On exit, route through peer.close() so pending requests are rejected first,
     // then onClose fires once with the exit reason (peer.close → handleClose →
-    // fireClose, which is already guarded).
-    child.on("exit", (code) => {
-      exitReason = new Error(`codex app-server exited (code ${code})`);
+    // fireClose, which is already guarded). Include the signal when the process
+    // was killed (code is null in that case) so the reason isn't "code null".
+    child.on("exit", (code, signal) => {
+      exitReason = new Error(
+        `codex app-server exited (${signal ? `signal ${signal}` : `code ${code ?? "unknown"}`})`,
+      );
       peer.close();
     });
 
