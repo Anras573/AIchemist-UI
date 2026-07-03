@@ -47,6 +47,84 @@ export interface CodexItemSinkDeps {
   projectPath: string;
 }
 
+// ── App-server item adapter ────────────────────────────────────────────────────
+//
+// The `codex app-server` transport streams items with camelCase discriminators
+// and slightly different field names than the exec SDK's snake_case ThreadItem
+// (e.g. `commandExecution` vs `command_execution`, `aggregatedOutput` vs
+// `aggregated_output`). This adapter maps those raw payloads (typed `unknown`
+// because the client passes them through) onto the shared NormalizedCodexItem so
+// both transports feed the same sink. Shapes per codex-rs/app-server/README.md.
+// The exec adapter (`fromSdkThreadItem`) lives in codex.ts since it needs the SDK
+// type; this one is pure `unknown`-parsing, so it lives here with the sink.
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+/** Adapt a raw app-server `item/*` payload to a {@link NormalizedCodexItem}. */
+export function fromAppServerItem(raw: unknown): NormalizedCodexItem {
+  const item = (raw ?? {}) as Record<string, unknown>;
+  const id = str(item.id);
+  const isError = item.status === "failed";
+  switch (item.type) {
+    case "agentMessage":
+      return { kind: "message", text: str(item.text) };
+    case "reasoning":
+      // App-server splits reasoning into a summary + raw content; prefer content.
+      return { kind: "reasoning", text: str(item.content) || str(item.summary) };
+    case "commandExecution":
+      return {
+        kind: "tool",
+        id,
+        name: "execute_bash",
+        args: { command: str(item.command) },
+        output: str(item.aggregatedOutput),
+        isError,
+      };
+    case "fileChange": {
+      const changes = Array.isArray(item.changes) ? (item.changes as Array<Record<string, unknown>>) : [];
+      return {
+        kind: "tool",
+        id,
+        name: "file_change",
+        args: { changes },
+        output: changes.map((c) => `${str(c.kind)} ${str(c.path)}`).join("\n"),
+        isError,
+        fileChanges: changes.map((c) => ({
+          path: str(c.path),
+          operation: c.kind === "delete" ? "delete" : "write",
+        })),
+      };
+    }
+    case "mcpToolCall":
+      return {
+        kind: "tool",
+        id,
+        name: `${str(item.server)}.${str(item.tool)}`,
+        args: (item.arguments ?? {}) as Record<string, unknown>,
+        output: renderAppServerMcpResult(item),
+        isError: isError || item.error != null,
+      };
+    case "webSearch":
+      return { kind: "tool", id, name: "web_search", args: { query: str(item.query) }, output: str(item.query), isError: false };
+    default:
+      return { kind: "ignored" };
+  }
+}
+
+/** Render an app-server mcpToolCall result/error as readable text (string preferred). */
+function renderAppServerMcpResult(item: Record<string, unknown>): string {
+  const err = item.error;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object" && typeof (err as { message?: unknown }).message === "string") {
+    return (err as { message: string }).message;
+  }
+  const result = item.result;
+  if (typeof result === "string") return result;
+  return result === undefined || result === null ? "" : JSON.stringify(result);
+}
+
 /** The noisiest dirs to keep out of the Changes panel (a subset of the fs-handlers ignore list). */
 const IGNORED_CHANGE_DIRS = new Set([".git", "node_modules"]);
 

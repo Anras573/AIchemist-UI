@@ -1,7 +1,14 @@
 import type { AgentInfo } from "../../src/types/index";
 import { getApiKey } from "../config";
 import { TurnEmitter } from "./turn-emitter";
-import { createCodexItemSink, type NormalizedCodexItem } from "./codex-item-mapper";
+import { createCodexItemSink, fromAppServerItem, type NormalizedCodexItem } from "./codex-item-mapper";
+import {
+  CodexAppServerClient,
+  spawnAppServerConnector,
+  type AppServerConnector,
+  type AppServerThreadOptions,
+} from "./codex-app-server";
+import { resolveCodexApproval } from "./codex-approval-bridge";
 import { providerSessionStore } from "./provider-session-store";
 import { buildSkillsContext } from "./skills";
 import { buildMemoryContext } from "./memory";
@@ -28,20 +35,21 @@ type CodexFactory = (options: CodexOptions) => Codex;
 // ─────────────────────────────────────────────────────────────────────────────
 // Codex provider — backed by `@openai/codex-sdk`.
 //
-// Unlike the other providers, the Codex SDK is NOT an HTTP client: it spawns the
-// Codex CLI binary (resolved from the bundled `@openai/codex-<platform>` package
-// or `CODEX_CLI_PATH`) and runs Codex as a self-driving coding agent. Codex
-// executes its own tools (shell, file edits, MCP) inside its own sandbox, so we
-// do NOT route tool calls through `runGatedTool`; instead we configure Codex's
-// `sandboxMode` / `approvalPolicy` and reflect the `item.*` events it streams
-// onto the timeline + trace transcript. AIchemist-managed MCP servers are
-// injected via `CodexOptions.config` (Codex's `mcp_servers`), respecting the
+// Unlike the other providers, Codex is NOT an HTTP client: it spawns the Codex
+// CLI binary (resolved from the bundled `@openai/codex-<platform>` package or
+// `CODEX_CLI_PATH`) and runs Codex as a self-driving coding agent that executes
+// its own tools (shell, file edits, MCP) inside its own sandbox. We reflect the
+// `item.*` events it streams onto the timeline + trace transcript rather than
+// routing tool calls through `runGatedTool`. AIchemist-managed MCP servers are
+// injected via the thread `config` (Codex's `mcp_servers`), respecting the
 // per-session disable set; Codex then emits `mcp_tool_call` items we reflect.
 //
-// Approval parity (surfacing Codex's interactive `on-request` approvals through
-// AIchemist's approval UI) is intentionally out of scope here and tracked by
-// #128 — the non-interactive `codex exec` transport this SDK uses cannot
-// surface interactive approval callbacks. See docs/plans/2026-06-28-codex-parity-plan.md.
+// Two transports, chosen per turn (see runViaExec / runViaAppServer):
+//   - exec (`@openai/codex-sdk`): one-shot, no interactive approval callbacks.
+//     Used for noTools / nonInteractive turns and as the app-server fallback.
+//   - app-server (`codex-app-server.ts`): long-running JSON-RPC; used for
+//     interactive turns so `on-request` approvals bridge to AIchemist's approval
+//     UI (`codex-approval-bridge.ts`). See docs/plans/2026-06-29-codex-approval-bridging-spike.md.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
@@ -51,6 +59,7 @@ const CODEX_MODEL_PREFIXES = ["gpt-", "o1", "o3"] as const;
 
 let codexInstance: Codex | null = null;
 let codexFactory: CodexFactory | null = null;
+let appServerConnectorOverride: AppServerConnector | null = null;
 let fetchImpl: typeof fetch = (...args) => fetch(...args);
 let probeCache: { result: { ok: boolean; reason?: string; durationMs?: number }; timestamp: number } | null =
   null;
@@ -284,6 +293,209 @@ function fromSdkThreadItem(item: ThreadItem): NormalizedCodexItem {
   return tool;
 }
 
+// ── Turn execution (two transports) ─────────────────────────────────────────────
+
+/** The per-turn context shared by both transport paths. */
+interface TurnRunContext {
+  params: AgentProviderParams;
+  db: Database;
+  sessionId: string;
+  projectPath: string;
+  emitter: TurnEmitter;
+  recorder: NativeTranscriptRecorder | null;
+  itemSink: ReturnType<typeof createCodexItemSink>;
+  model: string | undefined;
+  input: string;
+  codexConfig: CodexConfig | undefined;
+  persistThread: boolean;
+  resumeId: string | null;
+}
+
+/**
+ * Run the turn via the one-shot `codex exec` SDK transport (the original path).
+ * Used for noTools / nonInteractive turns and as the app-server fallback.
+ */
+async function runViaExec(ctx: TurnRunContext): Promise<string> {
+  const { db, sessionId, projectPath, emitter, recorder, itemSink, model, input, codexConfig, persistThread, resumeId } = ctx;
+  const codex = await getCodex(codexConfig);
+  const { sandboxMode, approvalPolicy } = resolveSandboxPolicy(ctx.params);
+  const threadOptions: ThreadOptions = {
+    model,
+    sandboxMode,
+    approvalPolicy,
+    workingDirectory: projectPath,
+    // The project may not be a git repo; don't let Codex refuse to start.
+    skipGitRepoCheck: true,
+  };
+  const thread: Thread = resumeId
+    ? codex.resumeThread(resumeId, threadOptions)
+    : codex.startThread(threadOptions);
+
+  let fullText = "";
+  try {
+    const { events } = await thread.runStreamed(input);
+    for await (const event of events as AsyncGenerator<ThreadEvent>) {
+      switch (event.type) {
+        case "thread.started":
+          if (persistThread) {
+            providerSessionStore.set(db, sessionId, "codex", { threadId: event.thread_id });
+          }
+          break;
+        case "item.started":
+          itemSink.started(fromSdkThreadItem(event.item));
+          break;
+        case "item.completed":
+          fullText += itemSink.completed(fromSdkThreadItem(event.item));
+          break;
+        case "turn.completed":
+          emitter.usage({
+            input_tokens: event.usage.input_tokens,
+            output_tokens: event.usage.output_tokens,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: event.usage.cached_input_tokens,
+          });
+          recorder?.usage({
+            input: event.usage.input_tokens,
+            output: event.usage.output_tokens,
+            cacheRead: event.usage.cached_input_tokens,
+            cacheCreation: 0,
+          });
+          break;
+        case "turn.failed":
+          throw new Error(event.error.message);
+        case "error":
+          throw new Error(event.message);
+      }
+    }
+    // The thread id is also populated on the Thread after the first turn; back-stop
+    // the persistence in case no `thread.started` event was observed on resume.
+    if (persistThread && thread.id) {
+      providerSessionStore.set(db, sessionId, "codex", { threadId: thread.id });
+    }
+    recorder?.turnEnd("success");
+  } catch (err) {
+    recorder?.turnEnd("error");
+    throw err;
+  }
+  return fullText;
+}
+
+/** Build the app-server client for a turn (connector injectable for tests). */
+function buildAppServerClient(ctx: TurnRunContext): CodexAppServerClient {
+  const connector =
+    appServerConnectorOverride ??
+    spawnAppServerConnector({
+      // Bundled-binary resolution is the same concern as the SDK path (#140);
+      // fall back to PATH. A missing binary fails startup → we fall back to exec.
+      binaryPath: process.env.CODEX_CLI_PATH?.trim() || "codex",
+      apiKey: getConfiguredOpenAiApiKey() ?? "",
+      baseUrl: configuredOpenAiBaseUrl(),
+      cwd: ctx.projectPath,
+    });
+  const approvalCtx = {
+    sessionId: ctx.sessionId,
+    config: ctx.params.projectConfig,
+    webContents: ctx.params.webContents,
+    nonInteractive: !!ctx.params.nonInteractive,
+  };
+  return new CodexAppServerClient(connector, (req) => resolveCodexApproval(req, approvalCtx));
+}
+
+/**
+ * Bring up the app-server client and resume/start the thread. Returns `null`
+ * (so the caller falls back to exec) if the server can't be brought up —
+ * construction/spawn throw, initialize, or thread start/resume all count as
+ * startup failures. Client construction is inside the try so a synchronous
+ * spawn failure (e.g. a sandbox blocking `spawn`) also falls back rather than
+ * crashing the turn.
+ */
+async function startAppServerTurn(
+  ctx: TurnRunContext,
+): Promise<{ client: CodexAppServerClient; threadId: string } | null> {
+  let client: CodexAppServerClient | null = null;
+  try {
+    client = buildAppServerClient(ctx);
+    await client.initialize();
+    const threadOptions: AppServerThreadOptions = {
+      model: ctx.model,
+      cwd: ctx.projectPath,
+      // Interactive: prompt on request (the whole point of this transport).
+      approvalPolicy: "on-request",
+      sandbox: "workspaceWrite",
+      config: ctx.codexConfig as Record<string, unknown> | undefined,
+    };
+    const threadId = ctx.resumeId
+      ? await client.resumeThread(ctx.resumeId, threadOptions)
+      : await client.startThread(threadOptions);
+    return { client, threadId };
+  } catch (err) {
+    client?.close();
+    console.warn(`[codex] app-server unavailable, falling back to exec transport: ${String(err)}`);
+    return null;
+  }
+}
+
+/**
+ * Run the turn via the long-running `codex app-server` transport, bridging its
+ * on-request approvals to AIchemist's approval UI. Returns `{ fallback: true }`
+ * when the server can't be brought up so the caller can retry on exec; a failure
+ * *mid-turn* (after streaming starts) is a real error and propagates.
+ */
+async function runViaAppServer(ctx: TurnRunContext): Promise<{ fallback: true } | { fallback: false; text: string }> {
+  const { db, sessionId, emitter, recorder, itemSink, input, persistThread } = ctx;
+  const startup = await startAppServerTurn(ctx);
+  if (!startup) return { fallback: true };
+  const { client, threadId } = startup;
+
+  try {
+    if (persistThread) providerSessionStore.set(db, sessionId, "codex", { threadId });
+    let fullText = "";
+    for await (const event of client.runTurn(threadId, input)) {
+      switch (event.type) {
+        case "item.started":
+          itemSink.started(fromAppServerItem(event.item));
+          break;
+        case "item.completed":
+          fullText += itemSink.completed(fromAppServerItem(event.item));
+          break;
+        case "turn.completed":
+          emitAppServerUsage(event.usage, emitter, recorder);
+          break;
+        case "turn.failed":
+          throw new Error(event.error.message);
+        // turn.started / item.updated carry nothing the sink needs.
+      }
+    }
+    recorder?.turnEnd("success");
+    return { fallback: false, text: fullText };
+  } catch (err) {
+    recorder?.turnEnd("error");
+    throw err;
+  } finally {
+    client.close();
+  }
+}
+
+/** Map an app-server usage payload (best-effort field names) onto the emitter + recorder. */
+function emitAppServerUsage(
+  usage: unknown,
+  emitter: TurnEmitter,
+  recorder: NativeTranscriptRecorder | null,
+): void {
+  const u = (usage ?? {}) as Record<string, unknown>;
+  const num = (v: unknown): number => (typeof v === "number" ? v : 0);
+  const input = num(u.input_tokens ?? u.input);
+  const output = num(u.output_tokens ?? u.output);
+  const cacheRead = num(u.cached_input_tokens ?? u.cached ?? u.cache_read_input_tokens);
+  emitter.usage({
+    input_tokens: input,
+    output_tokens: output,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: cacheRead,
+  });
+  recorder?.usage({ input, output, cacheRead, cacheCreation: 0 });
+}
+
 // ── Provider implementation ────────────────────────────────────────────────────
 
 export const codexProvider: AgentProvider = {
@@ -291,24 +503,13 @@ export const codexProvider: AgentProvider = {
     const { db, sessionId, projectPath, webContents, noTools } = params;
 
     const emitter = new TurnEmitter(webContents, sessionId);
+    const agentPrompt = params.agent ? readAgentFileSystemPrompt(params.agent) : null;
+    const model = resolveModelForTurn(params, agentPrompt);
+    const input = buildTurnInput(params, agentPrompt);
     // Inject AIchemist-managed MCP servers (respecting the per-session disable
     // set) so Codex can call them; it surfaces them as `mcp_tool_call` items,
     // already reflected onto the timeline/traces. noTools turns get none.
     const codexConfig = noTools ? undefined : buildCodexMcpConfig(db, sessionId);
-    const codex = await getCodex(codexConfig);
-
-    const agentPrompt = params.agent ? readAgentFileSystemPrompt(params.agent) : null;
-    const model = resolveModelForTurn(params, agentPrompt);
-    const { sandboxMode, approvalPolicy } = resolveSandboxPolicy(params);
-
-    const threadOptions: ThreadOptions = {
-      model,
-      sandboxMode,
-      approvalPolicy,
-      workingDirectory: projectPath,
-      // The project may not be a git repo; don't let Codex refuse to start.
-      skipGitRepoCheck: true,
-    };
 
     // Resume the persisted Codex thread, or start a fresh one. `noTools` turns
     // (skipPersistence — e.g. PR-draft generation) run a throwaway thread and
@@ -317,9 +518,6 @@ export const codexProvider: AgentProvider = {
     const persistThread = !noTools;
     const prior = persistThread ? providerSessionStore.get(db, sessionId, "codex") : null;
     const resumeId = prior?.threadId ?? null;
-    const thread: Thread = resumeId
-      ? codex.resumeThread(resumeId, threadOptions)
-      : codex.startThread(threadOptions);
 
     // noTools turns (PR-draft generation) are not recorded — matches the other providers.
     const recorder: NativeTranscriptRecorder | null = noTools
@@ -328,59 +526,35 @@ export const codexProvider: AgentProvider = {
     recorder?.turnStart(model);
 
     // Shared reflector: normalizes each Codex item and drives the timeline +
-    // transcript. The app-server transport (#128, slice 4) feeds the same sink.
+    // transcript. Both transports feed the same sink.
     const itemSink = createCodexItemSink({ emitter, recorder, projectPath });
 
-    const input = buildTurnInput(params, agentPrompt);
+    const ctx: TurnRunContext = {
+      params,
+      db,
+      sessionId,
+      projectPath,
+      emitter,
+      recorder,
+      itemSink,
+      model,
+      input,
+      codexConfig,
+      persistThread,
+      resumeId,
+    };
 
-    let fullText = "";
-    try {
-      const { events } = await thread.runStreamed(input);
-      for await (const event of events as AsyncGenerator<ThreadEvent>) {
-        switch (event.type) {
-          case "thread.started":
-            if (persistThread) {
-              providerSessionStore.set(db, sessionId, "codex", { threadId: event.thread_id });
-            }
-            break;
-          case "item.started":
-            itemSink.started(fromSdkThreadItem(event.item));
-            break;
-          case "item.completed":
-            fullText += itemSink.completed(fromSdkThreadItem(event.item));
-            break;
-          case "turn.completed":
-            emitter.usage({
-              input_tokens: event.usage.input_tokens,
-              output_tokens: event.usage.output_tokens,
-              cache_creation_input_tokens: 0,
-              cache_read_input_tokens: event.usage.cached_input_tokens,
-            });
-            recorder?.usage({
-              input: event.usage.input_tokens,
-              output: event.usage.output_tokens,
-              cacheRead: event.usage.cached_input_tokens,
-              cacheCreation: 0,
-            });
-            break;
-          case "turn.failed":
-            throw new Error(event.error.message);
-          case "error":
-            throw new Error(event.message);
-        }
-      }
-      // The thread id is also populated on the Thread after the first turn; back-stop
-      // the persistence in case no `thread.started` event was observed on resume.
-      if (persistThread && thread.id) {
-        providerSessionStore.set(db, sessionId, "codex", { threadId: thread.id });
-      }
-      recorder?.turnEnd("success");
-    } catch (err) {
-      recorder?.turnEnd("error");
-      throw err;
+    // Interactive turns use the long-running app-server transport so Codex's
+    // on-request approvals bridge to AIchemist's approval UI. noTools /
+    // nonInteractive turns (no user watching, or read-only) keep the one-shot
+    // exec transport. If the app-server can't come up, fall back to exec so an
+    // interactive turn still runs (degraded to the on-failure approval policy).
+    const useAppServer = !noTools && !params.nonInteractive;
+    if (useAppServer) {
+      const result = await runViaAppServer(ctx);
+      if (!result.fallback) return result.text;
     }
-
-    return fullText;
+    return runViaExec(ctx);
   },
 
   async listModels(): Promise<Array<{ id: string; name: string }>> {
@@ -457,6 +631,15 @@ export function _setCodexForTests(codex: Codex | null): void {
  */
 export function _setCodexFactoryForTests(factory: CodexFactory | null): void {
   codexFactory = factory;
+}
+
+/**
+ * Inject the app-server connector so tests can drive a fake peer (no binary
+ * spawn) and simulate item streaming + approval requests. When unset, an
+ * interactive turn spawns the real `codex app-server` binary.
+ */
+export function _setAppServerConnectorForTests(connector: AppServerConnector | null): void {
+  appServerConnectorOverride = connector;
 }
 
 export function _setFetchForTests(impl: typeof fetch | null): void {
