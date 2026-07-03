@@ -208,6 +208,13 @@ interface FileWatchHandle {
   debounce: ReturnType<typeof setTimeout> | null;
 }
 
+export type FileWatchListener = (eventType: fs.WatchEventType, filename: string | Buffer | null) => void;
+export type FileWatchFactory = (
+  watchPath: string,
+  options: fs.WatchOptions,
+  listener: FileWatchListener
+) => fs.FSWatcher;
+
 /**
  * Trigger manager for enabled workflows. Arms two kinds of trigger, started from
  * `app.whenReady()`:
@@ -240,15 +247,17 @@ export class WorkflowScheduler {
   private readonly fileWatchers = new Map<string, FileWatchHandle>();
   private readonly hooks: WorkflowRunHooks;
   private readonly fileWatchDebounceMs: number;
+  private readonly watch: FileWatchFactory;
   private jobsChangedListener: (() => void) | null = null;
 
   constructor(
     private readonly ctx: TurnQueueContext,
     hooks?: WorkflowRunHooks,
-    options?: { fileWatchDebounceMs?: number }
+    options?: { fileWatchDebounceMs?: number; watch?: FileWatchFactory }
   ) {
     this.hooks = hooks ?? defaultRunHooks(ctx);
     this.fileWatchDebounceMs = options?.fileWatchDebounceMs ?? FILE_WATCH_DEBOUNCE_MS;
+    this.watch = options?.watch ?? fs.watch;
   }
 
   /**
@@ -410,7 +419,7 @@ export class WorkflowScheduler {
     try {
       // `recursive: true` covers a watched directory tree (supported on macOS,
       // Windows, and modern Linux). On a single file it is harmless.
-      const watcher = fs.watch(watchPath, { recursive: true }, () => {
+      const watcher = this.watch(watchPath, { recursive: true }, () => {
         this.scheduleFileFire(wf.id);
       });
       // A delayed I/O error (the path is removed while watching) must not crash
