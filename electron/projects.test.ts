@@ -104,7 +104,17 @@ describe("getProjectConfig", () => {
     expect(config.provider).toBe("anthropic");
     expect(console.warn).toHaveBeenCalledWith(
       expect.stringContaining("[projects]"),
-      expect.anything()
+      expect.stringContaining(`"configPath": "${path.join(tmpDir, ".aichemist", "config.json")}"`)
+    );
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("[projects]"),
+      expect.stringContaining(
+        `"expected": [\n        "anthropic",\n        "copilot",\n        "ollama",\n        "openai-compatible",\n        "codex"\n      ]`
+      )
+    );
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("[projects]"),
+      expect.stringContaining(`"actual": "github"`)
     );
   });
 
@@ -127,7 +137,15 @@ describe("getProjectConfig", () => {
     expect(config.approval_mode).toBe("custom");
     expect(console.warn).toHaveBeenCalledWith(
       expect.stringContaining("[projects]"),
-      expect.anything()
+      expect.stringContaining(`"path": "approval_mode"`)
+    );
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("[projects]"),
+      expect.stringContaining(`"actual": "INVALID"`)
+    );
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("[projects]"),
+      expect.stringContaining(`"expected": [\n        "all",\n        "none",\n        "custom"\n      ]`)
     );
   });
 
@@ -142,4 +160,3 @@ describe("getProjectConfig", () => {
   });
 
 });
-
