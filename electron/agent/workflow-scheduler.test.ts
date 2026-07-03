@@ -23,6 +23,7 @@ import {
   runWorkflow,
   validateCron,
   WorkflowScheduler,
+  type FileWatchFactory,
   type WorkflowRunHooks,
 } from "./workflow-scheduler";
 import { _setCodexForTests } from "./codex";
@@ -634,10 +635,49 @@ describe("WorkflowScheduler", () => {
 
 describe("WorkflowScheduler — file-watch triggers", () => {
   const silentHooks: WorkflowRunHooks = { onRunUpdated: () => {} };
+  type FakeWatch = {
+    watchPath: string;
+    listener: Parameters<FileWatchFactory>[2];
+    closed: boolean;
+  };
+  let fakeWatchers: FakeWatch[];
+
+  const fakeWatch: FileWatchFactory = (watchPath, _options, listener) => {
+    if (!fs.existsSync(watchPath)) {
+      throw Object.assign(new Error(`ENOENT: no such file or directory, watch '${watchPath}'`), {
+        code: "ENOENT",
+      });
+    }
+
+    const fake: FakeWatch = { watchPath, listener, closed: false };
+    const watcher = {
+      close: vi.fn(() => {
+        fake.closed = true;
+      }),
+      on: vi.fn(() => watcher),
+    } as unknown as fs.FSWatcher;
+    fakeWatchers.push(fake);
+    return watcher;
+  };
+
+  beforeEach(() => {
+    fakeWatchers = [];
+  });
 
   // A short debounce keeps the fire-on-change test fast without flaking.
   function makeWatchScheduler(): WorkflowScheduler {
-    return new WorkflowScheduler(makeCtx(), silentHooks, { fileWatchDebounceMs: 20 });
+    return new WorkflowScheduler(makeCtx(), silentHooks, {
+      fileWatchDebounceMs: 20,
+      watch: fakeWatch,
+    });
+  }
+
+  function triggerFakeWatch(watchPath = projectDir): void {
+    for (const fake of fakeWatchers) {
+      if (!fake.closed && fake.watchPath === watchPath) {
+        fake.listener("change", "trigger.txt");
+      }
+    }
   }
 
   it("arms a file watcher for an enabled workflow with a watch_path", () => {
@@ -744,8 +784,10 @@ describe("WorkflowScheduler — file-watch triggers", () => {
     scheduler.start();
     expect(scheduler.isArmed(wf.id)).toBe(true);
 
-    // Touch a file under the watched directory to trigger the watcher.
+    // Touch a file under the watched directory, then emit the corresponding
+    // watcher event through the injected fake.
     fs.writeFileSync(path.join(projectDir, "trigger.txt"), "change");
+    triggerFakeWatch();
 
     await vi.waitFor(
       () => {
@@ -783,6 +825,7 @@ describe("WorkflowScheduler — file-watch triggers", () => {
     expect(scheduler.isArmed(wf.id)).toBe(false);
 
     fs.writeFileSync(path.join(projectDir, "after-cancel.txt"), "change");
+    triggerFakeWatch();
     // Give a cancelled watcher a chance to (wrongly) fire.
     await new Promise((resolve) => setTimeout(resolve, 100));
 
