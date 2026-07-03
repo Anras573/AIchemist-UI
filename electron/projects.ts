@@ -38,11 +38,11 @@ function valueAtPath(value: unknown, issuePath: PropertyKey[]): unknown {
 
 function summarizeConfigValue(value: unknown): unknown {
   if (value === null || value === undefined) return value;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return value.length <= 64 ? value : `[string:${value.length}]`;
+  if (typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) return `[array:${value.length}]`;
-  if (typeof value === "object") return `[object:${Object.keys(value).join(",")}]`;
+  if (typeof value === "object") return `[object:${Object.keys(value as Record<string, unknown>).join(",")}]`;
   return typeof value;
-}
 
 function describeProjectConfigIssue(issue: z.ZodIssue, parsed: unknown): Record<string, unknown> {
   const details: Record<string, unknown> = {
@@ -51,9 +51,7 @@ function describeProjectConfigIssue(issue: z.ZodIssue, parsed: unknown): Record<
     message: issue.message,
   };
   const actual = valueAtPath(parsed, issue.path);
-  if (actual !== undefined) {
-    details.actual = summarizeConfigValue(actual);
-  }
+  details.actual = actual === undefined ? "<missing>" : summarizeConfigValue(actual);
   if ("values" in issue) {
     details.expected = issue.values;
   } else if ("options" in issue) {
