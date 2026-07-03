@@ -44,7 +44,7 @@ function summarizeConfigValue(value: unknown): unknown {
   return typeof value;
 }
 
-function describeProjectConfigIssue(issue: z.core.$ZodIssue, parsed: unknown): Record<string, unknown> {
+function describeProjectConfigIssue(issue: z.ZodIssue, parsed: unknown): Record<string, unknown> {
   const details: Record<string, unknown> = {
     path: issue.path.length > 0 ? issue.path.join(".") : "<root>",
     code: issue.code,
@@ -56,6 +56,8 @@ function describeProjectConfigIssue(issue: z.core.$ZodIssue, parsed: unknown): R
   }
   if ("values" in issue) {
     details.expected = issue.values;
+  } else if ("options" in issue) {
+    details.expected = (issue as { options: unknown }).options;
   }
   return details;
 }
