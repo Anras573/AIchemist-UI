@@ -43,6 +43,7 @@ function summarizeConfigValue(value: unknown): unknown {
   if (Array.isArray(value)) return `[array:${value.length}]`;
   if (typeof value === "object") return `[object:${Object.keys(value as Record<string, unknown>).join(",")}]`;
   return typeof value;
+}
 
 function describeProjectConfigIssue(issue: z.ZodIssue, parsed: unknown): Record<string, unknown> {
   const details: Record<string, unknown> = {
