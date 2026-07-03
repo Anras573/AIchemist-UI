@@ -1,4 +1,5 @@
 // @vitest-environment node
+import * as nodePath from "node:path";
 import { describe, it, expect, vi } from "vitest";
 import { createCodexItemSink, type NormalizedCodexItem } from "./codex-item-mapper";
 import type { TurnEmitter } from "./turn-emitter";
@@ -30,7 +31,14 @@ function makeRecorder() {
   };
 }
 
-const PROJECT = "/proj";
+// Platform-rooted so the derived expectations below match the implementation's
+// node:path output on any OS ("/proj" on POSIX, "C:\\proj" on Windows).
+const PROJECT = nodePath.resolve(nodePath.sep, "proj");
+/** The absolute + relative path the sink should produce for an in-project change. */
+const inProject = (...segments: string[]) => ({
+  path: nodePath.join(PROJECT, ...segments),
+  relativePath: nodePath.join(...segments),
+});
 
 function setup() {
   const emitter = makeEmitter();
@@ -117,14 +125,12 @@ describe("createCodexItemSink", () => {
     });
     expect(emitter.fileChange).toHaveBeenCalledTimes(2);
     expect(emitter.fileChange).toHaveBeenNthCalledWith(1, {
-      path: "/proj/src/a.ts",
-      relativePath: "src/a.ts",
+      ...inProject("src", "a.ts"),
       diff: "",
       operation: "write",
     });
     expect(emitter.fileChange).toHaveBeenNthCalledWith(2, {
-      path: "/proj/src/b.ts",
-      relativePath: "src/b.ts",
+      ...inProject("src", "b.ts"),
       diff: "",
       operation: "delete",
     });
@@ -162,8 +168,7 @@ describe("createCodexItemSink", () => {
     });
     expect(emitter.fileChange).toHaveBeenCalledTimes(1);
     expect(emitter.fileChange).toHaveBeenCalledWith({
-      path: "/proj/src/keep.ts",
-      relativePath: "src/keep.ts",
+      ...inProject("src", "keep.ts"),
       diff: "",
       operation: "write",
     });

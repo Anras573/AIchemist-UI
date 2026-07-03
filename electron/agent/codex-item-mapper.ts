@@ -47,7 +47,7 @@ export interface CodexItemSinkDeps {
   projectPath: string;
 }
 
-/** Directories whose changes are noise in the Changes panel (mirrors the fs-handlers ignore list). */
+/** The noisiest dirs to keep out of the Changes panel (a subset of the fs-handlers ignore list). */
 const IGNORED_CHANGE_DIRS = new Set([".git", "node_modules"]);
 
 /**
