@@ -208,7 +208,7 @@ interface FileWatchHandle {
   debounce: ReturnType<typeof setTimeout> | null;
 }
 
-type FileWatchListener = (eventType: fs.WatchEventType, filename: string | Buffer | null) => void;
+export type FileWatchListener = (eventType: fs.WatchEventType, filename: string | Buffer | null) => void;
 export type FileWatchFactory = (
   watchPath: string,
   options: fs.WatchOptions,
