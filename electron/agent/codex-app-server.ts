@@ -20,6 +20,7 @@
  * recorder mapping is slice 3's job.
  */
 import { spawn } from "node:child_process";
+import * as nodePath from "node:path";
 import { JsonRpcPeer, createStdioTransport, type JsonRpcTransport } from "./jsonrpc";
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -342,6 +343,20 @@ function extractTurnUsage(params: Record<string, unknown>): unknown {
 // ── Default connector: spawn the `codex app-server` binary ────────────────────
 
 /**
+ * Prepend sibling tool dirs to the child env's PATH (mutates `env`). The bundled
+ * Codex binary ships helper tools it expects on PATH. Windows' PATH key is
+ * case-insensitive, so reuse the existing key when present.
+ */
+function prependPathDirs(env: NodeJS.ProcessEnv, dirs: string[]): void {
+  if (dirs.length === 0) return;
+  const key =
+    process.platform === "win32"
+      ? (Object.keys(env).find((k) => k.toLowerCase() === "path") ?? "Path")
+      : "PATH";
+  env[key] = [...dirs, env[key]].filter(Boolean).join(nodePath.delimiter);
+}
+
+/**
  * Spawn `codex app-server` and wire it to a {@link JsonRpcPeer} over stdio.
  *
  * NOTE: not exercised by unit tests (no binary interaction) — it's the real
@@ -354,10 +369,13 @@ export function spawnAppServerConnector(config: {
   apiKey: string;
   baseUrl?: string;
   cwd?: string;
+  /** Sibling tool dirs to prepend to the child PATH (the bundled binary needs these). */
+  pathDirs?: string[];
 }): AppServerConnector {
   return (handlers) => {
     const env: NodeJS.ProcessEnv = { ...process.env, CODEX_API_KEY: config.apiKey };
     if (config.baseUrl) env.OPENAI_BASE_URL = config.baseUrl;
+    prependPathDirs(env, config.pathDirs ?? []);
 
     const child = spawn(config.binaryPath, ["app-server"], {
       cwd: config.cwd,

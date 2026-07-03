@@ -9,6 +9,7 @@ import {
   type AppServerThreadOptions,
 } from "./codex-app-server";
 import { resolveCodexApproval } from "./codex-approval-bridge";
+import { resolveCodexBinary } from "./codex-binary";
 import { providerSessionStore } from "./provider-session-store";
 import { buildSkillsContext } from "./skills";
 import { buildMemoryContext } from "./memory";
@@ -382,12 +383,15 @@ async function runViaExec(ctx: TurnRunContext): Promise<string> {
 
 /** Build the app-server client for a turn (connector injectable for tests). */
 function buildAppServerClient(ctx: TurnRunContext): CodexAppServerClient {
+  // Resolve the same bundled binary the SDK's exec path uses so interactive
+  // turns actually run on the app-server. If it can't be resolved, fall back to
+  // PATH ("codex"); a missing binary fails startup → we fall back to exec.
+  const bin = resolveCodexBinary();
   const connector =
     appServerConnectorOverride ??
     spawnAppServerConnector({
-      // Bundled-binary resolution is the same concern as the SDK path (#140);
-      // fall back to PATH. A missing binary fails startup → we fall back to exec.
-      binaryPath: process.env.CODEX_CLI_PATH?.trim() || "codex",
+      binaryPath: bin?.executablePath ?? "codex",
+      pathDirs: bin?.pathDirs ?? [],
       apiKey: getConfiguredOpenAiApiKey() ?? "",
       baseUrl: configuredOpenAiBaseUrl(),
       cwd: ctx.projectPath,
