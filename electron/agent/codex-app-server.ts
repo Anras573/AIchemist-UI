@@ -194,6 +194,21 @@ export class CodexAppServerClient {
   }
 
   /**
+   * Reopen an existing thread by id (a fresh app-server process can resume a
+   * thread the exec path or a prior process persisted) so subsequent
+   * `turn/start` calls append to it. Options apply the same overrides as
+   * `startThread`. Returns the thread id.
+   */
+  async resumeThread(threadId: string, options: AppServerThreadOptions = {}): Promise<string> {
+    const result = (await this.peer.request("thread/resume", { threadId, ...options })) as {
+      thread?: { id?: string };
+    };
+    const id = result?.thread?.id;
+    if (!id) throw new Error("Codex app-server: thread/resume returned no thread id");
+    return id;
+  }
+
+  /**
    * Start a turn and stream its events until `turn/completed` (or `turn/failed`).
    * Only one turn runs at a time per client.
    */

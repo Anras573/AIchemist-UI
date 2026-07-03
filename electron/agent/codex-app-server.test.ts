@@ -97,6 +97,24 @@ describe("CodexAppServerClient", () => {
     await expect(p).rejects.toThrow(/no thread id/);
   });
 
+  it("resumes an existing thread by id", async () => {
+    const h = makeClient();
+    const p = h.client.resumeThread("thr_prev", { model: "gpt-5.1-codex", sandbox: "workspaceWrite" });
+    expect(h.sent.at(-1)).toMatchObject({
+      method: "thread/resume",
+      params: { threadId: "thr_prev", model: "gpt-5.1-codex", sandbox: "workspaceWrite" },
+    });
+    h.respondTo("thread/resume", { thread: { id: "thr_prev" } });
+    await expect(p).resolves.toBe("thr_prev");
+  });
+
+  it("throws if thread/resume returns no thread id", async () => {
+    const h = makeClient();
+    const p = h.client.resumeThread("thr_prev");
+    h.respondTo("thread/resume", { thread: {} });
+    await expect(p).rejects.toThrow(/no thread id/);
+  });
+
   it("streams a turn's lifecycle and attaches the latest usage to turn.completed", async () => {
     const h = makeClient();
     const { events, done } = collectTurn(h.client.runTurn("thr_1", "fix the build"));

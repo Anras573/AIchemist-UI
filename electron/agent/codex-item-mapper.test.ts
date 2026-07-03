@@ -1,7 +1,7 @@
 // @vitest-environment node
 import * as nodePath from "node:path";
 import { describe, it, expect, vi } from "vitest";
-import { createCodexItemSink, type NormalizedCodexItem } from "./codex-item-mapper";
+import { createCodexItemSink, fromAppServerItem, type NormalizedCodexItem } from "./codex-item-mapper";
 import type { TurnEmitter } from "./turn-emitter";
 import type { NativeTranscriptRecorder } from "../native-transcript";
 
@@ -190,5 +190,86 @@ describe("createCodexItemSink", () => {
       sink.completed({ kind: "tool", id: "x", name: "web_search", args: {}, output: "q", isError: false }),
     ).not.toThrow();
     expect(emitter.toolResult).toHaveBeenCalledWith("web_search", "q");
+  });
+});
+
+describe("fromAppServerItem", () => {
+  it("maps an agentMessage to a message item", () => {
+    expect(fromAppServerItem({ type: "agentMessage", id: "m1", text: "hi" })).toEqual({ kind: "message", text: "hi" });
+  });
+
+  it("maps reasoning preferring content over summary", () => {
+    expect(fromAppServerItem({ type: "reasoning", id: "r1", summary: "s", content: "raw" })).toEqual({
+      kind: "reasoning",
+      text: "raw",
+    });
+    expect(fromAppServerItem({ type: "reasoning", id: "r2", summary: "s" })).toEqual({ kind: "reasoning", text: "s" });
+  });
+
+  it("maps commandExecution to an execute_bash tool with aggregated output", () => {
+    expect(
+      fromAppServerItem({
+        type: "commandExecution",
+        id: "c1",
+        command: "npm test",
+        aggregatedOutput: "passed",
+        status: "completed",
+      }),
+    ).toEqual({ kind: "tool", id: "c1", name: "execute_bash", args: { command: "npm test" }, output: "passed", isError: false });
+  });
+
+  it("marks a failed command as an error", () => {
+    const item = fromAppServerItem({ type: "commandExecution", id: "c2", command: "x", status: "failed" });
+    expect(item).toMatchObject({ kind: "tool", isError: true, output: "" });
+  });
+
+  it("maps fileChange to a tool with normalized file changes (kind → operation)", () => {
+    expect(
+      fromAppServerItem({
+        type: "fileChange",
+        id: "f1",
+        status: "completed",
+        changes: [
+          { path: "a.ts", kind: "update", diff: "..." },
+          { path: "b.ts", kind: "delete", diff: "" },
+          { path: "c.ts", kind: "add", diff: "" },
+        ],
+      }),
+    ).toMatchObject({
+      kind: "tool",
+      name: "file_change",
+      isError: false,
+      fileChanges: [
+        { path: "a.ts", operation: "write" },
+        { path: "b.ts", operation: "delete" },
+        { path: "c.ts", operation: "write" },
+      ],
+    });
+  });
+
+  it("maps mcpToolCall to a server.tool item, preferring a string result and error message", () => {
+    expect(
+      fromAppServerItem({ type: "mcpToolCall", id: "t1", server: "wx", tool: "get", arguments: { q: 1 }, result: "sunny", status: "completed" }),
+    ).toEqual({ kind: "tool", id: "t1", name: "wx.get", args: { q: 1 }, output: "sunny", isError: false });
+
+    const errored = fromAppServerItem({ type: "mcpToolCall", id: "t2", server: "wx", tool: "get", error: { message: "boom" }, status: "failed" });
+    expect(errored).toMatchObject({ name: "wx.get", output: "boom", isError: true });
+  });
+
+  it("maps webSearch to a web_search tool", () => {
+    expect(fromAppServerItem({ type: "webSearch", id: "w1", query: "codex" })).toEqual({
+      kind: "tool",
+      id: "w1",
+      name: "web_search",
+      args: { query: "codex" },
+      output: "codex",
+      isError: false,
+    });
+  });
+
+  it("ignores unknown / empty item shapes", () => {
+    expect(fromAppServerItem({ type: "somethingElse" })).toEqual({ kind: "ignored" });
+    expect(fromAppServerItem(null)).toEqual({ kind: "ignored" });
+    expect(fromAppServerItem(undefined)).toEqual({ kind: "ignored" });
   });
 });
