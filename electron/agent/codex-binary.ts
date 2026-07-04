@@ -14,10 +14,11 @@ import * as fs from "node:fs";
 // everything (matches the SDK's `codexPathOverride`); an unresolvable binary
 // returns null so the caller can fall back (ultimately to the exec transport).
 //
-// Layout (per platform package): <pkg>/vendor/<triple>/bin/codex  (+ a
-// codex-package.json marker) with sibling tool dirs under <triple>/codex-path
-// that must be prepended to the child PATH; a legacy layout nests under
-// <triple>/codex/ with a `path` dir.
+// Layout (per platform package): the binary is <pkg>/vendor/<triple>/bin/codex
+// (+ a codex-package.json marker), and its sibling tool dirs to prepend to the
+// child PATH are at <triple>/codex-path. A legacy layout nests the binary at
+// <triple>/codex/codex and puts its PATH dir at <triple>/path (a sibling of the
+// `codex/` dir, NOT inside it).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CODEX_NPM_NAME = "@openai/codex";
