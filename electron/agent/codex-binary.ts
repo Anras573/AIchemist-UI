@@ -40,8 +40,10 @@ export interface ResolvedCodexBinary {
 /** Map a Node platform/arch to Codex's Rust target triple, or null if unsupported. */
 export function codexTargetTriple(platform: NodeJS.Platform, arch: string): string | null {
   switch (platform) {
+    // The SDK's resolver also maps `android` (Termux) onto linux-musl, but
+    // AIchemist is a desktop Electron app that never runs there — treat it as
+    // unsupported rather than claim a bundled binary exists.
     case "linux":
-    case "android":
       if (arch === "x64") return "x86_64-unknown-linux-musl";
       if (arch === "arm64") return "aarch64-unknown-linux-musl";
       return null;
@@ -77,10 +79,12 @@ function existingDirs(...dirs: string[]): string[] {
 }
 
 /**
- * A `require` anchored at a real file so `require.resolve` walks the app's
- * node_modules. Uses this module's path in the CJS Electron build; falls back to
- * cwd in ESM/test contexts where `__filename` isn't defined (`typeof` on an
- * undeclared identifier is safe — it yields "undefined" without throwing).
+ * A `require` whose resolution base is the app tree, so `require.resolve` walks
+ * the app's node_modules. Uses this module's path in the CJS Electron build;
+ * falls back to a path inside cwd in ESM/test contexts where `__filename` isn't
+ * defined (`typeof` on an undeclared identifier is safe — it yields "undefined"
+ * without throwing). The anchor need not exist on disk: `createRequire` only
+ * uses the containing directory to resolve from, never reads the file itself.
  */
 function anchoredRequire(): NodeRequire {
   const anchor =

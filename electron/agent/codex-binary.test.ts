@@ -17,6 +17,8 @@ describe("codexTargetTriple", () => {
     expect(codexTargetTriple("linux", "ia32")).toBeNull();
     expect(codexTargetTriple("freebsd", "x64")).toBeNull();
     expect(codexTargetTriple("darwin", "ppc")).toBeNull();
+    // Android is not a desktop target — unsupported, unlike the SDK's resolver.
+    expect(codexTargetTriple("android", "x64")).toBeNull();
   });
 });
 
