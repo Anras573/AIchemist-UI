@@ -102,9 +102,19 @@ describe("getProjectConfig", () => {
 
     const config = getProjectConfig(makeDbForPath(tmpDir), "proj-1");
     expect(config.provider).toBe("anthropic");
-    expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining("[projects]"),
-      expect.anything()
+    const warnSpy = vi.mocked(console.warn);
+    expect(warnSpy).toHaveBeenCalledOnce();
+    const [msg, json] = warnSpy.mock.calls[0];
+    expect(msg).toContain("[projects]");
+    const payload = JSON.parse(json as string) as {
+      configPath: string;
+      issues: Array<{ actual: unknown; expected: unknown }>;
+    };
+    expect(payload.configPath).toBe(path.join(tmpDir, ".aichemist", "config.json"));
+    expect(payload.issues).toHaveLength(1);
+    expect(payload.issues[0].actual).toBe("github");
+    expect(payload.issues[0].expected).toEqual(
+      expect.arrayContaining(["anthropic", "copilot", "ollama", "openai-compatible", "codex"])
     );
   });
 
@@ -125,9 +135,18 @@ describe("getProjectConfig", () => {
 
     const config = getProjectConfig(makeDbForPath(tmpDir), "proj-1");
     expect(config.approval_mode).toBe("custom");
-    expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining("[projects]"),
-      expect.anything()
+    const warnSpy = vi.mocked(console.warn);
+    expect(warnSpy).toHaveBeenCalledOnce();
+    const [msg, json] = warnSpy.mock.calls[0];
+    expect(msg).toContain("[projects]");
+    const payload = JSON.parse(json as string) as {
+      issues: Array<{ path: string; actual: unknown; expected: unknown }>;
+    };
+    expect(payload.issues).toHaveLength(1);
+    expect(payload.issues[0].path).toBe("approval_mode");
+    expect(payload.issues[0].actual).toBe("INVALID");
+    expect(payload.issues[0].expected).toEqual(
+      expect.arrayContaining(["all", "none", "custom"])
     );
   });
 
@@ -142,4 +161,3 @@ describe("getProjectConfig", () => {
   });
 
 });
-

@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import type { z } from "zod";
 import type { Database } from "better-sqlite3";
 import { ProjectConfigSchema } from "../src/types/schemas";
 import type { Project, ProjectConfig, Provider } from "../src/types/index";
@@ -27,12 +28,45 @@ function defaultProjectConfig(defaultProvider: Provider = "anthropic"): ProjectC
   };
 }
 
+function valueAtPath(value: unknown, issuePath: PropertyKey[]): unknown {
+  return issuePath.reduce<unknown>((current, key) => {
+    if (current === null || current === undefined) return undefined;
+    if (typeof current !== "object") return undefined;
+    return (current as Record<PropertyKey, unknown>)[key];
+  }, value);
+}
+
+function summarizeConfigValue(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") return value.length <= 64 ? value : `[string:${value.length}]`;
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return `[array:${value.length}]`;
+  if (typeof value === "object") return `[object:${Object.keys(value as Record<string, unknown>).join(",")}]`;
+  return typeof value;
+}
+
+function describeProjectConfigIssue(issue: z.ZodIssue, parsed: unknown): Record<string, unknown> {
+  const details: Record<string, unknown> = {
+    path: issue.path.length > 0 ? issue.path.join(".") : "<root>",
+    code: issue.code,
+    message: issue.message,
+  };
+  const actual = valueAtPath(parsed, issue.path);
+  details.actual = actual === undefined ? "<missing>" : summarizeConfigValue(actual);
+  if ("values" in issue) {
+    details.expected = issue.values;
+  } else if ("options" in issue) {
+    details.expected = (issue as { options: unknown }).options;
+  }
+  return details;
+}
+
 /**
  * Parse raw JSON into a validated ProjectConfig.
  * Unknown extra fields are stripped; missing optional fields get defaults.
  * Returns the default config if validation fails (corrupt/incompatible file).
  */
-function parseProjectConfig(raw: string): ProjectConfig {
+function parseProjectConfig(raw: string, sourcePath?: string): ProjectConfig {
   try {
     const parsed = JSON.parse(raw);
     const result = ProjectConfigSchema.safeParse(parsed);
@@ -43,7 +77,14 @@ function parseProjectConfig(raw: string): ProjectConfig {
       }
       return config;
     }
-    console.warn("[projects] ProjectConfig validation failed, falling back to defaults:", result.error.issues);
+    const warning = {
+      configPath: sourcePath,
+      issues: result.error.issues.map((issue) => describeProjectConfigIssue(issue, parsed)),
+    };
+    console.warn(
+      "[projects] ProjectConfig validation failed, falling back to defaults:",
+      JSON.stringify(warning, null, 2)
+    );
     return defaultProjectConfig();
   } catch {
     return defaultProjectConfig();
@@ -55,7 +96,7 @@ function readOrCreateConfig(projectPath: string, defaultProvider: Provider = "an
   if (fs.existsSync(cfgPath)) {
     try {
       const raw = fs.readFileSync(cfgPath, "utf-8");
-      return parseProjectConfig(raw);
+      return parseProjectConfig(raw, cfgPath);
     } catch {
       return defaultProjectConfig();
     }
