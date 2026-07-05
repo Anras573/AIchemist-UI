@@ -23,13 +23,20 @@ vi.mock("electron", () => ({
 
 // resolveProjectDir is the only claude-transcript export LIST_MEMORY touches.
 // Keep the real module (memory.ts also imports sanitizeCwd from it) and override
-// just resolveProjectDir so we control where the "Claude store" lives.
+// just resolveProjectDir. Also stub findTranscriptFile: the GET_TRACES Claude
+// branch calls it, and it closes over the module-internal resolveProjectDir (our
+// export mock doesn't reach that), so without a stub it would read the real
+// ~/.claude/projects tree — non-hermetic and potentially flaky.
 const resolveProjectDirMock = vi.hoisted(() => ({ fn: vi.fn() }));
+const findTranscriptFileMock = vi.hoisted(() => ({
+  fn: vi.fn(async (..._args: unknown[]): Promise<string | null> => null),
+}));
 vi.mock("../claude-transcript", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../claude-transcript")>();
   return {
     ...actual,
     resolveProjectDir: (...args: unknown[]) => resolveProjectDirMock.fn(...args),
+    findTranscriptFile: (...args: unknown[]) => findTranscriptFileMock.fn(...args),
   };
 });
 
@@ -190,8 +197,8 @@ describe("GET_TRACES — trace parity matrix", () => {
 
   beforeEach(() => {
     getProjectConfigMock.fn.mockReturnValue({ provider: "anthropic" });
-    // An empty Claude project dir so the Claude branch cleanly finds no file.
-    resolveProjectDirMock.fn.mockResolvedValue(makeTempDir("trace-claude-root-"));
+    // Hermetic Claude branch: no transcript file, never touches ~/.claude.
+    findTranscriptFileMock.fn.mockResolvedValue(null);
     _setNativeTracesRootForTests(makeTempDir("trace-native-root-"));
     db = new Database(":memory:");
     db.exec(`
