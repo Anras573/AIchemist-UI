@@ -40,6 +40,16 @@ vi.mock("../claude-transcript", async (importOriginal) => {
   };
 });
 
+// Same reasoning for the Copilot branch: stub findCopilotEventsFile so the
+// GET_TRACES Copilot routing test stays hermetic (never reads ~/.copilot).
+const findCopilotEventsFileMock = vi.hoisted(() => ({
+  fn: vi.fn(async (..._args: unknown[]): Promise<string | null> => null),
+}));
+vi.mock("../copilot-transcript", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../copilot-transcript")>();
+  return { ...actual, findCopilotEventsFile: (...args: unknown[]) => findCopilotEventsFileMock.fn(...args) };
+});
+
 // getProjectConfig resolves the effective provider for a legacy null-provider
 // session; keep the rest of ../projects real and control just that lookup.
 const getProjectConfigMock = vi.hoisted(() => ({ fn: vi.fn((..._args: unknown[]) => ({ provider: "anthropic" })) }));
@@ -162,10 +172,11 @@ describe("LIST_MEMORY", () => {
 
 // #130 parity matrix — trace integrity at the IPC boundary. Proves GET_TRACES
 // routes each provider to the right transcript source: Codex (and the other
-// self-driven providers) → the native transcript; a session with an SDK id →
-// the Claude/Copilot branch; a legacy null-provider session → the project's
-// default provider. (Approvals / MCP / workflow parity are covered by
-// codex(-app-server|-approval-bridge).test.ts and workflow-scheduler.test.ts.)
+// self-driven providers) → the native transcript; an SDK-id session →
+// the SDK branch (sdk_session_id → Claude, copilot_session_id → Copilot); a
+// legacy null-provider session → the project's default provider. (Approvals /
+// MCP / workflow parity are covered by codex(-app-server|-approval-bridge).test.ts
+// and workflow-scheduler.test.ts.)
 describe("GET_TRACES — trace parity matrix", () => {
   let db: Database.Database;
 
@@ -197,8 +208,9 @@ describe("GET_TRACES — trace parity matrix", () => {
 
   beforeEach(() => {
     getProjectConfigMock.fn.mockReturnValue({ provider: "anthropic" });
-    // Hermetic Claude branch: no transcript file, never touches ~/.claude.
+    // Hermetic Claude/Copilot branches: no transcript file, never touch ~/.claude / ~/.copilot.
     findTranscriptFileMock.fn.mockResolvedValue(null);
+    findCopilotEventsFileMock.fn.mockResolvedValue(null);
     _setNativeTracesRootForTests(makeTempDir("trace-native-root-"));
     db = new Database(":memory:");
     db.exec(`
@@ -261,6 +273,16 @@ describe("GET_TRACES — trace parity matrix", () => {
     writeNativeTranscript("claude-1", "codex");
     insertSession({ id: "claude-1", provider: "anthropic", sdkSessionId: "sdk-abc" });
     expect(await getTraces("claude-1")).toEqual([]);
+  });
+
+  it("routes a copilot_session_id to the Copilot branch, not the native transcript", async () => {
+    // Same routing-wins-over-file-existence assertion for the Copilot branch: a
+    // native transcript exists for this id, but a copilot_session_id must route to
+    // the Copilot branch (stubbed to find no file), so native spans are NOT returned.
+    writeNativeTranscript("cop-1", "codex");
+    insertSession({ id: "cop-1", provider: "copilot", copilotSessionId: "cop-sess-9" });
+    expect(await getTraces("cop-1")).toEqual([]);
+    expect(findCopilotEventsFileMock.fn).toHaveBeenCalledWith("cop-sess-9");
   });
 
   it("returns an empty list for an unknown session id", async () => {
