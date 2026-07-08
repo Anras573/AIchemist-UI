@@ -103,6 +103,29 @@ describe("recordUsage", () => {
   });
 });
 
+// ─── Durability across session/project deletion ─────────────────────────────
+
+describe("durability", () => {
+  it("survives session deletion — session_id is deliberately FK-free", () => {
+    recordUsage(db, { sessionId: "sess-1", projectId: "proj-1", provider: "anthropic", model: "m", usage: USAGE });
+
+    db.prepare("DELETE FROM sessions WHERE id = ?").run("sess-1");
+
+    const rows = db.prepare("SELECT * FROM usage_ledger").all();
+    expect(rows).toHaveLength(1);
+    expect(getUsageTotals(db, { projectId: "proj-1" }).turn_count).toBe(1);
+  });
+
+  it("is cascade-deleted when its project is deleted", () => {
+    recordUsage(db, { sessionId: "sess-1", projectId: "proj-1", provider: "anthropic", model: "m", usage: USAGE });
+
+    db.prepare("DELETE FROM projects WHERE id = ?").run("proj-1");
+
+    const rows = db.prepare("SELECT * FROM usage_ledger").all();
+    expect(rows).toHaveLength(0);
+  });
+});
+
 // ─── Aggregation queries ─────────────────────────────────────────────────────
 
 describe("aggregation queries", () => {

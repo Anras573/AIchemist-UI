@@ -119,9 +119,13 @@ const MIGRATIONS: Migration[] = [
   // completed turn, normalizing the four token-usage fields already streamed via
   // `TurnEmitter.usage()` into a durable, queryable table. `project_id` is
   // denormalized onto every row (rather than joined through `sessions`) so
-  // rollup queries survive session deletion and don't need a join. Token counts
-  // default to 0 — provider fidelity varies (see epic #155), and a partial/zero
-  // reading is valid, not an error.
+  // rollup queries don't need a join. Token counts default to 0 — provider
+  // fidelity varies (see epic #155), and a partial/zero reading is valid, not
+  // an error. `session_id` is deliberately FK-free (same as
+  // `workflow_runs.session_id`) — deleting a session must not cascade-delete
+  // the historical spend it incurred, which is the entire point of a durable
+  // ledger. Only `project_id` cascades, matching every other per-project table:
+  // deleting a whole project already wipes its sessions/messages/tool_calls.
   (db) => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS usage_ledger (
@@ -135,7 +139,6 @@ const MIGRATIONS: Migration[] = [
           cache_read_input_tokens     INTEGER NOT NULL DEFAULT 0,
           cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
           created_at                  TEXT NOT NULL,
-          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
           FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_usage_ledger_project_created ON usage_ledger(project_id, created_at);

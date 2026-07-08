@@ -1,6 +1,6 @@
 import * as crypto from "crypto";
 import type { Database } from "better-sqlite3";
-import type { SessionUsage } from "../src/types/index";
+import type { Provider, SessionUsage } from "../src/types/index";
 
 /**
  * Durable, queryable ledger of token usage — one row per completed agent turn,
@@ -14,7 +14,7 @@ export interface UsageLedgerRow {
   id: string;
   session_id: string;
   project_id: string;
-  provider: string;
+  provider: Provider;
   model: string | null;
   input_tokens: number;
   output_tokens: number;
@@ -29,7 +29,7 @@ export function recordUsage(
   params: {
     sessionId: string;
     projectId: string;
-    provider: string;
+    provider: Provider;
     model: string | null;
     usage: SessionUsage;
     /** ISO timestamp; defaults to now. Exposed for deterministic tests. */
@@ -57,7 +57,7 @@ export function recordUsage(
 /** Filters shared by every aggregation query. All fields are optional — an absent field is unconstrained. */
 export interface UsageFilter {
   projectId?: string;
-  provider?: string;
+  provider?: Provider;
   sessionId?: string;
   /** ISO timestamp, inclusive lower bound on `created_at`. */
   since?: string;
@@ -74,7 +74,7 @@ export interface UsageTotals {
 }
 
 export interface UsageByProvider extends UsageTotals {
-  provider: string;
+  provider: Provider;
 }
 
 export interface UsageByProject extends UsageTotals {
