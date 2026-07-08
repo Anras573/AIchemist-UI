@@ -2,13 +2,14 @@ import type { Database } from "better-sqlite3";
 import type { ProjectConfig } from "../../src/types/index";
 
 import { createPlaceholderMessage, updateMessageContent, loadToolCallsForMessage, updateSessionStatus } from "../sessions";
+import { recordUsage } from "../usage-ledger";
 import { claudeProvider } from "./claude";
 import { copilotProvider } from "./copilot";
 import { ollamaProvider } from "./ollama";
 import { openaiCompatProvider } from "./openai-compat";
 import { codexProvider } from "./codex";
 import type { AgentProvider, AgentProviderParams } from "./provider";
-import { TurnEmitter } from "./turn-emitter";
+import { TurnEmitter, clearLastUsage, getLastUsage } from "./turn-emitter";
 
 // ── Provider registry ─────────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ export function getProviderNames(): string[] {
 export async function runAgentTurn(params: {
   db: Database;
   sessionId: string;
+  projectId: string;
   prompt: string;
   projectPath: string;
   projectConfig: ProjectConfig;
@@ -56,12 +58,15 @@ export async function runAgentTurn(params: {
   skipPersistence?: boolean;
   nonInteractive?: boolean;
 }): Promise<void> {
-  const { db, sessionId, prompt, projectPath, projectConfig, webContents, agent, skills, skipPersistence, nonInteractive } =
+  const { db, sessionId, projectId, prompt, projectPath, projectConfig, webContents, agent, skills, skipPersistence, nonInteractive } =
     params;
 
   const emitter = new TurnEmitter(webContents, sessionId);
   emitter.status("running");
   updateSessionStatus(db, sessionId, "running");
+  // Discard any usage reading left over from a prior turn on this session so a
+  // provider that never calls usage() this turn doesn't record stale numbers.
+  clearLastUsage(sessionId);
 
   // Create a placeholder assistant message that tool calls can FK-reference
   const placeholderMsg = createPlaceholderMessage(db, { sessionId, agent });
@@ -101,6 +106,23 @@ export async function runAgentTurn(params: {
       }
     }
 
+    // Write one usage-ledger row per completed turn (every provider streams
+    // through the same TurnEmitter.usage(), so this is a single seam covering
+    // all of them). Fail-safe — a ledger write error must never break a turn.
+    try {
+      recordUsage(db, {
+        sessionId,
+        projectId,
+        provider: projectConfig.provider,
+        model: projectConfig.model || null,
+        usage: getLastUsage(sessionId),
+      });
+    } catch (err) {
+      console.error(`[usage-ledger] Failed to record usage for session ${sessionId}:`, err);
+    } finally {
+      clearLastUsage(sessionId);
+    }
+
     emitter.status("idle");
     updateSessionStatus(db, sessionId, "idle");
   } catch (err) {
@@ -112,6 +134,7 @@ export async function runAgentTurn(params: {
         db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);
       }
     }
+    clearLastUsage(sessionId);
     emitter.status("error");
     updateSessionStatus(db, sessionId, "error");
     throw err;

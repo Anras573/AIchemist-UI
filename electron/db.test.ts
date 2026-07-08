@@ -40,12 +40,32 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
 
-    expect(userVersion(db)).toBe(4);
+    expect(userVersion(db)).toBe(5);
     const cols = columnNames(db, "sessions");
     for (const c of EXPECTED_SESSION_COLUMNS) {
       expect(cols).toContain(c);
     }
     expect(columnNames(db, "messages")).toContain("agent");
+  });
+
+  it("creates the usage_ledger table at v5", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+
+    expect(tableNames(db)).toContain("usage_ledger");
+    for (const c of [
+      "session_id",
+      "project_id",
+      "provider",
+      "model",
+      "input_tokens",
+      "output_tokens",
+      "cache_read_input_tokens",
+      "cache_creation_input_tokens",
+      "created_at",
+    ]) {
+      expect(columnNames(db, "usage_ledger")).toContain(c);
+    }
   });
 
   it("creates the workflows + workflow_runs tables at v3", () => {
@@ -78,7 +98,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(4);
+    expect(userVersion(db)).toBe(5);
   });
 
   it("does not throw when provider_state already exists below user_version 2", () => {
@@ -87,7 +107,7 @@ describe("migrate", () => {
     // Simulate a dev build / partial migration: column exists but version rewound.
     db.exec("PRAGMA user_version = 1;");
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(4);
+    expect(userVersion(db)).toBe(5);
   });
 
   it("upgrades a legacy database (columns present, user_version 0) without error", () => {
@@ -112,7 +132,7 @@ describe("migrate", () => {
 
     expect(() => migrate(db)).not.toThrow();
 
-    expect(userVersion(db)).toBe(4);
+    expect(userVersion(db)).toBe(5);
     expect(columnNames(db, "sessions")).toContain("provider_state");
     expect(tableNames(db)).toContain("workflows");
     // Existing data is preserved, including the legacy copilot id used as a dead read.

@@ -96,6 +96,7 @@ export async function executeAgentTurn(
   await runAgentTurn({
     db,
     sessionId,
+    projectId: project.id,
     prompt,
     projectPath: session.workspace_path ?? project.path,
     projectConfig: effectiveConfig,

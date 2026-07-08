@@ -115,6 +115,34 @@ const MIGRATIONS: Migration[] = [
   (db) => {
     addColumnIfMissing(db, "workflows", "watch_path", "TEXT");
   },
+  // v5 — Usage ledger (issue #156, part of the Spending epic #155). One row per
+  // completed turn, normalizing the four token-usage fields already streamed via
+  // `TurnEmitter.usage()` into a durable, queryable table. `project_id` is
+  // denormalized onto every row (rather than joined through `sessions`) so
+  // rollup queries survive session deletion and don't need a join. Token counts
+  // default to 0 — provider fidelity varies (see epic #155), and a partial/zero
+  // reading is valid, not an error.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS usage_ledger (
+          id                          TEXT PRIMARY KEY,
+          session_id                  TEXT NOT NULL,
+          project_id                  TEXT NOT NULL,
+          provider                    TEXT NOT NULL,
+          model                       TEXT,
+          input_tokens                INTEGER NOT NULL DEFAULT 0,
+          output_tokens               INTEGER NOT NULL DEFAULT 0,
+          cache_read_input_tokens     INTEGER NOT NULL DEFAULT 0,
+          cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+          created_at                  TEXT NOT NULL,
+          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_usage_ledger_project_created ON usage_ledger(project_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_usage_ledger_provider_created ON usage_ledger(provider, created_at);
+      CREATE INDEX IF NOT EXISTS idx_usage_ledger_session ON usage_ledger(session_id);
+    `);
+  },
 ];
 
 /**
