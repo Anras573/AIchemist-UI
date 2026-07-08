@@ -186,11 +186,13 @@ describe("runAgentTurn usage ledger", () => {
       webContents: webContents as any,
     });
 
+    // The runner passes projectConfig.model through as-is — recordUsage() itself
+    // owns trimming/blank-to-null normalization (see usage-ledger.test.ts).
     expect(recordUsageMock).toHaveBeenCalledWith(db, {
       sessionId: "sess-2",
       projectId: "proj-1",
       provider: "copilot",
-      model: null,
+      model: "",
       usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
     });
   });

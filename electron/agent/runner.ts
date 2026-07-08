@@ -114,7 +114,7 @@ export async function runAgentTurn(params: {
         sessionId,
         projectId,
         provider: projectConfig.provider,
-        model: projectConfig.model?.trim() || null,
+        model: projectConfig.model,
         usage: getLastUsage(sessionId),
       });
     } catch (err) {

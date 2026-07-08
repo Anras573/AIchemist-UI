@@ -36,6 +36,7 @@ export function recordUsage(
     createdAt?: string;
   }
 ): void {
+  const model = params.model?.trim() || null;
   db.prepare(
     `INSERT INTO usage_ledger
        (id, session_id, project_id, provider, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, created_at)
@@ -45,7 +46,7 @@ export function recordUsage(
     params.sessionId,
     params.projectId,
     params.provider,
-    params.model,
+    model,
     params.usage.input_tokens,
     params.usage.output_tokens,
     params.usage.cache_read_input_tokens,

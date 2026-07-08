@@ -94,6 +94,32 @@ describe("recordUsage", () => {
     expect(row.input_tokens).toBe(0);
   });
 
+  it("trims a whitespace-only model to null, regardless of caller normalization", () => {
+    recordUsage(db, {
+      sessionId: "sess-1",
+      projectId: "proj-1",
+      provider: "ollama",
+      model: "   ",
+      usage: USAGE,
+    });
+
+    const row = db.prepare("SELECT * FROM usage_ledger").get() as Record<string, unknown>;
+    expect(row.model).toBeNull();
+  });
+
+  it("trims surrounding whitespace from a real model string", () => {
+    recordUsage(db, {
+      sessionId: "sess-1",
+      projectId: "proj-1",
+      provider: "anthropic",
+      model: "  claude-sonnet-4-6  ",
+      usage: USAGE,
+    });
+
+    const row = db.prepare("SELECT * FROM usage_ledger").get() as Record<string, unknown>;
+    expect(row.model).toBe("claude-sonnet-4-6");
+  });
+
   it("writes a separate row for each call, even on the same session", () => {
     recordUsage(db, { sessionId: "sess-1", projectId: "proj-1", provider: "anthropic", model: "m", usage: USAGE });
     recordUsage(db, { sessionId: "sess-1", projectId: "proj-1", provider: "anthropic", model: "m", usage: USAGE });
