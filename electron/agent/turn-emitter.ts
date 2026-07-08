@@ -7,6 +7,36 @@ import type {
   SessionUsage,
 } from "../../src/types/index";
 
+const ZERO_USAGE: SessionUsage = {
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_read_input_tokens: 0,
+  cache_creation_input_tokens: 0,
+};
+
+/**
+ * Last usage reading per session, keyed by `sessionId` (same "keyed map"
+ * pattern as the approval/question promise maps). Each provider constructs
+ * its own `TurnEmitter` instance from `webContents`/`sessionId` rather than
+ * sharing the runner's, so per-instance state wouldn't be visible to the
+ * runner — a session-keyed store is the seam every instance actually shares.
+ * `usage()` is called repeatedly as a turn streams (each call carries the
+ * running total, not a delta), so by the time the turn completes this holds
+ * its final totals; the runner reads it post-turn to write the usage-ledger
+ * row, then clears it.
+ */
+const lastUsageBySession = new Map<string, SessionUsage>();
+
+/** The last usage reading recorded for `sessionId` (all zeros if `usage()` was never called this turn). Always a fresh object — safe for callers to mutate. */
+export function getLastUsage(sessionId: string): SessionUsage {
+  return { ...(lastUsageBySession.get(sessionId) ?? ZERO_USAGE) };
+}
+
+/** Drop the tracked usage reading for `sessionId`. Call after consuming it, and before starting a new turn. */
+export function clearLastUsage(sessionId: string): void {
+  lastUsageBySession.delete(sessionId);
+}
+
 /**
  * Typed wrapper around `webContents.send` for the SESSION_* push events a
  * provider emits during an agent turn.
@@ -49,6 +79,7 @@ export class TurnEmitter {
 
   /** Token usage update for the current turn (SESSION_USAGE). */
   usage(usage: SessionUsage): void {
+    lastUsageBySession.set(this.sessionId, usage);
     this.webContents.send(CH.SESSION_USAGE, { session_id: this.sessionId, usage });
   }
 
