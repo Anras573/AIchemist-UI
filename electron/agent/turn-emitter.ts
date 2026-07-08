@@ -27,9 +27,9 @@ const ZERO_USAGE: SessionUsage = {
  */
 const lastUsageBySession = new Map<string, SessionUsage>();
 
-/** The last usage reading recorded for `sessionId` (all zeros if `usage()` was never called this turn). */
+/** The last usage reading recorded for `sessionId` (all zeros if `usage()` was never called this turn). Always a fresh object — safe for callers to mutate. */
 export function getLastUsage(sessionId: string): SessionUsage {
-  return lastUsageBySession.get(sessionId) ?? ZERO_USAGE;
+  return { ...(lastUsageBySession.get(sessionId) ?? ZERO_USAGE) };
 }
 
 /** Drop the tracked usage reading for `sessionId`. Call after consuming it, and before starting a new turn. */
