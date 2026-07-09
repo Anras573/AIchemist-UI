@@ -53,6 +53,23 @@ describe("pricing-overrides config", () => {
     expect(readPricingOverrides()).toEqual({});
   });
 
+  it("treats a top-level JSON array as an empty config, not a document with numeric keys", () => {
+    fs.writeFileSync(configPath, JSON.stringify([1, 2, 3]));
+    expect(readPricingOverrides()).toEqual({});
+  });
+
+  it("does not silently drop a write when the existing file is a corrupted top-level array", () => {
+    // typeof [] === "object" in JS — a naive "is this a document" check would
+    // accept the array, assign `.overrides` onto it as a non-index property,
+    // then JSON.stringify(array) would silently omit that property entirely,
+    // discarding the write with no error.
+    fs.writeFileSync(configPath, JSON.stringify(["not", "a", "doc"]));
+
+    upsertPricingOverride("ollama", "llama3.1", { inputPerMTokens: 1 });
+
+    expect(readPricingOverrides()).toEqual({ "ollama::llama3.1": { inputPerMTokens: 1 } });
+  });
+
   it("rethrows real I/O errors (not ENOENT) so they can be surfaced", () => {
     const dirPath = path.join(tempDir, "is-a-dir");
     fs.mkdirSync(dirPath);
