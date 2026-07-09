@@ -157,6 +157,23 @@ describe("pricing-overrides config", () => {
     expect(readPricingOverrides()).toEqual({});
   });
 
+  it("drops a key whose provider half isn't a recognized Provider id (typo protection)", () => {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        overrides: {
+          "anthropic-v2::model": { inputPerMTokens: 1 },
+          // "openai" is a tokenlens *catalog* provider id, not one of our app's
+          // five Provider values — this key can never be looked up either.
+          "openai::gpt-4o": { inputPerMTokens: 1 },
+        },
+      })
+    );
+
+    expect(readPricingOverrides()).toEqual({});
+  });
+
   it("normalizes whitespace and case in the provider half on read, so a hand-edited key still matches", () => {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
     fs.writeFileSync(

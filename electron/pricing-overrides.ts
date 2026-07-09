@@ -26,6 +26,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import type { Provider } from "../src/types/index";
+import { isProviderId, PROVIDER_IDS } from "./providers";
 
 export interface PricingRates {
   /** USD per 1,000,000 input tokens. */
@@ -71,17 +72,20 @@ export function overrideKey(provider: Provider, model: string): string {
  * with padding or wrong-case provider (e.g. `"anthropic::  my-model  "` or
  * `"Anthropic::model"`) still matches `estimateCost()`'s lookup instead of
  * silently never matching. Returns null for a key that doesn't match the
- * documented `"<provider>::<model>"` format at all — missing `"::"`, an
- * empty/whitespace-only provider half, or an empty/whitespace-only model
- * half — since such a key could never be produced by `overrideKey()` and
- * would otherwise sit in the map silently doing nothing.
+ * documented `"<provider>::<model>"` format at all — missing `"::"`, a
+ * provider half that isn't one of the recognized `PROVIDER_IDS` (typos like
+ * `"anthropic-v2"` can never be looked up by `estimateCost()`, which only
+ * ever calls `overrideKey()` with a typed `Provider`), or an
+ * empty/whitespace-only model half — since such a key could never be
+ * produced by `overrideKey()` and would otherwise sit in the map silently
+ * doing nothing.
  */
 function normalizeRawKey(key: string): string | null {
   const idx = key.indexOf("::");
   if (idx === -1) return null;
   const provider = key.slice(0, idx).trim().toLowerCase();
   const model = key.slice(idx + 2).trim();
-  if (!provider || !model) return null;
+  if (!isProviderId(provider) || !model) return null;
   return `${provider}::${model}`;
 }
 
@@ -162,7 +166,9 @@ export function readPricingOverrides(): PricingOverrideMap {
     }
     const normalizedKey = normalizeRawKey(key);
     if (!normalizedKey) {
-      console.warn(`[pricing-overrides] Skipping override "${key}" — key must match "<provider>::<model>" with a non-empty model`);
+      console.warn(
+        `[pricing-overrides] Skipping override "${key}" — key must match "<provider>::<model>" with a recognized provider (${PROVIDER_IDS.join(", ")}) and a non-empty model`
+      );
       continue;
     }
     out[normalizedKey] = entry;
