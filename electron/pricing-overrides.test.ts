@@ -72,6 +72,16 @@ describe("pricing-overrides config", () => {
     });
   });
 
+  it("normalizes a hand-edited key with padding around the model half on read, so it still matches a trimmed lookup", () => {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ overrides: { "anthropic::  my-model  ": { inputPerMTokens: 5 } } })
+    );
+
+    expect(readPricingOverrides()).toEqual({ "anthropic::my-model": { inputPerMTokens: 5 } });
+  });
+
   it("upserts a single override without disturbing the others", () => {
     upsertPricingOverride("ollama", "llama3.1", { inputPerMTokens: 0, outputPerMTokens: 0 });
     upsertPricingOverride("copilot", "gpt-5", { inputPerMTokens: 1.25, outputPerMTokens: 10 });

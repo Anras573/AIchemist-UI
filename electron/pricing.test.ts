@@ -178,6 +178,16 @@ describe("estimateCost — unknown provider/model", () => {
     expect(cost.confidence).toBe("unknown");
   });
 
+  it("returns a fresh object each time, so mutating one 'unknown' result can't corrupt another", () => {
+    const first = estimateCost({ provider: "anthropic", model: null, usage: FULL_USAGE });
+    first.totalUSD = 999;
+    first.confidence = "exact";
+
+    const second = estimateCost({ provider: "anthropic", model: "totally-fake-model-xyz", usage: FULL_USAGE });
+
+    expect(second).toEqual({ inputUSD: 0, outputUSD: 0, cacheReadUSD: 0, cacheCreationUSD: 0, totalUSD: 0, confidence: "unknown" });
+  });
+
   it("returns 'unknown' for a whitespace-only model", () => {
     const cost = estimateCost({ provider: "anthropic", model: "   ", usage: FULL_USAGE });
     expect(cost.confidence).toBe("unknown");

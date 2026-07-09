@@ -64,6 +64,18 @@ export function overrideKey(provider: Provider, model: string): string {
   return `${provider}::${model.trim()}`;
 }
 
+/**
+ * Re-derive a key loaded from disk the same way `overrideKey()` would, so a
+ * hand-edited JSON file with padding around the model half (e.g.
+ * `"anthropic::  my-model  "`) still matches `estimateCost()`'s trimmed
+ * lookup instead of silently never matching.
+ */
+function normalizeRawKey(key: string): string {
+  const idx = key.indexOf("::");
+  if (idx === -1) return key;
+  return `${key.slice(0, idx)}::${key.slice(idx + 2).trim()}`;
+}
+
 // ── Validation ────────────────────────────────────────────────────────────────
 
 const RATE_FIELDS = ["inputPerMTokens", "outputPerMTokens", "cacheReadPerMTokens", "cacheWritePerMTokens"] as const;
@@ -138,7 +150,7 @@ export function readPricingOverrides(): PricingOverrideMap {
       console.warn(`[pricing-overrides] Skipping override "${key}" — rate fields must be non-negative numbers`);
       continue;
     }
-    out[key] = entry;
+    out[normalizeRawKey(key)] = entry;
   }
   return out;
 }

@@ -45,14 +45,10 @@ export interface CostEstimate {
   confidence: CostConfidence;
 }
 
-const ZERO_COST: CostEstimate = {
-  inputUSD: 0,
-  outputUSD: 0,
-  cacheReadUSD: 0,
-  cacheCreationUSD: 0,
-  totalUSD: 0,
-  confidence: "unknown",
-};
+/** A fresh object every call — never a shared reference callers could mutate and corrupt for subsequent unrelated estimates. */
+function zeroCost(): CostEstimate {
+  return { inputUSD: 0, outputUSD: 0, cacheReadUSD: 0, cacheCreationUSD: 0, totalUSD: 0, confidence: "unknown" };
+}
 
 /**
  * Providers with known-incomplete token reporting today (see epic #155's
@@ -137,10 +133,10 @@ function hasPricingGap(usage: SessionUsage, rates: PricingRates): boolean {
  */
 export function estimateCost(params: { provider: Provider; model: string | null; usage: SessionUsage }): CostEstimate {
   const model = params.model?.trim();
-  if (!model) return ZERO_COST;
+  if (!model) return zeroCost();
 
   const rates = resolveRates(params.provider, model);
-  if (!rates) return ZERO_COST;
+  if (!rates) return zeroCost();
 
   const inputUSD = usdFromTokens(params.usage.input_tokens, rates.inputPerMTokens);
   const outputUSD = usdFromTokens(params.usage.output_tokens, rates.outputPerMTokens);
