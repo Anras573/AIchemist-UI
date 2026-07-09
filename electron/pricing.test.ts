@@ -192,6 +192,20 @@ describe("estimateCost — manual overrides", () => {
     expect(cost.inputUSD).toBeCloseTo(2, 5);
     expect(cost.outputUSD).toBeCloseTo(2, 5);
   });
+
+  it("degrades to catalog-only pricing (never throws) when the default overrides read hits a real I/O error", () => {
+    // Point the configured path at a directory — reading it throws EISDIR, a
+    // real I/O error that readPricingOverrides() deliberately rethrows (it's
+    // not "file missing", which is the only case it swallows).
+    const dirPath = path.join(tempDir, "is-a-dir");
+    fs.mkdirSync(dirPath);
+    _setPricingOverridesPathForTests(dirPath);
+
+    const cost = estimateCost({ provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: FULL_USAGE });
+
+    expect(cost.confidence).toBe("exact");
+    expect(cost.inputUSD).toBeCloseTo(3, 5);
+  });
 });
 
 describe("estimateCost — unknown provider/model", () => {

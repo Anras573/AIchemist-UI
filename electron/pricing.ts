@@ -108,6 +108,22 @@ function resolveRates(provider: Provider, model: string, overrides: PricingOverr
   return override ?? resolveCatalogRates(provider, model);
 }
 
+/**
+ * `readPricingOverrides()` deliberately rethrows real I/O errors (permission
+ * denied, the path pointing at a directory, etc.) so a broken config can be
+ * surfaced elsewhere — but `estimateCost()` must never throw, so its default
+ * (no caller-supplied `overrides`) read path falls back to catalog-only
+ * pricing on any such error rather than aborting the whole estimate.
+ */
+function safeReadPricingOverrides(): PricingOverrideMap {
+  try {
+    return readPricingOverrides();
+  } catch (err) {
+    console.error(`[pricing] Failed to read pricing overrides, falling back to catalog-only pricing: ${String(err)}`);
+    return {};
+  }
+}
+
 function usdFromTokens(tokens: number, ratePerMTokens: number | undefined): number {
   return (tokens / 1_000_000) * (ratePerMTokens ?? 0);
 }
@@ -155,7 +171,9 @@ function isZeroUsage(usage: SessionUsage): boolean {
  * disk read + JSON parse) per call — fine for an ad hoc single-turn estimate,
  * but a caller costing many `getUsageByProviderModel()` rows in a loop should
  * call `readPricingOverrides()` once and pass the same map through every
- * `estimateCost()` call, rather than re-reading the file N times.
+ * `estimateCost()` call, rather than re-reading the file N times. A real I/O
+ * error on that default read (see `safeReadPricingOverrides`) degrades to
+ * catalog-only pricing rather than throwing — this function never throws.
  */
 export function estimateCost(params: {
   provider: Provider;
@@ -166,7 +184,7 @@ export function estimateCost(params: {
   const model = params.model?.trim();
   if (!model) return zeroCost();
 
-  const rates = resolveRates(params.provider, model, params.overrides ?? readPricingOverrides());
+  const rates = resolveRates(params.provider, model, params.overrides ?? safeReadPricingOverrides());
   if (!rates) return zeroCost();
 
   const inputUSD = usdFromTokens(params.usage.input_tokens, rates.inputPerMTokens);
