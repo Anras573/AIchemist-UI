@@ -66,21 +66,23 @@ export function overrideKey(provider: Provider, model: string): string {
 
 /**
  * Validate + re-derive a key loaded from disk the same way `overrideKey()`
- * would (trimming the model half), so a hand-edited JSON file with padding
- * around a model id (e.g. `"anthropic::  my-model  "`) still matches
- * `estimateCost()`'s trimmed lookup instead of silently never matching.
- * Returns null for a key that doesn't match the documented
- * `"<provider>::<model>"` format at all — missing `"::"`, an empty provider
- * half, or an empty/whitespace-only model half — since such a key could
- * never be produced by `overrideKey()` and would otherwise sit in the map
- * silently doing nothing.
+ * would (trimming both halves, lower-casing the provider half — `Provider`
+ * values are always lowercase in this codebase), so a hand-edited JSON file
+ * with padding or wrong-case provider (e.g. `"anthropic::  my-model  "` or
+ * `"Anthropic::model"`) still matches `estimateCost()`'s lookup instead of
+ * silently never matching. Returns null for a key that doesn't match the
+ * documented `"<provider>::<model>"` format at all — missing `"::"`, an
+ * empty/whitespace-only provider half, or an empty/whitespace-only model
+ * half — since such a key could never be produced by `overrideKey()` and
+ * would otherwise sit in the map silently doing nothing.
  */
 function normalizeRawKey(key: string): string | null {
   const idx = key.indexOf("::");
-  if (idx <= 0) return null;
+  if (idx === -1) return null;
+  const provider = key.slice(0, idx).trim().toLowerCase();
   const model = key.slice(idx + 2).trim();
-  if (!model) return null;
-  return `${key.slice(0, idx)}::${model}`;
+  if (!provider || !model) return null;
+  return `${provider}::${model}`;
 }
 
 // ── Validation ────────────────────────────────────────────────────────────────

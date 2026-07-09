@@ -150,6 +150,31 @@ describe("pricing-overrides config", () => {
     expect(readPricingOverrides()).toEqual({});
   });
 
+  it("drops a key with a whitespace-only provider half on read", () => {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({ overrides: { "   ::llama3.1": { inputPerMTokens: 1 } } }));
+
+    expect(readPricingOverrides()).toEqual({});
+  });
+
+  it("normalizes whitespace and case in the provider half on read, so a hand-edited key still matches", () => {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        "overrides": {
+          "anthropic ::padded-provider-model": { inputPerMTokens: 1 },
+          "Ollama::mixed-case-provider-model": { inputPerMTokens: 2 },
+        },
+      })
+    );
+
+    expect(readPricingOverrides()).toEqual({
+      "anthropic::padded-provider-model": { inputPerMTokens: 1 },
+      "ollama::mixed-case-provider-model": { inputPerMTokens: 2 },
+    });
+  });
+
   it("drops a key with an empty or whitespace-only model half on read", () => {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
     fs.writeFileSync(
