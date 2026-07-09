@@ -65,15 +65,22 @@ export function overrideKey(provider: Provider, model: string): string {
 }
 
 /**
- * Re-derive a key loaded from disk the same way `overrideKey()` would, so a
- * hand-edited JSON file with padding around the model half (e.g.
- * `"anthropic::  my-model  "`) still matches `estimateCost()`'s trimmed
- * lookup instead of silently never matching.
+ * Validate + re-derive a key loaded from disk the same way `overrideKey()`
+ * would (trimming the model half), so a hand-edited JSON file with padding
+ * around a model id (e.g. `"anthropic::  my-model  "`) still matches
+ * `estimateCost()`'s trimmed lookup instead of silently never matching.
+ * Returns null for a key that doesn't match the documented
+ * `"<provider>::<model>"` format at all — missing `"::"`, an empty provider
+ * half, or an empty/whitespace-only model half — since such a key could
+ * never be produced by `overrideKey()` and would otherwise sit in the map
+ * silently doing nothing.
  */
-function normalizeRawKey(key: string): string {
+function normalizeRawKey(key: string): string | null {
   const idx = key.indexOf("::");
-  if (idx === -1) return key;
-  return `${key.slice(0, idx)}::${key.slice(idx + 2).trim()}`;
+  if (idx <= 0) return null;
+  const model = key.slice(idx + 2).trim();
+  if (!model) return null;
+  return `${key.slice(0, idx)}::${model}`;
 }
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -136,7 +143,8 @@ function readOverridesDoc(): Record<string, unknown> {
 /**
  * Read the configured overrides. Returns `{}` when the file is missing or its
  * JSON is malformed; rethrows real I/O errors (permission denied, etc.). Entries
- * with malformed rate fields are dropped (with a console warning) instead of
+ * with malformed rate fields, or a key that doesn't match `"<provider>::<model>"`
+ * (see `normalizeRawKey`), are dropped (with a console warning) instead of
  * failing the whole map.
  */
 export function readPricingOverrides(): PricingOverrideMap {
@@ -150,7 +158,12 @@ export function readPricingOverrides(): PricingOverrideMap {
       console.warn(`[pricing-overrides] Skipping override "${key}" — rate fields must be non-negative numbers`);
       continue;
     }
-    out[normalizeRawKey(key)] = entry;
+    const normalizedKey = normalizeRawKey(key);
+    if (!normalizedKey) {
+      console.warn(`[pricing-overrides] Skipping override "${key}" — key must match "<provider>::<model>" with a non-empty model`);
+      continue;
+    }
+    out[normalizedKey] = entry;
   }
   return out;
 }

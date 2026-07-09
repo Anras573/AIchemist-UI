@@ -136,6 +136,30 @@ describe("pricing-overrides config", () => {
     expect(readPricingOverrides()).toEqual({});
   });
 
+  it("drops a key with no '::' separator on read — it could never match overrideKey()'s lookup format", () => {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({ overrides: { "ollama-llama3.1": { inputPerMTokens: 1 } } }));
+
+    expect(readPricingOverrides()).toEqual({});
+  });
+
+  it("drops a key with an empty provider half (starts with '::') on read", () => {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({ overrides: { "::llama3.1": { inputPerMTokens: 1 } } }));
+
+    expect(readPricingOverrides()).toEqual({});
+  });
+
+  it("drops a key with an empty or whitespace-only model half on read", () => {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ overrides: { "ollama::": { inputPerMTokens: 1 }, "anthropic::   ": { inputPerMTokens: 1 } } })
+    );
+
+    expect(readPricingOverrides()).toEqual({});
+  });
+
   it("rejects writing an override with an invalid rate field", () => {
     expect(() => writePricingOverrides({ "ollama::llama3.1": { inputPerMTokens: Number.NaN } })).toThrow();
   });
