@@ -17,12 +17,14 @@
  * the SAME function backs both an ad hoc single-turn estimate (a `UsageLedgerRow`)
  * and the provider/model breakdown table (loop `getUsageByProviderModel()` rows
  * through it and sum — costing an aggregate requires per-model granularity, since
- * a provider's rows may span several differently-priced models).
+ * a provider's rows may span several differently-priced models). A bulk caller
+ * should read the overrides file once and pass it via the `overrides` param
+ * (see `estimateCost`'s doc comment) rather than let every call re-read it.
  */
 import { getModelMeta, defaultCatalog } from "tokenlens";
 import type { Provider, SessionUsage } from "../src/types/index";
 import { parseCompositeModelId } from "./openai-endpoints";
-import { readPricingOverrides, overrideKey, type PricingRates } from "./pricing-overrides";
+import { readPricingOverrides, overrideKey, type PricingOverrideMap, type PricingRates } from "./pricing-overrides";
 
 export type CostConfidence = "exact" | "estimated" | "unknown";
 
@@ -99,8 +101,8 @@ function resolveCatalogRates(provider: Provider, model: string): PricingRates | 
 }
 
 /** Manual overrides take priority over the catalog, so a user can correct a stale price or supply one the catalog doesn't have at all. */
-function resolveRates(provider: Provider, model: string): PricingRates | undefined {
-  const override = readPricingOverrides()[overrideKey(provider, model)];
+function resolveRates(provider: Provider, model: string, overrides: PricingOverrideMap): PricingRates | undefined {
+  const override = overrides[overrideKey(provider, model)];
   return override ?? resolveCatalogRates(provider, model);
 }
 
@@ -130,12 +132,23 @@ function hasPricingGap(usage: SessionUsage, rates: PricingRates): boolean {
  * shapes carry the same four token fields). Returns `confidence: "unknown"`
  * (all-zero) rather than silently reporting 0 as if it were exact, when no
  * pricing data is available for the given provider/model.
+ *
+ * `overrides` defaults to a fresh `readPricingOverrides()` read (a synchronous
+ * disk read + JSON parse) per call — fine for an ad hoc single-turn estimate,
+ * but a caller costing many `getUsageByProviderModel()` rows in a loop should
+ * call `readPricingOverrides()` once and pass the same map through every
+ * `estimateCost()` call, rather than re-reading the file N times.
  */
-export function estimateCost(params: { provider: Provider; model: string | null; usage: SessionUsage }): CostEstimate {
+export function estimateCost(params: {
+  provider: Provider;
+  model: string | null;
+  usage: SessionUsage;
+  overrides?: PricingOverrideMap;
+}): CostEstimate {
   const model = params.model?.trim();
   if (!model) return zeroCost();
 
-  const rates = resolveRates(params.provider, model);
+  const rates = resolveRates(params.provider, model, params.overrides ?? readPricingOverrides());
   if (!rates) return zeroCost();
 
   const inputUSD = usdFromTokens(params.usage.input_tokens, rates.inputPerMTokens);

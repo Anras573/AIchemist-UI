@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "./db";
 import { estimateCost } from "./pricing";
-import { _setPricingOverridesPathForTests, upsertPricingOverride } from "./pricing-overrides";
+import { _setPricingOverridesPathForTests, readPricingOverrides, upsertPricingOverride } from "./pricing-overrides";
 import { getUsageByProviderModel, recordUsage } from "./usage-ledger";
 
 let tempDir: string;
@@ -157,6 +157,26 @@ describe("estimateCost — manual overrides", () => {
     });
 
     expect(cost.inputUSD).toBeCloseTo(5, 5);
+  });
+
+  it("accepts a pre-loaded overrides map via the `overrides` param, for a caller costing many rows without re-reading disk per call", () => {
+    upsertPricingOverride("anthropic", "custom-model", { inputPerMTokens: 2, outputPerMTokens: 2 });
+    const overrides = readPricingOverrides();
+
+    // A completely empty file at the configured path — if estimateCost() fell
+    // back to a fresh disk read despite `overrides` being passed, this override
+    // would resolve to `undefined` and the assertions below would fail.
+    _setPricingOverridesPathForTests(path.join(tempDir, "different-empty-file.json"));
+
+    const cost = estimateCost({
+      provider: "anthropic",
+      model: "custom-model",
+      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      overrides,
+    });
+
+    expect(cost.inputUSD).toBeCloseTo(2, 5);
+    expect(cost.outputUSD).toBeCloseTo(2, 5);
   });
 });
 
