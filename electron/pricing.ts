@@ -38,9 +38,11 @@ export interface CostEstimate {
    * `exact` — full token fidelity and a complete price for every token field
    *   the turn used.
    * `estimated` — a price resolved, but it may understate the true cost:
-   *   either this provider's token reporting is known to be partial (see
-   *   `PARTIAL_FIDELITY_PROVIDERS`), or the resolved rate is missing a field
-   *   for a token type the turn actually used (see `hasPricingGap`).
+   *   this provider's token reporting is known to be partial (see
+   *   `PARTIAL_FIDELITY_PROVIDERS`), the resolved rate is missing a field for
+   *   a token type the turn actually used (see `hasPricingGap`), or every
+   *   token field is 0 (see `isZeroUsage` — indistinguishable from the
+   *   provider never reporting usage at all for this turn).
    * `unknown` — no pricing data for this provider/model; fields are all 0 and
    *   must not be treated as "free".
    */
@@ -127,6 +129,22 @@ function hasPricingGap(usage: SessionUsage, rates: PricingRates): boolean {
 }
 
 /**
+ * True when every token field is 0 — indistinguishable, from the usage row
+ * alone, between "this turn genuinely used zero tokens" (essentially never
+ * happens for a real turn) and "the provider never called `TurnEmitter.usage()`
+ * this turn", which `getLastUsage()` (`electron/agent/turn-emitter.ts`) backfills
+ * with an all-zero reading. A $0 total here must not be reported `exact`.
+ */
+function isZeroUsage(usage: SessionUsage): boolean {
+  return (
+    usage.input_tokens === 0 &&
+    usage.output_tokens === 0 &&
+    usage.cache_read_input_tokens === 0 &&
+    usage.cache_creation_input_tokens === 0
+  );
+}
+
+/**
  * Estimate the USD cost of one usage reading — a single turn (`UsageLedgerRow`)
  * or a pre-aggregated provider+model group (`UsageByProviderModel`, since both
  * shapes carry the same four token fields). Returns `confidence: "unknown"`
@@ -163,6 +181,10 @@ export function estimateCost(params: {
     cacheCreationUSD,
     totalUSD: inputUSD + outputUSD + cacheReadUSD + cacheCreationUSD,
     confidence:
-      PARTIAL_FIDELITY_PROVIDERS.has(params.provider) || hasPricingGap(params.usage, rates) ? "estimated" : "exact",
+      PARTIAL_FIDELITY_PROVIDERS.has(params.provider) ||
+      hasPricingGap(params.usage, rates) ||
+      isZeroUsage(params.usage)
+        ? "estimated"
+        : "exact",
   };
 }

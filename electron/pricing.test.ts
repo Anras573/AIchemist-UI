@@ -74,6 +74,20 @@ describe("estimateCost — known catalog pricing", () => {
     expect(cost.confidence).toBe("estimated");
     expect(cost.cacheCreationUSD).toBe(0);
   });
+
+  it("degrades to 'estimated' for an all-zero usage reading, even with a fully-priced known model", () => {
+    // An all-zero SessionUsage is indistinguishable from getLastUsage()'s
+    // ZERO_USAGE fallback for a turn where the provider never called
+    // TurnEmitter.usage() at all — reporting "exact $0" would be misleading.
+    const cost = estimateCost({
+      provider: "anthropic",
+      model: "claude-3-7-sonnet-20250219",
+      usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    });
+
+    expect(cost.confidence).toBe("estimated");
+    expect(cost.totalUSD).toBe(0);
+  });
 });
 
 describe("estimateCost — partial provider fidelity degrades confidence, not accuracy", () => {
