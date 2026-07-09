@@ -59,6 +59,21 @@ describe("estimateCost — known catalog pricing", () => {
     expect(cost.confidence).toBe("exact");
     expect(cost.inputUSD).toBeCloseTo(2.5, 5);
   });
+
+  it("degrades to 'estimated' when the catalog price is missing a field the turn actually used", () => {
+    // gpt-4o's catalog entry has no cache_write price, so a turn that did
+    // create cache tokens can't be priced exactly — usdFromTokens would
+    // otherwise silently treat the missing rate as 0 while still reporting
+    // "exact".
+    const cost = estimateCost({
+      provider: "openai-compatible",
+      model: "myendpoint/gpt-4o",
+      usage: { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 1_000_000 },
+    });
+
+    expect(cost.confidence).toBe("estimated");
+    expect(cost.cacheCreationUSD).toBe(0);
+  });
 });
 
 describe("estimateCost — partial provider fidelity degrades confidence, not accuracy", () => {
@@ -127,6 +142,21 @@ describe("estimateCost — manual overrides", () => {
     expect(cost.outputUSD).toBe(0);
     expect(cost.cacheReadUSD).toBe(0);
     expect(cost.cacheCreationUSD).toBe(0);
+    // Output/cache tokens were used but the override left those rates unset —
+    // that's a pricing gap, not a genuine $0 price, so this must not read "exact".
+    expect(cost.confidence).toBe("estimated");
+  });
+
+  it("still trims whitespace from the model before the override lookup, matching a key stored via upsertPricingOverride", () => {
+    upsertPricingOverride("anthropic", "  padded-model  ", { inputPerMTokens: 5, outputPerMTokens: 5 });
+
+    const cost = estimateCost({
+      provider: "anthropic",
+      model: "padded-model",
+      usage: { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    });
+
+    expect(cost.inputUSD).toBeCloseTo(5, 5);
   });
 });
 

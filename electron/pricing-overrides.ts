@@ -53,23 +53,38 @@ export function getPricingOverridesPath(): string {
   return overridesPathOverride ?? path.join(os.homedir(), ".aichemist", "pricing-overrides.json");
 }
 
-/** The lookup key for a provider/model pair — "::" doesn't appear in any provider id, and survives "/"-bearing composite model ids. */
+/**
+ * The lookup key for a provider/model pair — "::" doesn't appear in any
+ * provider id, and survives "/"-bearing composite model ids. The model is
+ * trimmed here (the single normalization point shared by every read and
+ * write path) so a whitespace-padded model id can never silently fail to
+ * match the trimmed id `estimateCost()` looks up.
+ */
 export function overrideKey(provider: Provider, model: string): string {
-  return `${provider}::${model}`;
+  return `${provider}::${model.trim()}`;
 }
 
 // ── Validation ────────────────────────────────────────────────────────────────
 
 const RATE_FIELDS = ["inputPerMTokens", "outputPerMTokens", "cacheReadPerMTokens", "cacheWritePerMTokens"] as const;
 
+/**
+ * At least one rate field must be defined — an override with none would still
+ * be found by `resolveRates()` (a truthy `{}`), pre-empting the catalog
+ * fallback while every field silently defaults to 0, reporting a "priced"
+ * turn that is actually unpriced.
+ */
 function isValidRates(entry: unknown): entry is PricingRates {
   if (!entry || typeof entry !== "object") return false;
   const e = entry as Record<string, unknown>;
+  let hasField = false;
   for (const key of RATE_FIELDS) {
     const value = e[key];
-    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) return false;
+    if (value === undefined) continue;
+    hasField = true;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return false;
   }
-  return true;
+  return hasField;
 }
 
 // ── Read / write ──────────────────────────────────────────────────────────────

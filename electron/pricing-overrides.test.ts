@@ -37,6 +37,10 @@ describe("overrideKey", () => {
       "openai-compatible::together/meta-llama/Llama-3-70b"
     );
   });
+
+  it("trims surrounding whitespace from the model, so a padded write and a trimmed read land on the same key", () => {
+    expect(overrideKey("anthropic", "  claude-sonnet  ")).toBe("anthropic::claude-sonnet");
+  });
 });
 
 describe("pricing-overrides config", () => {
@@ -124,6 +128,17 @@ describe("pricing-overrides config", () => {
 
   it("rejects writing an override with an invalid rate field", () => {
     expect(() => writePricingOverrides({ "ollama::llama3.1": { inputPerMTokens: Number.NaN } })).toThrow();
+  });
+
+  it("rejects writing an override with no rate fields at all — it would look 'priced' while computing to $0 everywhere", () => {
+    expect(() => writePricingOverrides({ "ollama::llama3.1": {} })).toThrow();
+  });
+
+  it("drops an entry with no rate fields at all on read", () => {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({ overrides: { "ollama::llama3.1": {} } }));
+
+    expect(readPricingOverrides()).toEqual({});
   });
 
   it("uses the default path under ~/.aichemist when no override is set", () => {

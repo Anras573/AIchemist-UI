@@ -33,10 +33,12 @@ export interface CostEstimate {
   cacheCreationUSD: number;
   totalUSD: number;
   /**
-   * `exact` — full token fidelity and a known price.
-   * `estimated` — a known price, but this provider's token reporting is known
-   *   to be partial (see `PARTIAL_FIDELITY_PROVIDERS`), so the estimate may
-   *   understate the true cost.
+   * `exact` — full token fidelity and a complete price for every token field
+   *   the turn used.
+   * `estimated` — a price resolved, but it may understate the true cost:
+   *   either this provider's token reporting is known to be partial (see
+   *   `PARTIAL_FIDELITY_PROVIDERS`), or the resolved rate is missing a field
+   *   for a token type the turn actually used (see `hasPricingGap`).
    * `unknown` — no pricing data for this provider/model; fields are all 0 and
    *   must not be treated as "free".
    */
@@ -111,6 +113,22 @@ function usdFromTokens(tokens: number, ratePerMTokens: number | undefined): numb
 }
 
 /**
+ * True when some token field the turn actually used has no matching rate —
+ * e.g. a catalog entry with no `cache_write` price (many models.dev entries
+ * omit it) or a manual override that only sets some fields. `usdFromTokens`
+ * silently treats a missing rate as 0, so without this check such a turn
+ * would report `exact` while actually understating cost.
+ */
+function hasPricingGap(usage: SessionUsage, rates: PricingRates): boolean {
+  return (
+    (usage.input_tokens > 0 && rates.inputPerMTokens === undefined) ||
+    (usage.output_tokens > 0 && rates.outputPerMTokens === undefined) ||
+    (usage.cache_read_input_tokens > 0 && rates.cacheReadPerMTokens === undefined) ||
+    (usage.cache_creation_input_tokens > 0 && rates.cacheWritePerMTokens === undefined)
+  );
+}
+
+/**
  * Estimate the USD cost of one usage reading — a single turn (`UsageLedgerRow`)
  * or a pre-aggregated provider+model group (`UsageByProviderModel`, since both
  * shapes carry the same four token fields). Returns `confidence: "unknown"`
@@ -135,6 +153,7 @@ export function estimateCost(params: { provider: Provider; model: string | null;
     cacheReadUSD,
     cacheCreationUSD,
     totalUSD: inputUSD + outputUSD + cacheReadUSD + cacheCreationUSD,
-    confidence: PARTIAL_FIDELITY_PROVIDERS.has(params.provider) ? "estimated" : "exact",
+    confidence:
+      PARTIAL_FIDELITY_PROVIDERS.has(params.provider) || hasPricingGap(params.usage, rates) ? "estimated" : "exact",
   };
 }
