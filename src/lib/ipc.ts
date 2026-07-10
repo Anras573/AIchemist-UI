@@ -1,5 +1,6 @@
 import React from "react";
 import type {
+  BudgetConfig,
   GitHubCreatePrArgs,
   GitHubGetCiStatusArgs,
   GitHubGetIssueArgs,
@@ -64,6 +65,11 @@ export const ipc = {
   settingsRead: () => window.electronAPI.settingsRead(),
   settingsWrite: (updates: Parameters<typeof window.electronAPI.settingsWrite>[0]) =>
     window.electronAPI.settingsWrite(updates),
+
+  // Budgets / spending
+  budgetRead: () => window.electronAPI.budgetRead(),
+  budgetWrite: (config: BudgetConfig) => window.electronAPI.budgetWrite(config),
+  budgetGetStatus: () => window.electronAPI.budgetGetStatus(),
 
   // Agent
   agentSend: (args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[]; skipPersistence?: boolean; messageId?: string }) =>

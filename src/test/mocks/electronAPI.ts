@@ -50,6 +50,17 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     settingsRead: vi.fn().mockResolvedValue({}),
     settingsWrite: vi.fn().mockResolvedValue(undefined),
 
+    // Budgets / spending
+    budgetRead: vi.fn().mockResolvedValue({ period: "monthly", globalAmountUSD: null, providerAmountUSD: {} }),
+    budgetWrite: vi.fn().mockResolvedValue({ period: "monthly", globalAmountUSD: null, providerAmountUSD: {} }),
+    budgetGetStatus: vi.fn().mockResolvedValue({
+      period: "monthly",
+      periodStart: "2026-01-01T00:00:00.000Z",
+      periodEnd: "2026-02-01T00:00:00.000Z",
+      global: { budgetUSD: null, spendUSD: 0, remainingUSD: null, burnRatePerDayUSD: 0 },
+      byProvider: [],
+    }),
+
     // Dialog
     openFolderDialog: vi.fn().mockResolvedValue(null),
     openGitHubUrl: vi.fn().mockResolvedValue(undefined),

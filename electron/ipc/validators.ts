@@ -133,6 +133,20 @@ const workflowListRunsSchema = z.object({
   workflowId: z.string().trim().min(1),
 });
 
+// A budget write replaces the whole config, so validate every field at the
+// boundary rather than letting a malformed provider key or negative amount
+// reach writeBudgetConfig()'s own throw-on-invalid path with a less specific
+// error. Amounts allow 0 (writeBudgetConfig/readBudgetConfig normalize 0 to
+// "unset") — only negative/non-finite is rejected here.
+const budgetWriteSchema = z.object({
+  period: z.enum(["daily", "weekly", "monthly"]),
+  globalAmountUSD: z.number().finite().min(0).nullable(),
+  providerAmountUSD: z.record(
+    z.string().refine((v) => isProviderId(v), { message: "is not a known provider" }),
+    z.number().finite().min(0)
+  ),
+});
+
 /** The delete channels take a bare path string rather than an options object. */
 const pathArgSchema = z.string().min(1);
 
@@ -153,4 +167,5 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.WORKFLOW_RUN_NOW]: unary(workflowRunNowSchema, CH.WORKFLOW_RUN_NOW),
   [CH.WORKFLOW_DELETE]: unary(workflowDeleteSchema, CH.WORKFLOW_DELETE),
   [CH.WORKFLOW_LIST_RUNS]: unary(workflowListRunsSchema, CH.WORKFLOW_LIST_RUNS),
+  [CH.BUDGET_WRITE]: unary(budgetWriteSchema, CH.BUDGET_WRITE),
 };

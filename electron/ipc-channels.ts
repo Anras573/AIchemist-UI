@@ -83,6 +83,11 @@ export const CREATE_SKILL       = "agents:create-skill";
 // ── Settings ──────────────────────────────────────────────────────────────────
 export const SETTINGS_READ          = "settings:read";
 export const SETTINGS_WRITE         = "settings:write";
+
+// ── Budgets / spending (~/.aichemist/budget.json) ─────────────────────────────
+export const BUDGET_READ            = "budget:read";
+export const BUDGET_WRITE           = "budget:write";
+export const BUDGET_GET_STATUS      = "budget:get-status";
 export const SESSION_STATUS           = "session:status";
 export const SESSION_DELTA            = "session:delta";
 export const SESSION_TOOL_CALL        = "session:tool_call";
