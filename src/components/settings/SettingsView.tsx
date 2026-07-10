@@ -18,6 +18,7 @@ import { ProvidersAndKeysSection } from "@/components/settings/sections/Provider
 import { McpServersSection } from "@/components/settings/sections/McpServersSection";
 import { SkillsSection } from "@/components/settings/sections/SkillsSection";
 import { AgentsSection } from "@/components/settings/sections/AgentsSection";
+import { SpendingSection } from "@/components/settings/sections/SpendingSection";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { isProvider } from "@/lib/providers";
 
@@ -25,7 +26,7 @@ interface SettingsViewProps {
   onClose: () => void;
 }
 
-type Section = "providers" | "mcp" | "skills" | "agents" | "advanced" | "appearance";
+type Section = "providers" | "mcp" | "skills" | "agents" | "spending" | "advanced" | "appearance";
 
 // Application-tier nav rows. Project-tier rows are derived from the active
 // project at render time (see PROJECT_NAV). The old "API Keys" / "Model
@@ -36,6 +37,7 @@ const APP_NAV: { id: Section; label: string }[] = [
   { id: "mcp", label: "MCP Servers" },
   { id: "skills", label: "Skills" },
   { id: "agents", label: "Agents" },
+  { id: "spending", label: "Spending" },
   { id: "appearance", label: "Appearance" },
   { id: "advanced", label: "Advanced" },
 ];
@@ -61,6 +63,10 @@ const SECTION_KEYWORDS: Record<string, string[]> = {
   mcp: ["mcp", "server", "model context protocol", "command", "stdio", "http", "sse"],
   skills: ["skill", "plugin"],
   agents: ["agent", "frontmatter"],
+  spending: [
+    "budget", "spend", "spending", "cost", "credits", "remaining balance", "burn rate",
+    "period", "monthly", "weekly", "daily", "usd",
+  ],
   appearance: ["theme", "light", "dark", "system", "color", "look"],
   advanced: [
     "default provider", "approval mode", "max tool rounds", "tool rounds",
@@ -371,6 +377,16 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                 description="Create and edit agent files. Per-session selection lives in the agent picker."
               >
                 <AgentsSection provider={hubProvider} projectPath={hubProjectPath} />
+              </SettingsSection>
+            )}
+
+            {/* ── Spending ── */}
+            {activeSection === "spending" && (
+              <SettingsSection
+                title="Spending"
+                description="Set a spending budget (global and/or per-provider) and see remaining balance and burn rate computed against real usage."
+              >
+                <SpendingSection />
               </SettingsSection>
             )}
 

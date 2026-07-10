@@ -402,3 +402,49 @@ export interface TraceSpan {
   status: "running" | "success" | "error";
   meta?: Record<string, unknown>;
 }
+
+// ─── Budgets & spending ───────────────────────────────────────────────────────
+
+export type BudgetPeriod = "daily" | "weekly" | "monthly";
+
+/**
+ * Persisted spending-budget configuration (`~/.aichemist/budget.json`). A `0`
+ * or absent amount means "no budget set": for `globalAmountUSD` that
+ * normalizes to `null`; for `providerAmountUSD`, a `0` override is dropped
+ * from the map entirely (an absent key), never stored as `null`. Either way,
+ * callers never special-case 0 separately from unset.
+ */
+export interface BudgetConfig {
+  period: BudgetPeriod;
+  /** USD. `null` = no global budget configured. */
+  globalAmountUSD: number | null;
+  /** Optional per-provider USD override; shares the global budget's reset period. A provider with no override is simply absent from this map. */
+  providerAmountUSD: Partial<Record<Provider, number>>;
+}
+
+/** Computed spend/remaining/burn-rate for one budget line (global or a single provider) over the current period. */
+export interface BudgetLineStatus {
+  /** `null` = no budget configured for this line. */
+  budgetUSD: number | null;
+  spendUSD: number;
+  /** `budgetUSD - spendUSD`. `null` when `budgetUSD` is null. */
+  remainingUSD: number | null;
+  /** Average USD/day spent so far in the current period. */
+  burnRatePerDayUSD: number;
+}
+
+export interface ProviderBudgetStatus extends BudgetLineStatus {
+  provider: Provider;
+}
+
+/** Result of BUDGET_GET_STATUS — the current period's spend against the configured budget(s). */
+export interface BudgetStatus {
+  period: BudgetPeriod;
+  /** ISO timestamp, inclusive start of the current period. */
+  periodStart: string;
+  /** ISO timestamp, exclusive end of the current period. */
+  periodEnd: string;
+  global: BudgetLineStatus;
+  /** One entry per provider with either a configured override or spend in the current period. */
+  byProvider: ProviderBudgetStatus[];
+}

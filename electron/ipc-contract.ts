@@ -47,6 +47,8 @@ import type {
   WorkflowRun,
   WorkflowAutonomy,
   WorkflowSessionStrategy,
+  BudgetConfig,
+  BudgetStatus,
 } from "../src/types";
 import type { SettingsMap } from "./settings";
 import type { OpenAiEndpointEntry, OpenAiEndpointsMap } from "./openai-endpoints";
@@ -131,6 +133,11 @@ export type IpcContract = {
   // ── Settings ──────────────────────────────────────────────────────────────
   [CH.SETTINGS_READ]: { args: []; result: SettingsMap };
   [CH.SETTINGS_WRITE]: { args: [updates: Partial<SettingsMap>]; result: void };
+
+  // ── Budgets / spending ──────────────────────────────────────────────────────
+  [CH.BUDGET_READ]: { args: []; result: BudgetConfig };
+  [CH.BUDGET_WRITE]: { args: [config: BudgetConfig]; result: BudgetConfig };
+  [CH.BUDGET_GET_STATUS]: { args: []; result: BudgetStatus };
 
   // ── Dialog / shell ──────────────────────────────────────────────────────────
   [CH.OPEN_FOLDER_DIALOG]: { args: []; result: string | null };

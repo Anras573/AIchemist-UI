@@ -66,6 +66,11 @@ export interface ElectronAPI {
   settingsRead: () => Promise<Res<typeof CH.SETTINGS_READ>>;
   settingsWrite: (updates: Partial<import("./settings").SettingsMap>) => Promise<Res<typeof CH.SETTINGS_WRITE>>;
 
+  // ── Budgets / spending ────────────────────────────────────────────────────
+  budgetRead: () => Promise<Res<typeof CH.BUDGET_READ>>;
+  budgetWrite: (config: import("../src/types").BudgetConfig) => Promise<Res<typeof CH.BUDGET_WRITE>>;
+  budgetGetStatus: () => Promise<Res<typeof CH.BUDGET_GET_STATUS>>;
+
   // ── Dialog ────────────────────────────────────────────────────────────────
   openFolderDialog: () => Promise<Res<typeof CH.OPEN_FOLDER_DIALOG>>;
   openGitHubUrl: (url: string) => Promise<Res<typeof CH.OPEN_GITHUB_URL>>;
@@ -219,6 +224,10 @@ const api: ElectronAPI = {
 
   settingsRead: () => invoke(CH.SETTINGS_READ),
   settingsWrite: (updates) => invoke(CH.SETTINGS_WRITE, updates),
+
+  budgetRead: () => invoke(CH.BUDGET_READ),
+  budgetWrite: (config) => invoke(CH.BUDGET_WRITE, config),
+  budgetGetStatus: () => invoke(CH.BUDGET_GET_STATUS),
 
   openFolderDialog: () => invoke(CH.OPEN_FOLDER_DIALOG),
   openGitHubUrl: (url) => invoke(CH.OPEN_GITHUB_URL, url),
