@@ -70,6 +70,12 @@ describe("SpendingPanel", () => {
     expect(screen.getByText("No project open")).toBeInTheDocument();
   });
 
+  it("doesn't fetch spend or budget data when there is no active project", () => {
+    renderWithProviders(<SpendingPanel />);
+    expect(window.electronAPI.spendingGetSummary).not.toHaveBeenCalled();
+    expect(window.electronAPI.budgetGetStatus).not.toHaveBeenCalled();
+  });
+
   it("renders KPI cards for period spend, lifetime spend, remaining budget, and burn rate", async () => {
     activateProject();
     vi.mocked(window.electronAPI.spendingGetSummary).mockResolvedValue({

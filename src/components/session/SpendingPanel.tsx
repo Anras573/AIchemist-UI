@@ -157,7 +157,8 @@ export function SpendingPanel() {
     { ttl: 15_000 }
   );
 
-  const budget = useIpcQuery<BudgetStatus>("spending-budget-status", () => ipc.budgetGetStatus(), { ttl: 15_000 });
+  const budgetKey = activeProject ? "spending-budget-status" : null;
+  const budget = useIpcQuery<BudgetStatus>(budgetKey, () => ipc.budgetGetStatus(), { ttl: 15_000 });
 
   // Refresh once a turn's usage row is durably recorded — `recordUsage()` runs
   // before the session transitions to "idle" (see electron/agent/runner.ts), so
@@ -214,6 +215,7 @@ export function SpendingPanel() {
           {RANGE_OPTIONS.map((o) => (
             <button
               key={o.value}
+              type="button"
               onClick={() => setPreset(o.value)}
               aria-pressed={preset === o.value}
               className={cn(
