@@ -49,6 +49,16 @@ function activateProject() {
   useProjectStore.getState().setActiveProject("proj-1");
 }
 
+// Mirrors SpendingPanel's own formatUSD/formatTokens exactly, so assertions
+// don't hard-code locale-specific formatting (grouping separators, currency
+// symbol placement) that can differ from the CI/dev machine's default locale.
+function usd(v: number): string {
+  return v.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+}
+function tokens(v: number): string {
+  return v.toLocaleString();
+}
+
 describe("SpendingPanel", () => {
   beforeEach(() => {
     vi.mocked(window.electronAPI.spendingGetSummary).mockResolvedValue(EMPTY_SUMMARY);
@@ -74,11 +84,11 @@ describe("SpendingPanel", () => {
 
     renderWithProviders(<SpendingPanel />);
 
-    expect(await screen.findByText("$12.50")).toBeInTheDocument();
-    expect(screen.getByText("$340.25")).toBeInTheDocument();
-    expect(screen.getByText("$87.50")).toBeInTheDocument();
-    expect(screen.getByText("of $100.00 · monthly")).toBeInTheDocument();
-    expect(screen.getByText("$3.20/day")).toBeInTheDocument();
+    expect(await screen.findByText(usd(12.5))).toBeInTheDocument();
+    expect(screen.getByText(usd(340.25))).toBeInTheDocument();
+    expect(screen.getByText(usd(87.5))).toBeInTheDocument();
+    expect(screen.getByText(`of ${usd(100)} · monthly`)).toBeInTheDocument();
+    expect(screen.getByText(`${usd(3.2)}/day`)).toBeInTheDocument();
   });
 
   it("shows 'No budget set' when no global budget is configured", async () => {
@@ -111,10 +121,10 @@ describe("SpendingPanel", () => {
     renderWithProviders(<SpendingPanel />);
 
     expect(await screen.findByText("Claude")).toBeInTheDocument();
-    expect(screen.getByText("1,000")).toBeInTheDocument();
-    expect(screen.getByText("500")).toBeInTheDocument();
-    expect(screen.getByText("250")).toBeInTheDocument(); // cache_read + cache_creation
-    expect(screen.getByText("$10.00")).toBeInTheDocument();
+    expect(screen.getByText(tokens(1000))).toBeInTheDocument();
+    expect(screen.getByText(tokens(500))).toBeInTheDocument();
+    expect(screen.getByText(tokens(250))).toBeInTheDocument(); // cache_read + cache_creation
+    expect(screen.getByText(usd(10))).toBeInTheDocument();
     expect(screen.getByText("100.0%")).toBeInTheDocument();
   });
 
@@ -176,7 +186,7 @@ describe("SpendingPanel", () => {
 
     renderWithProviders(<SpendingPanel />);
 
-    expect(await screen.findByText("$5.00")).toBeInTheDocument();
+    expect(await screen.findByText(usd(5))).toBeInTheDocument();
     // One badge for the period total, one for the lifetime total.
     expect(screen.getAllByLabelText("estimated cost")).toHaveLength(1);
     expect(screen.getAllByLabelText("unknown cost")).toHaveLength(1);
