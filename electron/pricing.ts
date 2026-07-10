@@ -22,11 +22,14 @@
  * (see `estimateCost`'s doc comment) rather than let every call re-read it.
  */
 import { getModelMeta, defaultCatalog } from "tokenlens";
-import type { Provider, SessionUsage } from "../src/types/index";
+import type { CostConfidence, Provider, SessionUsage } from "../src/types/index";
 import { parseCompositeModelId } from "./openai-endpoints";
 import { readPricingOverrides, overrideKey, type PricingOverrideMap, type PricingRates } from "./pricing-overrides";
 
-export type CostConfidence = "exact" | "estimated" | "unknown";
+// Canonical definition lives in src/types/index.ts (shared with the renderer,
+// e.g. the Spending panel) — re-exported here so existing imports of
+// `CostConfidence` from this module keep working.
+export type { CostConfidence };
 
 export interface CostEstimate {
   inputUSD: number;

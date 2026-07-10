@@ -448,3 +448,45 @@ export interface BudgetStatus {
   /** One entry per provider with either a configured override or spend in the current period. */
   byProvider: ProviderBudgetStatus[];
 }
+
+// ─── Spending panel (issue #159) ────────────────────────────────────────────────
+
+/**
+ * Confidence in a computed cost figure (`electron/pricing.ts`):
+ * `exact` — full token fidelity and a complete price for every field used.
+ * `estimated` — a price resolved but may understate the true cost (partial
+ *   provider fidelity, a pricing gap, or all-zero usage).
+ * `unknown` — no pricing data for the provider/model; never "free".
+ */
+export type CostConfidence = "exact" | "estimated" | "unknown";
+
+/** Time-range filter for SPENDING_GET_SUMMARY. A `null` bound is unbounded. */
+export interface SpendingRangeFilter {
+  since: string | null;
+  until: string | null;
+}
+
+/** One provider's token usage + estimated cost for a time range — a row in the Spending panel's provider breakdown table. */
+export interface SpendingProviderBreakdown {
+  provider: Provider;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  turn_count: number;
+  costUSD: number;
+  /** Worst-of the confidence across every provider/model group rolled into this row — never reports `exact` when any contributing group wasn't. */
+  confidence: CostConfidence;
+  /** 0-100, this row's share of `periodSpendUSD`. `0` when the period total is 0. */
+  percentOfTotal: number;
+}
+
+/** Result of SPENDING_GET_SUMMARY — one project's spend for `range`, aggregated across every provider used in it, plus that project's all-time total. */
+export interface SpendingSummary {
+  projectId: string;
+  range: SpendingRangeFilter;
+  periodSpendUSD: number;
+  lifetimeSpendUSD: number;
+  /** Sorted by `costUSD` descending. */
+  byProvider: SpendingProviderBreakdown[];
+}

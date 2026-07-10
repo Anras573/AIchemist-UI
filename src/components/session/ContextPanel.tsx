@@ -15,6 +15,7 @@ import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { FileViewer } from "./FileViewer";
 import { SkillsPanel, SkillsHeaderInfo } from "./SkillsPanel";
+import { SpendingPanel, SpendingHeaderInfo } from "./SpendingPanel";
 import { TracesPanel } from "./TracesPanel";
 import { ChangesPanel } from "./ChangesPanel";
 import { InteractiveTerminal } from "./InteractiveTerminal";
@@ -217,7 +218,7 @@ function MemoryFileViewer({ filePath }: { filePath: string }) {
 
 // ── ContextPanel ──────────────────────────────────────────────────────────────
 
-export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes" | "mcp" | "memory" | "github";
+export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes" | "mcp" | "memory" | "github" | "spending";
 
 /**
  * Right panel content — renders whichever tool is active (files or terminal).
@@ -285,6 +286,7 @@ export function ContextPanel({
       : activeTab === "mcp" ? "MCP Servers"
       : activeTab === "memory" ? "Memory"
       : activeTab === "github" ? "GitHub"
+      : activeTab === "spending" ? "Spending"
       : "Skills";
 
   return (
@@ -311,6 +313,7 @@ export function ContextPanel({
         {activeTab === "skills" && !isViewingFile && !isViewingMemory && (
           <SkillsHeaderInfo />
         )}
+        {activeTab === "spending" && <SpendingHeaderInfo />}
         <WithTooltip label="Close panel">
           <button
             onClick={onClose}
@@ -359,6 +362,8 @@ export function ContextPanel({
           )
         ) : activeTab === "github" ? (
           <GitHubPanel />
+        ) : activeTab === "spending" ? (
+          <SpendingPanel />
         ) : activeTab === "terminal" ? (
           activeProject ? (
             <InteractiveTerminal projectPath={sessionPath} />
