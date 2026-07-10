@@ -76,4 +76,19 @@ describe("SpendingSection (hub)", () => {
     await user.click(screen.getByLabelText("Remove Anthropic (Claude) override"));
     expect(screen.queryByLabelText("Remove Anthropic (Claude) override")).not.toBeInTheDocument();
   });
+
+  it("surfaces an error (with a retry) instead of an indefinite loading state when the initial load fails", async () => {
+    vi.mocked(window.electronAPI.budgetRead).mockRejectedValue(new Error("boom"));
+
+    renderWithProviders(<SpendingSection />);
+
+    await waitFor(() => expect(screen.getByText(/boom/)).toBeInTheDocument());
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    vi.mocked(window.electronAPI.budgetRead).mockResolvedValue(EMPTY_CONFIG);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Global budget (USD)")).toBeInTheDocument());
+  });
 });

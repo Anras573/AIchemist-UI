@@ -409,14 +409,16 @@ export type BudgetPeriod = "daily" | "weekly" | "monthly";
 
 /**
  * Persisted spending-budget configuration (`~/.aichemist/budget.json`). A `0`
- * or absent amount means "no budget set" — both normalize to `null` wherever
- * this is read, so callers never special-case 0 separately from unset.
+ * or absent amount means "no budget set": for `globalAmountUSD` that
+ * normalizes to `null`; for `providerAmountUSD`, a `0` override is dropped
+ * from the map entirely (an absent key), never stored as `null`. Either way,
+ * callers never special-case 0 separately from unset.
  */
 export interface BudgetConfig {
   period: BudgetPeriod;
   /** USD. `null` = no global budget configured. */
   globalAmountUSD: number | null;
-  /** Optional per-provider USD override; shares the global budget's reset period. */
+  /** Optional per-provider USD override; shares the global budget's reset period. A provider with no override is simply absent from this map. */
   providerAmountUSD: Partial<Record<Provider, number>>;
 }
 

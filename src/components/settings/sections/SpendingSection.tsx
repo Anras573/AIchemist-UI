@@ -137,10 +137,25 @@ export function SpendingSection() {
     setConfig({ ...config, providerAmountUSD: next });
   };
 
-  if (loading || !config) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground text-sm">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+      </div>
+    );
+  }
+
+  // A failed initial load leaves `config` null — surface the error instead of
+  // rendering an indefinite "Loading…" state (or a form bound to nothing).
+  if (!config) {
+    return (
+      <div className="flex flex-col items-center justify-center h-32 gap-2 text-sm">
+        <span className="flex items-center gap-1 text-destructive">
+          <AlertCircle className="h-4 w-4" /> {error ?? "Failed to load budget settings."}
+        </span>
+        <Button variant="outline" size="sm" onClick={() => void load()}>
+          Retry
+        </Button>
       </div>
     );
   }
