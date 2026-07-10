@@ -229,7 +229,10 @@ describe("estimateCost — manual overrides", () => {
     const cost = estimateCost({ provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: FULL_USAGE });
 
     expect(cost.confidence).toBe("exact");
-    expect(cost.inputUSD).toBeCloseTo(3, 5);
+    expect(cost.inputUSD).toBeCloseTo(
+      (FULL_USAGE.input_tokens / 1_000_000) * requireCatalogRate("anthropic", "claude-3-7-sonnet-20250219", "input"),
+      5
+    );
   });
 });
 
