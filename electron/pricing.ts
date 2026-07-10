@@ -116,9 +116,12 @@ function resolveRates(provider: Provider, model: string, overrides: PricingOverr
  * denied, the path pointing at a directory, etc.) so a broken config can be
  * surfaced elsewhere — but `estimateCost()` must never throw, so its default
  * (no caller-supplied `overrides`) read path falls back to catalog-only
- * pricing on any such error rather than aborting the whole estimate.
+ * pricing on any such error rather than aborting the whole estimate. Exported
+ * so bulk callers that read overrides once and pass them through many
+ * `estimateCost()` calls (e.g. `electron/spending.ts`) get the same
+ * fail-safe behavior instead of letting a broken config fail their whole read.
  */
-function safeReadPricingOverrides(): PricingOverrideMap {
+export function safeReadPricingOverrides(): PricingOverrideMap {
   try {
     return readPricingOverrides();
   } catch (err) {

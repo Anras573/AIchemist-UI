@@ -10,8 +10,8 @@
 import type { Database } from "better-sqlite3";
 import type { CostConfidence, Provider, SpendingSummary, SpendingProviderBreakdown } from "../src/types/index";
 import { getUsageByProviderModel, type UsageFilter } from "./usage-ledger";
-import { estimateCost } from "./pricing";
-import { readPricingOverrides, type PricingOverrideMap } from "./pricing-overrides";
+import { estimateCost, safeReadPricingOverrides } from "./pricing";
+import type { PricingOverrideMap } from "./pricing-overrides";
 
 const CONFIDENCE_RANK: Record<CostConfidence, number> = { exact: 0, estimated: 1, unknown: 2 };
 
@@ -80,6 +80,13 @@ function sumCost(byProvider: Map<Provider, ProviderAccumulator>): number {
   return total;
 }
 
+/** Worst-of confidence across every provider — `exact` when there's nothing to roll up (no usage). */
+function overallConfidence(byProvider: Map<Provider, ProviderAccumulator>): CostConfidence {
+  let confidence: CostConfidence = "exact";
+  for (const p of byProvider.values()) confidence = worseConfidence(confidence, p.confidence);
+  return confidence;
+}
+
 /**
  * Compute the Spending panel's data for one project: a per-provider
  * breakdown (tokens, cost, confidence, share of total) for `since`/`until`
@@ -90,7 +97,9 @@ export function getSpendingSummary(
   db: Database,
   params: { projectId: string; since?: string | null; until?: string | null }
 ): SpendingSummary {
-  const overrides = readPricingOverrides();
+  // A broken pricing-overrides file must not fail the whole panel — degrade to
+  // catalog-only pricing rather than rejecting SPENDING_GET_SUMMARY outright.
+  const overrides = safeReadPricingOverrides();
   const range = { since: params.since ?? null, until: params.until ?? null };
   const isUnbounded = range.since === null && range.until === null;
 
@@ -100,12 +109,14 @@ export function getSpendingSummary(
 
   const periodByProvider = accumulateByProvider(db, periodFilter, overrides);
   const periodSpendUSD = sumCost(periodByProvider);
+  const periodConfidence = overallConfidence(periodByProvider);
 
   // Avoid a redundant identical query when the selected range is already unbounded.
   const lifetimeByProvider = isUnbounded
     ? periodByProvider
     : accumulateByProvider(db, { projectId: params.projectId }, overrides);
   const lifetimeSpendUSD = isUnbounded ? periodSpendUSD : sumCost(lifetimeByProvider);
+  const lifetimeConfidence = isUnbounded ? periodConfidence : overallConfidence(lifetimeByProvider);
 
   const byProvider: SpendingProviderBreakdown[] = [...periodByProvider.values()]
     .sort((a, b) => b.costUSD - a.costUSD)
@@ -121,5 +132,13 @@ export function getSpendingSummary(
       percentOfTotal: periodSpendUSD > 0 ? (p.costUSD / periodSpendUSD) * 100 : 0,
     }));
 
-  return { projectId: params.projectId, range, periodSpendUSD, lifetimeSpendUSD, byProvider };
+  return {
+    projectId: params.projectId,
+    range,
+    periodSpendUSD,
+    periodConfidence,
+    lifetimeSpendUSD,
+    lifetimeConfidence,
+    byProvider,
+  };
 }

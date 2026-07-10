@@ -64,7 +64,9 @@ export function createElectronAPIMock(): Window["electronAPI"] {
       projectId: "mock-project-id",
       range: { since: null, until: null },
       periodSpendUSD: 0,
+      periodConfidence: "exact",
       lifetimeSpendUSD: 0,
+      lifetimeConfidence: "exact",
       byProvider: [],
     }),
 

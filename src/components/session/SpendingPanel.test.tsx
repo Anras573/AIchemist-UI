@@ -30,7 +30,9 @@ const EMPTY_SUMMARY: SpendingSummary = {
   projectId: "proj-1",
   range: { since: null, until: null },
   periodSpendUSD: 0,
+  periodConfidence: "exact",
   lifetimeSpendUSD: 0,
+  lifetimeConfidence: "exact",
   byProvider: [],
 };
 
@@ -160,6 +162,33 @@ describe("SpendingPanel", () => {
     expect(screen.getByText("Copilot")).toBeInTheDocument();
     expect(screen.getAllByLabelText("estimated cost")).toHaveLength(1);
     expect(screen.queryByLabelText("exact cost")).not.toBeInTheDocument();
+  });
+
+  it("marks the period/lifetime KPI totals as estimated when built from partial or unpriced data", async () => {
+    activateProject();
+    vi.mocked(window.electronAPI.spendingGetSummary).mockResolvedValue({
+      ...EMPTY_SUMMARY,
+      periodSpendUSD: 5,
+      periodConfidence: "estimated",
+      lifetimeSpendUSD: 50,
+      lifetimeConfidence: "unknown",
+    });
+
+    renderWithProviders(<SpendingPanel />);
+
+    expect(await screen.findByText("$5.00")).toBeInTheDocument();
+    // One badge for the period total, one for the lifetime total.
+    expect(screen.getAllByLabelText("estimated cost")).toHaveLength(1);
+    expect(screen.getAllByLabelText("unknown cost")).toHaveLength(1);
+  });
+
+  it("does not mark the period/lifetime KPI totals when the underlying data is exact", async () => {
+    activateProject();
+    renderWithProviders(<SpendingPanel />);
+
+    await waitFor(() => expect(window.electronAPI.spendingGetSummary).toHaveBeenCalledTimes(1));
+    expect(screen.queryByLabelText("estimated cost")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("unknown cost")).not.toBeInTheDocument();
   });
 
   it("switching time filters refetches the summary scoped to the new range", async () => {

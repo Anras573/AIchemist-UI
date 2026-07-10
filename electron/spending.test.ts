@@ -58,7 +58,9 @@ describe("getSpendingSummary", () => {
   it("returns zeroed totals with an empty provider breakdown when there's no usage", () => {
     const summary = getSpendingSummary(db, { projectId: "p1" });
     expect(summary.periodSpendUSD).toBe(0);
+    expect(summary.periodConfidence).toBe("exact");
     expect(summary.lifetimeSpendUSD).toBe(0);
+    expect(summary.lifetimeConfidence).toBe("exact");
     expect(summary.byProvider).toEqual([]);
   });
 
@@ -134,6 +136,36 @@ describe("getSpendingSummary", () => {
     expect(summary.byProvider[0].confidence).toBe("estimated");
   });
 
+  it("rolls a non-exact row's confidence up into periodConfidence and lifetimeConfidence", () => {
+    recordUsage(db, {
+      sessionId: "s1",
+      projectId: "p1",
+      provider: "ollama",
+      model: "llama3.2",
+      usage: { input_tokens: 100, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    });
+    upsertPricingOverride("ollama", "llama3.2", { inputPerMTokens: 0, outputPerMTokens: 0 });
+
+    const summary = getSpendingSummary(db, { projectId: "p1" });
+    expect(summary.periodConfidence).toBe("estimated");
+    expect(summary.lifetimeConfidence).toBe("estimated");
+  });
+
+  it("keeps periodConfidence 'exact' when every priced row is exact", () => {
+    recordUsage(db, {
+      sessionId: "s1",
+      projectId: "p1",
+      provider: "anthropic",
+      model: "claude-3-7-sonnet-20250219",
+      usage: ANTHROPIC_USAGE,
+    });
+
+    const summary = getSpendingSummary(db, { projectId: "p1" });
+    expect(summary.byProvider[0].confidence).toBe("exact");
+    expect(summary.periodConfidence).toBe("exact");
+    expect(summary.lifetimeConfidence).toBe("exact");
+  });
+
   it("excludes usage outside the requested since/until range from periodSpendUSD but keeps it in lifetimeSpendUSD", () => {
     recordUsage(db, {
       sessionId: "s1",
@@ -172,5 +204,27 @@ describe("getSpendingSummary", () => {
   it("echoes the requested range back on the result, defaulting unset bounds to null", () => {
     const summary = getSpendingSummary(db, { projectId: "p1", since: "2026-07-01T00:00:00.000Z" });
     expect(summary.range).toEqual({ since: "2026-07-01T00:00:00.000Z", until: null });
+  });
+
+  it("degrades to catalog-only pricing (never throws) when the overrides read hits a real I/O error", () => {
+    recordUsage(db, {
+      sessionId: "s1",
+      projectId: "p1",
+      provider: "anthropic",
+      model: "claude-3-7-sonnet-20250219",
+      usage: ANTHROPIC_USAGE,
+    });
+
+    // Point the configured path at a directory — reading it throws EISDIR, a
+    // real I/O error that readPricingOverrides() deliberately rethrows.
+    // getSpendingSummary must not propagate it — SPENDING_GET_SUMMARY should
+    // still return catalog-only pricing rather than failing the whole panel.
+    const dirPath = path.join(tempDir, "is-a-dir");
+    fs.mkdirSync(dirPath);
+    _setPricingOverridesPathForTests(dirPath);
+
+    const summary = getSpendingSummary(db, { projectId: "p1" });
+    expect(summary.periodSpendUSD).toBeGreaterThan(0);
+    expect(summary.byProvider[0].confidence).toBe("exact");
   });
 });

@@ -486,7 +486,11 @@ export interface SpendingSummary {
   projectId: string;
   range: SpendingRangeFilter;
   periodSpendUSD: number;
+  /** Worst-of the confidence across every `byProvider` row — `exact` when there's no usage in the range (nothing to be uncertain about). Lets the KPI card mark `periodSpendUSD` as estimated rather than presenting a total built from partial data as exact. */
+  periodConfidence: CostConfidence;
   lifetimeSpendUSD: number;
+  /** Same rollup as `periodConfidence`, but over the project's all-time usage rather than just `range`. */
+  lifetimeConfidence: CostConfidence;
   /** Sorted by `costUSD` descending. */
   byProvider: SpendingProviderBreakdown[];
 }
