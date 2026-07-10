@@ -235,6 +235,7 @@ export function SpendingPanel() {
               type="date"
               aria-label="Custom range start"
               value={customSince}
+              max={customUntil || undefined}
               onChange={(e) => setCustomSince(e.target.value)}
               className="h-7 rounded-sm border border-input bg-transparent px-1.5 text-xs"
             />
@@ -243,6 +244,7 @@ export function SpendingPanel() {
               type="date"
               aria-label="Custom range end"
               value={customUntil}
+              min={customSince || undefined}
               onChange={(e) => setCustomUntil(e.target.value)}
               className="h-7 rounded-sm border border-input bg-transparent px-1.5 text-xs"
             />

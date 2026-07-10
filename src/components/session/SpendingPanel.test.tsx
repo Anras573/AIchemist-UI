@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, it, expect, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { SpendingPanel } from "@/components/session/SpendingPanel";
@@ -270,5 +270,25 @@ describe("SpendingPanel", () => {
 
     expect(screen.getByLabelText("Custom range start")).toBeInTheDocument();
     expect(screen.getByLabelText("Custom range end")).toBeInTheDocument();
+  });
+
+  it("bounds each custom date input against the other to prevent an inverted range", async () => {
+    activateProject();
+    const user = userEvent.setup();
+    renderWithProviders(<SpendingPanel />);
+    await waitFor(() => expect(window.electronAPI.spendingGetSummary).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+
+    expect(screen.getByLabelText("Custom range start")).not.toHaveAttribute("max");
+    expect(screen.getByLabelText("Custom range end")).not.toHaveAttribute("min");
+
+    // Picking a date changes the summary query's range (and so its cache key),
+    // which briefly re-fetches and remounts the panel's content — re-query
+    // rather than holding onto the pre-fetch DOM node references.
+    fireEvent.change(screen.getByLabelText("Custom range start"), { target: { value: "2026-07-01" } });
+    expect(await screen.findByLabelText("Custom range end")).toHaveAttribute("min", "2026-07-01");
+
+    fireEvent.change(screen.getByLabelText("Custom range end"), { target: { value: "2026-07-10" } });
+    expect(await screen.findByLabelText("Custom range start")).toHaveAttribute("max", "2026-07-10");
   });
 });
