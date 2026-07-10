@@ -3,11 +3,32 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import Database from "better-sqlite3";
+import { defaultCatalog, getModelMeta } from "tokenlens";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "./db";
 import { estimateCost } from "./pricing";
 import { _setPricingOverridesPathForTests, readPricingOverrides, upsertPricingOverride } from "./pricing-overrides";
 import { getUsageByProviderModel, recordUsage } from "./usage-ledger";
+
+/**
+ * Looks up a model's real per-token price from the tokenlens catalog at test
+ * time, rather than hardcoding a vendor price snapshot — the catalog is an
+ * external dependency (models.dev via tokenlens) whose numbers can
+ * legitimately change on a routine dependency bump. Tests should verify our
+ * provider mapping + arithmetic, not pin a specific price.
+ */
+function requireCatalogRate(
+  provider: string,
+  model: string,
+  field: "input" | "output" | "cache_read" | "cache_write"
+): number {
+  const meta = getModelMeta({ providers: defaultCatalog, provider, model });
+  const value = meta?.cost?.[field];
+  if (value === undefined) {
+    throw new Error(`tokenlens catalog has no ${field} price for ${provider}/${model} — this fixture needs updating`);
+  }
+  return value;
+}
 
 let tempDir: string;
 
@@ -25,46 +46,50 @@ const FULL_USAGE = { input_tokens: 1_000_000, output_tokens: 500_000, cache_read
 
 describe("estimateCost — known catalog pricing", () => {
   it("returns an exact cost matching Anthropic's published per-token pricing for a full usage reading", () => {
-    // claude-3-7-sonnet-20250219: $3/$15/$0.30/$3.75 per 1M (input/output/cache_read/cache_write).
     const cost = estimateCost({ provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: FULL_USAGE });
+    const model = "claude-3-7-sonnet-20250219";
 
     expect(cost.confidence).toBe("exact");
-    expect(cost.inputUSD).toBeCloseTo(3, 5);
-    expect(cost.outputUSD).toBeCloseTo(7.5, 5);
-    expect(cost.cacheReadUSD).toBeCloseTo(0.06, 5);
-    expect(cost.cacheCreationUSD).toBeCloseTo(0.375, 5);
-    expect(cost.totalUSD).toBeCloseTo(3 + 7.5 + 0.06 + 0.375, 5);
+    expect(cost.inputUSD).toBeCloseTo((FULL_USAGE.input_tokens / 1_000_000) * requireCatalogRate("anthropic", model, "input"), 5);
+    expect(cost.outputUSD).toBeCloseTo((FULL_USAGE.output_tokens / 1_000_000) * requireCatalogRate("anthropic", model, "output"), 5);
+    expect(cost.cacheReadUSD).toBeCloseTo(
+      (FULL_USAGE.cache_read_input_tokens / 1_000_000) * requireCatalogRate("anthropic", model, "cache_read"),
+      5
+    );
+    expect(cost.cacheCreationUSD).toBeCloseTo(
+      (FULL_USAGE.cache_creation_input_tokens / 1_000_000) * requireCatalogRate("anthropic", model, "cache_write"),
+      5
+    );
+    expect(cost.totalUSD).toBeCloseTo(cost.inputUSD + cost.outputUSD + cost.cacheReadUSD + cost.cacheCreationUSD, 5);
   });
 
   it("resolves an openai-compatible composite model id against the OpenAI catalog entry", () => {
-    // gpt-4o: $2.50/$10 per 1M input/output.
-    const cost = estimateCost({
-      provider: "openai-compatible",
-      model: "myendpoint/gpt-4o",
-      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
-    });
+    const usage = { input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    const cost = estimateCost({ provider: "openai-compatible", model: "myendpoint/gpt-4o", usage });
 
     expect(cost.confidence).toBe("exact");
-    expect(cost.inputUSD).toBeCloseTo(2.5, 5);
-    expect(cost.outputUSD).toBeCloseTo(10, 5);
+    expect(cost.inputUSD).toBeCloseTo((usage.input_tokens / 1_000_000) * requireCatalogRate("openai", "gpt-4o", "input"), 5);
+    expect(cost.outputUSD).toBeCloseTo((usage.output_tokens / 1_000_000) * requireCatalogRate("openai", "gpt-4o", "output"), 5);
   });
 
   it("resolves codex against the OpenAI catalog by bare model id (no composite id)", () => {
-    const cost = estimateCost({
-      provider: "codex",
-      model: "gpt-4o",
-      usage: { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
-    });
+    const usage = { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    const cost = estimateCost({ provider: "codex", model: "gpt-4o", usage });
 
     expect(cost.confidence).toBe("exact");
-    expect(cost.inputUSD).toBeCloseTo(2.5, 5);
+    expect(cost.inputUSD).toBeCloseTo((usage.input_tokens / 1_000_000) * requireCatalogRate("openai", "gpt-4o", "input"), 5);
   });
 
   it("degrades to 'estimated' when the catalog price is missing a field the turn actually used", () => {
-    // gpt-4o's catalog entry has no cache_write price, so a turn that did
-    // create cache tokens can't be priced exactly — usdFromTokens would
-    // otherwise silently treat the missing rate as 0 while still reporting
-    // "exact".
+    // Precondition this test relies on: gpt-4o's catalog entry has no
+    // cache_write price. Assert it explicitly so a future tokenlens update
+    // that adds one fails here with a clear message, not as a confusing
+    // confidence mismatch below.
+    const meta = getModelMeta({ providers: defaultCatalog, provider: "openai", model: "gpt-4o" });
+    expect(meta?.cost?.cache_write).toBeUndefined();
+
+    // usdFromTokens would otherwise silently treat the missing rate as 0
+    // while still reporting "exact".
     const cost = estimateCost({
       provider: "openai-compatible",
       model: "myendpoint/gpt-4o",
@@ -281,8 +306,12 @@ describe("integration — costing the usage-ledger's provider/model aggregation"
     const costs = groups.map((g) => estimateCost({ provider: g.provider, model: g.model, usage: g }));
     const totalUSD = costs.reduce((sum, c) => sum + c.totalUSD, 0);
 
-    // claude-3-7-sonnet: $3/1M input; claude-3-5-haiku: $0.80/1M input.
-    expect(totalUSD).toBeCloseTo(3 + 0.8, 5);
+    // Each group used exactly 1M input tokens, so its cost is the catalog's
+    // per-1M-token input rate directly.
+    const expectedUSD =
+      requireCatalogRate("anthropic", "claude-3-7-sonnet-20250219", "input") +
+      requireCatalogRate("anthropic", "claude-3-5-haiku-20241022", "input");
+    expect(totalUSD).toBeCloseTo(expectedUSD, 5);
     expect(costs.every((c) => c.confidence === "exact")).toBe(true);
   });
 });

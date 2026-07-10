@@ -167,10 +167,10 @@ function readOverridesDoc(): Record<string, unknown> {
 export function readPricingOverrides(): PricingOverrideMap {
   const doc = readOverridesDoc();
   const raw = doc.overrides;
-  if (!raw || typeof raw !== "object") return {};
+  if (!isPlainObject(raw)) return {};
 
   const out: PricingOverrideMap = {};
-  for (const [key, entry] of Object.entries(raw as Record<string, unknown>)) {
+  for (const [key, entry] of Object.entries(raw)) {
     if (!isValidRates(entry)) {
       console.warn(`[pricing-overrides] Skipping override "${key}" — rate fields must be non-negative numbers`);
       continue;
@@ -187,17 +187,32 @@ export function readPricingOverrides(): PricingOverrideMap {
   return out;
 }
 
-/** Replace the entire overrides map. Preserves every other key in the JSON document. */
+/**
+ * Replace the entire overrides map. Preserves every other key in the JSON
+ * document. Every key is validated + normalized through `normalizeRawKey()`
+ * (the same check `readPricingOverrides()` applies) and written back in its
+ * normalized form — otherwise a key that write happily accepts (e.g. wrong
+ * case, padded, or an unrecognized provider) could persist successfully here
+ * and then be silently dropped on the very next read.
+ */
 export function writePricingOverrides(overrides: PricingOverrideMap): void {
+  const normalized: PricingOverrideMap = {};
   for (const [key, entry] of Object.entries(overrides)) {
     if (!isValidRates(entry)) {
       throw new Error(`Override "${key}" needs non-negative numeric rate fields`);
     }
+    const normalizedKey = normalizeRawKey(key);
+    if (!normalizedKey) {
+      throw new Error(
+        `Override "${key}" needs a key matching "<provider>::<model>" with a recognized provider (${PROVIDER_IDS.join(", ")}) and a non-empty model`
+      );
+    }
+    normalized[normalizedKey] = entry;
   }
 
   const filePath = getPricingOverridesPath();
   const doc = safeReadJson(filePath);
-  doc.overrides = overrides;
+  doc.overrides = normalized;
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(doc, null, 2) + "\n", "utf-8");
 }

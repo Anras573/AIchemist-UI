@@ -227,6 +227,20 @@ describe("pricing-overrides config", () => {
     expect(() => writePricingOverrides({ "ollama::llama3.1": {} })).toThrow();
   });
 
+  it("rejects writing a key that doesn't match '<provider>::<model>' — it would silently disappear on the next read otherwise", () => {
+    expect(() => writePricingOverrides({ "not-a-valid-key": { inputPerMTokens: 1 } })).toThrow();
+  });
+
+  it("rejects writing a key with an unrecognized provider", () => {
+    expect(() => writePricingOverrides({ "openai::gpt-4o": { inputPerMTokens: 1 } })).toThrow();
+  });
+
+  it("normalizes a key's whitespace/case on write, so a slightly malformed but recoverable key still round-trips", () => {
+    writePricingOverrides({ "  Anthropic  ::  my-model  ": { inputPerMTokens: 1 } });
+
+    expect(readPricingOverrides()).toEqual({ "anthropic::my-model": { inputPerMTokens: 1 } });
+  });
+
   it("drops an entry with no rate fields at all on read", () => {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
     fs.writeFileSync(configPath, JSON.stringify({ overrides: { "ollama::llama3.1": {} } }));
