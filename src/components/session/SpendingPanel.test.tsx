@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, it, expect, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { SpendingPanel } from "@/components/session/SpendingPanel";
@@ -126,6 +126,42 @@ describe("SpendingPanel", () => {
     expect(screen.getByText(tokens(250))).toBeInTheDocument(); // cache_read + cache_creation
     expect(screen.getByText(usd(10))).toBeInTheDocument();
     expect(screen.getByText("100.0%")).toBeInTheDocument();
+  });
+
+  it("renders a placeholder instead of $0.00 for a row with unknown pricing coverage", async () => {
+    activateProject();
+    vi.mocked(window.electronAPI.spendingGetSummary).mockResolvedValue({
+      ...EMPTY_SUMMARY,
+      periodSpendUSD: 0,
+      periodConfidence: "unknown",
+      byProvider: [
+        {
+          provider: "ollama",
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          turn_count: 1,
+          // estimateCost() always zeroes costUSD when confidence is "unknown" —
+          // rendering that as $0.00 would misleadingly read as "this is free".
+          costUSD: 0,
+          confidence: "unknown",
+          percentOfTotal: 0,
+        },
+      ],
+    });
+
+    renderWithProviders(<SpendingPanel />);
+
+    // The table's Cost column shows a placeholder for the unknown-priced row —
+    // note $0.00 (usd(0)) legitimately appears elsewhere on the page (the period/
+    // lifetime KPI cards, which really are $0 here), so this only checks the
+    // table cell itself, scoped past the ambiguous KPI-card matches.
+    expect(await screen.findByText("Ollama")).toBeInTheDocument();
+    const row = screen.getByText("Ollama").closest("tr");
+    expect(row).not.toBeNull();
+    expect(within(row!).getByText("—")).toBeInTheDocument();
+    expect(within(row!).queryByText(usd(0))).not.toBeInTheDocument();
   });
 
   it("shows an empty-state message when there is no usage in the selected range", async () => {

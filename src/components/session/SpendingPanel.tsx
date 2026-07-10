@@ -58,6 +58,16 @@ function formatTokens(v: number): string {
   return v.toLocaleString();
 }
 
+/**
+ * A row/total priced `unknown` always carries `costUSD: 0` (`estimateCost()`
+ * returns `zeroCost()` when no pricing data resolves) — that's a "we don't
+ * know", not "this is free". Render a placeholder rather than `$0.00` so it
+ * can't be misread as zero-cost usage.
+ */
+function formatCost(costUSD: number, confidence: CostConfidence): string {
+  return confidence === "unknown" ? "—" : formatUSD(costUSD);
+}
+
 // ── Confidence badge ──────────────────────────────────────────────────────────
 
 const CONFIDENCE_LABEL: Record<Exclude<CostConfidence, "exact">, string> = {
@@ -293,7 +303,7 @@ export function SpendingPanel() {
                     <td className="py-1.5 pr-2 text-right tabular-nums">
                       {formatTokens(p.cache_read_input_tokens + p.cache_creation_input_tokens)}
                     </td>
-                    <td className="py-1.5 pr-2 text-right tabular-nums">{formatUSD(p.costUSD)}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums">{formatCost(p.costUSD, p.confidence)}</td>
                     <td className="py-1.5 text-right tabular-nums">{`${p.percentOfTotal.toFixed(1)}%`}</td>
                   </tr>
                 ))}
