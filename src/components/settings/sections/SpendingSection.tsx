@@ -16,6 +16,11 @@ function formatUSD(v: number): string {
   return v.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 }
 
+/** `0`/absent both mean "unset" (mirrors electron/budget.ts's normalization) — render either as an empty field rather than a literal "0". */
+function displayAmount(v: number | null | undefined): string | number {
+  return v ? v : "";
+}
+
 /** Read-only KPI row for one budget line (global or a single provider). Degrades to "No budget set" rather than a negative/garbage remaining figure. */
 function BudgetLineSummary({ label, line }: { label: string; line: BudgetLineStatus }) {
   return (
@@ -65,6 +70,15 @@ export function SpendingSection() {
     void load();
   }, [load]);
 
+  // Driven by an effect (rather than a raw setTimeout in `save`) so the timer
+  // is cleared on unmount / re-trigger instead of risking a setState call
+  // after the component (or this section) has gone away.
+  useEffect(() => {
+    if (!saved) return;
+    const timer = setTimeout(() => setSaved(false), 2000);
+    return () => clearTimeout(timer);
+  }, [saved]);
+
   const overrideProviders = useMemo(
     () => (config ? (Object.keys(config.providerAmountUSD) as Provider[]) : []),
     [config]
@@ -84,7 +98,6 @@ export function SpendingSection() {
       const st = await ipc.budgetGetStatus();
       setStatus(st);
       setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -175,7 +188,7 @@ export function SpendingSection() {
             min={0}
             step="any"
             placeholder="No budget set"
-            value={config.globalAmountUSD ?? ""}
+            value={displayAmount(config.globalAmountUSD)}
             onChange={(e) => setGlobalAmount(e.target.value)}
             className="font-mono text-sm"
           />
@@ -194,7 +207,7 @@ export function SpendingSection() {
                 min={0}
                 step="any"
                 placeholder="No budget set"
-                value={config.providerAmountUSD[provider] ?? ""}
+                value={displayAmount(config.providerAmountUSD[provider])}
                 onChange={(e) => setOverrideAmount(provider, e.target.value)}
                 className="font-mono text-sm w-32"
               />
