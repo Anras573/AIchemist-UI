@@ -1,0 +1,208 @@
+/**
+ * Cost-calculation engine — turns raw token counts (from the usage ledger,
+ * see `electron/usage-ledger.ts`) into estimated USD spend, provider/model
+ * aware. This is the foundation the Spending panel (follow-up, see epic #155)
+ * reads from; this module does NOT compute perfect billing parity with a
+ * provider's actual invoice (out of scope — see epic #155), only a
+ * best-effort estimate from published per-token pricing.
+ *
+ * Pricing data comes from two places, manual overrides taking priority:
+ * 1. `readPricingOverrides()` (`electron/pricing-overrides.ts`) — user-configured
+ *    rates for provider/model pairs the catalog can't price (self-hosted models,
+ *    custom endpoints, GitHub Copilot's flat-subscription models which the
+ *    catalog ships with no per-token cost at all).
+ * 2. `tokenlens`'s bundled models.dev catalog (`defaultCatalog` + `getModelMeta`).
+ *
+ * `estimateCost()` is deliberately generic over `{ provider, model, usage }` so
+ * the SAME function backs both an ad hoc single-turn estimate (a `UsageLedgerRow`)
+ * and the provider/model breakdown table (loop `getUsageByProviderModel()` rows
+ * through it and sum — costing an aggregate requires per-model granularity, since
+ * a provider's rows may span several differently-priced models). A bulk caller
+ * should read the overrides file once and pass it via the `overrides` param
+ * (see `estimateCost`'s doc comment) rather than let every call re-read it.
+ */
+import { getModelMeta, defaultCatalog } from "tokenlens";
+import type { Provider, SessionUsage } from "../src/types/index";
+import { parseCompositeModelId } from "./openai-endpoints";
+import { readPricingOverrides, overrideKey, type PricingOverrideMap, type PricingRates } from "./pricing-overrides";
+
+export type CostConfidence = "exact" | "estimated" | "unknown";
+
+export interface CostEstimate {
+  inputUSD: number;
+  outputUSD: number;
+  cacheReadUSD: number;
+  cacheCreationUSD: number;
+  totalUSD: number;
+  /**
+   * `exact` — full token fidelity and a complete price for every token field
+   *   the turn used.
+   * `estimated` — a price resolved, but it may understate the true cost:
+   *   this provider's token reporting is known to be partial (see
+   *   `PARTIAL_FIDELITY_PROVIDERS`), the resolved rate is missing a field for
+   *   a token type the turn actually used (see `hasPricingGap`), or every
+   *   token field is 0 (see `isZeroUsage` — indistinguishable from the
+   *   provider never reporting usage at all for this turn).
+   * `unknown` — no pricing data for this provider/model; fields are all 0 and
+   *   must not be treated as "free".
+   */
+  confidence: CostConfidence;
+}
+
+/** A fresh object every call — never a shared reference callers could mutate and corrupt for subsequent unrelated estimates. */
+function zeroCost(): CostEstimate {
+  return { inputUSD: 0, outputUSD: 0, cacheReadUSD: 0, cacheCreationUSD: 0, totalUSD: 0, confidence: "unknown" };
+}
+
+/**
+ * Providers with known-incomplete token reporting today (see epic #155's
+ * fidelity table): Copilot's input/cache counts are effectively unknown, and
+ * Ollama never reports cache tokens. Even when a price resolves, a turn from
+ * one of these providers can only be an `estimated` cost, never `exact`.
+ */
+const PARTIAL_FIDELITY_PROVIDERS: ReadonlySet<Provider> = new Set(["copilot", "ollama"]);
+
+/**
+ * Maps our provider ids to the tokenlens/models.dev catalog's provider key.
+ * `codex` and `openai-compatible` both run OpenAI-shaped models most of the
+ * time, so both are looked up against the "openai" catalog entry; an
+ * unrecognized model there (e.g. a non-OpenAI self-hosted endpoint) falls
+ * through to `unknown` unless the user configures a manual override.
+ */
+const CATALOG_PROVIDER_ID: Partial<Record<Provider, string>> = {
+  anthropic: "anthropic",
+  copilot: "github-copilot",
+  codex: "openai",
+  "openai-compatible": "openai",
+};
+
+/** `openai-compatible` model ids are composite (`<endpoint>/<modelId>`) — only the model half is meaningful to the catalog. */
+function catalogLookupModel(provider: Provider, model: string): string {
+  if (provider !== "openai-compatible") return model;
+  const parsed = parseCompositeModelId(model);
+  return parsed ? parsed.modelId : model;
+}
+
+function resolveCatalogRates(provider: Provider, model: string): PricingRates | undefined {
+  const catalogProviderId = CATALOG_PROVIDER_ID[provider];
+  if (!catalogProviderId) return undefined;
+
+  const meta = getModelMeta({
+    providers: defaultCatalog,
+    provider: catalogProviderId,
+    model: catalogLookupModel(provider, model),
+  });
+  if (!meta?.cost) return undefined;
+
+  return {
+    inputPerMTokens: meta.cost.input,
+    outputPerMTokens: meta.cost.output,
+    cacheReadPerMTokens: meta.cost.cache_read,
+    cacheWritePerMTokens: meta.cost.cache_write,
+  };
+}
+
+/** Manual overrides take priority over the catalog, so a user can correct a stale price or supply one the catalog doesn't have at all. */
+function resolveRates(provider: Provider, model: string, overrides: PricingOverrideMap): PricingRates | undefined {
+  const override = overrides[overrideKey(provider, model)];
+  return override ?? resolveCatalogRates(provider, model);
+}
+
+/**
+ * `readPricingOverrides()` deliberately rethrows real I/O errors (permission
+ * denied, the path pointing at a directory, etc.) so a broken config can be
+ * surfaced elsewhere — but `estimateCost()` must never throw, so its default
+ * (no caller-supplied `overrides`) read path falls back to catalog-only
+ * pricing on any such error rather than aborting the whole estimate.
+ */
+function safeReadPricingOverrides(): PricingOverrideMap {
+  try {
+    return readPricingOverrides();
+  } catch (err) {
+    console.error(`[pricing] Failed to read pricing overrides, falling back to catalog-only pricing: ${String(err)}`);
+    return {};
+  }
+}
+
+function usdFromTokens(tokens: number, ratePerMTokens: number | undefined): number {
+  return (tokens / 1_000_000) * (ratePerMTokens ?? 0);
+}
+
+/**
+ * True when some token field the turn actually used has no matching rate —
+ * e.g. a catalog entry with no `cache_write` price (many models.dev entries
+ * omit it) or a manual override that only sets some fields. `usdFromTokens`
+ * silently treats a missing rate as 0, so without this check such a turn
+ * would report `exact` while actually understating cost.
+ */
+function hasPricingGap(usage: SessionUsage, rates: PricingRates): boolean {
+  return (
+    (usage.input_tokens > 0 && rates.inputPerMTokens === undefined) ||
+    (usage.output_tokens > 0 && rates.outputPerMTokens === undefined) ||
+    (usage.cache_read_input_tokens > 0 && rates.cacheReadPerMTokens === undefined) ||
+    (usage.cache_creation_input_tokens > 0 && rates.cacheWritePerMTokens === undefined)
+  );
+}
+
+/**
+ * True when every token field is 0 — indistinguishable, from the usage row
+ * alone, between "this turn genuinely used zero tokens" (essentially never
+ * happens for a real turn) and "the provider never called `TurnEmitter.usage()`
+ * this turn", which `getLastUsage()` (`electron/agent/turn-emitter.ts`) backfills
+ * with an all-zero reading. A $0 total here must not be reported `exact`.
+ */
+function isZeroUsage(usage: SessionUsage): boolean {
+  return (
+    usage.input_tokens === 0 &&
+    usage.output_tokens === 0 &&
+    usage.cache_read_input_tokens === 0 &&
+    usage.cache_creation_input_tokens === 0
+  );
+}
+
+/**
+ * Estimate the USD cost of one usage reading — a single turn (`UsageLedgerRow`)
+ * or a pre-aggregated provider+model group (`UsageByProviderModel`, since both
+ * shapes carry the same four token fields). Returns `confidence: "unknown"`
+ * (all-zero) rather than silently reporting 0 as if it were exact, when no
+ * pricing data is available for the given provider/model.
+ *
+ * `overrides` defaults to a fresh `readPricingOverrides()` read (a synchronous
+ * disk read + JSON parse) per call — fine for an ad hoc single-turn estimate,
+ * but a caller costing many `getUsageByProviderModel()` rows in a loop should
+ * call `readPricingOverrides()` once and pass the same map through every
+ * `estimateCost()` call, rather than re-reading the file N times. A real I/O
+ * error on that default read (see `safeReadPricingOverrides`) degrades to
+ * catalog-only pricing rather than throwing — this function never throws.
+ */
+export function estimateCost(params: {
+  provider: Provider;
+  model: string | null;
+  usage: SessionUsage;
+  overrides?: PricingOverrideMap;
+}): CostEstimate {
+  const model = params.model?.trim();
+  if (!model) return zeroCost();
+
+  const rates = resolveRates(params.provider, model, params.overrides ?? safeReadPricingOverrides());
+  if (!rates) return zeroCost();
+
+  const inputUSD = usdFromTokens(params.usage.input_tokens, rates.inputPerMTokens);
+  const outputUSD = usdFromTokens(params.usage.output_tokens, rates.outputPerMTokens);
+  const cacheReadUSD = usdFromTokens(params.usage.cache_read_input_tokens, rates.cacheReadPerMTokens);
+  const cacheCreationUSD = usdFromTokens(params.usage.cache_creation_input_tokens, rates.cacheWritePerMTokens);
+
+  return {
+    inputUSD,
+    outputUSD,
+    cacheReadUSD,
+    cacheCreationUSD,
+    totalUSD: inputUSD + outputUSD + cacheReadUSD + cacheCreationUSD,
+    confidence:
+      PARTIAL_FIDELITY_PROVIDERS.has(params.provider) ||
+      hasPricingGap(params.usage, rates) ||
+      isZeroUsage(params.usage)
+        ? "estimated"
+        : "exact",
+  };
+}

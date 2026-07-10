@@ -86,6 +86,11 @@ export interface UsageBySession extends UsageTotals {
   session_id: string;
 }
 
+export interface UsageByProviderModel extends UsageTotals {
+  provider: Provider;
+  model: string | null;
+}
+
 export interface UsageByDay extends UsageTotals {
   /** `YYYY-MM-DD`, derived from the `created_at` ISO timestamp's date prefix. */
   day: string;
@@ -161,6 +166,20 @@ export function getUsageBySession(db: Database, filter: UsageFilter = {}): Usage
       `SELECT session_id, ${TOTALS_SELECT} FROM usage_ledger ${clause} GROUP BY session_id ORDER BY session_id`
     )
     .all(...params) as UsageBySession[];
+}
+
+/**
+ * Totals grouped by provider + model — the granularity the pricing engine
+ * (`electron/pricing.ts`) needs, since cost depends on which model served each
+ * turn and a provider's rows may span several differently-priced models.
+ */
+export function getUsageByProviderModel(db: Database, filter: UsageFilter = {}): UsageByProviderModel[] {
+  const { clause, params } = buildWhere(filter);
+  return db
+    .prepare(
+      `SELECT provider, model, ${TOTALS_SELECT} FROM usage_ledger ${clause} GROUP BY provider, model ORDER BY provider, model`
+    )
+    .all(...params) as UsageByProviderModel[];
 }
 
 /** Totals grouped by calendar day (UTC date prefix of `created_at`) — backs time-series charts. */

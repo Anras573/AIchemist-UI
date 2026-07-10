@@ -9,6 +9,7 @@ import {
   getUsageByProject,
   getUsageBySession,
   getUsageByDay,
+  getUsageByProviderModel,
 } from "./usage-ledger";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -260,6 +261,25 @@ describe("aggregation queries", () => {
     expect(rows).toEqual([
       { day: "2026-07-01", input_tokens: 100, output_tokens: 70, cache_read_input_tokens: 10, cache_creation_input_tokens: 5, turn_count: 2 },
       { day: "2026-07-02", input_tokens: 200, output_tokens: 40, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, turn_count: 1 },
+    ]);
+  });
+
+  it("getUsageByProviderModel groups totals per provider+model, sorted", () => {
+    // Add a second anthropic model in proj-1 so the group-by is exercised.
+    recordUsage(db, {
+      sessionId: "sess-1",
+      projectId: "proj-1",
+      provider: "anthropic",
+      model: "claude-haiku",
+      usage: { input_tokens: 9, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      createdAt: "2026-07-01T11:00:00.000Z",
+    });
+
+    const rows = getUsageByProviderModel(db, { projectId: "proj-1" });
+    expect(rows).toEqual([
+      { provider: "anthropic", model: "claude", input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 10, cache_creation_input_tokens: 5, turn_count: 1 },
+      { provider: "anthropic", model: "claude-haiku", input_tokens: 9, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, turn_count: 1 },
+      { provider: "copilot", model: null, input_tokens: 0, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, turn_count: 1 },
     ]);
   });
 
