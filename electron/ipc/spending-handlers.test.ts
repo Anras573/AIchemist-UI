@@ -143,4 +143,17 @@ describe("SPENDING_GET_SUMMARY", () => {
     expect(untilEnv.ok).toBe(false);
     if (!untilEnv.ok) expect(untilEnv.error.code).toBe("invalid_input");
   });
+
+  it("rejects a non-ISO-8601 since/until instead of comparing it as a raw string against created_at", async () => {
+    const sinceEnv = await call<SpendingSummary>(CH.SPENDING_GET_SUMMARY, { projectId: "p1", since: "not-a-date" });
+    expect(sinceEnv.ok).toBe(false);
+    if (!sinceEnv.ok) expect(sinceEnv.error.code).toBe("invalid_input");
+
+    // A date-only string (no time component) isn't the `Date#toISOString()`
+    // shape the renderer always sends, so it's rejected too rather than
+    // silently accepted with different-than-expected comparison semantics.
+    const untilEnv = await call<SpendingSummary>(CH.SPENDING_GET_SUMMARY, { projectId: "p1", until: "2026-07-01" });
+    expect(untilEnv.ok).toBe(false);
+    if (!untilEnv.ok) expect(untilEnv.error.code).toBe("invalid_input");
+  });
 });

@@ -153,12 +153,16 @@ const budgetWriteSchema = z.object({
 // project scope entirely; a blank since/until becomes a `created_at >= "   "`
 // / `created_at < "   "` string comparison against real ISO timestamps,
 // which is not "unbounded", it just happens to match ~everything or
-// ~nothing depending on direction). `.trim().min(1)` rejects all three
-// rather than letting getSpendingSummary() run with an ambiguous filter.
+// ~nothing depending on direction). since/until are further constrained to
+// ISO-8601 UTC timestamps — usage-ledger.ts compares `created_at` as a plain
+// string, so a non-timestamp value like "abc" wouldn't error, it would just
+// silently produce a nonsensical (but not obviously wrong) comparison and a
+// misleading spend total. The renderer only ever sends `Date#toISOString()`
+// values, which `z.iso.datetime()` accepts.
 const spendingGetSummarySchema = z.object({
   projectId: z.string().trim().min(1),
-  since: z.string().trim().min(1).nullable().optional(),
-  until: z.string().trim().min(1).nullable().optional(),
+  since: z.iso.datetime().nullable().optional(),
+  until: z.iso.datetime().nullable().optional(),
 });
 
 /** The delete channels take a bare path string rather than an options object. */
