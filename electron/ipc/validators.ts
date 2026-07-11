@@ -147,6 +147,16 @@ const budgetWriteSchema = z.object({
   ),
 });
 
+// UsageFilter.projectId (electron/usage-ledger.ts) is only applied when
+// truthy — an empty/whitespace projectId would silently query unscoped
+// (cross-project) totals instead of failing, so reject it here rather than
+// letting getSpendingSummary() run with an unconstrained project filter.
+const spendingGetSummarySchema = z.object({
+  projectId: z.string().trim().min(1),
+  since: z.string().nullable().optional(),
+  until: z.string().nullable().optional(),
+});
+
 /** The delete channels take a bare path string rather than an options object. */
 const pathArgSchema = z.string().min(1);
 
@@ -168,4 +178,5 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.WORKFLOW_DELETE]: unary(workflowDeleteSchema, CH.WORKFLOW_DELETE),
   [CH.WORKFLOW_LIST_RUNS]: unary(workflowListRunsSchema, CH.WORKFLOW_LIST_RUNS),
   [CH.BUDGET_WRITE]: unary(budgetWriteSchema, CH.BUDGET_WRITE),
+  [CH.SPENDING_GET_SUMMARY]: unary(spendingGetSummarySchema, CH.SPENDING_GET_SUMMARY),
 };

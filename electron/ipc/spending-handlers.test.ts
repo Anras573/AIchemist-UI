@@ -107,4 +107,30 @@ describe("SPENDING_GET_SUMMARY", () => {
       expect(env.data.lifetimeSpendUSD).toBeGreaterThan(0);
     }
   });
+
+  it("rejects an empty projectId at the handler boundary with invalid_input, rather than silently querying unscoped", async () => {
+    recordUsage(db, {
+      sessionId: "s1",
+      projectId: "p1",
+      provider: "anthropic",
+      model: "claude-3-7-sonnet-20250219",
+      usage: { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    });
+
+    const env = await call<SpendingSummary>(CH.SPENDING_GET_SUMMARY, { projectId: "" });
+    expect(env.ok).toBe(false);
+    if (!env.ok) expect(env.error.code).toBe("invalid_input");
+  });
+
+  it("rejects a whitespace-only projectId", async () => {
+    const env = await call<SpendingSummary>(CH.SPENDING_GET_SUMMARY, { projectId: "   " });
+    expect(env.ok).toBe(false);
+    if (!env.ok) expect(env.error.code).toBe("invalid_input");
+  });
+
+  it("rejects a call with no params object", async () => {
+    const env = await call<SpendingSummary>(CH.SPENDING_GET_SUMMARY);
+    expect(env.ok).toBe(false);
+    if (!env.ok) expect(env.error.code).toBe("invalid_input");
+  });
 });
