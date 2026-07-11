@@ -104,6 +104,28 @@ describe("SpendingPanel", () => {
     expect(await screen.findByText("No budget set")).toBeInTheDocument();
   });
 
+  it("shows a loading placeholder for the budget KPIs while the budget status fetch is pending, not 'No budget set'", async () => {
+    activateProject();
+    vi.mocked(window.electronAPI.budgetGetStatus).mockReturnValue(new Promise(() => {})); // never resolves
+
+    renderWithProviders(<SpendingPanel />);
+
+    expect(await screen.findByText("By provider")).toBeInTheDocument(); // confirms the panel itself rendered (not stuck on the summary's own loading state)
+    expect(screen.getAllByText("Loading…")).toHaveLength(2); // remaining budget + burn rate
+    expect(screen.queryByText("No budget set")).not.toBeInTheDocument();
+  });
+
+  it("shows an error state for the budget KPIs when the budget status fetch fails, not 'No budget set'", async () => {
+    activateProject();
+    vi.mocked(window.electronAPI.budgetGetStatus).mockRejectedValue(new Error("boom"));
+
+    renderWithProviders(<SpendingPanel />);
+
+    expect(await screen.findByText("Error loading budget")).toBeInTheDocument();
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(screen.queryByText("No budget set")).not.toBeInTheDocument();
+  });
+
   it("renders the provider breakdown table with tokens, cost, and percentage", async () => {
     activateProject();
     vi.mocked(window.electronAPI.spendingGetSummary).mockResolvedValue({

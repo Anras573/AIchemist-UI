@@ -133,4 +133,14 @@ describe("SPENDING_GET_SUMMARY", () => {
     expect(env.ok).toBe(false);
     if (!env.ok) expect(env.error.code).toBe("invalid_input");
   });
+
+  it("rejects a whitespace-only since/until instead of letting it silently distort the query", async () => {
+    const sinceEnv = await call<SpendingSummary>(CH.SPENDING_GET_SUMMARY, { projectId: "p1", since: "   " });
+    expect(sinceEnv.ok).toBe(false);
+    if (!sinceEnv.ok) expect(sinceEnv.error.code).toBe("invalid_input");
+
+    const untilEnv = await call<SpendingSummary>(CH.SPENDING_GET_SUMMARY, { projectId: "p1", until: "   " });
+    expect(untilEnv.ok).toBe(false);
+    if (!untilEnv.ok) expect(untilEnv.error.code).toBe("invalid_input");
+  });
 });

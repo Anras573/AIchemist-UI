@@ -147,14 +147,18 @@ const budgetWriteSchema = z.object({
   ),
 });
 
-// UsageFilter.projectId (electron/usage-ledger.ts) is only applied when
-// truthy — an empty/whitespace projectId would silently query unscoped
-// (cross-project) totals instead of failing, so reject it here rather than
-// letting getSpendingSummary() run with an unconstrained project filter.
+// UsageFilter's projectId/since/until (electron/usage-ledger.ts) are each
+// only applied when truthy — an empty/whitespace value doesn't fail, it
+// silently changes the query's meaning instead (a blank projectId drops the
+// project scope entirely; a blank since/until becomes a `created_at >= "   "`
+// / `created_at < "   "` string comparison against real ISO timestamps,
+// which is not "unbounded", it just happens to match ~everything or
+// ~nothing depending on direction). `.trim().min(1)` rejects all three
+// rather than letting getSpendingSummary() run with an ambiguous filter.
 const spendingGetSummarySchema = z.object({
   projectId: z.string().trim().min(1),
-  since: z.string().nullable().optional(),
-  until: z.string().nullable().optional(),
+  since: z.string().trim().min(1).nullable().optional(),
+  until: z.string().trim().min(1).nullable().optional(),
 });
 
 /** The delete channels take a bare path string rather than an options object. */

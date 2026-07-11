@@ -207,6 +207,27 @@ export function SpendingPanel() {
   const budgetStatus = budget.data;
   const rangeLabel = RANGE_OPTIONS.find((o) => o.value === preset)?.label ?? "Period";
 
+  // Prefer real (possibly stale-while-revalidating) budget data whenever it's
+  // present; only fall back to a loading/error placeholder when there's none
+  // yet — otherwise a background revalidation failure would blank out a
+  // previously-loaded budget, and a still-loading first fetch would
+  // misleadingly read as "No budget set" rather than "we don't know yet".
+  const remainingBudget = budgetStatus
+    ? budgetStatus.global.budgetUSD === null
+      ? { value: "No budget set" }
+      : {
+          value: formatUSD(budgetStatus.global.remainingUSD ?? 0),
+          sub: `of ${formatUSD(budgetStatus.global.budgetUSD)} · ${budgetStatus.period}`,
+        }
+    : { value: budget.loading ? "Loading…" : budget.error ? "Error loading budget" : "No budget set" };
+  const burnRate = budgetStatus
+    ? `${formatUSD(budgetStatus.global.burnRatePerDayUSD)}/day`
+    : budget.loading
+      ? "Loading…"
+      : budget.error
+        ? "Error"
+        : "—";
+
   return (
     <div className="h-full overflow-y-auto p-3 space-y-4">
       {/* Time filters */}
@@ -256,23 +277,8 @@ export function SpendingPanel() {
       <div className="grid grid-cols-2 gap-2">
         <KpiCard label={rangeLabel} value={formatUSD(data.periodSpendUSD)} confidence={data.periodConfidence} />
         <KpiCard label="Lifetime" value={formatUSD(data.lifetimeSpendUSD)} confidence={data.lifetimeConfidence} />
-        <KpiCard
-          label="Remaining budget"
-          value={
-            !budgetStatus || budgetStatus.global.budgetUSD === null
-              ? "No budget set"
-              : formatUSD(budgetStatus.global.remainingUSD ?? 0)
-          }
-          sub={
-            budgetStatus && budgetStatus.global.budgetUSD !== null
-              ? `of ${formatUSD(budgetStatus.global.budgetUSD)} · ${budgetStatus.period}`
-              : undefined
-          }
-        />
-        <KpiCard
-          label="Burn rate"
-          value={budgetStatus ? `${formatUSD(budgetStatus.global.burnRatePerDayUSD)}/day` : "—"}
-        />
+        <KpiCard label="Remaining budget" value={remainingBudget.value} sub={remainingBudget.sub} />
+        <KpiCard label="Burn rate" value={burnRate} />
       </div>
 
       {/* Provider breakdown */}
