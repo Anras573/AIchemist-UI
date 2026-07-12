@@ -19,7 +19,7 @@ A workflow bundles everything needed to run a turn unattended:
 ## Triggers
 
 - **Cron** — standard cron expressions, DST-aware. The editor shows a live "next run" preview and rejects invalid expressions.
-- **File watch** — pick a folder (recursive); rapid bursts of changes are coalesced into a single run. The path doesn't have to exist yet — the watcher arms when it can.
+- **File watch** — pick a folder (recursive); rapid bursts of changes are coalesced into a single run. You can save a workflow whose watched path doesn't exist yet, but the watcher only attaches when the workflow is armed — at app launch, or when the workflow is saved or re-enabled. If the path is missing (or unwatchable) at that moment, the file trigger stays inactive until the workflow is saved again or the app restarts.
 - **Manual** — every workflow has a **Run now** button regardless of triggers.
 
 Scheduling is **forward-only**: runs missed while the app was closed are not replayed.

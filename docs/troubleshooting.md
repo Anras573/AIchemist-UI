@@ -44,6 +44,7 @@ Both apply from the **next message**, not retroactively to a running turn. For C
 
 - Schedules are **forward-only** — firings missed while the app was fully quit are not replayed. Keep the app (or its tray icon) running.
 - Check the workflow is **enabled** and its cron expression is valid (the editor previews the next run time).
+- For **file triggers**: the watched path must exist when the watcher is armed (app launch, or saving the workflow). If you created the path afterwards, re-save the workflow or restart the app to attach the watcher.
 - A `reuse`-session workflow whose session was busy records the firing as **skipped** — see the run history.
 
 ## An autonomous workflow's tools were "denied automatically"

@@ -45,7 +45,7 @@ Loaded once at app startup; restart after editing.
 | `budget.json` | [Spending budget](spending.md#budgets) |
 | `pricing-overrides.json` | Custom per-model prices for cost estimation |
 | `memory/` | Per-project [agent memory](memory-and-traces.md#memory) (non-Claude providers) |
-| `traces/` | Session transcripts for Ollama / OpenAI-compatible sessions |
+| `traces/` | Session transcripts for Codex, Ollama, and OpenAI-compatible sessions |
 
 ## Files in a project
 
