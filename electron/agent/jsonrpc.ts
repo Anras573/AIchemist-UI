@@ -1,7 +1,7 @@
 /**
  * Minimal JSON-RPC peer over a child process's stdio, for driving the Codex
  * `app-server` / `mcp-server` transports (see
- * docs/plans/2026-06-29-codex-approval-bridging-spike.md).
+ * notes/plans/2026-06-29-codex-approval-bridging-spike.md).
  *
  * Two layers, so the correlation/dispatch core is testable without real streams:
  *

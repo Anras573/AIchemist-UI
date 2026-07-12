@@ -201,4 +201,4 @@ Claude/Copilot/Ollama tool approvals.
   `item/commandExecution/requestApproval`, `item/permissions/requestApproval`),
   `codex-rs/docs/codex_mcp_interface.md` (`execCommandApproval`,
   `applyPatchApproval`), `codex-rs/app-server-client` (lifecycle).
-- Prior context: `docs/plans/2026-06-28-codex-parity-plan.md`.
+- Prior context: `notes/plans/2026-06-28-codex-parity-plan.md`.

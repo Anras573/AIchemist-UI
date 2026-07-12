@@ -1,0 +1,4 @@
+title: AIchemist UI
+description: A desktop AI assistant for your codebase — chat with agents that can read files, write code, and run commands in your projects.
+theme: jekyll-theme-cayman
+markdown: kramdown

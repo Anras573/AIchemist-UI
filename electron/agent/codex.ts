@@ -50,7 +50,7 @@ type CodexFactory = (options: CodexOptions) => Codex;
 //     Used for noTools / nonInteractive turns and as the app-server fallback.
 //   - app-server (`codex-app-server.ts`): long-running JSON-RPC; used for
 //     interactive turns so `on-request` approvals bridge to AIchemist's approval
-//     UI (`codex-approval-bridge.ts`). See docs/plans/2026-06-29-codex-approval-bridging-spike.md.
+//     UI (`codex-approval-bridge.ts`). See notes/plans/2026-06-29-codex-approval-bridging-spike.md.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
