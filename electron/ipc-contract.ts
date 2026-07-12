@@ -49,6 +49,7 @@ import type {
   WorkflowSessionStrategy,
   BudgetConfig,
   BudgetStatus,
+  SpendingSummary,
 } from "../src/types";
 import type { SettingsMap } from "./settings";
 import type { OpenAiEndpointEntry, OpenAiEndpointsMap } from "./openai-endpoints";
@@ -138,6 +139,10 @@ export type IpcContract = {
   [CH.BUDGET_READ]: { args: []; result: BudgetConfig };
   [CH.BUDGET_WRITE]: { args: [config: BudgetConfig]; result: BudgetConfig };
   [CH.BUDGET_GET_STATUS]: { args: []; result: BudgetStatus };
+  [CH.SPENDING_GET_SUMMARY]: {
+    args: [params: { projectId: string; since?: string | null; until?: string | null }];
+    result: SpendingSummary;
+  };
 
   // ── Dialog / shell ──────────────────────────────────────────────────────────
   [CH.OPEN_FOLDER_DIALOG]: { args: []; result: string | null };

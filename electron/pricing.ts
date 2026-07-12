@@ -22,11 +22,14 @@
  * (see `estimateCost`'s doc comment) rather than let every call re-read it.
  */
 import { getModelMeta, defaultCatalog } from "tokenlens";
-import type { Provider, SessionUsage } from "../src/types/index";
+import type { CostConfidence, Provider, SessionUsage } from "../src/types/index";
 import { parseCompositeModelId } from "./openai-endpoints";
 import { readPricingOverrides, overrideKey, type PricingOverrideMap, type PricingRates } from "./pricing-overrides";
 
-export type CostConfidence = "exact" | "estimated" | "unknown";
+// Canonical definition lives in src/types/index.ts (shared with the renderer,
+// e.g. the Spending panel) — re-exported here so existing imports of
+// `CostConfidence` from this module keep working.
+export type { CostConfidence };
 
 export interface CostEstimate {
   inputUSD: number;
@@ -113,9 +116,12 @@ function resolveRates(provider: Provider, model: string, overrides: PricingOverr
  * denied, the path pointing at a directory, etc.) so a broken config can be
  * surfaced elsewhere — but `estimateCost()` must never throw, so its default
  * (no caller-supplied `overrides`) read path falls back to catalog-only
- * pricing on any such error rather than aborting the whole estimate.
+ * pricing on any such error rather than aborting the whole estimate. Exported
+ * so bulk callers that read overrides once and pass them through many
+ * `estimateCost()` calls (e.g. `electron/spending.ts`) get the same
+ * fail-safe behavior instead of letting a broken config fail their whole read.
  */
-function safeReadPricingOverrides(): PricingOverrideMap {
+export function safeReadPricingOverrides(): PricingOverrideMap {
   try {
     return readPricingOverrides();
   } catch (err) {

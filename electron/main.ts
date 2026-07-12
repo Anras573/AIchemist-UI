@@ -18,6 +18,7 @@ import { registerGitHubHandlers } from "./ipc/github-handlers";
 import { registerMcpHandlers } from "./ipc/mcp-handlers";
 import { registerWorkflowHandlers } from "./ipc/workflow-handlers";
 import { registerBudgetHandlers } from "./ipc/budget-handlers";
+import { registerSpendingHandlers } from "./ipc/spending-handlers";
 import { WorkflowScheduler } from "./agent/workflow-scheduler";
 import { TrayController } from "./tray";
 
@@ -105,6 +106,7 @@ function registerAllHandlers(scheduler: WorkflowScheduler): void {
   registerMcpHandlers();
   registerWorkflowHandlers(db, scheduler);
   registerBudgetHandlers(db);
+  registerSpendingHandlers(db);
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────

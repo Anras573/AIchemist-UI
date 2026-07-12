@@ -60,6 +60,15 @@ export function createElectronAPIMock(): Window["electronAPI"] {
       global: { budgetUSD: null, spendUSD: 0, remainingUSD: null, burnRatePerDayUSD: 0 },
       byProvider: [],
     }),
+    spendingGetSummary: vi.fn().mockResolvedValue({
+      projectId: "mock-project-id",
+      range: { since: null, until: null },
+      periodSpendUSD: 0,
+      periodConfidence: "exact",
+      lifetimeSpendUSD: 0,
+      lifetimeConfidence: "exact",
+      byProvider: [],
+    }),
 
     // Dialog
     openFolderDialog: vi.fn().mockResolvedValue(null),

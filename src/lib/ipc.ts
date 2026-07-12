@@ -70,6 +70,8 @@ export const ipc = {
   budgetRead: () => window.electronAPI.budgetRead(),
   budgetWrite: (config: BudgetConfig) => window.electronAPI.budgetWrite(config),
   budgetGetStatus: () => window.electronAPI.budgetGetStatus(),
+  spendingGetSummary: (params: { projectId: string; since?: string | null; until?: string | null }) =>
+    window.electronAPI.spendingGetSummary(params),
 
   // Agent
   agentSend: (args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[]; skipPersistence?: boolean; messageId?: string }) =>
