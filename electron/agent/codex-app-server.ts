@@ -1,6 +1,6 @@
 /**
  * Codex `app-server` client (slice 2/4 of #128 — interactive approval bridging;
- * see docs/plans/2026-06-29-codex-approval-bridging-spike.md).
+ * see notes/plans/2026-06-29-codex-approval-bridging-spike.md).
  *
  * Unlike `@openai/codex-sdk` (which drives one-shot `codex exec`), the app-server
  * is a long-running JSON-RPC peer that can issue **server→client approval
