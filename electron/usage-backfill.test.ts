@@ -14,6 +14,25 @@ vi.mock("./trace-source", () => ({
   loadTranscriptSpans: (...args: unknown[]) => loadTranscriptSpansMock(...(args as [unknown, string])),
 }));
 
+// Lets a single test force the Nth recordUsage() call within a session's
+// insert loop to throw, so we can prove the per-session transaction rolls
+// back instead of leaving a partially-backfilled (and thus permanently
+// under-counted) session behind.
+const recordUsageState = vi.hoisted(() => ({ failOnCall: -1, callCount: 0 }));
+vi.mock("./usage-ledger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./usage-ledger")>();
+  return {
+    ...actual,
+    recordUsage: (db: unknown, params: Parameters<typeof actual.recordUsage>[1]) => {
+      recordUsageState.callCount++;
+      if (recordUsageState.callCount === recordUsageState.failOnCall) {
+        throw new Error("simulated insert failure");
+      }
+      return actual.recordUsage(db as never, params);
+    },
+  };
+});
+
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 function makeDb(): Database.Database {
@@ -67,6 +86,8 @@ beforeEach(() => {
   seedSession(db, "sess-3", "proj-2");
   resolveTraceSourceMock.mockReset();
   loadTranscriptSpansMock.mockReset();
+  recordUsageState.failOnCall = -1;
+  recordUsageState.callCount = 0;
 });
 
 // ─── backfillUsageLedger ───────────────────────────────────────────────────────
@@ -184,6 +205,33 @@ describe("backfillUsageLedger", () => {
     const second = await backfillUsageLedger(db, { projectId: "proj-1" });
     const sess1Second = second.sessions.find((s) => s.sessionId === "sess-1");
     expect(sess1Second).toMatchObject({ status: "skipped-has-usage", turnsBackfilled: 0 });
+    expect(ledgerRows(db).filter((r) => r.session_id === "sess-1")).toHaveLength(2);
+  });
+
+  it("is atomic per session — a failure mid-insert rolls back so a later run retries from scratch", async () => {
+    resolveTraceSourceMock.mockImplementation((_db, sessionId) =>
+      sessionId === "sess-1" ? { kind: "native", sessionId: "sess-1", provider: "ollama" } : null
+    );
+    loadTranscriptSpansMock.mockImplementation(async (_db, sessionId) =>
+      sessionId === "sess-1" ? [turnSpan(), turnSpan({ id: "turn:2" })] : []
+    );
+    // Fail the 2nd of 2 recordUsage() calls for sess-1's insert loop.
+    recordUsageState.failOnCall = 2;
+
+    const first = await backfillUsageLedger(db, { projectId: "proj-1" });
+    const sess1First = first.sessions.find((s) => s.sessionId === "sess-1");
+    expect(sess1First?.status).toBe("error");
+    // The transaction rolled back — no partial row from the 1st (successful)
+    // insert survives, so this session isn't left permanently under-counted.
+    expect(ledgerRows(db).filter((r) => r.session_id === "sess-1")).toHaveLength(0);
+
+    // No more forced failures — a later run must retry sess-1 from scratch
+    // rather than skipping it (which is what would happen if a stray row had
+    // survived the earlier failure).
+    recordUsageState.failOnCall = -1;
+    const second = await backfillUsageLedger(db, { projectId: "proj-1" });
+    const sess1Second = second.sessions.find((s) => s.sessionId === "sess-1");
+    expect(sess1Second).toMatchObject({ status: "backfilled", turnsBackfilled: 2 });
     expect(ledgerRows(db).filter((r) => r.session_id === "sess-1")).toHaveLength(2);
   });
 

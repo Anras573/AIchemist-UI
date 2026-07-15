@@ -105,17 +105,25 @@ export async function backfillUsageLedger(
         continue;
       }
 
-      for (const turn of turns) {
-        recordUsage(db, {
-          sessionId: session.id,
-          projectId: session.project_id,
-          provider: src.provider as Provider,
-          model: extractModel(turn),
-          usage: extractTokens(turn),
-          createdAt: new Date(turn.endMs ?? turn.startMs).toISOString(),
-          source: "backfill",
-        });
-      }
+      // Atomic per session: if any recordUsage() call in this loop throws, the
+      // transaction rolls back to zero rows for this session rather than
+      // leaving it partially backfilled. A partial session would otherwise be
+      // permanently stuck — the next run's hasUsage check above would see the
+      // surviving rows and skip it forever instead of retrying.
+      const insertTurns = db.transaction(() => {
+        for (const turn of turns) {
+          recordUsage(db, {
+            sessionId: session.id,
+            projectId: session.project_id,
+            provider: src.provider as Provider,
+            model: extractModel(turn),
+            usage: extractTokens(turn),
+            createdAt: new Date(turn.endMs ?? turn.startMs).toISOString(),
+            source: "backfill",
+          });
+        }
+      });
+      insertTurns();
       totalTurnsBackfilled += turns.length;
       results.push({ sessionId: session.id, status: "backfilled", turnsBackfilled: turns.length });
     } catch (err) {
