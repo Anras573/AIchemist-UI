@@ -201,9 +201,13 @@ The Traces tab does **not** use an in-memory tracer. Instead, every provider has
 
 Ollama and OpenAI-compatible run an in-process tool loop and have no SDK session id, so they write their own JSONL transcript keyed by **app `sessionId`** (not an SDK id). Each turn a `NativeTranscriptRecorder` (`createNativeTranscriptRecorder(sessionId, provider)`) appends events: `turn_start` first (so the live turn span exists), then `tool_call` / `tool_result` as they happen (id-paired into tool spans), then a folded `reasoning` + `usage` summary and `turn_end` at the end. The two providers call `turnStart` / `turnEnd` (in a `finally`, with success/error status) and record reasoning/usage; **tool events are recorded in the shared `runGatedTool`** via an optional `recorder` on `GatedToolContext` (unset for the SDK providers, so they're unaffected). `noTools` turns (text-only PR-draft generation) are not recorded. Writes are fail-safe — a transcript I/O error can never break a turn. Test seam: `_setNativeTracesRootForTests(dir | null)`.
 
+### Resolving a session's transcript — `electron/trace-source.ts`
+
+`resolveTraceSource(db, sessionId)` and `loadTranscriptSpans(db, sessionId)` are the shared resolution logic: dispatch by provider — reads the SDK session id from `provider_state` (`claude.sdkSessionId` / `copilot.sessionId`), falling back to the legacy `sessions.sdk_session_id` / `copilot_session_id` columns for pre-migration sessions, then locates + parses the corresponding file. When neither SDK id exists, it resolves the session's **effective provider** (`session.provider ?? project.config.provider`) and, for the self-driven providers (Ollama / OpenAI-compatible / Codex), reads the native transcript at `~/.aichemist/traces/<sessionId>/events.jsonl`. Resolving by provider rather than file existence lets a watcher bind before the first turn has written the file. Two consumers: the `GET_TRACES` IPC handler (below) and the usage-ledger backfill (`electron/usage-backfill.ts`, see the Spending section) — both need to locate a session's transcript the same way, so this logic isn't duplicated between them.
+
 ### IPC surface
 
-- **`GET_TRACES({ sessionId })`** in `electron/ipc/trace-handlers.ts` — dispatches by provider: reads the SDK session id from `provider_state` (`claude.sdkSessionId` / `copilot.sessionId`), falling back to the legacy `sessions.sdk_session_id` / `copilot_session_id` columns for pre-migration sessions, then parses the corresponding file. When neither SDK id exists, it resolves the session's **effective provider** (`session.provider ?? project.config.provider`) and, for the self-driven providers (Ollama / OpenAI-compatible), reads the native transcript at `~/.aichemist/traces/<sessionId>/events.jsonl`. Resolving by provider rather than file existence lets the watcher bind before the first turn has written the file.
+- **`GET_TRACES({ sessionId })`** in `electron/ipc/trace-handlers.ts` — thin wrapper over `loadTranscriptSpans()`.
 - **`TRACE_BIND_TRANSCRIPT({ sessionId })`** — sets up an `fs.watch` watcher (directory-level, with a 1 s stat-poll safety-net for macOS) on the transcript file and streams incremental spans via `SESSION_TRACE`. The `TracesPanel` calls this when the tab opens.
 
 ### Copilot turn grouping — anchor on `interactionId`, not `turnId`
@@ -227,6 +231,32 @@ Claude's `.jsonl` format has one line per SDK message. `claude-transcript.ts` bu
 ### Session ID lookup
 
 Traces only appear once the session has run at least one turn — that's when the SDK session id (`provider_state.claude.sdkSessionId` / `provider_state.copilot.sessionId`) is first populated. Before then, `GET_TRACES` returns an empty array. Don't add a fallback that synthesizes spans from `tool_calls` rows; the transcript is the source of truth.
+
+---
+
+## Spending (epic #155)
+
+A cross-provider spend ledger + cost engine + budget model, surfaced in a dedicated **Spending** tab (`ToolStrip` + `ContextPanel` → `SpendingPanel.tsx`). Aggregates across every provider used in the active project — deliberately not gated by the session's provider lock the way Skills/MCP/Memory are.
+
+| Module | Role |
+|---|---|
+| `electron/usage-ledger.ts` | `usage_ledger` SQLite table (migration v5) — one row per completed turn (`recordUsage()`, called from `electron/agent/runner.ts` after every turn) plus aggregation queries (`getUsageTotals`, `getUsageByProvider`, `getUsageByProviderModel`, `getUsageByDay`, …). `session_id` is deliberately FK-free (deleting a session must not delete the spend it incurred); only `project_id` cascades. |
+| `electron/pricing.ts` + `electron/pricing-overrides.ts` | `estimateCost({ provider, model, usage })` prices a usage row via `tokenlens`'s bundled catalog, with manual overrides (`~/.aichemist/pricing-overrides.json`) taking priority. Returns a `CostConfidence` (`exact` / `estimated` / `unknown`, `src/types/index.ts`) — `estimated` for providers with known partial token fidelity (Copilot, Ollama), `unknown` when nothing prices the provider/model (never silently `0`). |
+| `electron/budget.ts` + `electron/budget-status.ts` | `~/.aichemist/budget.json` — a global USD budget + optional per-provider overrides, resetting daily/weekly/monthly. `computeBudgetStatus()` resolves the current period's spend (via the ledger + pricing engine) into remaining balance + burn rate. |
+| `electron/spending.ts` | `getSpendingSummary()` — combines the ledger + pricing engine into one project's time-range-filtered per-provider breakdown plus lifetime total; backs `SPENDING_GET_SUMMARY`. |
+| `src/components/settings/sections/SpendingSection.tsx` | Settings → Spending hub section — budget editor + pricing overrides. |
+
+### Usage-ledger backfill — `electron/usage-backfill.ts` (issue #160)
+
+Sessions run before the ledger shipped have no `usage_ledger` rows, so they'd show as permanent $0 spend. `backfillUsageLedger(db)` closes that gap by reconstructing usage from each session's trace transcript (via `electron/trace-source.ts`, shared with `GET_TRACES` — see the Traces section above), inserting one ledger row per completed turn with `source: "backfill"` (vs. `"live"` for turns recorded via the normal runner path — migration v6).
+
+- **Scope/idempotency:** only backfills a session that has **zero** ledger rows at all. A session already recording live usage is left alone rather than partially topped up — filling only the pre-ledger gap for a session used both before and after the ledger shipped would need per-turn de-duplication against the transcript, which is out of scope (epic #155 rules out retroactive correction of historical turns). Re-running is a no-op for anything already backfilled.
+- **Fail-safe:** wrapped in a per-session try/catch so one unreadable/corrupt transcript can't abort the run for the rest; the underlying transcript parsers are themselves fail-safe (return `[]` rather than throwing).
+- Runs fire-and-forget on every app startup (`electron/main.ts`, after `recoverStaleSessionStatuses`) — cheap because already-covered sessions are skipped by a single indexed lookup, so no one-shot flag is needed.
+
+### Shared trace resolution — `electron/trace-source.ts`
+
+`resolveTraceSource(db, sessionId)` / `loadTranscriptSpans(db, sessionId)` hold the provider-dispatch + transcript-loading logic once, used by both `GET_TRACES` (`electron/ipc/trace-handlers.ts`) and the usage-ledger backfill above. See the "Resolving a session's transcript" subsection under Traces for details.
 
 ---
 

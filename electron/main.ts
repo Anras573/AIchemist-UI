@@ -4,6 +4,7 @@ import * as CH from "./ipc-channels";
 import { loadEnv, checkApiKeys } from "./config";
 import { openDb } from "./db";
 import { recoverStaleSessionStatuses } from "./sessions";
+import { backfillUsageLedger } from "./usage-backfill";
 import { getProvider, getProviderNames } from "./agent/runner";
 
 import { registerTerminalHandlers } from "./ipc/terminal-handlers";
@@ -115,6 +116,24 @@ app.whenReady().then(() => {
   if (stale > 0) {
     console.log(`[startup] Marked ${stale} stale session(s) as "error" (were "running" at last exit)`);
   }
+
+  // Fire-and-forget: backfills the usage ledger from historical trace
+  // transcripts for any session with no ledger rows yet. Idempotent (a
+  // session with existing rows is skipped) and fail-safe per session, so it's
+  // safe to run unawaited on every startup rather than gating it behind a
+  // one-shot flag.
+  void backfillUsageLedger(db)
+    .then(({ sessions, totalTurnsBackfilled }) => {
+      const backfilled = sessions.filter((s) => s.status === "backfilled").length;
+      if (backfilled > 0) {
+        console.log(
+          `[startup] Backfilled usage ledger for ${backfilled} session(s), ${totalTurnsBackfilled} turn(s)`
+        );
+      }
+    })
+    .catch((err) => {
+      console.error("[startup] Usage ledger backfill failed:", err);
+    });
 
   workflowScheduler = new WorkflowScheduler({ db, activeTurns, getMainWindow });
   registerAllHandlers(workflowScheduler);

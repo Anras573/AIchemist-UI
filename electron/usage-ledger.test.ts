@@ -79,6 +79,21 @@ describe("recordUsage", () => {
       created_at: "2026-07-01T00:00:00.000Z",
     });
     expect(typeof rows[0].id).toBe("string");
+    expect(rows[0].source).toBe("live");
+  });
+
+  it("records an explicit source (e.g. 'backfill')", () => {
+    recordUsage(db, {
+      sessionId: "sess-1",
+      projectId: "proj-1",
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      usage: USAGE,
+      source: "backfill",
+    });
+
+    const row = db.prepare("SELECT source FROM usage_ledger").get() as { source: string };
+    expect(row.source).toBe("backfill");
   });
 
   it("allows a null model and zero token fields (partial provider fidelity)", () => {

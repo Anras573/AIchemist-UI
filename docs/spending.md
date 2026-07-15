@@ -22,3 +22,9 @@ Set a spending budget in **Settings → Spending**:
 The Spending panel then shows **remaining balance** and **burn rate** (average spend per day this period) for each budget line. Budgets are informational — they warn you, they don't block requests.
 
 Budget config is stored in `~/.aichemist/budget.json`.
+
+## Historical data
+
+Every completed turn is recorded to the usage ledger as it happens. On upgrade, AIchemist also **backfills** the ledger once per session by reconstructing token usage from each session's saved trace transcript, so sessions you started before the Spending feature shipped still show historical spend instead of $0.
+
+This backfill only fills sessions that have **no** ledger entries at all — a session already recording live usage (i.e., you've run a turn in it since upgrading) is left as-is rather than partially topped up. If a session's transcript was later deleted or rotated, its pre-upgrade turns can't be recovered and won't appear in lifetime totals.
