@@ -40,7 +40,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
 
-    expect(userVersion(db)).toBe(5);
+    expect(userVersion(db)).toBe(6);
     const cols = columnNames(db, "sessions");
     for (const c of EXPECTED_SESSION_COLUMNS) {
       expect(cols).toContain(c);
@@ -66,6 +66,24 @@ describe("migrate", () => {
     ]) {
       expect(columnNames(db, "usage_ledger")).toContain(c);
     }
+  });
+
+  it("adds usage_ledger.source at v6, defaulting existing + new rows to 'live'", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+
+    expect(columnNames(db, "usage_ledger")).toContain("source");
+    db.prepare(
+      `INSERT INTO projects (id, name, path, created_at) VALUES ('p1', 'P', '/tmp/p1', 'now')`
+    ).run();
+    db.prepare(
+      `INSERT INTO sessions (id, project_id, title, status, created_at) VALUES ('s1', 'p1', 'S', 'idle', 'now')`
+    ).run();
+    db.prepare(
+      `INSERT INTO usage_ledger (id, session_id, project_id, provider, created_at) VALUES ('u1', 's1', 'p1', 'anthropic', 'now')`
+    ).run();
+    const row = db.prepare("SELECT source FROM usage_ledger WHERE id = 'u1'").get() as { source: string };
+    expect(row.source).toBe("live");
   });
 
   it("creates the workflows + workflow_runs tables at v3", () => {
@@ -98,7 +116,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(5);
+    expect(userVersion(db)).toBe(6);
   });
 
   it("does not throw when provider_state already exists below user_version 2", () => {
@@ -107,7 +125,7 @@ describe("migrate", () => {
     // Simulate a dev build / partial migration: column exists but version rewound.
     db.exec("PRAGMA user_version = 1;");
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(5);
+    expect(userVersion(db)).toBe(6);
   });
 
   it("upgrades a legacy database (columns present, user_version 0) without error", () => {
@@ -132,7 +150,7 @@ describe("migrate", () => {
 
     expect(() => migrate(db)).not.toThrow();
 
-    expect(userVersion(db)).toBe(5);
+    expect(userVersion(db)).toBe(6);
     expect(columnNames(db, "sessions")).toContain("provider_state");
     expect(tableNames(db)).toContain("workflows");
     // Existing data is preserved, including the legacy copilot id used as a dead read.

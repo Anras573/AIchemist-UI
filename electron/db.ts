@@ -146,6 +146,16 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_usage_ledger_session ON usage_ledger(session_id);
     `);
   },
+  // v6 — Usage-ledger backfill (issue #160, part of the Spending epic #155).
+  // Adds `usage_ledger.source` so rows reconstructed from a historical trace
+  // transcript (backfillUsageLedger in electron/usage-backfill.ts) are
+  // distinguishable from rows recorded live at the end of a completed turn
+  // (recordUsage(), called from the runner). Existing rows all predate the
+  // backfill feature and are live, so the column defaults to 'live' for both
+  // pre-existing and new rows that don't pass a source explicitly.
+  (db) => {
+    addColumnIfMissing(db, "usage_ledger", "source", "TEXT NOT NULL DEFAULT 'live'");
+  },
 ];
 
 /**

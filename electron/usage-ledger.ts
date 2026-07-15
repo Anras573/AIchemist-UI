@@ -10,6 +10,9 @@ import type { Provider, SessionUsage } from "../src/types/index";
  * (provider fidelity varies — see epic #155), not an error condition.
  */
 
+/** `"live"` — recorded at the end of a completed turn. `"backfill"` — reconstructed from a historical trace transcript (electron/usage-backfill.ts, issue #160). */
+export type UsageSource = "live" | "backfill";
+
 export interface UsageLedgerRow {
   id: string;
   session_id: string;
@@ -21,6 +24,7 @@ export interface UsageLedgerRow {
   cache_read_input_tokens: number;
   cache_creation_input_tokens: number;
   created_at: string;
+  source: UsageSource;
 }
 
 /** Record one completed turn's token usage. Fails loudly — callers should treat this as best-effort and not let a write error break the turn. */
@@ -34,13 +38,15 @@ export function recordUsage(
     usage: SessionUsage;
     /** ISO timestamp; defaults to now. Exposed for deterministic tests. */
     createdAt?: string;
+    /** Defaults to `"live"` — the runner never passes this explicitly. */
+    source?: UsageSource;
   }
 ): void {
   const model = params.model?.trim() || null;
   db.prepare(
     `INSERT INTO usage_ledger
-       (id, session_id, project_id, provider, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, session_id, project_id, provider, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, created_at, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     crypto.randomUUID(),
     params.sessionId,
@@ -51,7 +57,8 @@ export function recordUsage(
     params.usage.output_tokens,
     params.usage.cache_read_input_tokens,
     params.usage.cache_creation_input_tokens,
-    params.createdAt ?? new Date().toISOString()
+    params.createdAt ?? new Date().toISOString(),
+    params.source ?? "live"
   );
 }
 
