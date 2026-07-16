@@ -413,13 +413,21 @@ export async function runClaudeAgentTurn(params: {
               emitter.delta(text);
             }
           }
-        } else if (event["type"] === "message_start") {
-          // input_tokens in message_start includes the full conversation context
+        } else if (event["type"] === "message_start" && msg.parent_tool_use_id === null) {
+          // input_tokens in message_start includes the full conversation context.
+          // Guarded to the top-level agent (parent_tool_use_id === null) — a
+          // subagent (Task tool) turn emits its own message_start/message_delta
+          // stream_events through this same loop, tagged with a non-null
+          // parent_tool_use_id. Without this guard, a subagent's usage would
+          // clobber turnInputTokens/turnOutputTokens/etc. depending on event
+          // ordering, corrupting the parent turn's recorded usage rather than
+          // just omitting the subagent's. Matches the SDK's own result.usage
+          // field semantics, which likewise excludes subagent tokens.
           const msgUsage = ((event["message"] as Record<string, unknown>)?.["usage"]) as Record<string, number> | undefined;
           turnInputTokens = msgUsage?.["input_tokens"] ?? 0;
           turnCacheReadTokens = msgUsage?.["cache_read_input_tokens"] ?? 0;
           turnCacheCreationTokens = msgUsage?.["cache_creation_input_tokens"] ?? 0;
-        } else if (event["type"] === "message_delta") {
+        } else if (event["type"] === "message_delta" && msg.parent_tool_use_id === null) {
           const deltaUsage = (event["usage"]) as { output_tokens?: number } | undefined;
           turnOutputTokens = deltaUsage?.["output_tokens"] ?? 0;
           emitter.usage({

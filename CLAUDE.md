@@ -509,6 +509,12 @@ Claude prefers its **native tools** (`Write`, `Edit`, `Bash`, `WebFetch`) over o
 
 MCP tools (`mcp__aichemist-tools__*`) are explicitly skipped in the hook (they handle approval themselves). Read-only tools (`Read`, `Glob`, `LS`) always return `approve` immediately.
 
+### Claude Code SDK — subagent `stream_event`s share the same loop
+
+When Claude spawns a subagent (Task tool), the subagent's own `message_start`/`message_delta` `stream_event`s flow through the **same** `for await (const msg of queryStream)` loop as the top-level agent's — they're distinguished only by `msg.parent_tool_use_id` (`null` for the top-level agent, a tool-use id for a subagent turn).
+
+**Usage tracking in `claude.ts` is guarded to `parent_tool_use_id === null`.** Without that guard, a subagent's `message_start`/`message_delta` would clobber the same `turnInputTokens`/`turnOutputTokens`/`turnCacheReadTokens`/`turnCacheCreationTokens` variables the top-level agent uses, silently corrupting (not just omitting) the recorded usage for turns that use subagents — whichever stream fires last wins, parent or subagent. This intentionally matches the SDK's own `result.usage` field, which likewise excludes subagent tokens (subagent-inclusive totals are only available via `result.total_cost_usd` / `result.modelUsage`, which this codebase doesn't use — see the Spending section).
+
 ### Copilot SDK — `customAgents` vs `systemMessage`
 
 `customAgents` in Copilot sessions are **sub-agent delegation configs** — the parent Copilot agent decides when to delegate to them based on inference. They are NOT a replacement for the session system prompt.

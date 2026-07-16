@@ -125,7 +125,28 @@ function KpiCard({
 
 export function SpendingHeaderInfo() {
   return (
-    <WithTooltip label="Spend is aggregated across every provider used in this project. Rows marked “estimated” reflect partial token data or incomplete pricing coverage; remaining budget and burn rate come from your global budget settings (Settings → Spending), which apply across all projects.">
+    <WithTooltip
+      label={
+        <div className="flex flex-col gap-1 max-w-[280px] text-[11px]">
+          <span className="font-medium">How costs are calculated:</span>
+          <span className="text-muted-foreground">
+            Each turn&apos;s recorded token counts are priced against published per-token API rates
+            (plus your pricing overrides in Settings → Spending) — this is an estimate, not your
+            provider&apos;s actual invoice.
+          </span>
+          <span className="text-muted-foreground">
+            Flat-subscription plans (e.g. Claude Pro/Max) are priced as if pay-per-token, so this does
+            not reflect your real plan quota or remaining allowance.
+          </span>
+          <span className="text-muted-foreground">
+            Rows marked &ldquo;estimated&rdquo; reflect partial token data or incomplete pricing
+            coverage. Remaining budget and burn rate come from your global budget settings, which apply
+            across all projects.
+          </span>
+        </div>
+      }
+      side="left"
+    >
       <button
         type="button"
         aria-label="About the Spending tab"
