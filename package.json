@@ -19,7 +19,7 @@
     "@anthropic-ai/sdk": "^0.102.0",
     "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist": "^5.3.0",
-    "@github/copilot-sdk": "1.0.0",
+    "@github/copilot-sdk": "1.0.7",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@octokit/rest": "^22.0.1",
     "@openai/codex-sdk": "^0.142.5",
