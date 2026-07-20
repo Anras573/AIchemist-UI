@@ -67,7 +67,7 @@
         "@types/react-dom": "^19.2.3",
         "@vitejs/plugin-react": "^4.7.0",
         "@vitest/coverage-v8": "^4.1.10",
-        "electron": "^41.10.2",
+        "electron": "^42.7.0",
         "electron-vite": "^5.0.0",
         "jsdom": "^29.1.1",
         "tailwindcss": "^4.3.3",
@@ -1018,7 +1018,7 @@
 
     "ee-first": ["ee-first@1.1.1", "", {}, "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=="],
 
-    "electron": ["electron@41.10.2", "", { "dependencies": { "@electron-internal/extract-zip": "^1.0.1", "@electron/get": "^5.0.0", "@types/node": "^24.9.0" }, "bin": { "electron": "cli.js" } }, "sha512-vzSetbn05LPfg0gW0p9txpqmkkFyTXzdSHvKIXbtmsK362hkgUQJu+x19GSSS9v/VXeFi5UJI5TYJ1a+Os3CpA=="],
+    "electron": ["electron@42.7.0", "", { "dependencies": { "@electron-internal/extract-zip": "^1.0.1", "@electron/get": "^5.0.0", "@types/node": "^24.9.0" }, "bin": { "electron": "cli.js", "install-electron": "install.js" } }, "sha512-Uu5p03M5o7aqulT8QxFYYg3eJVDfuNEUuasBU1qFl05ghVRRH7UHL7na8S3GhxVScZQ2D7j9DCMsc+qT5FuxtQ=="],
 
     "electron-squirrel-startup": ["electron-squirrel-startup@1.0.1", "", { "dependencies": { "debug": "^2.2.0" } }, "sha512-sTfFIHGku+7PsHLJ7v0dRcZNkALrV+YEozINTW8X1nM//e5O3L+rfYuvSW00lmGHnYmUjARZulD8F2V8ISI9RA=="],
 
