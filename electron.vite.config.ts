@@ -14,7 +14,12 @@ export default defineConfig({
       rollupOptions: {
         // These ESM-only SDKs use import.meta.resolve() internally and must not
         // be bundled — keep them as native dynamic imports at runtime.
-        external: ["@github/copilot-sdk", "@anthropic-ai/claude-agent-sdk"],
+        external: [
+          "@github/copilot-sdk",
+          "@anthropic-ai/claude-agent-sdk",
+          "ai",
+          "@ai-sdk/openai-compatible",
+        ],
       },
     },
   },

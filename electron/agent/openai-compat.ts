@@ -13,10 +13,8 @@
  * SESSION_TOOL_CALL / SESSION_TOOL_RESULT events work like the other providers.
  */
 import type { Database } from "better-sqlite3";
-import { dynamicTool, jsonSchema, stepCountIs, streamText, tool } from "ai";
 import type { LanguageModel, ModelMessage, ToolSet } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
 
 import { buildSkillsContext } from "./skills";
@@ -97,9 +95,18 @@ export function _setFetch(impl: typeof fetch | null): void {
   fetchImpl = impl ?? ((...args) => fetch(...args));
 }
 
-type ClientFactory = (endpointName: string, entry: OpenAiEndpointEntry) => (modelId: string) => LanguageModel;
+// "ai" and "@ai-sdk/openai-compatible" ship ESM-only (no CJS `require` export
+// condition as of ai v7 / openai-compatible v3), so the CommonJS-bundled main
+// process must dynamic-import them (see electron.vite.config.ts's `external`
+// list) rather than statically import — mirrors the existing pattern for
+// @anthropic-ai/claude-agent-sdk and @openai/codex-sdk in claude.ts/codex.ts.
+type ClientFactory = (
+  endpointName: string,
+  entry: OpenAiEndpointEntry,
+) => ((modelId: string) => LanguageModel) | Promise<(modelId: string) => LanguageModel>;
 
-const defaultClientFactory: ClientFactory = (endpointName, entry) => {
+const defaultClientFactory: ClientFactory = async (endpointName, entry) => {
+  const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
   const provider = createOpenAICompatible({
     name: endpointName,
     baseURL: entry.baseURL,
@@ -471,7 +478,8 @@ function runTool(
   return runGatedTool(ctx, { name, args, category, impl });
 }
 
-function makeBuiltinTools(ctx: ToolContext): ToolSet {
+async function makeBuiltinTools(ctx: ToolContext): Promise<ToolSet> {
+  const { tool } = await import("ai");
   return {
     read_file: tool({
       description: "Read a file from the project and return its text content.",
@@ -625,7 +633,8 @@ function makeBuiltinTools(ctx: ToolContext): ToolSet {
   };
 }
 
-function makeMcpTools(ctx: ToolContext, bridge: ManagedMcpBridge): ToolSet {
+async function makeMcpTools(ctx: ToolContext, bridge: ManagedMcpBridge): Promise<ToolSet> {
+  const { dynamicTool, jsonSchema } = await import("ai");
   const out: ToolSet = {};
   for (const def of bridge.tools) {
     const name = def.function.name;
@@ -693,15 +702,16 @@ async function resolveDelegateTarget(
  * not offered to sub-agents.
  */
 async function runDelegatedTurn(ctx: ToolContext, requested: string, subPrompt: string): Promise<string> {
+  const { streamText, stepCountIs } = await import("ai");
   const target = await resolveDelegateTarget(ctx.endpoints, requested);
-  const model = clientFactory(target.endpointName, target.entry)(target.modelId);
+  const model = (await clientFactory(target.endpointName, target.entry))(target.modelId);
 
   const subCtx: ToolContext = {
     ...ctx,
     delegationDepth: ctx.delegationDepth + 1,
     emitter: ctx.emitter.withoutDeltas(),
   };
-  const subTools = makeBuiltinTools(subCtx);
+  const subTools = await makeBuiltinTools(subCtx);
   // Sub-agents must not mutate shared project memory — their context is ephemeral.
   // (ask_user is separately blocked by the depth guard inside its own execute.)
   delete subTools.write_memory;
@@ -740,9 +750,10 @@ async function runDelegatedTurn(ctx: ToolContext, requested: string, subPrompt: 
 // ── Turn execution ────────────────────────────────────────────────────────────
 
 export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<string> {
+  const { streamText, stepCountIs } = await import("ai");
   const endpoints = readOpenAiEndpoints();
   const { endpointName, entry, modelId } = await resolveTargetForTurn(endpoints, params);
-  const model = clientFactory(endpointName, entry)(modelId);
+  const model = (await clientFactory(endpointName, entry))(modelId);
 
   const emitter = new TurnEmitter(params.webContents, params.sessionId);
   // noTools turns are text-only generation (e.g. PR draft generation) — skip
@@ -771,7 +782,9 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
         loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
         params.projectPath,
       );
-  const tools = managedMcpBridge ? { ...makeBuiltinTools(ctx), ...makeMcpTools(ctx, managedMcpBridge) } : undefined;
+  const tools = managedMcpBridge
+    ? { ...(await makeBuiltinTools(ctx)), ...(await makeMcpTools(ctx, managedMcpBridge)) }
+    : undefined;
 
   const messages = withCurrentPrompt(loadHistory(params.db, params.sessionId, params.messageId), params.prompt);
 
