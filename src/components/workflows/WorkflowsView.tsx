@@ -21,7 +21,9 @@ type EditorTarget = { workflow: Workflow | null } | null;
 
 export function WorkflowsView({ onClose }: WorkflowsViewProps) {
   const ipc = useIpc();
-  const { projects, activeProjectId, setActiveProject } = useProjectStore();
+  const projects = useProjectStore((s) => s.projects);
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const setActiveProject = useProjectStore((s) => s.setActiveProject);
   const { workflows, setWorkflows, upsertWorkflow, removeWorkflow, runsByWorkflow, setRuns, applyRunUpdate } =
     useWorkflowStore();
 

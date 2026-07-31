@@ -234,10 +234,14 @@ export function ContextPanel({
   onClose: () => void;
   onAutoSwitch?: (tab: ContextTab) => void;
 }) {
-  const { liveToolCalls, activeSessionId, sessions } = useSessionStore();
-  const { projects, activeProjectId } = useProjectStore();
-  const activeProject = projects.find((p) => p.id === activeProjectId);
-  const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const activeSession = useSessionStore((s) =>
+    activeSessionId ? s.sessions[activeSessionId] : undefined
+  );
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProject = useProjectStore((s) =>
+    s.projects.find((p) => p.id === activeProjectId)
+  );
   const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
   // Effective provider (session lock, falling back to the project default for
   // legacy null-provider sessions). Used to reset the Memory file viewer when the
@@ -247,9 +251,9 @@ export function ContextPanel({
   const [viewingMemoryFile, setViewingMemoryFile] = useState<string | null>(null);
 
   // Auto-switch to terminal when an execute_bash call arrives
-  const lastToolCall = activeSessionId
-    ? (liveToolCalls[activeSessionId] ?? []).at(-1)
-    : undefined;
+  const lastToolCall = useSessionStore((s) =>
+    activeSessionId ? (s.liveToolCalls[activeSessionId] ?? []).at(-1) : undefined
+  );
   useEffect(() => {
     if (lastToolCall?.toolName === "execute_bash") {
       onAutoSwitch?.("terminal");

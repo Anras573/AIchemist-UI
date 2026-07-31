@@ -26,7 +26,7 @@ interface ModelPickerButtonProps {
 
 export function ModelPickerButton({ sessionId, provider, model }: ModelPickerButtonProps) {
   const ipc = useIpc();
-  const { updateSessionModel } = useSessionStore();
+  const updateSessionModel = useSessionStore((s) => s.updateSessionModel);
   const [open, setOpen] = useState(false);
   const [copilotModels, setCopilotModels] = useState<ModelOption[]>([]);
   const [ollamaModels, setOllamaModels] = useState<ModelOption[]>([]);

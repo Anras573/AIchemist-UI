@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { onSessionEvent, IPC_CHANNELS, useIpc, onThinkingDelta, onThinkingDone } from "@/lib/ipc";
 import { useSessionStore, type PendingQuestion } from "@/lib/store/useSessionStore";
 import type {
@@ -97,7 +98,31 @@ export function useSessionEvents() {
     dequeueMessage,
     setQueuePaused,
     clearQueuePaused,
-  } = useSessionStore();
+  } = useSessionStore(
+    useShallow((s) => ({
+      updateSessionStatus: s.updateSessionStatus,
+      commitMessage: s.commitMessage,
+      appendStreamingDelta: s.appendStreamingDelta,
+      clearStreamingText: s.clearStreamingText,
+      addLiveToolCall: s.addLiveToolCall,
+      clearLiveToolCalls: s.clearLiveToolCalls,
+      appendTerminalOutput: s.appendTerminalOutput,
+      addPendingApproval: s.addPendingApproval,
+      addOrUpdateTraceSpan: s.addOrUpdateTraceSpan,
+      addFileChange: s.addFileChange,
+      addCompactionEvent: s.addCompactionEvent,
+      updateSessionUsage: s.updateSessionUsage,
+      requestTabSwitch: s.requestTabSwitch,
+      appendThinking: s.appendThinking,
+      doneThinking: s.doneThinking,
+      clearThinking: s.clearThinking,
+      addPendingQuestion: s.addPendingQuestion,
+      clearPendingQuestions: s.clearPendingQuestions,
+      dequeueMessage: s.dequeueMessage,
+      setQueuePaused: s.setQueuePaused,
+      clearQueuePaused: s.clearQueuePaused,
+    }))
+  );
 
   useEffect(() => {
     const unsubs = [

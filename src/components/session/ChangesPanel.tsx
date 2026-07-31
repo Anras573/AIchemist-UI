@@ -12,6 +12,8 @@ import type { FileChange } from "@/types";
 import { CodeBlock } from "@/components/ai-elements/code-block";
 import { OpenPrSection } from "./OpenPrSection";
 
+const EMPTY_FILE_CHANGES: FileChange[] = [];
+
 // ── countDiffStats ────────────────────────────────────────────────────────────
 
 function countDiffStats(diff: string): { added: number; removed: number } {
@@ -246,19 +248,25 @@ function GitDiffSection({ projectPath }: { projectPath: string }) {
 // ── ChangesPanel ──────────────────────────────────────────────────────────────
 
 export function ChangesPanel() {
-  const { sessions, activeSessionId, sessionFileChanges, sessionAgents } = useSessionStore();
-  const { activeProjectId, projects } = useProjectStore();
-  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
-  const activeProject = projects.find((p) => p.id === activeProjectId);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const activeSession = useSessionStore((s) =>
+    activeSessionId ? s.sessions[activeSessionId] : null
+  );
+  const sessionAgent = useSessionStore((s) =>
+    activeSessionId ? s.sessionAgents[activeSessionId] : null
+  );
+  const changes: FileChange[] = useSessionStore(
+    (s) => (activeSessionId ? s.sessionFileChanges[activeSessionId] : undefined) ?? EMPTY_FILE_CHANGES
+  );
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProject = useProjectStore((s) =>
+    s.projects.find((p) => p.id === activeProjectId)
+  );
   const activeSessionTitle = activeSession?.title ?? null;
   const activeSessionAgent = activeSessionId
-    ? (sessionAgents[activeSessionId] ?? activeSession?.agent ?? null)
+    ? (sessionAgent ?? activeSession?.agent ?? null)
     : null;
   const workspacePath = activeSession?.workspace_path ?? activeProject?.path ?? "";
-
-  const changes: FileChange[] = activeSessionId
-    ? (sessionFileChanges[activeSessionId] ?? [])
-    : [];
 
   return (
     <div className="relative flex flex-col gap-4 p-3 overflow-y-auto h-full text-sm">

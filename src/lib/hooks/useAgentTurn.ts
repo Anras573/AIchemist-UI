@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useIpc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -12,10 +13,14 @@ import type { Message, SessionStatus } from "@/types";
  */
 export function useAgentTurn() {
   const ipc = useIpc();
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const session = useSessionStore((s) =>
+    activeSessionId ? s.sessions[activeSessionId] : undefined
+  );
+  const sessionAgent = useSessionStore((s) =>
+    activeSessionId ? s.sessionAgents[activeSessionId] : undefined
+  );
   const {
-    sessions,
-    activeSessionId,
-    sessionAgents,
     updateSessionStatus,
     updateSessionTitle,
     appendMessage,
@@ -23,16 +28,26 @@ export function useAgentTurn() {
     clearLiveToolCalls,
     clearPendingApprovals,
     addQueuedMessage,
-  } = useSessionStore();
+  } = useSessionStore(
+    useShallow((s) => ({
+      updateSessionStatus: s.updateSessionStatus,
+      updateSessionTitle: s.updateSessionTitle,
+      appendMessage: s.appendMessage,
+      clearStreamingText: s.clearStreamingText,
+      clearLiveToolCalls: s.clearLiveToolCalls,
+      clearPendingApprovals: s.clearPendingApprovals,
+      addQueuedMessage: s.addQueuedMessage,
+    }))
+  );
 
-  const { projects, activeProjectId } = useProjectStore();
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const project = useProjectStore((s) =>
+    s.projects.find((p) => p.id === activeProjectId)
+  );
 
   const sendMessage = useCallback(
     async (text: string, oneshotSkills?: string[]) => {
       if (!activeSessionId) return;
-
-      const session = sessions[activeSessionId];
-      const project = projects.find((p) => p.id === activeProjectId);
       if (!session || !project) return;
 
       // 1. Persist the user message to SQLite and add it to the store
@@ -59,7 +74,7 @@ export function useAgentTurn() {
 
       // 3. Run the agent turn via IPC — main process handles LLM dispatch
       const sessionIdAtStart = activeSessionId;
-      const activeAgent = sessionAgents[activeSessionId] ?? undefined;
+      const activeAgent = sessionAgent ?? undefined;
       const isAlreadyRunning = (session.status as SessionStatus) === "running"
         || (session.status as SessionStatus) === "waiting_approval";
 
@@ -94,10 +109,9 @@ export function useAgentTurn() {
     },
     [
       activeSessionId,
-      sessions,
-      projects,
-      activeProjectId,
-      sessionAgents,
+      session,
+      project,
+      sessionAgent,
       updateSessionStatus,
       updateSessionTitle,
       appendMessage,

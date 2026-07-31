@@ -53,10 +53,19 @@ function AgentSourceBadge({ source, plugin }: { source?: string; plugin?: string
  */
 export function AgentPickerButton() {
   const ipc = useIpc();
-  const { activeSessionId, sessions, sessionAgents, setSessionAgent } = useSessionStore();
-  const { projects, activeProjectId, openSettings } = useProjectStore();
-  const activeProject = projects.find((p) => p.id === activeProjectId);
-  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const activeSession = useSessionStore((s) =>
+    activeSessionId ? s.sessions[activeSessionId] : null
+  );
+  const selectedAgent = useSessionStore((s) =>
+    activeSessionId ? (s.sessionAgents[activeSessionId] ?? null) : null
+  );
+  const setSessionAgent = useSessionStore((s) => s.setSessionAgent);
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProject = useProjectStore((s) =>
+    s.projects.find((p) => p.id === activeProjectId)
+  );
+  const openSettings = useProjectStore((s) => s.openSettings);
 
   const provider = activeProject?.config.provider;
   const projectPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
@@ -72,10 +81,6 @@ export function AgentPickerButton() {
   // The picker only views agents inline (read-only); creating / editing is
   // delegated to the Settings hub.
   const [viewingAgent, setViewingAgent] = useState<AgentInfo | undefined>(undefined);
-
-  const selectedAgent = activeSessionId
-    ? (sessionAgents[activeSessionId] ?? null)
-    : null;
 
   const loadAgents = useCallback(() => {
     if (!projectPath || !provider) return;
@@ -115,7 +120,7 @@ export function AgentPickerButton() {
 
       // For Copilot, warn when the session already has messages — switching
       // agents discards the SDK session, which resets conversation context.
-      const hasMessages = (sessions[activeSessionId]?.messages.length ?? 0) > 0;
+      const hasMessages = (activeSession?.messages.length ?? 0) > 0;
       if (provider === "copilot" && hasMessages) {
         setPendingAgent(agentName);
         return;
@@ -123,7 +128,7 @@ export function AgentPickerButton() {
 
       applyAgentSelection(agentName);
     },
-    [activeSessionId, selectedAgent, sessions, provider, applyAgentSelection]
+    [activeSessionId, selectedAgent, activeSession, provider, applyAgentSelection]
   );
 
   const handleConfirmSwitch = useCallback(() => {
