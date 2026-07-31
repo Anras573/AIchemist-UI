@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useAgentTurn } from "@/lib/hooks/useAgentTurn";
@@ -11,10 +12,22 @@ import type { Provider } from "@/types";
 
 export function WorkspaceView() {
   const ipc = useIpc();
-  const { activeProjectId, projects } = useProjectStore();
-  const { tabSwitchRequest, clearTabSwitchRequest, addSession, setActiveSession, sessions, activeSessionId } = useSessionStore();
-  const activeProject = projects.find((p) => p.id === activeProjectId);
-  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProject = useProjectStore((s) =>
+    s.projects.find((p) => p.id === activeProjectId)
+  );
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const activeSession = useSessionStore((s) =>
+    activeSessionId ? s.sessions[activeSessionId] : null
+  );
+  const tabSwitchRequest = useSessionStore((s) => s.tabSwitchRequest);
+  const { clearTabSwitchRequest, addSession, setActiveSession } = useSessionStore(
+    useShallow((s) => ({
+      clearTabSwitchRequest: s.clearTabSwitchRequest,
+      addSession: s.addSession,
+      setActiveSession: s.setActiveSession,
+    }))
+  );
   const { sendMessage } = useAgentTurn();
 
   // null = panel closed; a tab value = panel open on that tab

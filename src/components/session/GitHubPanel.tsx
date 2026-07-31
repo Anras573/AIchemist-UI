@@ -108,10 +108,14 @@ function mapGitHubError(rawError: unknown): string {
  */
 export function GitHubPanel({}: GitHubPanelProps) {
   const ipc = useIpc();
-  const { projects, activeProjectId } = useProjectStore();
-  const { sessions, activeSessionId } = useSessionStore();
-  const activeProject = projects.find((p) => p.id === activeProjectId);
-  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProject = useProjectStore((s) =>
+    s.projects.find((p) => p.id === activeProjectId)
+  );
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const activeSession = useSessionStore((s) =>
+    activeSessionId ? s.sessions[activeSessionId] : null
+  );
   const projectPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
 
   // Open PRs + issues, cached/de-duplicated by project path. Key-based caching

@@ -33,6 +33,7 @@ const SOURCE_LABEL: Record<SkillSource, { label: string; className: string; acti
 };
 
 const ALL_SOURCES: SkillSource[] = ["project", "global", "plugin"];
+const EMPTY_SKILLS: string[] = [];
 
 function SkillSourceBadge({ source, plugin }: { source?: string; plugin?: string }) {
   if (!source) return null;
@@ -123,13 +124,20 @@ function SkillCard({
 
 export function SkillsPanel() {
   const ipc = useIpc();
-  const { projects, activeProjectId } = useProjectStore();
-  const activeProject = projects.find((p) => p.id === activeProjectId);
-  const { activeSessionId, sessionSkills, setSessionSkills, sessions } = useSessionStore();
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProject = useProjectStore((s) =>
+    s.projects.find((p) => p.id === activeProjectId)
+  );
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const activeSession = useSessionStore((s) =>
+    activeSessionId ? s.sessions[activeSessionId] : null
+  );
+  const activeSkills = useSessionStore(
+    (s) => (activeSessionId ? s.sessionSkills[activeSessionId] : undefined) ?? EMPTY_SKILLS
+  );
+  const setSessionSkills = useSessionStore((s) => s.setSessionSkills);
   const openSettings = useProjectStore((s) => s.openSettings);
-  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const projectPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
-  const activeSkills = activeSessionId ? (sessionSkills[activeSessionId] ?? []) : [];
   const provider = useActiveSessionProvider();
 
   // Cache the skill listing by project path + provider (the two inputs that

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useIpc } from "@/lib/ipc";
@@ -37,16 +38,25 @@ type Page = "root" | "agent";
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const ipc = useIpc();
-  const { projects, setActiveProject, activeProjectId, openSettings } = useProjectStore();
-  const {
-    sessions,
-    setActiveSession,
-    addSession,
-    removeSession,
-    activeSessionId,
-    setSessionAgent,
-    sessionAgents,
-  } = useSessionStore();
+  const projects = useProjectStore((s) => s.projects);
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const { setActiveProject, openSettings } = useProjectStore(
+    useShallow((s) => ({
+      setActiveProject: s.setActiveProject,
+      openSettings: s.openSettings,
+    }))
+  );
+  const sessions = useSessionStore((s) => s.sessions);
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const sessionAgents = useSessionStore((s) => s.sessionAgents);
+  const { setActiveSession, addSession, removeSession, setSessionAgent } = useSessionStore(
+    useShallow((s) => ({
+      setActiveSession: s.setActiveSession,
+      addSession: s.addSession,
+      removeSession: s.removeSession,
+      setSessionAgent: s.setSessionAgent,
+    }))
+  );
 
   const [page, setPage] = useState<Page>("root");
   const [search, setSearch] = useState("");

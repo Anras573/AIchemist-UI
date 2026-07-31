@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
-import { SkillInfo, SessionUsage } from "@/types";
+import { SkillInfo } from "@/types";
 import type { Provider } from "@/types";
 import { useIpc } from "@/lib/ipc";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
@@ -41,13 +41,11 @@ import { getModelContextWindow } from "@/lib/models";
 function SessionContextUsage({
   sessionId,
   model,
-  sessionUsage,
 }: {
   sessionId: string;
   model: string;
-  sessionUsage: Record<string, SessionUsage>;
 }) {
-  const raw = sessionUsage[sessionId];
+  const raw = useSessionStore((s) => s.sessionUsage[sessionId]);
   if (!raw) return null;
 
   const { input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens } = raw;
@@ -114,13 +112,18 @@ function InputBarInner({
 }: InputBarProps) {
   const controller = usePromptInputController();
   const ipc = useIpc();
-  const { sessions, activeSessionId, clearSessionMessages, sessionUsage } = useSessionStore();
-  const { projects, activeProjectId } = useProjectStore();
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const activeSession = useSessionStore((s) =>
+    activeSessionId ? s.sessions[activeSessionId] : null
+  );
+  const clearSessionMessages = useSessionStore((s) => s.clearSessionMessages);
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProject = useProjectStore((s) =>
+    activeProjectId ? s.projects.find((p) => p.id === activeProjectId) : null
+  );
   // Skill discovery is provider-dependent (global/plugin scan paths differ),
   // so the slash palette must list the same skills the Skills panel shows.
   const provider = useActiveSessionProvider();
-  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
-  const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null;
   const sessionPath = activeSession?.workspace_path ?? activeProject?.path ?? "";
   const { branch: gitBranch } = useGitBranch(sessionPath);
 
@@ -304,7 +307,7 @@ function InputBarInner({
               />
             )}
             <AgentPickerButton />
-            {activeSession && activeSession.messages.length > 0 && <SessionContextUsage sessionId={activeSession.id} model={activeSession.model ?? ""} sessionUsage={sessionUsage} />}
+            {activeSession && activeSession.messages.length > 0 && <SessionContextUsage sessionId={activeSession.id} model={activeSession.model ?? ""} />}
             {(activeSession?.branch ?? gitBranch) && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground/60">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

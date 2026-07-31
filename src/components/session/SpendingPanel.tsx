@@ -162,8 +162,10 @@ export function SpendingHeaderInfo() {
 
 export function SpendingPanel() {
   const ipc = useIpc();
-  const { projects, activeProjectId } = useProjectStore();
-  const activeProject = projects.find((p) => p.id === activeProjectId);
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const activeProject = useProjectStore((s) =>
+    s.projects.find((p) => p.id === activeProjectId)
+  );
 
   const [preset, setPreset] = useState<RangePreset>("7d");
   const [customSince, setCustomSince] = useState("");

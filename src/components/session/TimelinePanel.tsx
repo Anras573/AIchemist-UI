@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { useSessionStore, LiveToolCall, PendingApproval } from "@/lib/store/useSessionStore";
+import { useShallow } from "zustand/react/shallow";
+import { useSessionStore, LiveToolCall, PendingApproval, PendingQuestion } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { Message as MessageRecord, CompactionEvent } from "@/types";
 import type { Provider } from "@/types";
@@ -33,6 +34,10 @@ import { QuestionCard } from "./QuestionCard";
 import { useIpc } from "@/lib/ipc";
 
 const EMPTY_COMPACTIONS: CompactionEvent[] = [];
+const EMPTY_TOOL_CALLS: LiveToolCall[] = [];
+const EMPTY_APPROVALS: PendingApproval[] = [];
+const EMPTY_QUESTIONS: PendingQuestion[] = [];
+const EMPTY_QUEUED_IDS: string[] = [];
 
 // ─── Individual message bubble ────────────────────────────────────────────────
 
@@ -252,27 +257,59 @@ interface TimelinePanelProps {
 
 export function TimelinePanel({ onSendMessage, onNewSession, createSessionError, projectPath }: TimelinePanelProps) {
   const ipc = useIpc();
-  const { sessions, activeSessionId, streamingText, liveToolCalls, pendingApprovals, pendingQuestions, removeApproval, removePendingQuestion, sessionCompactions, sessionThinking, sessionIsThinking, queuedMessageIds, queuePaused, clearQueuePaused, clearQueuedMessages, dequeueMessage } = useSessionStore();
-  const { activeProjectId, projects } = useProjectStore();
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const session = useSessionStore((s) =>
+    activeSessionId ? s.sessions[activeSessionId] : null
+  );
+  const streaming = useSessionStore((s) =>
+    activeSessionId ? (s.streamingText[activeSessionId] ?? "") : ""
+  );
+  const toolCalls = useSessionStore(
+    (s) => (activeSessionId ? s.liveToolCalls[activeSessionId] : undefined) ?? EMPTY_TOOL_CALLS
+  );
+  const approvals = useSessionStore(
+    (s) => (activeSessionId ? s.pendingApprovals[activeSessionId] : undefined) ?? EMPTY_APPROVALS
+  );
+  const questions = useSessionStore(
+    (s) => (activeSessionId ? s.pendingQuestions[activeSessionId] : undefined) ?? EMPTY_QUESTIONS
+  );
+  const compactions = useSessionStore(
+    (s) => (activeSessionId ? s.sessionCompactions[activeSessionId] : undefined) ?? EMPTY_COMPACTIONS
+  );
+  const thinkingText = useSessionStore((s) =>
+    activeSessionId ? (s.sessionThinking[activeSessionId] ?? "") : ""
+  );
+  const isThinking = useSessionStore((s) =>
+    activeSessionId ? (s.sessionIsThinking[activeSessionId] ?? false) : false
+  );
+  const queuedIds = useSessionStore(
+    (s) => (activeSessionId ? s.queuedMessageIds[activeSessionId] : undefined) ?? EMPTY_QUEUED_IDS
+  );
+  const queuePausedState = useSessionStore(
+    (s) => (activeSessionId ? s.queuePaused[activeSessionId] : undefined) ?? null
+  );
+  const {
+    removeApproval,
+    removePendingQuestion,
+    clearQueuePaused,
+    clearQueuedMessages,
+    dequeueMessage,
+  } = useSessionStore(
+    useShallow((s) => ({
+      removeApproval: s.removeApproval,
+      removePendingQuestion: s.removePendingQuestion,
+      clearQueuePaused: s.clearQueuePaused,
+      clearQueuedMessages: s.clearQueuedMessages,
+      dequeueMessage: s.dequeueMessage,
+    }))
+  );
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const projects = useProjectStore((s) => s.projects);
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
   const defaultProvider = activeProject?.config.provider ?? null;
   const { probes } = useProviderProbes(activeProjectId ?? undefined);
-  const session = activeSessionId ? sessions[activeSessionId] : null;
-  const streaming = activeSessionId ? (streamingText[activeSessionId] ?? "") : "";
-  const toolCalls = activeSessionId ? (liveToolCalls[activeSessionId] ?? []) : [];
-  const approvals = activeSessionId ? (pendingApprovals[activeSessionId] ?? []) : [];
-  const questions = activeSessionId ? (pendingQuestions[activeSessionId] ?? []) : [];
-  const compactions = activeSessionId
-    ? (sessionCompactions[activeSessionId] ?? EMPTY_COMPACTIONS)
-    : EMPTY_COMPACTIONS;
-  const thinkingText = activeSessionId ? (sessionThinking[activeSessionId] ?? "") : "";
-  const isThinking = activeSessionId ? (sessionIsThinking[activeSessionId] ?? false) : false;
   const isRunning = session?.status === "running" || session?.status === "waiting_approval";
-  const queuedIdsSet = useMemo(
-    () => new Set(activeSessionId ? (queuedMessageIds[activeSessionId] ?? []) : []),
-    [queuedMessageIds, activeSessionId]
-  );
-  const queuePausedState = activeSessionId ? (queuePaused[activeSessionId] ?? null) : null;
+  const queuedIdsSet = useMemo(() => new Set(queuedIds), [queuedIds]);
 
   const messages = session?.messages ?? [];
 
@@ -307,7 +344,7 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
   function handleQueueRecovery(action: "retry" | "skip" | "clear") {
     if (!activeSessionId) return;
     const sid = activeSessionId;
-    const failedMsgId = queuePaused[sid]?.failedMessageId;
+    const failedMsgId = queuePausedState?.failedMessageId;
     ipc.agentQueueRecovery(sid, action)
       .then(() => {
         clearQueuePaused(sid);

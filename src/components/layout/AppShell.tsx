@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ProjectSidebar } from "@/components/layout/ProjectSidebar";
 import { WorkspaceView } from "@/components/layout/WorkspaceView";
 import { CommandPalette } from "@/components/layout/CommandPalette";
@@ -11,7 +12,15 @@ import { TitleBar } from "@/components/layout/TitleBar";
 export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const { settingsOpen, openSettings, closeSettings, workflowsOpen, closeWorkflows } = useProjectStore();
+  const { settingsOpen, openSettings, closeSettings, workflowsOpen, closeWorkflows } = useProjectStore(
+    useShallow((s) => ({
+      settingsOpen: s.settingsOpen,
+      openSettings: s.openSettings,
+      closeSettings: s.closeSettings,
+      workflowsOpen: s.workflowsOpen,
+      closeWorkflows: s.closeWorkflows,
+    }))
+  );
 
   // Subscribe to all session:* events for the lifetime of the app
   useSessionEvents();
