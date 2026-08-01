@@ -554,11 +554,17 @@ export const codexProvider: AgentProvider = {
     // exec transport. If the app-server can't come up, fall back to exec so an
     // interactive turn still runs (degraded to the on-failure approval policy).
     const useAppServer = !noTools && !params.nonInteractive;
-    if (useAppServer) {
-      const result = await runViaAppServer(ctx);
-      if (!result.fallback) return result.text;
+    try {
+      if (useAppServer) {
+        const result = await runViaAppServer(ctx);
+        if (!result.fallback) return result.text;
+      }
+      return await runViaExec(ctx);
+    } finally {
+      // Flush any buffered streaming text now — the turn is over, so nothing
+      // should be left waiting on the coalescing timer past this point.
+      emitter.flush();
     }
-    return runViaExec(ctx);
   },
 
   async listModels(): Promise<Array<{ id: string; name: string }>> {

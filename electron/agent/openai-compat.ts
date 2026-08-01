@@ -852,6 +852,9 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
     }
     turnStatus = "success";
   } finally {
+    // Flush any buffered streaming text now — the turn is over, so nothing
+    // should be left waiting on the coalescing timer past this point.
+    emitter.flush();
     await managedMcpBridge?.close();
     recorder?.turnEnd(turnStatus);
   }

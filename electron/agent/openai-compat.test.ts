@@ -279,8 +279,9 @@ describe("openai-compat turn execution", () => {
     expect(factoryCalls).toEqual([
       { endpointName: "local", baseURL: "http://localhost:1234/v1", modelId: "test-model" },
     ]);
-    expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, { session_id: "s-1", text_delta: "Hel" });
-    expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, { session_id: "s-1", text_delta: "lo" });
+    // Both chunks arrive within the same debounce window, so they coalesce
+    // into a single SESSION_DELTA send rather than one per chunk.
+    expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, { session_id: "s-1", text_delta: "Hello" });
     expect(send).toHaveBeenCalledWith(CH.SESSION_USAGE, {
       session_id: "s-1",
       usage: {

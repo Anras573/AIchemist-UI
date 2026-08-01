@@ -540,8 +540,10 @@ export async function runClaudeAgentTurn(params: {
         }
       }
     }
-  } catch (err) {
-    throw err;
+  } finally {
+    // Flush any buffered streaming text now — the turn is over, so nothing
+    // should be left waiting on the coalescing timer past this point.
+    emitter.flush();
   }
 
   // 5. Persist the SDK session id if it changed or was assigned for the first time
