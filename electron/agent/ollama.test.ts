@@ -173,13 +173,11 @@ describe("ollama provider", () => {
     expect(call.tools).toEqual(expect.arrayContaining([
       expect.objectContaining({ function: expect.objectContaining({ name: "read_file" }) }),
     ]));
-    expect(send).toHaveBeenNthCalledWith(1, CH.SESSION_DELTA, {
+    // All three chunks arrive within the same debounce window, so they
+    // coalesce into a single SESSION_DELTA send rather than one per chunk.
+    expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, {
       session_id: "s-1",
-      text_delta: "Hel",
-    });
-    expect(send).toHaveBeenNthCalledWith(2, CH.SESSION_DELTA, {
-      session_id: "s-1",
-      text_delta: "lo",
+      text_delta: "Hello",
     });
   });
 
@@ -1238,14 +1236,12 @@ describe("ollama provider", () => {
       expect(text).toBe("Answer.");
       expect(ollamaMocks.show).toHaveBeenCalledWith({ model: "qwen3:latest" });
       expect(ollamaMocks.chat).toHaveBeenCalledWith(expect.objectContaining({ think: true }));
-      // Reasoning is streamed via the thinking channel, then closed when content arrives.
+      // Reasoning is streamed via the thinking channel, coalesced into a single
+      // send (both chunks arrive within the same debounce window), then closed
+      // when content arrives.
       expect(send).toHaveBeenCalledWith(CH.SESSION_THINKING_DELTA, {
         session_id: "s-think",
-        text_delta: "Let me ",
-      });
-      expect(send).toHaveBeenCalledWith(CH.SESSION_THINKING_DELTA, {
-        session_id: "s-think",
-        text_delta: "reason.",
+        text_delta: "Let me reason.",
       });
       expect(send).toHaveBeenCalledWith(CH.SESSION_THINKING_DONE, { session_id: "s-think" });
       expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, {

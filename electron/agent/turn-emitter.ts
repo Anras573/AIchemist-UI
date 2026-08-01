@@ -38,6 +38,75 @@ export function clearLastUsage(sessionId: string): void {
 }
 
 /**
+ * How long a stream of `delta()`/`thinkingDelta()` calls is buffered before
+ * being flushed as a single IPC message. A fast stream can emit hundreds of
+ * token-sized deltas per second; without coalescing, each one is its own
+ * `webContents.send` plus a renderer store update. 16ms keeps the flush
+ * roughly in step with a 60fps frame without introducing visible latency.
+ */
+const DELTA_FLUSH_INTERVAL_MS = 16;
+
+interface DeltaBuffer {
+  text: string;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+/**
+ * Pending, not-yet-flushed delta/thinking-delta text, keyed by `sessionId` —
+ * not by `TurnEmitter` instance, because a single turn routes through more
+ * than one instance (the runner's own emitter for status/message, and each
+ * provider's separately-constructed emitter for delta/toolCall/etc). Keying
+ * by session lets `flush()` on any instance drain buffers written by another,
+ * which is what preserves cross-event ordering (see `flush()` below).
+ */
+const pendingDeltaBySession = new Map<string, DeltaBuffer>();
+const pendingThinkingBySession = new Map<string, DeltaBuffer>();
+
+function bufferDelta(
+  buffers: Map<string, DeltaBuffer>,
+  sessionId: string,
+  text: string,
+  emit: (accumulated: string) => void,
+): void {
+  const existing = buffers.get(sessionId);
+  if (existing) {
+    existing.text += text;
+    return;
+  }
+  const buffer: DeltaBuffer = { text, timer: null };
+  buffer.timer = setTimeout(() => {
+    buffers.delete(sessionId);
+    emit(buffer.text);
+  }, DELTA_FLUSH_INTERVAL_MS);
+  buffer.timer.unref?.();
+  buffers.set(sessionId, buffer);
+}
+
+function flushBuffer(
+  buffers: Map<string, DeltaBuffer>,
+  sessionId: string,
+  emit: (accumulated: string) => void,
+): void {
+  const buffer = buffers.get(sessionId);
+  if (!buffer) return;
+  if (buffer.timer) clearTimeout(buffer.timer);
+  buffers.delete(sessionId);
+  emit(buffer.text);
+}
+
+/** Test seam: drop all pending delta/thinking buffers (and their timers) for every session. */
+export function _resetTurnEmitterBuffersForTests(): void {
+  for (const buffer of pendingDeltaBySession.values()) {
+    if (buffer.timer) clearTimeout(buffer.timer);
+  }
+  pendingDeltaBySession.clear();
+  for (const buffer of pendingThinkingBySession.values()) {
+    if (buffer.timer) clearTimeout(buffer.timer);
+  }
+  pendingThinkingBySession.clear();
+}
+
+/**
  * Typed wrapper around `webContents.send` for the SESSION_* push events a
  * provider emits during an agent turn.
  *
@@ -56,35 +125,65 @@ export class TurnEmitter {
     readonly sessionId: string,
   ) {}
 
-  /** Streamed assistant text (SESSION_DELTA). */
+  /** Streamed assistant text (SESSION_DELTA), coalesced and flushed on a short timer. */
   delta(text: string): void {
-    this.webContents.send(CH.SESSION_DELTA, {
-      session_id: this.sessionId,
-      text_delta: text,
+    bufferDelta(pendingDeltaBySession, this.sessionId, text, (accumulated) => {
+      this.webContents.send(CH.SESSION_DELTA, {
+        session_id: this.sessionId,
+        text_delta: accumulated,
+      });
     });
   }
 
-  /** Streamed extended-thinking text (SESSION_THINKING_DELTA). */
+  /** Streamed extended-thinking text (SESSION_THINKING_DELTA), coalesced and flushed on a short timer. */
   thinkingDelta(text: string): void {
-    this.webContents.send(CH.SESSION_THINKING_DELTA, {
-      session_id: this.sessionId,
-      text_delta: text,
+    bufferDelta(pendingThinkingBySession, this.sessionId, text, (accumulated) => {
+      this.webContents.send(CH.SESSION_THINKING_DELTA, {
+        session_id: this.sessionId,
+        text_delta: accumulated,
+      });
+    });
+  }
+
+  /**
+   * Flush any buffered `delta()`/`thinkingDelta()` text for this session
+   * immediately, without waiting for the debounce timer. Every other emit
+   * method calls this first so a buffered chunk can never be reordered after
+   * a tool call, message, or status change that logically followed it.
+   * Providers also call this once at the end of a turn so trailing text
+   * isn't left waiting on the timer past turn completion.
+   */
+  flush(): void {
+    flushBuffer(pendingDeltaBySession, this.sessionId, (accumulated) => {
+      this.webContents.send(CH.SESSION_DELTA, {
+        session_id: this.sessionId,
+        text_delta: accumulated,
+      });
+    });
+    flushBuffer(pendingThinkingBySession, this.sessionId, (accumulated) => {
+      this.webContents.send(CH.SESSION_THINKING_DELTA, {
+        session_id: this.sessionId,
+        text_delta: accumulated,
+      });
     });
   }
 
   /** Extended thinking finished (SESSION_THINKING_DONE). */
   thinkingDone(): void {
+    this.flush();
     this.webContents.send(CH.SESSION_THINKING_DONE, { session_id: this.sessionId });
   }
 
   /** Token usage update for the current turn (SESSION_USAGE). */
   usage(usage: SessionUsage): void {
+    this.flush();
     lastUsageBySession.set(this.sessionId, usage);
     this.webContents.send(CH.SESSION_USAGE, { session_id: this.sessionId, usage });
   }
 
   /** A tool call has started (SESSION_TOOL_CALL). */
   toolCall(toolCallId: string, toolName: string, input: unknown): void {
+    this.flush();
     this.webContents.send(CH.SESSION_TOOL_CALL, {
       session_id: this.sessionId,
       tool_name: toolName,
@@ -95,6 +194,7 @@ export class TurnEmitter {
 
   /** A tool call has produced output (SESSION_TOOL_RESULT). */
   toolResult(toolName: string, output: unknown): void {
+    this.flush();
     this.webContents.send(CH.SESSION_TOOL_RESULT, {
       session_id: this.sessionId,
       tool_name: toolName,
@@ -104,6 +204,7 @@ export class TurnEmitter {
 
   /** A file was written or deleted by a tool (SESSION_FILE_CHANGE). */
   fileChange(change: FileChange): void {
+    this.flush();
     this.webContents.send(CH.SESSION_FILE_CHANGE, {
       session_id: this.sessionId,
       file_change: change,
@@ -112,6 +213,7 @@ export class TurnEmitter {
 
   /** A context compaction boundary was crossed (SESSION_COMPACTION). */
   compaction(compaction: Omit<CompactionEvent, "session_id">): void {
+    this.flush();
     this.webContents.send(CH.SESSION_COMPACTION, {
       session_id: this.sessionId,
       compaction: { ...compaction, session_id: this.sessionId },
@@ -120,6 +222,7 @@ export class TurnEmitter {
 
   /** Session status transition (SESSION_STATUS). */
   status(status: SessionStatus | "complete"): void {
+    this.flush();
     this.webContents.send(CH.SESSION_STATUS, {
       session_id: this.sessionId,
       status,
@@ -128,6 +231,7 @@ export class TurnEmitter {
 
   /** Final persisted assistant message for the turn (SESSION_MESSAGE). */
   message(message: Message): void {
+    this.flush();
     this.webContents.send(CH.SESSION_MESSAGE, {
       session_id: this.sessionId,
       message,

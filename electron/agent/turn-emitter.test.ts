@@ -1,7 +1,7 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as CH from "../ipc-channels";
-import { TurnEmitter, clearLastUsage, getLastUsage } from "./turn-emitter";
+import { TurnEmitter, clearLastUsage, getLastUsage, _resetTurnEmitterBuffersForTests } from "./turn-emitter";
 
 function makeEmitter() {
   const send = vi.fn();
@@ -10,10 +10,63 @@ function makeEmitter() {
 }
 
 describe("TurnEmitter", () => {
-  it("emits SESSION_DELTA with the session id", () => {
+  beforeEach(() => {
+    _resetTurnEmitterBuffersForTests();
+  });
+
+  afterEach(() => {
+    _resetTurnEmitterBuffersForTests();
+  });
+
+  it("buffers delta text and flushes it as a single SESSION_DELTA send", () => {
     const { send, emitter } = makeEmitter();
-    emitter.delta("hello");
+    emitter.delta("hel");
+    emitter.delta("lo");
+    // Nothing sent yet — still buffered.
+    expect(send).not.toHaveBeenCalled();
+    emitter.flush();
+    expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, { session_id: "s-1", text_delta: "hello" });
+  });
+
+  it("flushes buffered delta text automatically after the debounce interval", () => {
+    vi.useFakeTimers();
+    try {
+      const { send, emitter } = makeEmitter();
+      emitter.delta("hi");
+      expect(send).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(20);
+      expect(send).toHaveBeenCalledWith(CH.SESSION_DELTA, { session_id: "s-1", text_delta: "hi" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("flushes pending delta text before a subsequent event so ordering is preserved", () => {
+    const { send, emitter } = makeEmitter();
+    emitter.delta("partial");
+    emitter.toolCall("tc-1", "read_file", {});
+    expect(send).toHaveBeenNthCalledWith(1, CH.SESSION_DELTA, { session_id: "s-1", text_delta: "partial" });
+    expect(send).toHaveBeenNthCalledWith(2, CH.SESSION_TOOL_CALL, {
+      session_id: "s-1",
+      tool_name: "read_file",
+      tool_call_id: "tc-1",
+      input: {},
+    });
+  });
+
+  it("shares pending buffers across TurnEmitter instances for the same session", () => {
+    // The runner and each provider construct their own TurnEmitter instance
+    // for the same session — buffering must be keyed by session, not by
+    // instance, or a delta buffered on one instance would never be flushed
+    // (or would be reordered) by an event sent through another.
+    const send = vi.fn();
+    const providerEmitter = new TurnEmitter({ send } as never, "s-shared");
+    const runnerEmitter = new TurnEmitter({ send } as never, "s-shared");
+    providerEmitter.delta("hello");
+    runnerEmitter.status("idle");
+    expect(send).toHaveBeenNthCalledWith(1, CH.SESSION_DELTA, { session_id: "s-shared", text_delta: "hello" });
+    expect(send).toHaveBeenNthCalledWith(2, CH.SESSION_STATUS, { session_id: "s-shared", status: "idle" });
   });
 
   it("emits SESSION_TOOL_CALL with id, name and input", () => {

@@ -34,6 +34,7 @@ vi.mock("./turn-emitter", () => ({
     this.toolCall = vi.fn();
     this.toolResult = vi.fn();
     this.fileChange = vi.fn();
+    this.flush = vi.fn();
   }),
 }));
 
