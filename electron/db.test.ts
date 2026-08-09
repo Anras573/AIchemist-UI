@@ -176,4 +176,12 @@ describe("migrate", () => {
     expect(indexNames(db, "tool_calls")).toContain("idx_tool_calls_message");
     expect(indexNames(db, "sessions")).toContain("idx_sessions_project");
   });
+
+  it("sets synchronous=NORMAL alongside WAL", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+
+    // better-sqlite3 reports synchronous as an integer: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA.
+    expect(db.pragma("synchronous", { simple: true })).toBe(1);
+  });
 });
