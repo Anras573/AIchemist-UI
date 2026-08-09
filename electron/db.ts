@@ -178,6 +178,7 @@ const MIGRATIONS: Migration[] = [
 export function migrate(db: Database.Database): void {
   db.exec(`
     PRAGMA journal_mode=WAL;
+    PRAGMA synchronous=NORMAL;
     PRAGMA foreign_keys=ON;
 
     CREATE TABLE IF NOT EXISTS projects (
