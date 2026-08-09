@@ -90,9 +90,10 @@ export function registerTraceHandlers(db: Database, getMainWindow: () => Browser
     if (!src) return { ok: false, reason: "no-sdk-session-id" };
 
     const onUpdate = (spans: TraceSpan[]) => {
+      if (spans.length === 0) return;
       const win = getMainWindow();
       if (!win) return;
-      for (const span of spans) win.webContents.send(CH.SESSION_TRACE, span);
+      win.webContents.send(CH.SESSION_TRACE_BATCH, spans);
     };
 
     if (src.kind === "claude") {

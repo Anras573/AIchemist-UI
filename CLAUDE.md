@@ -208,7 +208,7 @@ Ollama and OpenAI-compatible run an in-process tool loop and have no SDK session
 ### IPC surface
 
 - **`GET_TRACES({ sessionId })`** in `electron/ipc/trace-handlers.ts` — thin wrapper over `loadTranscriptSpans()`.
-- **`TRACE_BIND_TRANSCRIPT({ sessionId })`** — sets up an `fs.watch` watcher (directory-level, with a 1 s stat-poll safety-net for macOS) on the transcript file and streams incremental spans via `SESSION_TRACE`. The `TracesPanel` calls this when the tab opens.
+- **`TRACE_BIND_TRANSCRIPT({ sessionId })`** — sets up an `fs.watch` watcher (directory-level, with a 1 s stat-poll safety-net for macOS) on the transcript file and streams the full rebuilt span list as **one** `SESSION_TRACE_BATCH` message per change (not one `send` per span — that was O(n) IPC messages per transcript append, see issue #180). The `TracesPanel` calls this when the tab opens. The renderer merges a batch in a single `addOrUpdateTraceSpans()` store `set`, keyed by span id per session, instead of one `set` per span.
 
 ### Copilot turn grouping — anchor on `interactionId`, not `turnId`
 

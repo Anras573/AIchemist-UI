@@ -100,7 +100,7 @@ interface SessionStore {
   setSessionAgent: (sessionId: string, agent: string | null) => void;
   setSessionSkills: (sessionId: string, skills: string[]) => void;
   setSessionDisabledMcp: (sessionId: string, names: string[]) => void;
-  addOrUpdateTraceSpan: (span: TraceSpan) => void;
+  addOrUpdateTraceSpans: (spans: TraceSpan[]) => void;
   addFileChange: (sessionId: string, change: FileChange) => void;
   // Signals WorkspaceView to switch the context panel to a given tab
   tabSwitchRequest: string | null;
@@ -409,15 +409,24 @@ export const useSessionStore = create<SessionStore>()(
           sessionDisabledMcp: { ...state.sessionDisabledMcp, [sessionId]: names },
         })),
 
-      addOrUpdateTraceSpan: (span) =>
+      addOrUpdateTraceSpans: (spans) =>
         set((state) => {
-          const existing = state.sessionTraces[span.sessionId] ?? [];
-          const idx = existing.findIndex((s) => s.id === span.id);
-          const updated =
-            idx >= 0
-              ? [...existing.slice(0, idx), span, ...existing.slice(idx + 1)]
-              : [...existing, span];
-          return { sessionTraces: { ...state.sessionTraces, [span.sessionId]: updated } };
+          if (spans.length === 0) return state;
+          const bySession = new Map<string, TraceSpan[]>();
+          for (const span of spans) {
+            const group = bySession.get(span.sessionId);
+            if (group) group.push(span);
+            else bySession.set(span.sessionId, [span]);
+          }
+          const sessionTraces = { ...state.sessionTraces };
+          for (const [sessionId, newSpans] of bySession) {
+            const merged = new Map(
+              (state.sessionTraces[sessionId] ?? []).map((s) => [s.id, s] as const)
+            );
+            for (const span of newSpans) merged.set(span.id, span);
+            sessionTraces[sessionId] = [...merged.values()];
+          }
+          return { sessionTraces };
         }),
 
       addFileChange: (sessionId, change) =>

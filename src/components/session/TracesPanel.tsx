@@ -294,7 +294,7 @@ export function TracesPanel() {
   const ipc = useIpc();
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const sessionTraces = useSessionStore((s) => s.sessionTraces);
-  const addOrUpdateTraceSpan = useSessionStore((s) => s.addOrUpdateTraceSpan);
+  const addOrUpdateTraceSpans = useSessionStore((s) => s.addOrUpdateTraceSpans);
   const [loading, setLoading] = useState(false);
 
   const traces = activeSessionId ? (sessionTraces[activeSessionId] ?? []) : [];
@@ -307,13 +307,13 @@ export function TracesPanel() {
     setLoading(true);
     try {
       const spans = await ipc.getTraces(activeSessionId);
-      spans.forEach((span) => addOrUpdateTraceSpan(span));
+      addOrUpdateTraceSpans(spans);
     } catch {
-      // Non-critical — live spans still flow via SESSION_TRACE push events
+      // Non-critical — live spans still flow via SESSION_TRACE_BATCH push events
     } finally {
       setLoading(false);
     }
-  }, [activeSessionId, addOrUpdateTraceSpan]);
+  }, [activeSessionId, addOrUpdateTraceSpans]);
 
   useEffect(() => { void hydrate(); }, [hydrate]);
 

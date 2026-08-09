@@ -95,7 +95,7 @@ export const SESSION_TOOL_CALL        = "session:tool_call";
 export const SESSION_TOOL_RESULT      = "session:tool_result";
 export const SESSION_APPROVAL_REQUIRED = "session:approval_required";
 export const SESSION_MESSAGE          = "session:message";
-export const SESSION_TRACE            = "session:trace";
+export const SESSION_TRACE_BATCH      = "session:trace_batch";
 
 // ── Memory ────────────────────────────────────────────────────────────────────
 export const LIST_MEMORY            = "memory:list";
