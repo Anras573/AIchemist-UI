@@ -35,12 +35,18 @@ function tableNames(db: Database.Database): string[] {
   ).map((t) => t.name);
 }
 
+function indexNames(db: Database.Database, table: string): string[] {
+  return (db.prepare(`PRAGMA index_list(${table})`).all() as { name: string }[]).map(
+    (i) => i.name
+  );
+}
+
 describe("migrate", () => {
   it("brings a fresh database to the latest version with every column", () => {
     const db = new Database(":memory:");
     migrate(db);
 
-    expect(userVersion(db)).toBe(6);
+    expect(userVersion(db)).toBe(7);
     const cols = columnNames(db, "sessions");
     for (const c of EXPECTED_SESSION_COLUMNS) {
       expect(cols).toContain(c);
@@ -116,7 +122,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(6);
+    expect(userVersion(db)).toBe(7);
   });
 
   it("does not throw when provider_state already exists below user_version 2", () => {
@@ -125,7 +131,7 @@ describe("migrate", () => {
     // Simulate a dev build / partial migration: column exists but version rewound.
     db.exec("PRAGMA user_version = 1;");
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(6);
+    expect(userVersion(db)).toBe(7);
   });
 
   it("upgrades a legacy database (columns present, user_version 0) without error", () => {
@@ -150,7 +156,7 @@ describe("migrate", () => {
 
     expect(() => migrate(db)).not.toThrow();
 
-    expect(userVersion(db)).toBe(6);
+    expect(userVersion(db)).toBe(7);
     expect(columnNames(db, "sessions")).toContain("provider_state");
     expect(tableNames(db)).toContain("workflows");
     // Existing data is preserved, including the legacy copilot id used as a dead read.
@@ -160,5 +166,14 @@ describe("migrate", () => {
     };
     expect(row.copilot_session_id).toBe("legacy-copilot-id");
     expect(row.provider_state).toBeNull();
+  });
+
+  it("adds indexes on the hot foreign keys (messages, tool_calls, sessions) at v7", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+
+    expect(indexNames(db, "messages")).toContain("idx_messages_session");
+    expect(indexNames(db, "tool_calls")).toContain("idx_tool_calls_message");
+    expect(indexNames(db, "sessions")).toContain("idx_sessions_project");
   });
 });

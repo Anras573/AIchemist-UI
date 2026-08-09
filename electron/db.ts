@@ -156,6 +156,19 @@ const MIGRATIONS: Migration[] = [
   (db) => {
     addColumnIfMissing(db, "usage_ledger", "source", "TEXT NOT NULL DEFAULT 'live'");
   },
+  // v7 — Indexes for hot foreign keys (issue #178, part of the Performance
+  // epic #175). The base schema defines these FKs but never indexed them:
+  // getSession() full-scans messages on every hydration, tool_calls are
+  // loaded per hydration/turn end, and listSessions scans by project_id.
+  // Cascade deletes without a child-side index also make deleting a parent
+  // row (project, session) O(children) per row instead of an index seek.
+  (db) => {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+      CREATE INDEX IF NOT EXISTS idx_tool_calls_message ON tool_calls(message_id);
+      CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
+    `);
+  },
 ];
 
 /**
