@@ -1,7 +1,12 @@
 import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { visualizer } from "rollup-plugin-visualizer";
 import path from "path";
+
+// ANALYZE=true bun run build writes dist/renderer/bundle-stats.html — a
+// treemap of the renderer bundle for verifying code-split wins (issue #181).
+const analyze = process.env.ANALYZE === "true";
 
 export default defineConfig({
   main: {
@@ -40,7 +45,13 @@ export default defineConfig({
         input: "./index.html",
       },
     },
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      ...(analyze
+        ? [visualizer({ filename: "dist/renderer/bundle-stats.html", gzipSize: true, template: "treemap" })]
+        : []),
+    ],
     resolve: {
       alias: { "@": path.resolve(__dirname, "./src") },
     },

@@ -414,6 +414,14 @@ Tailwind CSS v4 (via `@tailwindcss/vite` plugin). UI primitives are shadcn/ui co
 
 **⚠️ Tailwind v4 does not scan `node_modules`:** If a third-party component (e.g. `streamdown`) renders Tailwind arbitrary-value classes from its dist bundle, those classes will never be generated. Add explicit CSS rules in `src/index.css` instead of relying on those classes being present. Example: streamdown's syntax-highlighted token spans write color values as inline CSS custom properties (`--sdm-c`, `--shiki-dark`); `index.css` has `[data-streamdown="code-block"] span { color: var(--sdm-c, inherit); }` to apply them.
 
+### Code splitting
+
+The renderer has no route-based bundler, so heavy surfaces are `React.lazy` + `Suspense`-split explicitly instead of shipping in the initial chunk (issue #181): `SettingsView` and `WorkflowsView` in `AppShell.tsx`, `TracesPanel` and `InteractiveTerminal` in `ContextPanel.tsx`. All four are already gated behind a store flag or tab check, so the `Suspense` boundary just replaces an instant swap with a `<Spinner />` fallback while the chunk fetches. Follow the same pattern (`lazy(() => import("./X").then((m) => ({ default: m.X })))`, named export) for any new panel that pulls in a large dependency and isn't needed at first paint.
+
+The `mermaid` and `math` (KaTeX) Streamdown plugins are similarly deferred: `src/components/ai-elements/streamdown-plugins.ts` exports `useStreamdownPlugins()`, which starts with only the lightweight `cjk`/`code` plugins and dynamically imports `@streamdown/math` + `@streamdown/mermaid` on first render (module-level cached promise, so every consumer shares one fetch). `MessageResponse` (`ai-elements/message.tsx`) and `ContextPanel`'s `MemoryFileViewer` both use this hook rather than statically importing the plugin packages.
+
+`ANALYZE=true bun run build` writes `dist/renderer/bundle-stats.html` (via `rollup-plugin-visualizer`, wired in `electron.vite.config.ts`) — a treemap of the renderer bundle for checking code-split wins before/after a change.
+
 ### Tooltips
 
 Use `<WithTooltip label="…">` from `src/components/ui/with-tooltip.tsx` for hover hints on interactive controls. It wraps the Base UI `Tooltip` primitives via the `render` prop (Base UI does not support `asChild`). Pair `label` with `aria-label` (or visible text) on the inner element so the control stays accessible to screen readers and discoverable in tests via `getByLabelText`. Avoid native `title=` on the same element — it would race with the Tooltip and create a duplicate browser tooltip. The global `TooltipProvider` is mounted in `src/App.tsx`.

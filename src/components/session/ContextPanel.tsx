@@ -1,10 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { X, ChevronLeft } from "lucide-react";
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
 import { Streamdown } from "streamdown";
+import { useStreamdownPlugins } from "@/components/ai-elements/streamdown-plugins";
 import { useIpc } from "@/lib/ipc";
 import {
   FileTree,
@@ -16,14 +13,28 @@ import { useProjectStore } from "@/lib/store/useProjectStore";
 import { FileViewer } from "./FileViewer";
 import { SkillsPanel, SkillsHeaderInfo } from "./SkillsPanel";
 import { SpendingPanel, SpendingHeaderInfo } from "./SpendingPanel";
-import { TracesPanel } from "./TracesPanel";
 import { ChangesPanel } from "./ChangesPanel";
-import { InteractiveTerminal } from "./InteractiveTerminal";
 import { McpServersPanel } from "./McpServersPanel";
 import { MemoryPanel } from "./MemoryPanel";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { GitHubPanel } from "./GitHubPanel";
 import { WithTooltip } from "@/components/ui/with-tooltip";
+import { Spinner } from "@/components/ui/spinner";
+
+// Deferred to their own chunks — each owns a heavy dependency (the trace
+// graph view and @xterm/xterm respectively) that most sessions never open.
+const TracesPanel = lazy(() => import("./TracesPanel").then((m) => ({ default: m.TracesPanel })));
+const InteractiveTerminal = lazy(() =>
+  import("./InteractiveTerminal").then((m) => ({ default: m.InteractiveTerminal }))
+);
+
+function PanelFallback() {
+  return (
+    <div className="h-full flex items-center justify-center">
+      <Spinner />
+    </div>
+  );
+}
 
 // ── Rust types ────────────────────────────────────────────────────────────────
 
@@ -169,10 +180,9 @@ function FileTreeView({ projectPath, onFileOpen }: FileTreeViewProps) {
 
 // ── MemoryFileViewer — renders a memory .md file as markdown ─────────────────
 
-const streamdownPlugins = { cjk, code, math, mermaid };
-
 function MemoryFileViewer({ filePath }: { filePath: string }) {
   const ipc = useIpc();
+  const plugins = useStreamdownPlugins();
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -207,7 +217,7 @@ function MemoryFileViewer({ filePath }: { filePath: string }) {
   return (
     <div className="h-full overflow-auto px-4 py-3">
       <Streamdown
-        plugins={streamdownPlugins}
+        plugins={plugins}
         className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:overflow-x-auto [&_table]:overflow-x-auto [&_table]:block"
       >
         {content}
@@ -347,7 +357,9 @@ export function ContextPanel({
         ) : activeTab === "skills" ? (
           <SkillsPanel />
         ) : activeTab === "traces" ? (
-          <TracesPanel />
+          <Suspense fallback={<PanelFallback />}>
+            <TracesPanel />
+          </Suspense>
         ) : activeTab === "changes" ? (
           <ChangesPanel />
         ) : activeTab === "mcp" ? (
@@ -370,7 +382,9 @@ export function ContextPanel({
           <SpendingPanel />
         ) : activeTab === "terminal" ? (
           activeProject ? (
-            <InteractiveTerminal projectPath={sessionPath} />
+            <Suspense fallback={<PanelFallback />}>
+              <InteractiveTerminal projectPath={sessionPath} />
+            </Suspense>
           ) : (
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
               No project open

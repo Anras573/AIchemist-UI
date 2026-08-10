@@ -26,19 +26,20 @@ describe("AppShell", () => {
     expect(screen.queryByTestId("settings-view")).not.toBeInTheDocument();
   });
 
-  it("shows SettingsView and hides WorkspaceView when settingsOpen is true", () => {
+  it("shows SettingsView and hides WorkspaceView when settingsOpen is true", async () => {
     useProjectStore.getState().openSettings();
     renderWithProviders(<AppShell />);
-    expect(screen.getByTestId("settings-view")).toBeInTheDocument();
+    // SettingsView is React.lazy-loaded, so it resolves after at least one tick.
+    expect(await screen.findByTestId("settings-view")).toBeInTheDocument();
     expect(screen.queryByTestId("workspace-view")).not.toBeInTheDocument();
   });
 
-  it("routes project settings through the single SettingsView (no separate sheet)", () => {
+  it("routes project settings through the single SettingsView (no separate sheet)", async () => {
     // Project settings is now a section of the unified hub, opened via
     // openSettings({ scope: "project", … }) rather than a standalone sheet.
     useProjectStore.getState().openSettings({ scope: "project", id: "general" });
     renderWithProviders(<AppShell />);
-    expect(screen.getByTestId("settings-view")).toBeInTheDocument();
+    expect(await screen.findByTestId("settings-view")).toBeInTheDocument();
     expect(useProjectStore.getState().settingsSection).toEqual({
       scope: "project",
       id: "general",

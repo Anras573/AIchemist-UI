@@ -1,13 +1,30 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ProjectSidebar } from "@/components/layout/ProjectSidebar";
 import { WorkspaceView } from "@/components/layout/WorkspaceView";
 import { CommandPalette } from "@/components/layout/CommandPalette";
-import { SettingsView } from "@/components/settings/SettingsView";
-import { WorkflowsView } from "@/components/workflows/WorkflowsView";
 import { useSessionEvents } from "@/lib/hooks/useSessionEvents";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { TitleBar } from "@/components/layout/TitleBar";
+import { Spinner } from "@/components/ui/spinner";
+
+// Deferred to their own chunks — neither is mounted at first paint (both are
+// gated behind a store flag), and the settings hub in particular pulls in a
+// large tree of section components most launches never open.
+const SettingsView = lazy(() =>
+  import("@/components/settings/SettingsView").then((m) => ({ default: m.SettingsView }))
+);
+const WorkflowsView = lazy(() =>
+  import("@/components/workflows/WorkflowsView").then((m) => ({ default: m.WorkflowsView }))
+);
+
+function MainViewFallback() {
+  return (
+    <div className="flex flex-1 items-center justify-center">
+      <Spinner />
+    </div>
+  );
+}
 
 export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -53,9 +70,13 @@ export function AppShell() {
 
         <main className="flex flex-1 overflow-hidden">
           {settingsOpen ? (
-            <SettingsView onClose={closeSettings} />
+            <Suspense fallback={<MainViewFallback />}>
+              <SettingsView onClose={closeSettings} />
+            </Suspense>
           ) : workflowsOpen ? (
-            <WorkflowsView onClose={closeWorkflows} />
+            <Suspense fallback={<MainViewFallback />}>
+              <WorkflowsView onClose={closeWorkflows} />
+            </Suspense>
           ) : (
             <WorkspaceView />
           )}
