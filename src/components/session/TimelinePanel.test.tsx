@@ -91,6 +91,45 @@ describe("TimelinePanel messages", () => {
     expect(screen.getByText("Queued")).toBeInTheDocument();
   });
 
+  it("orders messages and compaction markers chronologically regardless of input order", () => {
+    // Messages passed out of chronological order — the timeline must still
+    // render them (and an interleaved compaction marker) sorted by timestamp.
+    useSessionStore.getState().addSession(
+      makeSession("sess-1", {
+        messages: [
+          makeMessage("m-2", { content: "second message", created_at: "2024-01-01T00:00:02Z" }),
+          makeMessage("m-1", { content: "first message", created_at: "2024-01-01T00:00:01Z" }),
+          makeMessage("m-3", { content: "third message", created_at: "2024-01-01T00:00:04Z" }),
+        ],
+      })
+    );
+    useSessionStore.getState().setActiveSession("sess-1");
+    useSessionStore.setState({
+      sessionCompactions: {
+        "sess-1": [
+          {
+            id: "c-1",
+            session_id: "sess-1",
+            trigger: "auto",
+            pre_tokens: 42_000,
+            timestamp: "2024-01-01T00:00:03Z",
+          },
+        ],
+      },
+    });
+
+    const { container } = renderWithProviders(<TimelinePanel />);
+    const text = container.textContent ?? "";
+    const positions = [
+      text.indexOf("first message"),
+      text.indexOf("second message"),
+      text.indexOf("42k tokens summarised"),
+      text.indexOf("third message"),
+    ];
+    expect(positions.every((p) => p >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
   it("renders compaction markers between messages", () => {
     useSessionStore.getState().addSession(
       makeSession("sess-1", { messages: [makeMessage("m-1")] })

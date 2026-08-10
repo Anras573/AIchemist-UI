@@ -326,7 +326,10 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
     ].sort((a, b) => {
       const ta = a.kind === "message" ? a.data.created_at : a.data.timestamp;
       const tb = b.kind === "message" ? b.data.created_at : b.data.timestamp;
-      return ta.localeCompare(tb);
+      // Ordinal comparison — locale-aware localeCompare collation is
+      // dramatically slower and orders ISO-8601 timestamps identically
+      // (issue #184). This memo re-runs on every message commit.
+      return ta < tb ? -1 : ta > tb ? 1 : 0;
     });
   }, [messages, compactions]);
 
