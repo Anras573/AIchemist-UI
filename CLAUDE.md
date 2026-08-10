@@ -108,6 +108,7 @@ bun run rebuild   # electron-rebuild -f -w better-sqlite3 -w node-pty
 ### State management (Zustand)
 
 - `useSessionStore` — sessions, messages, streaming text, live tool calls, pending approvals, pending questions, terminal output, and `sessionAgents` (maps `sessionId → agentName | null`). Only `activeSessionId` is persisted (session data lives in SQLite). `sessionAgents` is restored from `session.agent` via `hydrateSession()` on navigation.
+  - `streamingText` / `terminalOutput` / `sessionThinking` are display-only buffers appended to via plain string concatenation, so each is capped at `MAX_TEXT_BUFFER_LENGTH` (~200 KB) by a shared `appendCapped()` helper — once a buffer hits the ceiling, the head is dropped and prefixed with a `TRUNCATION_MARKER` rather than growing unbounded for the life of a session/turn (issue #182). The DB and provider transcripts remain the durable record; these are display-only.
 - `useProjectStore` — projects list, active project. Only `activeProjectId` is persisted.
 
 ### Database
