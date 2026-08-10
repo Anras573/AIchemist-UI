@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useSessionStore } from "@/lib/store/useSessionStore";
+import { useSessionStore, MAX_TEXT_BUFFER_LENGTH, TRUNCATION_MARKER } from "@/lib/store/useSessionStore";
 import type { Session, Message, TraceSpan } from "@/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -137,6 +137,45 @@ describe("appendStreamingDelta", () => {
     get().appendStreamingDelta("sess-2", "B");
     expect(get().streamingText["sess-1"]).toBe("A");
     expect(get().streamingText["sess-2"]).toBe("B");
+  });
+
+  it("caps the buffer and prepends a truncation marker once it exceeds the limit", () => {
+    get().appendStreamingDelta("sess-1", "a".repeat(MAX_TEXT_BUFFER_LENGTH));
+    get().appendStreamingDelta("sess-1", "b".repeat(1000));
+    const text = get().streamingText["sess-1"];
+    expect(text.length).toBe(MAX_TEXT_BUFFER_LENGTH);
+    expect(text.startsWith(TRUNCATION_MARKER)).toBe(true);
+    expect(text.endsWith("b".repeat(1000))).toBe(true);
+  });
+});
+
+// ─── appendTerminalOutput ─────────────────────────────────────────────────────
+
+describe("appendTerminalOutput", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ terminalOutput: {} });
+  });
+
+  it("concatenates output across multiple calls", () => {
+    get().appendTerminalOutput("sess-1", "$ ls\n");
+    get().appendTerminalOutput("sess-1", "file.txt\n");
+    expect(get().terminalOutput["sess-1"]).toBe("$ ls\nfile.txt\n");
+  });
+
+  it("does not affect other sessions", () => {
+    get().appendTerminalOutput("sess-1", "A");
+    get().appendTerminalOutput("sess-2", "B");
+    expect(get().terminalOutput["sess-1"]).toBe("A");
+    expect(get().terminalOutput["sess-2"]).toBe("B");
+  });
+
+  it("caps the buffer and prepends a truncation marker once it exceeds the limit", () => {
+    get().appendTerminalOutput("sess-1", "a".repeat(MAX_TEXT_BUFFER_LENGTH));
+    get().appendTerminalOutput("sess-1", "b".repeat(1000));
+    const text = get().terminalOutput["sess-1"];
+    expect(text.length).toBe(MAX_TEXT_BUFFER_LENGTH);
+    expect(text.startsWith(TRUNCATION_MARKER)).toBe(true);
+    expect(text.endsWith("b".repeat(1000))).toBe(true);
   });
 });
 
@@ -529,6 +568,15 @@ describe("appendThinking", () => {
     get().appendThinking("sess-2", "b");
     expect(get().sessionThinking["sess-1"]).toBe("a");
     expect(get().sessionThinking["sess-2"]).toBe("b");
+  });
+
+  it("caps the buffer and prepends a truncation marker once it exceeds the limit", () => {
+    get().appendThinking("sess-1", "a".repeat(MAX_TEXT_BUFFER_LENGTH));
+    get().appendThinking("sess-1", "b".repeat(1000));
+    const text = get().sessionThinking["sess-1"];
+    expect(text.length).toBe(MAX_TEXT_BUFFER_LENGTH);
+    expect(text.startsWith(TRUNCATION_MARKER)).toBe(true);
+    expect(text.endsWith("b".repeat(1000))).toBe(true);
   });
 });
 

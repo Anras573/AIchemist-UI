@@ -34,6 +34,21 @@ export interface PendingQuestion {
   resolve: (answer: string) => void;
 }
 
+// terminalOutput / sessionThinking / streamingText are display-only buffers —
+// the DB and provider transcripts remain the durable record — so they're
+// capped rather than left to grow for the lifetime of a session/turn (issue
+// #182). Plain string concatenation is O(total length) per append; capping
+// bounds that to O(MAX_TEXT_BUFFER_LENGTH) once a buffer hits the ceiling.
+export const MAX_TEXT_BUFFER_LENGTH = 200_000; // ~200 KB
+export const TRUNCATION_MARKER = "… earlier output truncated …\n";
+
+function appendCapped(existing: string, addition: string): string {
+  const combined = existing + addition;
+  if (combined.length <= MAX_TEXT_BUFFER_LENGTH) return combined;
+  const keep = MAX_TEXT_BUFFER_LENGTH - TRUNCATION_MARKER.length;
+  return TRUNCATION_MARKER + combined.slice(combined.length - keep);
+}
+
 interface SessionStore {
   // All loaded sessions keyed by session id (can span multiple projects)
   sessions: Record<string, Session>;
@@ -295,7 +310,7 @@ export const useSessionStore = create<SessionStore>()(
         set((state) => ({
           streamingText: {
             ...state.streamingText,
-            [sessionId]: (state.streamingText[sessionId] ?? "") + delta,
+            [sessionId]: appendCapped(state.streamingText[sessionId] ?? "", delta),
           },
         })),
 
@@ -382,7 +397,7 @@ export const useSessionStore = create<SessionStore>()(
         set((state) => ({
           terminalOutput: {
             ...state.terminalOutput,
-            [sessionId]: (state.terminalOutput[sessionId] ?? "") + line,
+            [sessionId]: appendCapped(state.terminalOutput[sessionId] ?? "", line),
           },
         })),
 
@@ -457,7 +472,7 @@ export const useSessionStore = create<SessionStore>()(
         set((state) => ({
           sessionThinking: {
             ...state.sessionThinking,
-            [sessionId]: (state.sessionThinking[sessionId] ?? "") + delta,
+            [sessionId]: appendCapped(state.sessionThinking[sessionId] ?? "", delta),
           },
           sessionIsThinking: {
             ...state.sessionIsThinking,
