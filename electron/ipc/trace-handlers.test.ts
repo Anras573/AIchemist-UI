@@ -289,3 +289,67 @@ describe("GET_TRACES — trace parity matrix", () => {
     expect(await getTraces("nope")).toEqual([]);
   });
 });
+
+// #180 — the live trace watcher must push one batched SESSION_TRACE_BATCH
+// message per transcript change (carrying TraceSpan[]), not one send() call
+// per span. A per-span send makes the pipeline O(n) IPC messages x O(n)
+// renderer-store work per change.
+describe("TRACE_BIND_TRANSCRIPT — batched span emission (#180)", () => {
+  let db: Database.Database;
+  let sendSpy: ReturnType<typeof vi.fn>;
+
+  function insertSession(id: string, provider: string): void {
+    db.prepare(
+      `INSERT INTO sessions (id, project_id, provider, provider_state, sdk_session_id, copilot_session_id, workspace_path)
+       VALUES (?, 'proj-1', ?, NULL, NULL, NULL, NULL)`,
+    ).run(id, provider);
+  }
+
+  beforeEach(() => {
+    _setNativeTracesRootForTests(makeTempDir("trace-native-watch-root-"));
+    db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE projects (id TEXT PRIMARY KEY, path TEXT);
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY, project_id TEXT, provider TEXT, provider_state TEXT,
+        sdk_session_id TEXT, copilot_session_id TEXT, workspace_path TEXT
+      );
+    `);
+    db.prepare("INSERT INTO projects (id, path) VALUES ('proj-1', ?)").run(PROJECT);
+    handlers.clear();
+    sendSpy = vi.fn();
+    registerTraceHandlers(db as never, () => ({ webContents: { send: sendSpy } }) as never);
+  });
+
+  afterEach(async () => {
+    await handlers.get(CH.TRACE_UNBIND_TRANSCRIPT)?.({}, "cdx-live");
+    _setNativeTracesRootForTests(null);
+    db.close();
+  });
+
+  it("emits one SESSION_TRACE_BATCH array instead of one send per span", async () => {
+    insertSession("cdx-live", "codex");
+    const rec = createNativeTranscriptRecorder("cdx-live", "codex");
+    rec.turnStart("gpt-5.1-codex");
+    rec.toolCall("t1", "execute_bash", { command: "ls" });
+    rec.toolResult("t1", "total 0", false);
+    rec.turnEnd("success");
+
+    const env = await handlers.get(CH.TRACE_BIND_TRANSCRIPT)!({}, "cdx-live");
+    expect(env.ok).toBe(true);
+
+    // Initial refresh reads whatever's already on disk; give the async read +
+    // 100ms debounce path generous headroom.
+    await new Promise((r) => setTimeout(r, 400));
+
+    const batchCalls = sendSpy.mock.calls.filter(([channel]) => channel === CH.SESSION_TRACE_BATCH);
+    expect(batchCalls.length).toBeGreaterThan(0);
+    // Every emitted payload is an array (batched), never a bare span object.
+    for (const [, payload] of batchCalls) {
+      expect(Array.isArray(payload)).toBe(true);
+    }
+    // The turn + tool spans for this transcript arrive together in one message.
+    const lastPayload = batchCalls[batchCalls.length - 1][1] as unknown[];
+    expect(lastPayload.length).toBeGreaterThan(1);
+  });
+});

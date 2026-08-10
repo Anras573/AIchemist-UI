@@ -85,7 +85,7 @@ export function useSessionEvents() {
     clearLiveToolCalls,
     appendTerminalOutput,
     addPendingApproval,
-    addOrUpdateTraceSpan,
+    addOrUpdateTraceSpans,
     addFileChange,
     addCompactionEvent,
     updateSessionUsage,
@@ -108,7 +108,7 @@ export function useSessionEvents() {
       clearLiveToolCalls: s.clearLiveToolCalls,
       appendTerminalOutput: s.appendTerminalOutput,
       addPendingApproval: s.addPendingApproval,
-      addOrUpdateTraceSpan: s.addOrUpdateTraceSpan,
+      addOrUpdateTraceSpans: s.addOrUpdateTraceSpans,
       addFileChange: s.addFileChange,
       addCompactionEvent: s.addCompactionEvent,
       updateSessionUsage: s.updateSessionUsage,
@@ -187,9 +187,9 @@ export function useSessionEvents() {
         }
       ),
 
-      onSessionEvent<import("@/types").TraceSpan>(
-        IPC_CHANNELS.SESSION_TRACE,
-        (span) => addOrUpdateTraceSpan(span)
+      onSessionEvent<import("@/types").TraceSpan[]>(
+        IPC_CHANNELS.SESSION_TRACE_BATCH,
+        (spans) => addOrUpdateTraceSpans(spans)
       ),
 
       onSessionEvent<import("@/types").SessionFileChangeEvent>(
@@ -265,7 +265,7 @@ export function useSessionEvents() {
     addLiveToolCall,
     appendTerminalOutput,
     addPendingApproval,
-    addOrUpdateTraceSpan,
+    addOrUpdateTraceSpans,
     addFileChange,
     addCompactionEvent,
     updateSessionUsage,

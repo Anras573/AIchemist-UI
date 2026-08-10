@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useSessionStore } from "@/lib/store/useSessionStore";
-import type { Session, Message } from "@/types";
+import type { Session, Message, TraceSpan } from "@/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -422,6 +422,64 @@ describe("addFileChange", () => {
     expect(get().sessionFileChanges["brand-new-session"]).toBeUndefined();
     get().addFileChange("brand-new-session", { path: "/x", relativePath: "x", diff: "", operation: "write" });
     expect(get().sessionFileChanges["brand-new-session"]).toHaveLength(1);
+  });
+});
+
+// ─── addOrUpdateTraceSpans ────────────────────────────────────────────────────
+
+describe("addOrUpdateTraceSpans", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ sessionTraces: {} });
+  });
+
+  function makeSpan(overrides: Partial<TraceSpan> = {}): TraceSpan {
+    return {
+      id: "span-1",
+      sessionId: "sess-1",
+      type: "turn",
+      name: "turn",
+      startMs: 0,
+      status: "running",
+      ...overrides,
+    };
+  }
+
+  it("adds a batch of new spans in a single update", () => {
+    get().addOrUpdateTraceSpans([
+      makeSpan({ id: "t1" }),
+      makeSpan({ id: "tool1", type: "tool", parentId: "t1" }),
+    ]);
+    expect(get().sessionTraces["sess-1"]).toHaveLength(2);
+  });
+
+  it("merges an update to an existing span by id, keeping its position", () => {
+    get().addOrUpdateTraceSpans([
+      makeSpan({ id: "t1", status: "running" }),
+      makeSpan({ id: "t2", status: "running" }),
+    ]);
+    get().addOrUpdateTraceSpans([makeSpan({ id: "t1", status: "success" })]);
+
+    const spans = get().sessionTraces["sess-1"];
+    expect(spans).toHaveLength(2);
+    expect(spans[0].id).toBe("t1");
+    expect(spans[0].status).toBe("success");
+    expect(spans[1].id).toBe("t2");
+  });
+
+  it("groups spans by sessionId within a single batch", () => {
+    get().addOrUpdateTraceSpans([
+      makeSpan({ id: "a", sessionId: "sess-1" }),
+      makeSpan({ id: "b", sessionId: "sess-2" }),
+    ]);
+    expect(get().sessionTraces["sess-1"]).toHaveLength(1);
+    expect(get().sessionTraces["sess-2"]).toHaveLength(1);
+  });
+
+  it("is a no-op for an empty batch", () => {
+    get().addOrUpdateTraceSpans([makeSpan({ id: "t1" })]);
+    const before = get().sessionTraces;
+    get().addOrUpdateTraceSpans([]);
+    expect(get().sessionTraces).toBe(before);
   });
 });
 

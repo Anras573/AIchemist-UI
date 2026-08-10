@@ -171,7 +171,7 @@ export const IPC_CHANNELS = {
   SESSION_TOOL_RESULT: "session:tool_result",
   SESSION_APPROVAL_REQUIRED: "session:approval_required",
   SESSION_MESSAGE: "session:message",
-  SESSION_TRACE: "session:trace",
+  SESSION_TRACE_BATCH: "session:trace_batch",
   SESSION_FILE_CHANGE: "session:file_change",
   SESSION_COMPACTION: "session:compaction",
   SESSION_USAGE: "session:usage",
