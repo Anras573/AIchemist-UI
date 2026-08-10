@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import type { Database } from "better-sqlite3";
 import type { Message, Provider, Session, ToolCall, ToolCallStatus, ToolCategory } from "../src/types/index";
+import { stmt } from "./db-stmt-cache";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -25,7 +26,8 @@ export function createSession(
   const id = options.id ?? crypto.randomUUID();
   const createdAt = nowIso();
 
-  db.prepare(
+  stmt(
+    db,
     "INSERT INTO sessions (id, project_id, title, status, created_at, provider, model, branch, workspace_path, github_issue_number) VALUES (?, ?, 'New session', 'idle', ?, ?, ?, ?, ?, ?)"
   ).run(id, projectId, createdAt, provider, model, options.branch ?? null, options.workspacePath ?? null, options.issueNumber ?? null);
 
@@ -51,14 +53,13 @@ export function createSession(
  * List all sessions for a project (metadata only — messages are not loaded).
  */
 export function listSessions(db: Database, projectId: string): Session[] {
-  const rows = db
-    .prepare(
-      `SELECT id, project_id, title, status, created_at, provider, model, branch, workspace_path, agent, skills, disabled_mcp_servers, github_issue_number
+  const rows = stmt(
+    db,
+    `SELECT id, project_id, title, status, created_at, provider, model, branch, workspace_path, agent, skills, disabled_mcp_servers, github_issue_number
        FROM sessions
        WHERE project_id = ?
        ORDER BY created_at ASC`
-    )
-    .all(projectId) as {
+  ).all(projectId) as {
     id: string;
     project_id: string;
     title: string;
@@ -96,11 +97,10 @@ export function listSessions(db: Database, projectId: string): Session[] {
  * Fetch a single session with its full message history.
  */
 export function getSession(db: Database, sessionId: string): Session {
-  const row = db
-    .prepare(
-      "SELECT id, project_id, title, status, created_at, provider, model, branch, workspace_path, agent, skills, disabled_mcp_servers, github_issue_number FROM sessions WHERE id = ?"
-    )
-    .get(sessionId) as
+  const row = stmt(
+    db,
+    "SELECT id, project_id, title, status, created_at, provider, model, branch, workspace_path, agent, skills, disabled_mcp_servers, github_issue_number FROM sessions WHERE id = ?"
+  ).get(sessionId) as
     | {
         id: string;
         project_id: string;
@@ -122,14 +122,13 @@ export function getSession(db: Database, sessionId: string): Session {
     throw new Error(`Session not found: ${sessionId}`);
   }
 
-  const messageRows = db
-    .prepare(
-      `SELECT id, session_id, role, content, created_at, agent
+  const messageRows = stmt(
+    db,
+    `SELECT id, session_id, role, content, created_at, agent
        FROM messages
        WHERE session_id = ?
        ORDER BY created_at ASC`
-    )
-    .all(sessionId) as {
+  ).all(sessionId) as {
     id: string;
     session_id: string;
     role: string;
@@ -143,6 +142,9 @@ export function getSession(db: Database, sessionId: string): Session {
   if (messageRows.length > 0) {
     const messageIds = messageRows.map((m) => m.id);
     const placeholders = messageIds.map(() => "?").join(", ");
+    // Not cached via stmt() — the SQL text varies with messageIds.length, so
+    // caching would leak one statement per distinct message count instead of
+    // reusing a fixed one.
     const toolCallRows = db
       .prepare(
         `SELECT id, message_id, name, args, result, status, category
@@ -207,7 +209,7 @@ export function getSession(db: Database, sessionId: string): Session {
  * Hard-delete a session and its messages (cascade via foreign key).
  */
 export function deleteSession(db: Database, sessionId: string): void {
-  db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+  stmt(db, "DELETE FROM sessions WHERE id = ?").run(sessionId);
 }
 
 /**
@@ -220,7 +222,7 @@ export function updateSessionStatus(
   sessionId: string,
   status: Session["status"]
 ): void {
-  db.prepare("UPDATE sessions SET status = ? WHERE id = ?").run(status, sessionId);
+  stmt(db, "UPDATE sessions SET status = ? WHERE id = ?").run(status, sessionId);
 }
 
 /**
@@ -230,9 +232,7 @@ export function updateSessionStatus(
  * Returns the number of sessions recovered.
  */
 export function recoverStaleSessionStatuses(db: Database): number {
-  const result = db
-    .prepare("UPDATE sessions SET status = 'error' WHERE status = 'running'")
-    .run();
+  const result = stmt(db, "UPDATE sessions SET status = 'error' WHERE status = 'running'").run();
   return result.changes;
 }
 
@@ -246,7 +246,8 @@ export function saveMessage(
   const id = crypto.randomUUID();
   const createdAt = nowIso();
 
-  db.prepare(
+  stmt(
+    db,
     "INSERT INTO messages (id, session_id, role, content, created_at, agent) VALUES (?, ?, ?, ?, ?, ?)"
   ).run(id, args.sessionId, args.role, args.content, createdAt, args.agent ?? null);
 
@@ -269,7 +270,7 @@ export function updateSessionTitle(
   sessionId: string,
   title: string
 ): void {
-  db.prepare("UPDATE sessions SET title = ? WHERE id = ?").run(title, sessionId);
+  stmt(db, "UPDATE sessions SET title = ? WHERE id = ?").run(title, sessionId);
 }
 
 /**
@@ -281,7 +282,7 @@ export function updateSessionModel(
   provider: Provider,
   model: string
 ): void {
-  db.prepare("UPDATE sessions SET provider = ?, model = ? WHERE id = ?").run(
+  stmt(db, "UPDATE sessions SET provider = ?, model = ? WHERE id = ?").run(
     provider,
     model,
     sessionId
@@ -296,7 +297,7 @@ export function updateSessionAgent(
   sessionId: string,
   agent: string | null
 ): void {
-  db.prepare("UPDATE sessions SET agent = ? WHERE id = ?").run(agent, sessionId);
+  stmt(db, "UPDATE sessions SET agent = ? WHERE id = ?").run(agent, sessionId);
 }
 
 /**
@@ -308,7 +309,7 @@ export function updateSessionSkills(
   skills: string[]
 ): void {
   const value = skills.length > 0 ? JSON.stringify(skills) : null;
-  db.prepare("UPDATE sessions SET skills = ? WHERE id = ?").run(value, sessionId);
+  stmt(db, "UPDATE sessions SET skills = ? WHERE id = ?").run(value, sessionId);
 }
 
 /**
@@ -319,9 +320,9 @@ export function updateSessionSkills(
  * so a corrupted DB row never causes the runner to throw.
  */
 export function getDisabledMcpServers(db: Database, sessionId: string): string[] {
-  const row = db
-    .prepare("SELECT disabled_mcp_servers FROM sessions WHERE id = ?")
-    .get(sessionId) as { disabled_mcp_servers: string | null } | undefined;
+  const row = stmt(db, "SELECT disabled_mcp_servers FROM sessions WHERE id = ?").get(sessionId) as
+    | { disabled_mcp_servers: string | null }
+    | undefined;
   return parseJsonStringArray(row?.disabled_mcp_servers) ?? [];
 }
 
@@ -337,7 +338,7 @@ export function setDisabledMcpServers(
 ): void {
   const cleaned = [...new Set(names.filter((n) => typeof n === "string" && n.length > 0))].sort();
   const value = cleaned.length > 0 ? JSON.stringify(cleaned) : null;
-  db.prepare("UPDATE sessions SET disabled_mcp_servers = ? WHERE id = ?").run(value, sessionId);
+  stmt(db, "UPDATE sessions SET disabled_mcp_servers = ? WHERE id = ?").run(value, sessionId);
 }
 
 /**
@@ -371,7 +372,8 @@ export function createPlaceholderMessage(
   const id = crypto.randomUUID();
   const createdAt = nowIso();
 
-  db.prepare(
+  stmt(
+    db,
     "INSERT INTO messages (id, session_id, role, content, created_at, agent) VALUES (?, ?, ?, ?, ?, ?)"
   ).run(id, args.sessionId, "assistant", "", createdAt, args.agent ?? null);
 
@@ -394,7 +396,7 @@ export function updateMessageContent(
   messageId: string,
   content: string
 ): void {
-  db.prepare("UPDATE messages SET content = ? WHERE id = ?").run(content, messageId);
+  stmt(db, "UPDATE messages SET content = ? WHERE id = ?").run(content, messageId);
 }
 
 /**
@@ -411,7 +413,8 @@ export function saveToolCall(
     category: string;
   }
 ): void {
-  db.prepare(
+  stmt(
+    db,
     "INSERT INTO tool_calls (id, message_id, name, args, result, status, category) VALUES (?, ?, ?, ?, NULL, ?, ?)"
   ).run(
     args.id,
@@ -433,13 +436,13 @@ export function updateToolCallStatus(
   result?: unknown
 ): void {
   if (result !== undefined) {
-    db.prepare("UPDATE tool_calls SET status = ?, result = ? WHERE id = ?").run(
+    stmt(db, "UPDATE tool_calls SET status = ?, result = ? WHERE id = ?").run(
       status,
       JSON.stringify(result),
       id
     );
   } else {
-    db.prepare("UPDATE tool_calls SET status = ? WHERE id = ?").run(status, id);
+    stmt(db, "UPDATE tool_calls SET status = ? WHERE id = ?").run(status, id);
   }
 }
 
@@ -447,11 +450,10 @@ export function updateToolCallStatus(
  * Loads all tool_calls for a message, ordered by insertion.
  */
 export function loadToolCallsForMessage(db: Database, messageId: string): ToolCall[] {
-  const rows = db
-    .prepare(
-      "SELECT id, name, args, result, status, category FROM tool_calls WHERE message_id = ? ORDER BY rowid ASC"
-    )
-    .all(messageId) as {
+  const rows = stmt(
+    db,
+    "SELECT id, name, args, result, status, category FROM tool_calls WHERE message_id = ? ORDER BY rowid ASC"
+  ).all(messageId) as {
     id: string;
     name: string;
     args: string;

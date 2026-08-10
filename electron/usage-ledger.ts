@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import type { Database } from "better-sqlite3";
 import type { Provider, SessionUsage } from "../src/types/index";
+import { stmt } from "./db-stmt-cache";
 
 /**
  * Durable, queryable ledger of token usage — one row per completed agent turn,
@@ -43,7 +44,8 @@ export function recordUsage(
   }
 ): void {
   const model = params.model?.trim() || null;
-  db.prepare(
+  stmt(
+    db,
     `INSERT INTO usage_ledger
        (id, session_id, project_id, provider, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, created_at, source)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
