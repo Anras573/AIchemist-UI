@@ -82,6 +82,19 @@ bun run start
 bun run rebuild
 ```
 
+## Packaging & Releases
+
+Desktop installers are built with [electron-builder](https://www.electron.build/) (config in `electron-builder.yml`):
+
+```bash
+bun run build        # compile main/preload/renderer first
+bun run dist:win      # → release/*.exe (NSIS installer)
+bun run dist:mac      # → release/*.dmg, release/*.zip (x64 + arm64)
+bun run dist:linux    # → release/*.AppImage, release/*.deb
+```
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please): commits to `main` following [Conventional Commits](https://www.conventionalcommits.org/) accumulate into a release PR that bumps `package.json` and updates `CHANGELOG.md`. Merging that PR tags a GitHub Release, which triggers `.github/workflows/release-please.yml` to build and attach the Windows/macOS/Linux installers to it.
+
 ## Configuration
 
 API keys go in `~/.aichemist/.env` — see the [settings reference](docs/settings-reference.md) for every supported variable and configuration file, and the [provider guide](docs/providers.md) for per-provider setup.
