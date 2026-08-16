@@ -2,6 +2,11 @@
   "name": "aichemist-ui",
   "private": true,
   "version": "0.1.0",
+  "description": "AIchemist — an Electron desktop client for coding agents.",
+  "author": {
+    "name": "Anras573",
+    "email": "Anras573@users.noreply.github.com"
+  },
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -11,7 +16,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.12",
@@ -76,6 +84,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "@vitest/coverage-v8": "^4.1.10",
     "electron": "^42.7.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "jsdom": "^29.1.1",
     "rollup-plugin-visualizer": "^7.0.1",
