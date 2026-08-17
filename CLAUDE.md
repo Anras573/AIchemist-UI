@@ -67,6 +67,7 @@ This is an **Electron** desktop application with a React + TypeScript renderer a
 | `agent/mcp-tools.ts` | MCP tool approval gate + `ask_user` tool (Claude) |
 | `agent/approval.ts` | Approval promise map — `requestApproval` / `resolveApproval` |
 | `agent/question.ts` | Question promise map — `requestQuestion` / `resolveQuestion` |
+| `updater.ts` | Wraps `electron-updater`'s `autoUpdater`; emits `UPDATE_STATUS` push events |
 
 ### Layout
 
@@ -483,6 +484,22 @@ VS Code-style editor-owned MCP config. AIchemist maintains its own MCP server li
 | Health probing | `electron/agent/mcp-probe.ts` actively connects to each managed server (stdio/HTTP/SSE), runs `tools/list`, and surfaces `{ connected, tools, error }` on each row. Cached 30s by fingerprint of the unfiltered managed map; `force: true` (`MCP_PROBE_MANAGED` IPC, used by the refresh button) bypasses the cache. Stdio probes have a 4-parallel concurrency cap to avoid spawn storms. The SDK loader is injected via `_setSdkLoader` for tests — see `mcp-probe.test.ts`. |
 | Per-session disable | Toggle in the panel persists names to `sessions.disabled_mcp_servers` via `MCP_TOGGLE_SESSION_SERVER` and `setDisabledMcpServers`. Both runners read the disabled set per turn and pass it via `loadManagedMcpServers({ excludeNames })`. Claude picks up the new map per-turn (no cache work needed). For Copilot, the disabled set is filtered BEFORE `fingerprintManaged()` so toggling naturally invalidates the cached SDK session. |
 | No project-level managed scope | Intentional — projects should use the de-facto `.mcp.json` at the project root, which both SDKs already discover. |
+
+---
+
+## Packaging, releases & auto-updates
+
+Desktop installers are built with **electron-builder** (`electron-builder.yml`): `bun run dist:win` / `dist:mac` / `dist:linux` → `release/`. Native modules (`better-sqlite3`, `node-pty`) are recompiled per target platform/arch automatically by electron-builder's bundled `@electron/rebuild` step — cross-arch macOS (x64 + arm64) works on a single `macos-latest` runner; `asarUnpack: ["**/*.node"]` is required so the `.node` binaries stay unpacked and `dlopen`-able at runtime. `deb.compression` is pinned to `gz` (not the default `xz`) because `xz` via `fpm` is extremely slow in CI/sandboxed environments.
+
+**Releases** are automated with [release-please](https://github.com/googleapis/release-please) (`.github/workflows/release-please.yml`, `release-type: node`): commits to `main` following Conventional Commits accumulate into a release PR that bumps `package.json` / `CHANGELOG.md`; merging it tags a GitHub Release. That triggers a 3-OS build matrix (`windows-latest` / `macos-latest` / `ubuntu-latest`) that runs `electron-builder --publish always` — publishing straight to the tag's release rather than going through a separate upload-asset action, since electron-builder needs to own the asset naming/blockmap/`latest*.yml` generation for auto-update to work correctly.
+
+**Auto-updates** use `electron-updater` (`electron/updater.ts`), reading the `latest.yml` / `latest-mac.yml` / `latest-linux.yml` manifests electron-builder publishes next to the installers (`publish: { provider: github, owner, repo }` in `electron-builder.yml`).
+
+- `initAutoUpdater(getMainWindow)` (called once in `main.ts`'s `whenReady`) wires `autoUpdater`'s events to a `latestStatus` module variable and pushes `UPDATE_STATUS` events to the renderer. `checkForUpdates()` is a no-op (`state: "not-available"`) when `!app.isPackaged` — electron-updater requires `app-update.yml`, which only exists in a packaged build, and would otherwise throw in `bun run dev`.
+- `main.ts` fires one check ~10s after the window is created, then every `UPDATE_CHECK_INTERVAL_MS` (4h) in the background; both timers are cleared in `before-quit`. `autoUpdater.autoDownload = true` and `autoInstallOnAppQuit = true` — a downloaded update installs silently on the next natural quit even if the user never clicks "Restart & update".
+- IPC: `UPDATE_CHECK` (manual check, returns the resulting `UpdateStatus`), `UPDATE_INSTALL` (`quitAndInstall()`), `UPDATE_GET_STATE` (`{ currentVersion, status }` — lets a late-mounted UI show the current state without waiting for the next push). Handlers in `electron/ipc/update-handlers.ts`.
+- Renderer: `UpdateBanner` (mounted once in `AppShell`) is a floating toast that only renders for `"downloading"` / `"downloaded"` — silent for `"checking"` / `"not-available"` / `"error"` so a background-check hiccup never interrupts the user; those quieter states are visible instead in **Settings → Advanced → Software Updates** (`UpdatesSection.tsx`), which also has the manual "Check for updates" button and shows the running app version.
+- Platform coverage: Windows (NSIS) and macOS (`.dmg`, using the `.zip` electron-updater actually reads) both auto-update. Linux only auto-updates via the AppImage target; the `.deb` has no update channel (electron-updater doesn't support Debian package self-update — reinstall manually).
 
 ---
 

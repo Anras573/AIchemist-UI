@@ -143,3 +143,9 @@ export const WORKFLOW_RUN_NOW          = "workflow:run-now";
 export const WORKFLOW_DELETE           = "workflow:delete";
 export const WORKFLOW_LIST_RUNS        = "workflow:list-runs";
 export const WORKFLOW_RUN_UPDATED      = "workflow:run-updated"; // push: main → renderer
+
+// ── Auto-update (electron-updater) ────────────────────────────────────────────
+export const UPDATE_CHECK              = "update:check";
+export const UPDATE_INSTALL            = "update:install";
+export const UPDATE_GET_STATE          = "update:get-state";
+export const UPDATE_STATUS             = "update:status"; // push: main → renderer

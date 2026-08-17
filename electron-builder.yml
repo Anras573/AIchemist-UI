@@ -2,6 +2,10 @@ appId: dev.aichemist.app
 productName: AIchemist
 directories:
   output: release
+publish:
+  provider: github
+  owner: Anras573
+  repo: AIchemist-UI
 files:
   - dist/main/**
   - dist/preload/**
@@ -39,4 +43,4 @@ linux:
         - x64
   category: Development
 deb:
-  compression: gzip
+  compression: gz

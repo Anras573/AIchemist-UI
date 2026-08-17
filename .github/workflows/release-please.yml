@@ -22,7 +22,7 @@ jobs:
           release-type: node
 
   build:
-    name: Build (${{ matrix.os }})
+    name: Build & publish (${{ matrix.os }})
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     strategy:
@@ -30,18 +30,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            dist-script: dist:win
-            asset-glob: release/*.exe
+            builder-flag: --win
           - os: macos-latest
-            dist-script: dist:mac
-            asset-glob: |
-              release/*.dmg
-              release/*.zip
+            builder-flag: --mac
           - os: ubuntu-latest
-            dist-script: dist:linux
-            asset-glob: |
-              release/*.AppImage
-              release/*.deb
+            builder-flag: --linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -58,13 +51,12 @@ jobs:
       - name: Build app
         run: bun run build
 
-      - name: Package (${{ matrix.os }})
-        run: bun run ${{ matrix.dist-script }}
+      # electron-builder publishes straight to the tag's GitHub Release
+      # (already created by release-please): installers plus the
+      # latest.yml/latest-mac.yml/latest-linux.yml manifests electron-updater
+      # reads to discover new versions.
+      - name: Package & publish (${{ matrix.os }})
+        run: bunx electron-builder ${{ matrix.builder-flag }} --publish always
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
-          files: ${{ matrix.asset-glob }}

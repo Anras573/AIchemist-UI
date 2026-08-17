@@ -17,9 +17,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "dist:linux": "electron-builder --linux"
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.12",
@@ -50,6 +50,7 @@
     "diff": "^9.0.0",
     "dotenv": "^17.4.2",
     "electron-squirrel-startup": "^1.0.1",
+    "electron-updater": "^6.8.9",
     "embla-carousel-react": "^8.6.0",
     "lucide-react": "^1.25.0",
     "media-chrome": "^4.19.2",

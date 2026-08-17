@@ -494,3 +494,31 @@ export interface SpendingSummary {
   /** Sorted by `costUSD` descending. */
   byProvider: SpendingProviderBreakdown[];
 }
+
+// ── Auto-update ─────────────────────────────────────────────────────────────
+
+export type UpdateStatusState =
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+/** Pushed on UPDATE_STATUS whenever electron-updater's state changes. */
+export interface UpdateStatus {
+  state: UpdateStatusState;
+  /** Set once a newer version is known (`available` / `downloading` / `downloaded`). */
+  version?: string;
+  /** 0-100, set while `state === "downloading"`. */
+  percent?: number;
+  /** Set when `state === "error"`. */
+  error?: string;
+}
+
+/** Result of UPDATE_GET_STATE — the running app's version plus the last known update status. */
+export interface UpdateStateSnapshot {
+  currentVersion: string;
+  status: UpdateStatus;
+}
