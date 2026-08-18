@@ -20,8 +20,16 @@ import { registerMcpHandlers } from "./ipc/mcp-handlers";
 import { registerWorkflowHandlers } from "./ipc/workflow-handlers";
 import { registerBudgetHandlers } from "./ipc/budget-handlers";
 import { registerSpendingHandlers } from "./ipc/spending-handlers";
+import { registerUpdateHandlers } from "./ipc/update-handlers";
 import { WorkflowScheduler } from "./agent/workflow-scheduler";
 import { TrayController } from "./tray";
+import { initAutoUpdater, checkForUpdates } from "./updater";
+
+// How often to silently check for a new release in the background, on top of
+// the one-shot check shortly after startup. electron-updater auto-downloads
+// and (with autoInstallOnAppQuit) installs on the next natural quit — no
+// restart is forced.
+const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 // ── Prevent multiple instances ───────────────────────────────────────────────
 if (require("electron-squirrel-startup")) app.quit();
@@ -83,6 +91,8 @@ function createWindow(): BrowserWindow {
 }
 
 let cleanupTerminals: (() => void) | undefined;
+let updateCheckTimer: NodeJS.Timeout | undefined;
+let updateCheckInterval: NodeJS.Timeout | undefined;
 
 // The workflow cron scheduler. Created in whenReady (it needs the same
 // activeTurns / window machinery the handlers use) and armed after handlers
@@ -108,6 +118,7 @@ function registerAllHandlers(scheduler: WorkflowScheduler): void {
   registerWorkflowHandlers(db, scheduler);
   registerBudgetHandlers(db);
   registerSpendingHandlers(db);
+  registerUpdateHandlers();
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
@@ -138,6 +149,13 @@ app.whenReady().then(() => {
   workflowScheduler = new WorkflowScheduler({ db, activeTurns, getMainWindow });
   registerAllHandlers(workflowScheduler);
   const win = createWindow();
+
+  // Auto-update: check shortly after launch (once the window can receive the
+  // push events) and then periodically in the background. No-op in dev
+  // (checkForUpdates() guards on app.isPackaged).
+  initAutoUpdater(getMainWindow);
+  updateCheckTimer = setTimeout(() => void checkForUpdates(), 10_000);
+  updateCheckInterval = setInterval(() => void checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
 
   // The tray appears whenever the scheduler has at least one armed job and lets
   // the user reopen the window or quit while it runs in the background.
@@ -197,6 +215,8 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   isQuitting = true;
   cleanupTerminals?.();
+  clearTimeout(updateCheckTimer);
+  clearInterval(updateCheckInterval);
   tray?.destroy();
   workflowScheduler?.stopAll();
 

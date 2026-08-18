@@ -6,6 +6,7 @@ import { CommandPalette } from "@/components/layout/CommandPalette";
 import { useSessionEvents } from "@/lib/hooks/useSessionEvents";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { TitleBar } from "@/components/layout/TitleBar";
+import { UpdateBanner } from "@/components/layout/UpdateBanner";
 import { Spinner } from "@/components/ui/spinner";
 
 // Deferred to their own chunks — neither is mounted at first paint (both are
@@ -84,6 +85,7 @@ export function AppShell() {
       </div>
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <UpdateBanner />
     </div>
   );
 }

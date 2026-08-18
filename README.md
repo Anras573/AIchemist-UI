@@ -93,7 +93,11 @@ bun run dist:mac      # → release/*.dmg, release/*.zip (x64 + arm64)
 bun run dist:linux    # → release/*.AppImage, release/*.deb
 ```
 
-Releases are automated with [release-please](https://github.com/googleapis/release-please): commits to `main` following [Conventional Commits](https://www.conventionalcommits.org/) accumulate into a release PR that bumps `package.json` and updates `CHANGELOG.md`. Merging that PR tags a GitHub Release, which triggers `.github/workflows/release-please.yml` to build and attach the Windows/macOS/Linux installers to it.
+Releases are automated with [release-please](https://github.com/googleapis/release-please): commits to `main` following [Conventional Commits](https://www.conventionalcommits.org/) accumulate into a release PR that bumps `package.json` and updates `CHANGELOG.md`. Merging that PR tags a GitHub Release, which triggers `.github/workflows/release-please.yml` to build each platform and `electron-builder --publish always` it straight to that release.
+
+### Auto-updates
+
+The app checks for a new release shortly after launch and every few hours in the background via [`electron-updater`](https://www.electron.build/auto-update), downloading it automatically; a toast offers "Restart & update" once it's ready (or it installs silently on the next natural quit). Current version and a manual "Check for updates" button live in **Settings → Advanced**. This only runs in packaged builds — it's a no-op in `bun run dev`. Auto-update works for the Windows installer and macOS `.dmg`; the Linux `.deb` has no update channel (reinstall manually), while the AppImage updates itself in place.
 
 ## Configuration
 

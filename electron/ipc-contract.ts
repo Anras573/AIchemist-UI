@@ -50,6 +50,8 @@ import type {
   BudgetConfig,
   BudgetStatus,
   SpendingSummary,
+  UpdateStateSnapshot,
+  UpdateStatus,
 } from "../src/types";
 import type { SettingsMap } from "./settings";
 import type { OpenAiEndpointEntry, OpenAiEndpointsMap } from "./openai-endpoints";
@@ -255,6 +257,11 @@ export type IpcContract = {
   [CH.TERMINAL_INPUT]: { args: [id: string, data: string]; result: void };
   [CH.TERMINAL_RESIZE]: { args: [id: string, cols: number, rows: number]; result: void };
   [CH.TERMINAL_CLOSE]: { args: [id: string]; result: void };
+
+  // ── Auto-update ───────────────────────────────────────────────────────────────
+  [CH.UPDATE_CHECK]: { args: []; result: UpdateStatus };
+  [CH.UPDATE_INSTALL]: { args: []; result: void };
+  [CH.UPDATE_GET_STATE]: { args: []; result: UpdateStateSnapshot };
 };
 
 /** Union of all request/response channel names covered by the contract. */

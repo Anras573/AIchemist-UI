@@ -19,6 +19,7 @@ import { McpServersSection } from "@/components/settings/sections/McpServersSect
 import { SkillsSection } from "@/components/settings/sections/SkillsSection";
 import { AgentsSection } from "@/components/settings/sections/AgentsSection";
 import { SpendingSection } from "@/components/settings/sections/SpendingSection";
+import { UpdatesSection } from "@/components/settings/sections/UpdatesSection";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { isProvider } from "@/lib/providers";
 
@@ -70,7 +71,7 @@ const SECTION_KEYWORDS: Record<string, string[]> = {
   appearance: ["theme", "light", "dark", "system", "color", "look"],
   advanced: [
     "default provider", "approval mode", "max tool rounds", "tool rounds",
-    "defaults", "tool loop", "cap",
+    "defaults", "tool loop", "cap", "update", "updates", "version", "release",
   ],
   general: [
     "provider", "model", "worktree", "approval", "safety", "rules", "tools",
@@ -458,6 +459,16 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                     </>
                   }
                 />
+              </SettingsSection>
+            )}
+
+            {/* ── Software updates ── */}
+            {activeSection === "advanced" && (
+              <SettingsSection
+                title="Software Updates"
+                description="AIchemist checks for a new release shortly after launch and periodically in the background, downloading it automatically."
+              >
+                <UpdatesSection />
               </SettingsSection>
             )}
 

@@ -161,6 +161,11 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     terminalResize: vi.fn().mockResolvedValue(undefined),
     terminalClose: vi.fn().mockResolvedValue(undefined),
 
+    // Auto-update
+    updateCheck: vi.fn().mockResolvedValue({ state: "idle" }),
+    updateInstall: vi.fn().mockResolvedValue(undefined),
+    updateGetState: vi.fn().mockResolvedValue({ currentVersion: "0.0.0-test", status: { state: "idle" } }),
+
     // Push event bus
     on: vi.fn(),
     off: vi.fn(),

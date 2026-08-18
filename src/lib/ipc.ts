@@ -147,6 +147,11 @@ export const ipc = {
   terminalInput: (id: string, data: string) => window.electronAPI.terminalInput(id, data),
   terminalResize: (id: string, cols: number, rows: number) => window.electronAPI.terminalResize(id, cols, rows),
   terminalClose: (id: string) => window.electronAPI.terminalClose(id),
+
+  // Auto-update
+  updateCheck: () => window.electronAPI.updateCheck(),
+  updateInstall: () => window.electronAPI.updateInstall(),
+  updateGetState: () => window.electronAPI.updateGetState(),
 };
 
 // ── Push-event subscription helper ────────────────────────────────────────────
@@ -184,6 +189,7 @@ export const IPC_CHANNELS = {
   CONFIG_WARNING: "config:warning",
   WORKTREE_WARNING: "worktree:warning",
   WORKFLOW_RUN_UPDATED: "workflow:run-updated",
+  UPDATE_STATUS: "update:status",
 } as const;
 
 // ── Thinking / reasoning subscription helpers ─────────────────────────────────

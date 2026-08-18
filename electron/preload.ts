@@ -178,6 +178,11 @@ export interface ElectronAPI {
   terminalResize: (id: string, cols: number, rows: number) => Promise<Res<typeof CH.TERMINAL_RESIZE>>;
   terminalClose: (id: string) => Promise<Res<typeof CH.TERMINAL_CLOSE>>;
 
+  // ── Auto-update ───────────────────────────────────────────────────────────
+  updateCheck: () => Promise<Res<typeof CH.UPDATE_CHECK>>;
+  updateInstall: () => Promise<Res<typeof CH.UPDATE_INSTALL>>;
+  updateGetState: () => Promise<Res<typeof CH.UPDATE_GET_STATE>>;
+
   // ── Push event bus ────────────────────────────────────────────────────────
   on: (channel: string, listener: (payload: unknown) => void) => void;
   off: (channel: string, listener: (payload: unknown) => void) => void;
@@ -287,6 +292,10 @@ const api: ElectronAPI = {
   terminalInput: (id, data) => invoke(CH.TERMINAL_INPUT, id, data),
   terminalResize: (id, cols, rows) => invoke(CH.TERMINAL_RESIZE, id, cols, rows),
   terminalClose: (id) => invoke(CH.TERMINAL_CLOSE, id),
+
+  updateCheck: () => invoke(CH.UPDATE_CHECK),
+  updateInstall: () => invoke(CH.UPDATE_INSTALL),
+  updateGetState: () => invoke(CH.UPDATE_GET_STATE),
 
   on: (channel, listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
