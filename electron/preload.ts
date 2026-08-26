@@ -133,6 +133,7 @@ export interface ElectronAPI {
     name: string;
     projectPath?: string;
   }) => Promise<Res<typeof CH.MCP_DELETE_SERVER>>;
+  mcpMarketplaceList: () => Promise<Res<typeof CH.MCP_MARKETPLACE_LIST>>;
 
   // ── Agent / Skill file management ─────────────────────────────────────────
   writeAgentFile: (args: { filePath: string; content: string }) => Promise<Res<typeof CH.WRITE_AGENT_FILE>>;
@@ -270,6 +271,7 @@ const api: ElectronAPI = {
   mcpReadConfig: (args) => invoke(CH.MCP_READ_CONFIG, args),
   mcpWriteConfig: (args) => invoke(CH.MCP_WRITE_CONFIG, args),
   mcpDeleteServer: (args) => invoke(CH.MCP_DELETE_SERVER, args),
+  mcpMarketplaceList: () => invoke(CH.MCP_MARKETPLACE_LIST),
 
   writeAgentFile: (args) => invoke(CH.WRITE_AGENT_FILE, args),
   deleteAgentFile: (filePath) => invoke(CH.DELETE_AGENT_FILE, filePath),

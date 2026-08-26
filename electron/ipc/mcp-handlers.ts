@@ -8,6 +8,7 @@ import {
   readMcpServers as readMcpServersConfig,
   writeMcpServers as writeMcpServersConfig,
   deleteMcpServer as deleteMcpServerConfig,
+  listMarketplaceEntries,
   type McpScope,
   type McpServersMap,
 } from "../mcp";
@@ -120,4 +121,6 @@ export function registerMcpHandlers(): void {
       deleteMcpServerConfig(args.scope, args.name, args.projectPath);
     },
   );
+
+  handle(CH.MCP_MARKETPLACE_LIST, () => listMarketplaceEntries());
 }
