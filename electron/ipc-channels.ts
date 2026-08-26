@@ -63,6 +63,7 @@ export const MCP_READ_CONFIG        = "mcp:read-config";
 export const MCP_WRITE_CONFIG       = "mcp:write-config";
 export const MCP_DELETE_SERVER      = "mcp:delete-server";
 export const MCP_PROBE_MANAGED      = "mcp:probe-managed";
+export const MCP_MARKETPLACE_LIST   = "mcp:marketplace-list";
 
 // ── Provider availability probes ──────────────────────────────────────────────
 export const PROBE_PROVIDERS        = "providers:probe";

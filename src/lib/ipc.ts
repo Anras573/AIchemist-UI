@@ -110,6 +110,7 @@ export const ipc = {
     window.electronAPI.mcpWriteConfig(args),
   mcpDeleteServer: (args: Parameters<typeof window.electronAPI.mcpDeleteServer>[0]) =>
     window.electronAPI.mcpDeleteServer(args),
+  mcpMarketplaceList: () => window.electronAPI.mcpMarketplaceList(),
 
   // Agent / Skill file management
   writeAgentFile: (args: { filePath: string; content: string }) =>

@@ -108,6 +108,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     mcpReadConfig: vi.fn().mockResolvedValue({}),
     mcpWriteConfig: vi.fn().mockResolvedValue(undefined),
     mcpDeleteServer: vi.fn().mockResolvedValue(undefined),
+    mcpMarketplaceList: vi.fn().mockResolvedValue([]),
 
     // Agent / Skill file management
     writeAgentFile: vi.fn().mockResolvedValue(undefined),

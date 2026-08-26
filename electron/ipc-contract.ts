@@ -55,7 +55,7 @@ import type {
 } from "../src/types";
 import type { SettingsMap } from "./settings";
 import type { OpenAiEndpointEntry, OpenAiEndpointsMap } from "./openai-endpoints";
-import type { McpScope, McpServersMap } from "./mcp";
+import type { McpScope, McpServersMap, MarketplaceListItem } from "./mcp";
 
 /** Result of the model-listing channels. */
 type ModelList = Array<{ id: string; name: string }>;
@@ -209,6 +209,7 @@ export type IpcContract = {
     result: void;
   };
   [CH.MCP_DELETE_SERVER]: { args: [args: { scope: McpScope; name: string; projectPath?: string }]; result: void };
+  [CH.MCP_MARKETPLACE_LIST]: { args: []; result: MarketplaceListItem[] };
 
   // ── Provider probes ─────────────────────────────────────────────────────────
   [CH.PROBE_PROVIDERS]: { args: [args?: { projectId?: string; force?: boolean }]; result: ProviderProbes };
