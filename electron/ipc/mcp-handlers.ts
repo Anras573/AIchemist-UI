@@ -8,12 +8,17 @@ import {
   readMcpServers as readMcpServersConfig,
   writeMcpServers as writeMcpServersConfig,
   deleteMcpServer as deleteMcpServerConfig,
+  upsertMcpServer,
   listMarketplaceEntries,
+  getMarketplaceEntry,
+  missingRequiredFields,
+  buildServerEntry,
   type McpScope,
   type McpServersMap,
 } from "../mcp";
 import type { McpServerInfo } from "../../src/types/index";
 import { handle } from "./handle";
+import { IpcError } from "./errors";
 
 interface ClaudeServersCache {
   timestamp: number;
@@ -123,4 +128,36 @@ export function registerMcpHandlers(): void {
   );
 
   handle(CH.MCP_MARKETPLACE_LIST, () => listMarketplaceEntries());
+
+  handle(
+    CH.MCP_MARKETPLACE_INSTALL,
+    async (_event, args: { entryId: string; values: Record<string, string> }) => {
+      const entry = getMarketplaceEntry(args.entryId);
+      if (!entry) {
+        throw new IpcError("not_found", `Unknown marketplace entry: ${args.entryId}`);
+      }
+      const missing = missingRequiredFields(entry, args.values);
+      if (missing.length > 0) {
+        throw new IpcError(
+          "invalid_input",
+          `Missing required field(s): ${missing.map((f) => f.label).join(", ")}`,
+        );
+      }
+      const serverEntry = buildServerEntry(entry, args.values);
+      upsertMcpServer("aichemist-global", entry.id, serverEntry);
+
+      const probeResults = await probeManagedServers({ [entry.id]: serverEntry }, { force: true });
+      const probe = probeResults.get(entry.id) ?? {
+        connected: false,
+        tools: [],
+        error: "Probe did not return a result",
+        durationMs: 0,
+      };
+      return { probe };
+    },
+  );
+
+  handle(CH.MCP_MARKETPLACE_UNINSTALL, (_event, args: { entryId: string }) => {
+    deleteMcpServerConfig("aichemist-global", args.entryId);
+  });
 }

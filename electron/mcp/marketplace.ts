@@ -3,6 +3,7 @@
  * (see marketplace-catalog.ts) that the UI lists next to what's already
  * installed in the AIchemist-managed scope (`~/.aichemist/mcp.json`).
  */
+import type { McpServerEntry } from "./config";
 import { readMcpServers } from "./config";
 import { MARKETPLACE_CATALOG } from "./marketplace-catalog";
 
@@ -52,4 +53,38 @@ export function listMarketplaceEntries(): MarketplaceListItem[] {
     ...entry,
     installed: installedNames.has(entry.id),
   }));
+}
+
+/** Look up a single catalog entry by id, or `undefined` if unknown. */
+export function getMarketplaceEntry(id: string): MarketplaceEntry | undefined {
+  return MARKETPLACE_CATALOG.find((entry) => entry.id === id);
+}
+
+/** The entry's required `configFields` not present (or blank) in `values`. */
+export function missingRequiredFields(
+  entry: MarketplaceEntry,
+  values: Record<string, string>,
+): MarketplaceConfigField[] {
+  return (entry.configFields ?? []).filter((field) => field.required && !values[field.key]?.trim());
+}
+
+/**
+ * Resolve a catalog entry's `{{token}}` placeholders — in `command`, each of
+ * `args`, `env`/`headers` values, and `url` — against user-supplied `values`,
+ * producing a concrete `McpServerEntry` ready to write via `upsertMcpServer`.
+ * A placeholder with no matching value substitutes to an empty string;
+ * callers should check `missingRequiredFields` first.
+ */
+export function buildServerEntry(entry: MarketplaceEntry, values: Record<string, string>): McpServerEntry {
+  const substitute = (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => values[key] ?? "");
+  const substituteRecord = (record: Record<string, string>) =>
+    Object.fromEntries(Object.entries(record).map(([k, v]) => [k, substitute(v)]));
+
+  const result: McpServerEntry = { type: entry.transport };
+  if (entry.command) result.command = substitute(entry.command);
+  if (entry.args) result.args = entry.args.map(substitute);
+  if (entry.env) result.env = substituteRecord(entry.env);
+  if (entry.url) result.url = substitute(entry.url);
+  if (entry.headers) result.headers = substituteRecord(entry.headers);
+  return result;
 }

@@ -1,6 +1,12 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { listMarketplaceEntries } from "./marketplace";
+import {
+  listMarketplaceEntries,
+  getMarketplaceEntry,
+  missingRequiredFields,
+  buildServerEntry,
+  type MarketplaceEntry,
+} from "./marketplace";
 import { MARKETPLACE_CATALOG } from "./marketplace-catalog";
 
 vi.mock("fs");
@@ -58,6 +64,126 @@ describe("listMarketplaceEntries", () => {
       transport: "stdio",
       command: "npx",
     });
+  });
+});
+
+describe("getMarketplaceEntry", () => {
+  it("returns the matching entry by id", () => {
+    expect(getMarketplaceEntry("github")?.name).toBe("GitHub");
+  });
+
+  it("returns undefined for an unknown id", () => {
+    expect(getMarketplaceEntry("does-not-exist")).toBeUndefined();
+  });
+});
+
+describe("missingRequiredFields", () => {
+  const entry: MarketplaceEntry = {
+    id: "test",
+    name: "Test",
+    description: "",
+    transport: "stdio",
+    command: "npx",
+    args: ["{{token}}"],
+    configFields: [
+      { key: "token", label: "Token", required: true },
+      { key: "optional", label: "Optional", required: false },
+    ],
+  };
+
+  it("flags a required field that is absent", () => {
+    expect(missingRequiredFields(entry, {}).map((f) => f.key)).toEqual(["token"]);
+  });
+
+  it("flags a required field that is present but blank", () => {
+    expect(missingRequiredFields(entry, { token: "   " }).map((f) => f.key)).toEqual(["token"]);
+  });
+
+  it("does not flag an optional field", () => {
+    expect(missingRequiredFields(entry, { token: "abc" })).toEqual([]);
+  });
+
+  it("returns [] for an entry with no configFields", () => {
+    expect(missingRequiredFields({ ...entry, configFields: undefined }, {})).toEqual([]);
+  });
+});
+
+describe("buildServerEntry", () => {
+  it("substitutes {{token}} placeholders in command, args, and env", () => {
+    const entry: MarketplaceEntry = {
+      id: "github",
+      name: "GitHub",
+      description: "",
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-github"],
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: "{{githubToken}}" },
+      configFields: [{ key: "githubToken", label: "Token", required: true }],
+    };
+    const result = buildServerEntry(entry, { githubToken: "secret-value" });
+    expect(result).toEqual({
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-github"],
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: "secret-value" },
+    });
+  });
+
+  it("substitutes a placeholder inside an arg (not just whole-arg)", () => {
+    const entry: MarketplaceEntry = {
+      id: "filesystem",
+      name: "Filesystem",
+      description: "",
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "{{rootPath}}"],
+      configFields: [{ key: "rootPath", label: "Root", required: true }],
+    };
+    const result = buildServerEntry(entry, { rootPath: "/Users/me/projects" });
+    expect(result.args).toEqual([
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "/Users/me/projects",
+    ]);
+  });
+
+  it("substitutes into url and headers for non-stdio entries", () => {
+    const entry: MarketplaceEntry = {
+      id: "remote",
+      name: "Remote",
+      description: "",
+      transport: "http",
+      url: "https://{{host}}/mcp",
+      headers: { Authorization: "Bearer {{apiKey}}" },
+      configFields: [{ key: "host", label: "Host", required: true }, { key: "apiKey", label: "Key", required: true }],
+    };
+    const result = buildServerEntry(entry, { host: "example.com", apiKey: "xyz" });
+    expect(result).toEqual({
+      type: "http",
+      url: "https://example.com/mcp",
+      headers: { Authorization: "Bearer xyz" },
+    });
+  });
+
+  it("substitutes an unresolved placeholder to an empty string", () => {
+    const entry: MarketplaceEntry = {
+      id: "test",
+      name: "Test",
+      description: "",
+      transport: "stdio",
+      command: "npx",
+      args: ["{{missing}}"],
+    };
+    expect(buildServerEntry(entry, {}).args).toEqual([""]);
+  });
+
+  it("round-trips every real catalog entry without throwing", () => {
+    for (const entry of MARKETPLACE_CATALOG) {
+      const values = Object.fromEntries((entry.configFields ?? []).map((f) => [f.key, "test-value"]));
+      const result = buildServerEntry(entry, values);
+      expect(result.type).toBe(entry.transport);
+      expect(JSON.stringify(result)).not.toContain("{{");
+    }
   });
 });
 
