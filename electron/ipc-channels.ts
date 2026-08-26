@@ -58,12 +58,14 @@ export const GITHUB_GET_ISSUE       = "github:get-issue";
 export const GITHUB_GET_CI_STATUS   = "github:get-ci-status";
 export const GITHUB_GET_PR_CONTEXT  = "github:get-pr-context";
 // ── MCP servers ───────────────────────────────────────────────────────────────
-export const LIST_MCP_SERVERS       = "agent:list-mcp-servers";
-export const MCP_READ_CONFIG        = "mcp:read-config";
-export const MCP_WRITE_CONFIG       = "mcp:write-config";
-export const MCP_DELETE_SERVER      = "mcp:delete-server";
-export const MCP_PROBE_MANAGED      = "mcp:probe-managed";
-export const MCP_MARKETPLACE_LIST   = "mcp:marketplace-list";
+export const LIST_MCP_SERVERS          = "agent:list-mcp-servers";
+export const MCP_READ_CONFIG           = "mcp:read-config";
+export const MCP_WRITE_CONFIG          = "mcp:write-config";
+export const MCP_DELETE_SERVER         = "mcp:delete-server";
+export const MCP_PROBE_MANAGED         = "mcp:probe-managed";
+export const MCP_MARKETPLACE_LIST      = "mcp:marketplace-list";
+export const MCP_MARKETPLACE_INSTALL   = "mcp:marketplace-install";
+export const MCP_MARKETPLACE_UNINSTALL = "mcp:marketplace-uninstall";
 
 // ── Provider availability probes ──────────────────────────────────────────────
 export const PROBE_PROVIDERS        = "providers:probe";

@@ -168,6 +168,18 @@ const spendingGetSummarySchema = z.object({
 /** The delete channels take a bare path string rather than an options object. */
 const pathArgSchema = z.string().min(1);
 
+// Installing writes to ~/.aichemist/mcp.json and spawns a process to probe it,
+// so validate the shape at the boundary — a malformed `values` map (e.g. a
+// non-string value) must not reach `buildServerEntry`'s string substitution.
+const mcpMarketplaceInstallSchema = z.object({
+  entryId: z.string().trim().min(1),
+  values: z.record(z.string(), z.string()),
+});
+
+const mcpMarketplaceUninstallSchema = z.object({
+  entryId: z.string().trim().min(1),
+});
+
 /**
  * Per-channel argument validators. Keyed by channel constant so a new mutation
  * channel can opt in with one entry.
@@ -187,4 +199,6 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.WORKFLOW_LIST_RUNS]: unary(workflowListRunsSchema, CH.WORKFLOW_LIST_RUNS),
   [CH.BUDGET_WRITE]: unary(budgetWriteSchema, CH.BUDGET_WRITE),
   [CH.SPENDING_GET_SUMMARY]: unary(spendingGetSummarySchema, CH.SPENDING_GET_SUMMARY),
+  [CH.MCP_MARKETPLACE_INSTALL]: unary(mcpMarketplaceInstallSchema, CH.MCP_MARKETPLACE_INSTALL),
+  [CH.MCP_MARKETPLACE_UNINSTALL]: unary(mcpMarketplaceUninstallSchema, CH.MCP_MARKETPLACE_UNINSTALL),
 };
