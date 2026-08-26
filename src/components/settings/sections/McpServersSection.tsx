@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  Store,
 } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { WithTooltip } from "@/components/ui/with-tooltip";
+import { McpMarketplacePanel } from "./McpMarketplacePanel";
 import type { McpServerInfo } from "@/types";
 
 // ── Types (mirror electron/mcp/config.ts) ─────────────────────────────────────
@@ -263,6 +265,7 @@ export function McpServersSection({ projectPath }: McpServersSectionProps) {
   // Live health for the AIchemist-managed scope, keyed by server name.
   const [health, setHealth] = useState<Map<string, McpServerInfo>>(new Map());
   const [probing, setProbing] = useState(false);
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false);
 
   const needsProject = SCOPES.find((s) => s.id === scope)?.needsProject ?? false;
   const missingProject = needsProject && !projectPath;
@@ -463,6 +466,9 @@ export function McpServersSection({ projectPath }: McpServersSectionProps) {
           );
         })}
         <div className="ml-auto flex items-center gap-1 pb-1">
+          <Button variant="outline" size="sm" onClick={() => setMarketplaceOpen(true)}>
+            <Store className="h-4 w-4 mr-1" /> Marketplace
+          </Button>
           {isProbedScope && (
             <WithTooltip label="Re-probe server health">
               <Button
@@ -566,6 +572,17 @@ export function McpServersSection({ projectPath }: McpServersSectionProps) {
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>
+
+      <McpMarketplacePanel
+        open={marketplaceOpen}
+        onOpenChange={setMarketplaceOpen}
+        onChanged={() => {
+          if (isProbedScope) {
+            void load();
+            void refreshHealth();
+          }
+        }}
+      />
     </div>
   );
 }
