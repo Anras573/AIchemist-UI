@@ -6,6 +6,12 @@ publish:
   provider: github
   owner: Anras573
   repo: AIchemist-UI
+  # release-please publishes the GitHub Release (non-draft) before this
+  # workflow runs, so electron-builder must target that existing published
+  # release rather than its default of creating/managing a draft — otherwise
+  # it refuses to upload assets ("existing type not compatible with
+  # publishing type") and every install artifact silently gets skipped.
+  releaseType: release
 files:
   - dist/main/**
   - dist/preload/**
