@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/Anras573/AIchemist-UI/compare/v1.0.0...v1.0.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **release:** target existing published release for electron-builder assets ([#201](https://github.com/Anras573/AIchemist-UI/issues/201)) ([1c9f637](https://github.com/Anras573/AIchemist-UI/commit/1c9f63724a7a1187a14409c7f31b17bd3b4ce951))
+
 ## 1.0.0 (2026-08-27)
 
 
