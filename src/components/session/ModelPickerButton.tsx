@@ -14,7 +14,7 @@ import {
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
 import { useSessionStore } from "@/lib/store/useSessionStore";
-import { ANTHROPIC_MODELS, type ModelOption } from "@/lib/models";
+import { type ModelOption } from "@/lib/models";
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -28,6 +28,7 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
   const ipc = useIpc();
   const updateSessionModel = useSessionStore((s) => s.updateSessionModel);
   const [open, setOpen] = useState(false);
+  const [claudeModels, setClaudeModels] = useState<ModelOption[]>([]);
   const [copilotModels, setCopilotModels] = useState<ModelOption[]>([]);
   const [ollamaModels, setOllamaModels] = useState<ModelOption[]>([]);
   const [openAiCompatModels, setOpenAiCompatModels] = useState<ModelOption[]>([]);
@@ -36,11 +37,29 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
   // Reset cached model lists when the session changes so a fresh fetch occurs
   // for the new session's provider.
   useEffect(() => {
+    setClaudeModels([]);
     setCopilotModels([]);
     setOllamaModels([]);
     setOpenAiCompatModels([]);
     setCodexModels([]);
   }, [sessionId]);
+
+  // Fetch Claude models dynamically (only when opened and not already loaded)
+  useEffect(() => {
+    if (!open || provider !== "anthropic" || claudeModels.length > 0) return;
+    ipc.getClaudeModels()
+      .then((models: Array<{ id: string; name: string }>) => {
+        setClaudeModels(
+          models.map((m) => ({
+            provider: "anthropic",
+            model: m.id,
+            label: m.name,
+            logoProvider: "anthropic",
+          }))
+        );
+      })
+      .catch(() => {/* Claude not configured — silently hide the group */});
+  }, [open, provider, claudeModels.length, ipc]);
 
   // Provider is locked at session creation time. Only load Copilot models if
   // this session is a Copilot session — saves an IPC round trip for Claude
@@ -59,7 +78,7 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
         );
       })
       .catch(() => {/* Copilot not configured — silently hide the group */});
-  }, [open, provider, copilotModels.length]);
+  }, [open, provider, copilotModels.length, ipc]);
 
   useEffect(() => {
     if (!open || provider !== "ollama" || ollamaModels.length > 0) return;
@@ -112,12 +131,12 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
   }, [open, provider, codexModels.length]);
 
   // Only show the group matching the session's locked provider.
-  const visibleAnthropic = provider === "anthropic" ? ANTHROPIC_MODELS : [];
+  const visibleClaude = provider === "anthropic" ? claudeModels : [];
   const visibleCopilot = provider === "copilot" ? copilotModels : [];
   const visibleOllama = provider === "ollama" ? ollamaModels : [];
   const visibleOpenAiCompat = provider === "openai-compatible" ? openAiCompatModels : [];
   const visibleCodex = provider === "codex" ? codexModels : [];
-  const allModels = [...visibleAnthropic, ...visibleCopilot, ...visibleOllama, ...visibleOpenAiCompat, ...visibleCodex];
+  const allModels = [...visibleClaude, ...visibleCopilot, ...visibleOllama, ...visibleOpenAiCompat, ...visibleCodex];
 
   const current =
     allModels.find((m) => m.provider === provider && m.model === model) ??
@@ -165,9 +184,9 @@ export function ModelPickerButton({ sessionId, provider, model }: ModelPickerBut
         <ModelSelectorList>
           <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
 
-          {visibleAnthropic.length > 0 && (
+          {visibleClaude.length > 0 && (
             <ModelSelectorGroup heading="Anthropic">
-              {visibleAnthropic.map((option) => {
+              {visibleClaude.map((option) => {
                 const isActive = option.provider === provider && option.model === model;
                 return (
                   <ModelSelectorItem

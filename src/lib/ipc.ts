@@ -83,6 +83,7 @@ export const ipc = {
   answerQuestion: (questionId: string, answer: string) =>
     window.electronAPI.answerQuestion(questionId, answer),
   getCopilotModels: () => window.electronAPI.getCopilotModels(),
+  getClaudeModels: () => window.electronAPI.getClaudeModels(),
   getOllamaModels: () => window.electronAPI.getOllamaModels(),
   getOpenAiCompatModels: () => window.electronAPI.getOpenAiCompatModels(),
   getCodexModels: () => window.electronAPI.getCodexModels(),

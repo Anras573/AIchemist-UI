@@ -79,6 +79,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     agentQueueRecovery: vi.fn().mockResolvedValue(undefined),
     approveToolCall: vi.fn().mockResolvedValue(undefined),
     answerQuestion: vi.fn().mockResolvedValue(undefined),
+    getClaudeModels: vi.fn().mockResolvedValue([]),
     getCopilotModels: vi.fn().mockResolvedValue([]),
     getOllamaModels: vi.fn().mockResolvedValue([]),
     getOpenAiCompatModels: vi.fn().mockResolvedValue([]),

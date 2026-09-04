@@ -47,6 +47,7 @@ export function registerAgentHandlers(
   );
 
   handle(CH.GET_COPILOT_MODELS, async () => (await getProvider("copilot").listModels?.()) ?? []);
+  handle(CH.GET_CLAUDE_MODELS, async () => (await getProvider("anthropic").listModels?.()) ?? []);
   handle(CH.GET_OLLAMA_MODELS, async () => (await getProvider("ollama").listModels?.()) ?? []);
   handle(CH.GET_OPENAI_COMPAT_MODELS, async () => (await getProvider("openai-compatible").listModels?.()) ?? []);
   handle(CH.GET_CODEX_MODELS, async () => (await getProvider("codex").listModels?.()) ?? []);

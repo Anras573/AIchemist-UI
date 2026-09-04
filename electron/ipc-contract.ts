@@ -181,6 +181,7 @@ export type IpcContract = {
     result: void;
   };
   [CH.ANSWER_QUESTION]: { args: [args: { questionId: string; answer: string }]; result: void };
+  [CH.GET_CLAUDE_MODELS]: { args: []; result: ModelList };
   [CH.GET_COPILOT_MODELS]: { args: []; result: ModelList };
   [CH.GET_OLLAMA_MODELS]: { args: []; result: ModelList };
   [CH.GET_OPENAI_COMPAT_MODELS]: { args: []; result: ModelList };

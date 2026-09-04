@@ -98,6 +98,7 @@ export interface ElectronAPI {
   ) => Promise<Res<typeof CH.APPROVE_TOOL_CALL>>;
   answerQuestion: (questionId: string, answer: string) => Promise<Res<typeof CH.ANSWER_QUESTION>>;
   getCopilotModels: () => Promise<Res<typeof CH.GET_COPILOT_MODELS>>;
+  getClaudeModels: () => Promise<Res<typeof CH.GET_CLAUDE_MODELS>>;
   getOllamaModels: () => Promise<Res<typeof CH.GET_OLLAMA_MODELS>>;
   getOpenAiCompatModels: () => Promise<Res<typeof CH.GET_OPENAI_COMPAT_MODELS>>;
   getCodexModels: () => Promise<Res<typeof CH.GET_CODEX_MODELS>>;
@@ -255,6 +256,7 @@ const api: ElectronAPI = {
     invoke(CH.APPROVE_TOOL_CALL, { sessionId, approvalId, approved, ...options }),
   answerQuestion: (questionId, answer) => invoke(CH.ANSWER_QUESTION, { questionId, answer }),
   getCopilotModels: () => invoke(CH.GET_COPILOT_MODELS),
+  getClaudeModels: () => invoke(CH.GET_CLAUDE_MODELS),
   getOllamaModels: () => invoke(CH.GET_OLLAMA_MODELS),
   getOpenAiCompatModels: () => invoke(CH.GET_OPENAI_COMPAT_MODELS),
   getCodexModels: () => invoke(CH.GET_CODEX_MODELS),
