@@ -200,7 +200,12 @@ function emitFileChanges(emitter: TurnEmitter, projectPath: string, changes: Cod
       // skip the dirs the fs tooling already ignores so the panel stays signal.
       if (!rel || rel.startsWith("..") || nodePath.isAbsolute(rel)) continue;
       if (rel.split(nodePath.sep).some((seg) => IGNORED_CHANGE_DIRS.has(seg))) continue;
-      emitter.fileChange({ path: abs, relativePath: rel, diff: "", operation: change.operation });
+      // Normalize emitted paths to POSIX-style so tests and renderer see a stable
+      // forward-slash path regardless of host OS (Windows yields backslashes).
+      const relPosix = rel.split(nodePath.sep).join("/");
+      const projectPosix = projectPath.split(nodePath.sep).join("/");
+      const emittedPath = projectPosix.endsWith("/") ? `${projectPosix}${relPosix}` : `${projectPosix}/${relPosix}`;
+      emitter.fileChange({ path: emittedPath, relativePath: relPosix, diff: "", operation: change.operation });
     } catch {
       // best-effort — never break the turn on an unresolvable path
     }
