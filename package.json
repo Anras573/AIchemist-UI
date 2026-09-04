@@ -9,6 +9,7 @@
   },
   "main": "dist/main/main.js",
   "scripts": {
+    "postinstall": "node scripts/ensure-electron.js",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
