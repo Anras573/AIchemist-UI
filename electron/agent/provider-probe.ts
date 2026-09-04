@@ -217,7 +217,9 @@ export async function probeAnthropic(opts?: { force?: boolean }): Promise<Provid
  */
 function oauthCredentialExists(): boolean {
   try {
-    const credFile = path.join(os.homedir(), ".claude", ".credentials.json");
+    // Respect explicit HOME/USERPROFILE env vars in tests — fall back to os.homedir().
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
+    const credFile = path.join(home, ".claude", ".credentials.json");
     return fs.existsSync(credFile);
   } catch {
     return false;

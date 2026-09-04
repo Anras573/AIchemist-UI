@@ -107,7 +107,11 @@ describe("permissions", () => {
     const file = path.join(memoryDir(PROJECT), "p.md");
     fs.chmodSync(file, 0o644);
     implWriteMemory(PROJECT, "p.md", "v2");
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    // Windows doesn't support POSIX permission bits reliably; only assert on
+    // POSIX platforms where chmod semantics are meaningful.
+    if (process.platform !== "win32") {
+      expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    }
   });
 });
 

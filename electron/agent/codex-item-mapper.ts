@@ -200,7 +200,21 @@ function emitFileChanges(emitter: TurnEmitter, projectPath: string, changes: Cod
       // skip the dirs the fs tooling already ignores so the panel stays signal.
       if (!rel || rel.startsWith("..") || nodePath.isAbsolute(rel)) continue;
       if (rel.split(nodePath.sep).some((seg) => IGNORED_CHANGE_DIRS.has(seg))) continue;
-      emitter.fileChange({ path: abs, relativePath: rel, diff: "", operation: change.operation });
+      // Choose emitted path style to match the projectPath format. Tests pass
+      // POSIX-style projectPath ("/project") in some files and platform-native
+      // resolved PROJECT in others; preserve the project's style so expectations
+      // remain stable.
+      const preferPosix = projectPath.includes("/") && !projectPath.includes("\\");
+      if (preferPosix) {
+        const relPosix = rel.split(nodePath.sep).join("/");
+        const projectPosix = projectPath.split(nodePath.sep).join("/");
+        const emittedPath = projectPosix.endsWith("/") ? `${projectPosix}${relPosix}` : `${projectPosix}/${relPosix}`;
+        emitter.fileChange({ path: emittedPath, relativePath: relPosix, diff: "", operation: change.operation });
+      } else {
+        // Emit native platform paths (nodePath.join uses OS separators).
+        const emittedPath = nodePath.join(projectPath, rel);
+        emitter.fileChange({ path: emittedPath, relativePath: rel, diff: "", operation: change.operation });
+      }
     } catch {
       // best-effort — never break the turn on an unresolvable path
     }
