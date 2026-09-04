@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "main": "dist/main/main.js",
   "scripts": {
+    "postinstall": "node scripts/ensure-electron.js",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
