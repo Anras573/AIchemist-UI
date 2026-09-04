@@ -91,24 +91,27 @@ describe("SpendingPanel", () => {
     renderWithProviders(<SpendingPanel />);
 
     // Match numeric currency portions using a regex to be robust across locales
-    const kpi7 = await screen.findByText("7 days");
-    expect(kpi7).toBeInTheDocument();
-    const kpi7Container = kpi7.closest("div");
+    // There are multiple elements with the text "7 days" (button + card label).
+    const kpi7Matches = await screen.findAllByText("7 days");
+    // Pick the card label which is a <p> element.
+    const kpi7 = kpi7Matches.find((el) => el.tagName === "P");
+    expect(kpi7).toBeDefined();
+    const kpi7Container = kpi7!.closest("div");
     expect(kpi7Container).not.toBeNull();
-    expect(within(kpi7Container!).getByText(/\d{1,3}[,.]\d{2}/)).toBeInTheDocument();
+    expect(within(kpi7Container!).getAllByText(/\d{1,3}[,.]\d{2}/).length).toBeGreaterThan(0);
 
     const lifetime = screen.getByText("Lifetime");
     const lifetimeContainer = lifetime.closest("div");
-    expect(within(lifetimeContainer!).getByText(/\d{1,3}[,.]\d{2}/)).toBeInTheDocument();
+    expect(within(lifetimeContainer!).getAllByText(/\d{1,3}[,.]\d{2}/).length).toBeGreaterThan(0);
 
     const remaining = screen.getByText("Remaining budget");
     const remainingContainer = remaining.closest("div");
-    expect(within(remainingContainer!).getByText(/\d{1,3}[,.]\d{2}/)).toBeInTheDocument();
-    expect(within(remainingContainer!).getByText(/of\s+\d{1,3}[,.]\d{2}/)).toBeInTheDocument();
+    expect(within(remainingContainer!).getAllByText(/\d{1,3}[,.]\d{2}/).length).toBeGreaterThan(0);
+    expect(within(remainingContainer!).getAllByText(/of\s+\d{1,3}[,.]\d{2}/).length).toBeGreaterThan(0);
 
     const burn = screen.getByText("Burn rate");
     const burnContainer = burn.closest("div");
-    expect(within(burnContainer!).getByText(/\d{1,3}[,.]\d{2}/)).toBeInTheDocument();
+    expect(within(burnContainer!).getAllByText(/\d{1,3}[,.]\d{2}/).length).toBeGreaterThan(0);
   });
 
   it("shows 'No budget set' when no global budget is configured", async () => {
@@ -169,7 +172,7 @@ describe("SpendingPanel", () => {
     expect(within(claudeRow!).getByText(tokens(500))).toBeInTheDocument();
     expect(within(claudeRow!).getByText(tokens(250))).toBeInTheDocument(); // cache_read + cache_creation
     // Match cost numeric portion robustly across locales
-    expect(within(claudeRow!).getByText(/\d{1,3}[,.]\d{2}/)).toBeInTheDocument();
+    expect(within(claudeRow!).getAllByText(/\d{1,3}[,.]\d{2}/).length).toBeGreaterThan(0);
     expect(within(claudeRow!).getByText("100.0%")).toBeInTheDocument();
   });
 
@@ -268,7 +271,7 @@ describe("SpendingPanel", () => {
     renderWithProviders(<SpendingPanel />);
 
     // Match numeric portion robustly across locales
-    expect(await screen.findByText(/\d{1,3}[,.]\d{2}/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/\d{1,3}[,.]\d{2}/)).length).toBeGreaterThan(0);
     // One badge for the period total, one for the lifetime total.
     expect(screen.getAllByLabelText("estimated cost")).toHaveLength(1);
     expect(screen.getAllByLabelText("unknown cost")).toHaveLength(1);
