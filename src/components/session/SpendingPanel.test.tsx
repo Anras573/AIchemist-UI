@@ -107,7 +107,9 @@ describe("SpendingPanel", () => {
     const remaining = screen.getByText("Remaining budget");
     const remainingContainer = remaining.closest("div");
     expect(within(remainingContainer!).getAllByText(/\d{1,3}[,.]\d{2}/).length).toBeGreaterThan(0);
-    expect(within(remainingContainer!).getAllByText(/of\s+\d{1,3}[,.]\d{2}/).length).toBeGreaterThan(0);
+    // Allow for locale-dependent currency symbol placement (e.g. "$100.00" vs "100.00 $") by
+    // permitting any non-digit characters between "of" and the numeric portion.
+    expect(within(remainingContainer!).getAllByText(/of\s*[^\d]*\d{1,3}[,.]\d{2}/).length).toBeGreaterThan(0);
 
     const burn = screen.getByText("Burn rate");
     const burnContainer = burn.closest("div");
