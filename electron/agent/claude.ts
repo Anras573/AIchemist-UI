@@ -7,6 +7,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { createPatch } from "diff";
+import Anthropic from "@anthropic-ai/sdk";
 
 import { parseAgentMarkdown } from "./agent-file";
 import { createApprovalMcpServer } from "./mcp-tools";
@@ -556,6 +557,34 @@ export async function runClaudeAgentTurn(params: {
 
 // ── AgentProvider implementation ──────────────────────────────────────────────
 
+/** Fetch available Claude models from the Anthropic API. */
+export async function getClaudeModels(): Promise<Array<{ id: string; name: string }>> {
+  const config = getAnthropicConfig();
+  const client = new Anthropic({
+    apiKey: config.api_key || undefined,
+    baseURL: config.base_url || undefined,
+  });
+
+  try {
+    const models = await client.models.list();
+    // Filter to Claude models and map to { id, name } format
+    return models.data
+      .filter((m) => m.id.includes("claude"))
+      .map((m) => ({
+        id: m.id,
+        name: m.id
+          .replace(/^claude-/, "Claude ")
+          .replace(/-/g, " ")
+          .split(" ")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
+      }));
+  } catch (error) {
+    console.error("Failed to fetch Claude models:", error);
+    return [];
+  }
+}
+
 export const claudeProvider: AgentProvider = {
   async run(params: AgentProviderParams): Promise<string> {
     let sdkSessionId =
@@ -584,5 +613,9 @@ export const claudeProvider: AgentProvider = {
 
   async listAgents(projectPath: string): Promise<AgentInfo[]> {
     return getClaudeAgents(projectPath);
+  },
+
+  async listModels(): Promise<Array<{ id: string; name: string }>> {
+    return getClaudeModels();
   },
 };

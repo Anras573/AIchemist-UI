@@ -38,6 +38,9 @@ beforeEach(() => {
 
 describe("ModelPickerButton", () => {
   it("shows only Anthropic models for an anthropic-locked session", async () => {
+    vi.mocked(window.electronAPI.getClaudeModels).mockResolvedValue([
+      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4 6" },
+    ]);
     vi.mocked(window.electronAPI.getCopilotModels).mockResolvedValue([
       { id: "gpt-5", name: "GPT-5" },
     ]);
@@ -54,6 +57,7 @@ describe("ModelPickerButton", () => {
     expect(screen.getByText("Anthropic")).toBeInTheDocument();
     expect(screen.queryByText("GitHub Copilot")).not.toBeInTheDocument();
     expect(screen.queryByText("Ollama")).not.toBeInTheDocument();
+    expect(window.electronAPI.getClaudeModels).toHaveBeenCalled();
     expect(window.electronAPI.getCopilotModels).not.toHaveBeenCalled();
     expect(window.electronAPI.getOllamaModels).not.toHaveBeenCalled();
   });
