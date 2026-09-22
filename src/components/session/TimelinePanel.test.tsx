@@ -1,3 +1,4 @@
+import type React from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { TimelinePanel } from "./TimelinePanel";
@@ -5,6 +6,35 @@ import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { makeMessage, makeProject, makeSession } from "@/test/utils/fixtures";
+
+// jsdom has no layout engine, so react-virtuoso can't measure real item
+// heights/viewport size — it would render an arbitrary (often near-empty)
+// window of items. Replace it with a plain, fully-rendered list so timeline
+// content assertions keep testing real behavior instead of virtualization
+// internals. Wrapped in vi.fn() so tests can assert on the `data` it was
+// handed (i.e. that the timeline is actually wired through Virtuoso).
+type MockVirtuosoProps = {
+  data?: unknown[];
+  itemContent: (index: number, item: unknown, context?: unknown) => React.ReactNode;
+  context?: unknown;
+  components?: { Footer?: React.ComponentType<{ context?: unknown }> };
+};
+
+const mockVirtuoso = vi.fn((props: MockVirtuosoProps) => {
+  const Footer = props.components?.Footer;
+  return (
+    <div>
+      {(props.data ?? []).map((item, index) => (
+        <div key={index}>{props.itemContent(index, item, props.context)}</div>
+      ))}
+      {Footer && <Footer context={props.context} />}
+    </div>
+  );
+});
+
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: (props: MockVirtuosoProps) => mockVirtuoso(props),
+}));
 
 // Conversation (use-stick-to-bottom) requires ResizeObserver, absent in jsdom.
 class ResizeObserverStub {
@@ -14,6 +44,7 @@ class ResizeObserverStub {
 }
 
 beforeEach(() => {
+  mockVirtuoso.mockClear();
   vi.stubGlobal("ResizeObserver", ResizeObserverStub);
   useSessionStore.setState({
     sessions: {},
@@ -128,6 +159,24 @@ describe("TimelinePanel messages", () => {
     ];
     expect(positions.every((p) => p >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
+  it("renders a long history through Virtuoso instead of mounting it all directly (issue #208)", () => {
+    const messages = Array.from({ length: 500 }, (_, i) =>
+      makeMessage(`m-${i}`, {
+        role: i % 2 === 0 ? "user" : "assistant",
+        content: `message ${i}`,
+        created_at: `2024-01-01T00:${String(i % 60).padStart(2, "0")}:00Z`,
+      })
+    );
+    useSessionStore.getState().addSession(makeSession("sess-1", { messages }));
+    useSessionStore.getState().setActiveSession("sess-1");
+
+    renderWithProviders(<TimelinePanel />);
+
+    expect(mockVirtuoso).toHaveBeenCalled();
+    const { data } = mockVirtuoso.mock.calls.at(-1)![0];
+    expect(data).toHaveLength(500);
   });
 
   it("renders compaction markers between messages", () => {
