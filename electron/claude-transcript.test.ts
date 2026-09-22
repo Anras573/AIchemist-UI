@@ -84,8 +84,10 @@ import {
   parseTranscript,
   createTranscriptReader,
   transcriptToSpans,
+  createClaudeSpanAccumulator,
   type TranscriptEntry,
 } from "./claude-transcript";
+import type { TraceSpan } from "../src/types/index";
 
 function addDir(p: string) {
   dirs.add(p);
@@ -383,5 +385,78 @@ describe("transcriptToSpans", () => {
     const spans = transcriptToSpans(entries, opts);
     const subTurn = spans.find((s) => s.id === "turn:sub_u1")!;
     expect(subTurn.parentId).toBeUndefined();
+  });
+
+  describe("createClaudeSpanAccumulator (incremental)", () => {
+    it("feeding entries one at a time matches a single full parse", () => {
+      const entries = [
+        mkUser("u1", null, "2025-01-01T00:00:00.000Z"),
+        mkAssistant("a1", "u1", "2025-01-01T00:00:01.000Z", [
+          { type: "tool_use", id: "tu_1", name: "Read", input: { file: "x" } },
+        ]),
+        mkToolResult("r1", "a1", "2025-01-01T00:00:02.000Z", "tu_1", "file contents"),
+        mkAssistant("a2", "r1", "2025-01-01T00:00:03.000Z", [{ type: "text", text: "done" }], {
+          input_tokens: 10,
+          output_tokens: 5,
+        }),
+      ];
+
+      const full = transcriptToSpans(entries, opts);
+
+      const acc = createClaudeSpanAccumulator(opts);
+      let incremental: TraceSpan[] = [];
+      for (const e of entries) {
+        incremental = acc.applyEntries([e]);
+      }
+
+      expect(incremental).toEqual(full);
+    });
+
+    it("only re-derives the turn a late tool_result belongs to, leaving earlier turns' span objects untouched", () => {
+      const acc = createClaudeSpanAccumulator(opts);
+
+      // First turn, fully resolved in one batch.
+      acc.applyEntries([
+        mkUser("u1", null, "2025-01-01T00:00:00.000Z"),
+        mkAssistant("a1", "u1", "2025-01-01T00:00:01.000Z", [{ type: "text", text: "hi" }]),
+      ]);
+      const afterTurn1 = acc.applyEntries([]);
+      const turn1SpanRef = afterTurn1.find((s) => s.id === "turn:u1")!;
+
+      // Second turn starts with a tool call whose result arrives in a later batch.
+      acc.applyEntries([
+        mkUser("u2", null, "2025-01-01T00:01:00.000Z"),
+        mkAssistant("a2", "u2", "2025-01-01T00:01:01.000Z", [
+          { type: "tool_use", id: "tu_2", name: "Bash", input: {} },
+        ]),
+      ]);
+      const midTurn2 = acc.applyEntries([]);
+      const tool2Running = midTurn2.find((s) => s.id === "tool:tu_2")!;
+      expect(tool2Running.status).toBe("running");
+
+      const afterResult = acc.applyEntries([
+        mkToolResult("r2", "a2", "2025-01-01T00:01:02.000Z", "tu_2", "ok"),
+      ]);
+
+      // Turn 1's span object is reused by reference — it was never touched by
+      // the batch that only affected turn 2's tool result.
+      expect(afterResult.find((s) => s.id === "turn:u1")).toBe(turn1SpanRef);
+
+      const tool2Done = afterResult.find((s) => s.id === "tool:tu_2")!;
+      expect(tool2Done.status).toBe("success");
+      expect((tool2Done.meta as any).toolResult.preview).toContain("ok");
+
+      // Equivalent to a full one-shot parse of the same entries.
+      const allEntries = [
+        mkUser("u1", null, "2025-01-01T00:00:00.000Z"),
+        mkAssistant("a1", "u1", "2025-01-01T00:00:01.000Z", [{ type: "text", text: "hi" }]),
+        mkUser("u2", null, "2025-01-01T00:01:00.000Z"),
+        mkAssistant("a2", "u2", "2025-01-01T00:01:01.000Z", [
+          { type: "tool_use", id: "tu_2", name: "Bash", input: {} },
+        ]),
+        mkToolResult("r2", "a2", "2025-01-01T00:01:02.000Z", "tu_2", "ok"),
+      ];
+      expect(afterResult).toEqual(transcriptToSpans(allEntries, opts));
+    });
   });
 });

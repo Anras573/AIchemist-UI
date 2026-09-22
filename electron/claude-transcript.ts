@@ -340,8 +340,31 @@ function findSidechainParentTaskToolUseId(
   return candidates.length === 1 ? candidates[0] : null;
 }
 
+export interface ClaudeSpanAccumulator {
+  /**
+   * Fold newly-read transcript entries into the running turn/tool state and
+   * return the full, up-to-date span list. Only `newEntries` are walked —
+   * spans for turns untouched by this batch are reused as-is rather than
+   * rebuilt, which is what keeps a long-lived session's live-watcher refresh
+   * cost bounded by the size of each update instead of the whole transcript
+   * (issue #207).
+   */
+  applyEntries(newEntries: TranscriptEntry[]): TraceSpan[];
+}
+
+interface TurnState {
+  id: string;                        // canonical turn span id
+  anchor: TranscriptEntry;           // the root user prompt
+  startMs: number;
+  assistants: TranscriptEntry[];     // assistant messages in this turn
+  tools: { toolUseId: string; name: string; input: unknown; startEntry: TranscriptEntry }[];
+  sidechain: boolean;
+}
+
 /**
- * Build TraceSpans from transcript entries.
+ * Stateful, incremental span builder for a Claude transcript. Create one per
+ * watched session and keep feeding it newly-read entries (not the full
+ * cumulative list) on each refresh.
  *
  * Turns are anchored at root (non-sidechain, non-meta) user prompts that
  * aren't tool_result deliveries; all subsequent assistant + tool_result
@@ -350,97 +373,38 @@ function findSidechainParentTaskToolUseId(
  * Sidechain turns use the same grouping logic but start at sidechain user
  * entries; they're nested under their parent Task tool span when unambiguous.
  */
-export function transcriptToSpans(
-  entries: TranscriptEntry[],
-  opts: TranscriptSpanOptions
-): TraceSpan[] {
+export function createClaudeSpanAccumulator(opts: TranscriptSpanOptions): ClaudeSpanAccumulator {
   const { sessionId, sdkSessionId } = opts;
 
-  // Index entries for quick lookup.
+  // Cumulative indexes, grown incrementally across calls.
   const byUuid = new Map<string, TranscriptEntry>();
   const toolUseByEntry = new Map<string, { toolUseId: string; name: string }[]>();
-  for (const e of entries) {
-    if (e.uuid) byUuid.set(e.uuid, e);
-    if (e.type === "assistant") {
-      const blocks = extractAssistantContent(e);
-      const uses: { toolUseId: string; name: string }[] = [];
-      for (const b of blocks) {
-        if (b.type === "tool_use" && b.id && b.name) {
-          uses.push({ toolUseId: b.id, name: b.name });
-        }
-      }
-      if (uses.length) toolUseByEntry.set(e.uuid ?? "", uses);
-    }
-  }
   const ctx: BuildCtx = { byUuid, toolUseByEntry };
-
-  // Index tool_result entries by tool_use_id for quick pairing.
   const toolResultById = new Map<string, { entry: TranscriptEntry; block: UserContentToolResult }>();
-  for (const e of entries) {
-    if (e.type !== "user") continue;
-    for (const b of extractUserContent(e)) {
-      if (b.type === "tool_result" && b.tool_use_id) {
-        toolResultById.set(b.tool_use_id, { entry: e, block: b });
-      }
-    }
-  }
+  const toolOwnerTurnId = new Map<string, string>(); // tool_use_id → owning turn id
 
-  // Build turn groups.
-  interface TurnGroup {
-    anchor: TranscriptEntry;           // the root user prompt
-    assistants: TranscriptEntry[];     // assistant messages in this turn
-    tools: { toolUseId: string; name: string; input: unknown; startEntry: TranscriptEntry }[];
-    sidechain: boolean;
-  }
-  const turns: TurnGroup[] = [];
-  let current: TurnGroup | null = null;
+  const turnOrder: string[] = [];
+  const turnsById = new Map<string, TurnState>();
+  const spanById = new Map<string, TraceSpan>();
+  let current: TurnState | null = null;
 
-  const startNewTurn = (anchor: TranscriptEntry, sidechain: boolean) => {
-    current = { anchor, assistants: [], tools: [], sidechain };
-    turns.push(current);
+  const startNewTurn = (anchor: TranscriptEntry, sidechain: boolean): TurnState => {
+    const startMs = anchor.timestamp ? Date.parse(anchor.timestamp) : 0;
+    const id = anchor.uuid ? `turn:${anchor.uuid}` : `turn:${sdkSessionId}:${startMs}`;
+    const t: TurnState = { id, anchor, startMs, assistants: [], tools: [], sidechain };
+    turnsById.set(id, t);
+    turnOrder.push(id);
+    current = t;
+    return t;
   };
 
-  for (const e of entries) {
-    if (e.type === "user") {
-      const blocks = extractUserContent(e);
-      const isToolResult = blocks.some((b) => b.type === "tool_result");
-      if (!isToolResult && !e.isMeta) {
-        startNewTurn(e, !!e.isSidechain);
-      }
-      continue;
-    }
-    if (e.type === "assistant") {
-      if (!current) {
-        // Orphan assistant — synthesize an anchor so we don't drop it.
-        startNewTurn(e, !!e.isSidechain);
-      }
-      current!.assistants.push(e);
-      for (const use of toolUseByEntry.get(e.uuid ?? "") ?? []) {
-        const block = extractAssistantContent(e).find(
-          (b) => b.type === "tool_use" && (b as AssistantContentToolUse).id === use.toolUseId
-        ) as AssistantContentToolUse | undefined;
-        current!.tools.push({
-          toolUseId: use.toolUseId,
-          name: use.name,
-          input: block?.input ?? {},
-          startEntry: e,
-        });
-      }
-    }
-  }
-
-  // Materialize spans.
-  const spans: TraceSpan[] = [];
-  const toolParentTurnId = new Map<string, string>(); // tool_use_id → turn span id
-
-  for (const turn of turns) {
-    const anchor = turn.anchor;
-    const startMs = anchor.timestamp ? Date.parse(anchor.timestamp) : 0;
-    const lastEntry = turn.assistants[turn.assistants.length - 1] ?? anchor;
+  const rebuildTurnSpans = (t: TurnState): void => {
+    const anchor = t.anchor;
+    const lastEntry = t.assistants[t.assistants.length - 1] ?? anchor;
     // Turn end = timestamp of the last tool_result in this turn OR last assistant msg.
-    let endMs = lastEntry.timestamp ? Date.parse(lastEntry.timestamp) : startMs;
-    for (const t of turn.tools) {
-      const res = toolResultById.get(t.toolUseId);
+    let endMs = lastEntry.timestamp ? Date.parse(lastEntry.timestamp) : t.startMs;
+    for (const tool of t.tools) {
+      const res = toolResultById.get(tool.toolUseId);
       const ts = res?.entry.timestamp ? Date.parse(res.entry.timestamp) : undefined;
       if (ts && ts > endMs) endMs = ts;
     }
@@ -449,7 +413,7 @@ export function transcriptToSpans(
     let tokIn = 0, tokOut = 0, tokCacheR = 0, tokCacheC = 0;
     let model: string | undefined;
     let thinking = "";
-    for (const a of turn.assistants) {
+    for (const a of t.assistants) {
       const u = a.message?.usage;
       if (u) {
         tokIn += u.input_tokens ?? 0;
@@ -465,71 +429,156 @@ export function transcriptToSpans(
       }
     }
 
-    const turnId = anchor.uuid
-      ? `turn:${anchor.uuid}`
-      : `turn:${sdkSessionId}:${startMs}`;
-
     // Determine parent for sidechain turns.
     let parentToolSpanId: string | undefined;
-    if (turn.sidechain) {
+    if (t.sidechain) {
       const parentToolUseId = findSidechainParentTaskToolUseId(anchor, ctx);
       if (parentToolUseId) parentToolSpanId = `tool:${parentToolUseId}`;
     }
 
-    const turnName = turn.sidechain ? "Sub-agent turn" : "Agent Turn";
-    const turnSpan: TraceSpan = {
-      id: turnId,
+    const turnName = t.sidechain ? "Sub-agent turn" : "Agent Turn";
+    spanById.set(t.id, {
+      id: t.id,
       parentId: parentToolSpanId,
       sessionId,
       type: "turn",
       name: turnName,
-      startMs,
+      startMs: t.startMs,
       endMs,
-      durationMs: Math.max(0, endMs - startMs),
+      durationMs: Math.max(0, endMs - t.startMs),
       status: "success",
       meta: {
         model,
         tokens: { input: tokIn, output: tokOut, cacheRead: tokCacheR, cacheCreation: tokCacheC },
         thinking: thinking || undefined,
-        isSidechain: turn.sidechain || undefined,
+        isSidechain: t.sidechain || undefined,
         gitBranch: anchor.gitBranch,
         rootUserUuid: anchor.uuid,
       },
-    };
-    spans.push(turnSpan);
+    });
 
     // Tool spans under this turn.
-    for (const t of turn.tools) {
-      const res = toolResultById.get(t.toolUseId);
-      const toolStart = t.startEntry.timestamp ? Date.parse(t.startEntry.timestamp) : startMs;
+    for (const tool of t.tools) {
+      const res = toolResultById.get(tool.toolUseId);
+      const toolStart = tool.startEntry.timestamp ? Date.parse(tool.startEntry.timestamp) : t.startMs;
       const toolEnd = res?.entry.timestamp ? Date.parse(res.entry.timestamp) : undefined;
       const previewText = res ? extractToolResultText(res.block.content) : "";
       const isError = !!res?.block.is_error;
 
-      const toolSpan: TraceSpan = {
-        id: `tool:${t.toolUseId}`,
-        parentId: turnId,
+      spanById.set(`tool:${tool.toolUseId}`, {
+        id: `tool:${tool.toolUseId}`,
+        parentId: t.id,
         sessionId,
         type: "tool",
-        name: t.name,
+        name: tool.name,
         startMs: toolStart,
         endMs: toolEnd,
         durationMs: toolEnd !== undefined ? Math.max(0, toolEnd - toolStart) : undefined,
         status: res ? (isError ? "error" : "success") : "running",
         meta: {
-          input: t.input,
-          toolUseId: t.toolUseId,
+          input: tool.input,
+          toolUseId: tool.toolUseId,
           toolResult: res
             ? { preview: truncatePreview(previewText), isError }
             : undefined,
         },
-      };
-      spans.push(toolSpan);
-      toolParentTurnId.set(t.toolUseId, turnId);
+      });
     }
-  }
+  };
 
-  return spans;
+  return {
+    applyEntries(newEntries) {
+      // Index pass — grows the cumulative uuid / tool_use lookups.
+      for (const e of newEntries) {
+        if (e.uuid) byUuid.set(e.uuid, e);
+        if (e.type === "assistant") {
+          const blocks = extractAssistantContent(e);
+          const uses: { toolUseId: string; name: string }[] = [];
+          for (const b of blocks) {
+            if (b.type === "tool_use" && b.id && b.name) {
+              uses.push({ toolUseId: b.id, name: b.name });
+            }
+          }
+          if (uses.length) toolUseByEntry.set(e.uuid ?? "", uses);
+        }
+      }
+
+      // Grouping pass — only over the new entries; turns from prior batches
+      // are left untouched unless a new tool_result targets one of them.
+      const dirty = new Set<string>();
+
+      for (const e of newEntries) {
+        if (e.type === "user") {
+          const blocks = extractUserContent(e);
+          const isToolResult = blocks.some((b) => b.type === "tool_result");
+          if (isToolResult) {
+            for (const b of blocks) {
+              if (b.type === "tool_result" && b.tool_use_id) {
+                toolResultById.set(b.tool_use_id, { entry: e, block: b });
+                const ownerId = toolOwnerTurnId.get(b.tool_use_id);
+                if (ownerId) dirty.add(ownerId);
+              }
+            }
+            continue;
+          }
+          if (!e.isMeta) {
+            dirty.add(startNewTurn(e, !!e.isSidechain).id);
+          }
+          continue;
+        }
+        if (e.type === "assistant") {
+          if (!current) {
+            // Orphan assistant — synthesize an anchor so we don't drop it.
+            dirty.add(startNewTurn(e, !!e.isSidechain).id);
+          }
+          current!.assistants.push(e);
+          dirty.add(current!.id);
+          for (const use of toolUseByEntry.get(e.uuid ?? "") ?? []) {
+            const block = extractAssistantContent(e).find(
+              (b) => b.type === "tool_use" && (b as AssistantContentToolUse).id === use.toolUseId
+            ) as AssistantContentToolUse | undefined;
+            current!.tools.push({
+              toolUseId: use.toolUseId,
+              name: use.name,
+              input: block?.input ?? {},
+              startEntry: e,
+            });
+            toolOwnerTurnId.set(use.toolUseId, current!.id);
+          }
+        }
+      }
+
+      for (const id of dirty) {
+        const t = turnsById.get(id);
+        if (t) rebuildTurnSpans(t);
+      }
+
+      // Flatten in turn-start order (mirrors the original full-rebuild order).
+      const spans: TraceSpan[] = [];
+      for (const id of turnOrder) {
+        const t = turnsById.get(id)!;
+        spans.push(spanById.get(id)!);
+        for (const tool of t.tools) {
+          spans.push(spanById.get(`tool:${tool.toolUseId}`)!);
+        }
+      }
+      return spans;
+    },
+  };
+}
+
+/**
+ * Build TraceSpans from transcript entries.
+ *
+ * One-shot wrapper over `createClaudeSpanAccumulator` for callers (tests,
+ * `GET_TRACES`, usage-ledger backfill) that just want a full parse and don't
+ * need to keep state between calls.
+ */
+export function transcriptToSpans(
+  entries: TranscriptEntry[],
+  opts: TranscriptSpanOptions
+): TraceSpan[] {
+  return createClaudeSpanAccumulator(opts).applyEntries(entries);
 }
 
 // ── Watcher ────────────────────────────────────────────────────────────────────
@@ -565,6 +614,7 @@ export function watchTranscript(
   let stat0: number | null = null;
   let pollTimer: NodeJS.Timeout | null = null;
   let lastEmit = 0;
+  let accumulator = createClaudeSpanAccumulator({ sessionId, sdkSessionId });
 
   const schedule = () => {
     if (closed) return;
@@ -580,8 +630,13 @@ export function watchTranscript(
         if (!resolvedPath) return;
         reader = createTranscriptReader(resolvedPath);
       }
-      const entries = await reader!.readAll();
-      const spans = transcriptToSpans(entries, { sessionId, sdkSessionId });
+      // Incremental read — only appended bytes are parsed per change, and
+      // only the new entries (not the whole cumulative history) are folded
+      // into the span accumulator (issue #207).
+      const { newEntries, didReset } = await reader!.readIncremental();
+      if (didReset) accumulator = createClaudeSpanAccumulator({ sessionId, sdkSessionId });
+      if (newEntries.length === 0 && !didReset) return;
+      const spans = accumulator.applyEntries(newEntries);
       lastEmit = Date.now();
       cb.onUpdate(spans);
     } catch (err) {
