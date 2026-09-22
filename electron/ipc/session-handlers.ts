@@ -124,8 +124,10 @@ export function registerSessionHandlers(
   handle(CH.LIST_SESSIONS, (_event, projectId: string) =>
     listSessions(db, projectId)
   );
-  handle(CH.GET_SESSION, (_event, sessionId: string) =>
-    getSession(db, sessionId)
+  handle(
+    CH.GET_SESSION,
+    (_event, sessionId: string, options?: { limit?: number; beforeMessageId?: string }) =>
+      getSession(db, sessionId, options)
   );
   handle(CH.DELETE_SESSION, (_event, sessionId: string, options?: { cleanupWorktree?: boolean }) => {
     const session = getSession(db, sessionId);

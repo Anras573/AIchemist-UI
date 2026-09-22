@@ -116,7 +116,10 @@ export type IpcContract = {
     result: Session;
   };
   [CH.LIST_SESSIONS]: { args: [projectId: string]; result: Session[] };
-  [CH.GET_SESSION]: { args: [sessionId: string]; result: Session };
+  [CH.GET_SESSION]: {
+    args: [sessionId: string, options?: { limit?: number; beforeMessageId?: string }];
+    result: Session;
+  };
   [CH.DELETE_SESSION]: { args: [sessionId: string, options?: { cleanupWorktree?: boolean }]; result: void };
   [CH.SAVE_MESSAGE]: {
     args: [args: { sessionId: string; role: Message["role"]; content: string }];

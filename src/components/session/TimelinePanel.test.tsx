@@ -1,11 +1,12 @@
 import type React from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { TimelinePanel } from "./TimelinePanel";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { makeMessage, makeProject, makeSession } from "@/test/utils/fixtures";
+import { OLDER_MESSAGES_PAGE_SIZE } from "@/lib/hooks/useLoadOlderMessages";
 
 // jsdom has no layout engine, so react-virtuoso can't measure real item
 // heights/viewport size — it would render an arbitrary (often near-empty)
@@ -18,6 +19,8 @@ type MockVirtuosoProps = {
   itemContent: (index: number, item: unknown, context?: unknown) => React.ReactNode;
   context?: unknown;
   components?: { Footer?: React.ComponentType<{ context?: unknown }> };
+  startReached?: (index: number) => void;
+  firstItemIndex?: number;
 };
 
 const mockVirtuoso = vi.fn((props: MockVirtuosoProps) => {
@@ -54,6 +57,7 @@ beforeEach(() => {
     pendingApprovals: {},
     pendingQuestions: {},
     sessionCompactions: {},
+    sessionHasMoreMessages: {},
     queuedMessageIds: {},
     queuePaused: {},
   });
@@ -177,6 +181,57 @@ describe("TimelinePanel messages", () => {
     expect(mockVirtuoso).toHaveBeenCalled();
     const { data } = mockVirtuoso.mock.calls.at(-1)![0];
     expect(data).toHaveLength(500);
+  });
+
+  it("loads and prepends an older page when Virtuoso's startReached fires (issue #208 follow-up)", async () => {
+    useSessionStore.getState().addSession(
+      makeSession("sess-1", {
+        messages: [
+          makeMessage("m-1", { content: "first loaded", created_at: "2024-01-01T00:00:10Z" }),
+          makeMessage("m-2", { content: "second loaded", created_at: "2024-01-01T00:00:11Z" }),
+        ],
+      })
+    );
+    useSessionStore.getState().setActiveSession("sess-1");
+    useSessionStore.setState({ sessionHasMoreMessages: { "sess-1": true } });
+
+    vi.mocked(window.electronAPI.getSession).mockResolvedValueOnce(
+      makeSession("sess-1", {
+        messages: [makeMessage("m-older", { content: "older message", created_at: "2024-01-01T00:00:05Z" })],
+        has_more_messages: false,
+      })
+    );
+
+    renderWithProviders(<TimelinePanel />);
+    expect(screen.getByText("first loaded")).toBeInTheDocument();
+    expect(screen.queryByText("older message")).not.toBeInTheDocument();
+
+    const { startReached } = mockVirtuoso.mock.calls.at(-1)![0];
+    startReached?.(0);
+
+    await waitFor(() => expect(screen.getByText("older message")).toBeInTheDocument());
+    expect(window.electronAPI.getSession).toHaveBeenCalledWith("sess-1", {
+      limit: OLDER_MESSAGES_PAGE_SIZE,
+      beforeMessageId: "m-1",
+    });
+
+    // The older page is prepended ahead of (not replacing) what was already loaded.
+    expect(screen.getByText("first loaded")).toBeInTheDocument();
+    expect(screen.getByText("second loaded")).toBeInTheDocument();
+  });
+
+  it("does not fetch an older page once has_more_messages is false", () => {
+    useSessionStore.getState().addSession(
+      makeSession("sess-1", { messages: [makeMessage("m-1", { content: "only message" })] })
+    );
+    useSessionStore.getState().setActiveSession("sess-1");
+    useSessionStore.setState({ sessionHasMoreMessages: { "sess-1": false } });
+
+    renderWithProviders(<TimelinePanel />);
+    const { startReached } = mockVirtuoso.mock.calls.at(-1)![0];
+    startReached?.(0);
+
+    expect(window.electronAPI.getSession).not.toHaveBeenCalled();
   });
 
   it("renders compaction markers between messages", () => {

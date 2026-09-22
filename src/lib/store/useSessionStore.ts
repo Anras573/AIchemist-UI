@@ -63,6 +63,9 @@ interface SessionStore {
   pendingQuestions: Record<string, PendingQuestion[]>;
   // Active sub-agent per session (Claude only); null = default agent
   sessionAgents: Record<string, string | null>;
+  // Whether an older page of messages exists beyond what's currently loaded
+  // (mirrors Session.has_more_messages); drives the "load older" affordance.
+  sessionHasMoreMessages: Record<string, boolean>;
   sessionDisabledMcp: Record<string, string[]>;
   // Active skills per session; empty array = no skills toggled
   sessionSkills: Record<string, string[]>;
@@ -87,8 +90,10 @@ interface SessionStore {
 
   mergeSessions: (sessions: Session[]) => void;
   setActiveSession: (id: string | null) => void;
-  /** Replaces a session's messages with the full history loaded from the DB. */
+  /** Replaces a session's messages with the page of history loaded from the DB. */
   hydrateSession: (session: Session) => void;
+  /** Prepends an older page of messages (from a "load older" fetch) ahead of what's already loaded. */
+  prependMessages: (sessionId: string, messages: Message[], hasMore: boolean) => void;
   addSession: (session: Session) => void;
   removeSession: (id: string) => void;
   updateSessionStatus: (sessionId: string, status: SessionStatus) => void;
@@ -150,6 +155,7 @@ export const useSessionStore = create<SessionStore>()(
       pendingQuestions: {},
       terminalOutput: {},
       sessionAgents: {},
+      sessionHasMoreMessages: {},
       sessionSkills: {},
       sessionDisabledMcp: {},
       sessionTraces: {},
@@ -204,9 +210,35 @@ export const useSessionStore = create<SessionStore>()(
                 title: session.title,
               },
             },
+            sessionHasMoreMessages: {
+              ...state.sessionHasMoreMessages,
+              [session.id]: session.has_more_messages ?? false,
+            },
             ...agentUpdate,
             ...skillsUpdate,
             ...disabledMcpUpdate,
+          };
+        }),
+
+      prependMessages: (sessionId, messages, hasMore) =>
+        set((state) => {
+          const s = state.sessions[sessionId];
+          if (!s) return state;
+          // Defensive de-dup — guards against overlapping "load older" fetches
+          // (e.g. a repeated startReached firing) re-adding the same page.
+          const existingIds = new Set(s.messages.map((m) => m.id));
+          const older = messages.filter((m) => !existingIds.has(m.id));
+          if (older.length === 0) {
+            return {
+              sessionHasMoreMessages: { ...state.sessionHasMoreMessages, [sessionId]: hasMore },
+            };
+          }
+          return {
+            sessions: {
+              ...state.sessions,
+              [sessionId]: { ...s, messages: [...older, ...s.messages] },
+            },
+            sessionHasMoreMessages: { ...state.sessionHasMoreMessages, [sessionId]: hasMore },
           };
         }),
 
@@ -223,6 +255,7 @@ export const useSessionStore = create<SessionStore>()(
           const { [id]: _pendingApprovals, ...pendingApprovalsRest } = state.pendingApprovals;
           const { [id]: _pendingQuestions, ...pendingQuestionsRest } = state.pendingQuestions;
           const { [id]: _sessionAgents, ...sessionAgentsRest } = state.sessionAgents;
+          const { [id]: _sessionHasMoreMessages, ...sessionHasMoreMessagesRest } = state.sessionHasMoreMessages;
           const { [id]: _sessionSkills, ...sessionSkillsRest } = state.sessionSkills;
           const { [id]: _sessionDisabledMcp, ...sessionDisabledMcpRest } = state.sessionDisabledMcp;
           const { [id]: _t, ...tracesRest } = state.sessionTraces;
@@ -241,6 +274,7 @@ export const useSessionStore = create<SessionStore>()(
             pendingApprovals: pendingApprovalsRest,
             pendingQuestions: pendingQuestionsRest,
             sessionAgents: sessionAgentsRest,
+            sessionHasMoreMessages: sessionHasMoreMessagesRest,
             sessionSkills: sessionSkillsRest,
             sessionDisabledMcp: sessionDisabledMcpRest,
             sessionTraces: tracesRest,

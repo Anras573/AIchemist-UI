@@ -31,12 +31,20 @@ import { EmptyStateNewSession } from "./EmptyStateNewSession";
 import { InputBar } from "./InputBar";
 import { QuestionCard } from "./QuestionCard";
 import { useIpc } from "@/lib/ipc";
+import { useLoadOlderMessages } from "@/lib/hooks/useLoadOlderMessages";
 
 const EMPTY_COMPACTIONS: CompactionEvent[] = [];
 const EMPTY_TOOL_CALLS: LiveToolCall[] = [];
 const EMPTY_APPROVALS: PendingApproval[] = [];
 const EMPTY_QUESTIONS: PendingQuestion[] = [];
 const EMPTY_QUEUED_IDS: string[] = [];
+
+// Starting value for Virtuoso's `firstItemIndex` — react-virtuoso's documented
+// pattern for prepending items to the top of the list without a scroll jump.
+// It only needs to stay comfortably above 0 as older pages are prepended
+// (each prepend decrements it by the page size), so an arbitrary large value
+// works; it has no other meaning (not a real message index).
+const FIRST_ITEM_INDEX_START = 10_000_000;
 
 // ─── Individual message bubble ────────────────────────────────────────────────
 
@@ -373,6 +381,10 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
   const queuePausedState = useSessionStore(
     (s) => (activeSessionId ? s.queuePaused[activeSessionId] : undefined) ?? null
   );
+  const hasMoreMessages = useSessionStore((s) =>
+    activeSessionId ? (s.sessionHasMoreMessages[activeSessionId] ?? false) : false
+  );
+  const loadOlderMessages = useLoadOlderMessages();
   const {
     removeApproval,
     removePendingQuestion,
@@ -451,6 +463,7 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
   const [isAtBottom, setIsAtBottom] = useState(true);
   const isAtBottomRef = useRef(true);
   const scrollerElRef = useRef<HTMLElement | null>(null);
+  const [firstItemIndex, setFirstItemIndex] = useState(FIRST_ITEM_INDEX_START);
 
   const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
     isAtBottomRef.current = atBottom;
@@ -473,8 +486,24 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
   useEffect(() => {
     isAtBottomRef.current = true;
     setIsAtBottom(true);
+    setFirstItemIndex(FIRST_ITEM_INDEX_START);
     scrollToBottom("auto");
   }, [activeSessionId, scrollToBottom]);
+
+  // ── Load older messages on scroll-up ───────────────────────────────────────
+  //
+  // Virtuoso's `startReached` fires when the user scrolls near index 0. Fetch
+  // the next-older page (cursored on the current oldest message) and prepend
+  // it, decrementing `firstItemIndex` by exactly the number of new messages
+  // so Virtuoso keeps the viewport anchored instead of jumping.
+  const handleStartReached = useCallback(() => {
+    if (!activeSessionId || !hasMoreMessages) return;
+    const oldest = messages[0];
+    if (!oldest) return;
+    loadOlderMessages(activeSessionId, oldest.id).then((count) => {
+      if (count > 0) setFirstItemIndex((idx) => idx - count);
+    });
+  }, [activeSessionId, hasMoreMessages, messages, loadOlderMessages]);
 
   const footerContext: TimelineFooterContext = {
     showEmptyState: timelineItems.length === 0 && session?.status !== "running",
@@ -523,9 +552,11 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
           data={timelineItems}
           context={footerContext}
           computeItemKey={(_, item) => item.data.id}
+          firstItemIndex={firstItemIndex}
           initialTopMostItemIndex={
             timelineItems.length > 0 ? { index: timelineItems.length - 1, align: "end" } : undefined
           }
+          startReached={handleStartReached}
           followOutput={(atBottom) => (atBottom ? "auto" : false)}
           atBottomStateChange={handleAtBottomStateChange}
           scrollerRef={(ref) => {
