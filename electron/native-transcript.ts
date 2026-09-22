@@ -177,6 +177,8 @@ export async function parseNativeTranscript(filePath: string): Promise<NativeEve
 export interface NativeTranscriptReader {
   /** Re-read any new bytes since the last call; returns the full events list. */
   readAll(): Promise<NativeEvent[]>;
+  /** Re-read only new events since the last call. */
+  readIncremental(): Promise<{ newEntries: NativeEvent[]; didReset: boolean }>;
   /** Reset offset + buffer (force a full re-parse next call). */
   reset(): void;
 }
@@ -191,20 +193,22 @@ export function createNativeTranscriptReader(filePath: string): NativeTranscript
   let buffer = "";
   const events: NativeEvent[] = [];
 
-  async function pull(): Promise<void> {
+  async function pull(): Promise<{ newEntries: NativeEvent[]; didReset: boolean }> {
+    let didReset = false;
     let size = 0;
     try {
       size = (await fsp.stat(filePath)).size;
     } catch {
-      return;
+      return { newEntries: [], didReset: false };
     }
     if (size < offset) {
       // File was truncated / rotated — start over (append-only in practice).
       offset = 0;
       buffer = "";
       events.length = 0;
+      didReset = true;
     }
-    if (size === offset) return;
+    if (size === offset) return { newEntries: [], didReset };
 
     const fd = await fsp.open(filePath, "r");
     try {
@@ -220,20 +224,26 @@ export function createNativeTranscriptReader(filePath: string): NativeTranscript
     const lines = buffer.split("\n");
     // Last element is the (possibly empty) trailing partial — keep it for next call.
     buffer = lines.pop() ?? "";
+    const newOnes: NativeEvent[] = [];
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
-        events.push(JSON.parse(line) as NativeEvent);
+        newOnes.push(JSON.parse(line) as NativeEvent);
       } catch {
         /* skip malformed line */
       }
     }
+    events.push(...newOnes);
+    return { newEntries: newOnes, didReset };
   }
 
   return {
     async readAll() {
       await pull();
       return [...events];
+    },
+    async readIncremental() {
+      return pull();
     },
     reset() {
       offset = 0;
@@ -268,17 +278,27 @@ interface TurnAccum {
   results: Map<string, { output: string; isError: boolean; endMs: number }>;
 }
 
+export interface NativeSpanAccumulator {
+  /**
+   * Fold newly-read events into the running turn/tool state and return the
+   * full, up-to-date span list. Only `newEvents` are walked — spans for turns
+   * untouched by this batch are reused as-is rather than rebuilt, which is
+   * what keeps a long-lived session's live-watcher refresh cost bounded by
+   * the size of each update instead of the whole transcript (issue #207).
+   */
+  applyEvents(newEvents: NativeEvent[]): TraceSpan[];
+}
+
 /**
- * Build TraceSpans from native transcript events.
- *
- * Each `turn_start` opens a turn span (running until its `turn_end`); tool_call
- * / tool_result pairs (matched by tool_call id) become tool spans parented to
- * their turn. Turns are emitted in start order.
+ * Stateful, incremental span builder for native transcript events. Create one
+ * per watched session and keep feeding it newly-read events (not the full
+ * cumulative list) on each refresh.
  */
-export function nativeEventsToSpans(events: NativeEvent[], opts: NativeSpanOptions): TraceSpan[] {
+export function createNativeSpanAccumulator(opts: NativeSpanOptions): NativeSpanAccumulator {
   const { sessionId } = opts;
   const turns = new Map<string, TurnAccum>();
   const order: string[] = [];
+  const spanById = new Map<string, TraceSpan>();
 
   const ensureTurn = (turnId: string, ts: number): TurnAccum => {
     let t = turns.get(turnId);
@@ -299,45 +319,12 @@ export function nativeEventsToSpans(events: NativeEvent[], opts: NativeSpanOptio
     return t;
   };
 
-  for (const e of events) {
-    const t = ensureTurn(e.turnId, e.ts);
-    if (e.ts > t.endMs) t.endMs = e.ts;
-    switch (e.type) {
-      case "turn_start":
-        t.startMs = e.ts;
-        t.model = e.model;
-        break;
-      case "tool_call":
-        if (!t.tools.has(e.toolCallId)) t.toolOrder.push(e.toolCallId);
-        t.tools.set(e.toolCallId, { name: e.name, input: e.input, startMs: e.ts });
-        break;
-      case "tool_result":
-        t.results.set(e.toolCallId, { output: e.output, isError: e.isError, endMs: e.ts });
-        break;
-      case "reasoning":
-        t.reasoning += (t.reasoning ? "\n\n" : "") + e.text;
-        break;
-      case "usage":
-        t.tokens = {
-          input: e.input,
-          output: e.output,
-          cacheRead: e.cacheRead,
-          cacheCreation: e.cacheCreation,
-        };
-        break;
-      case "turn_end":
-        t.status = e.status;
-        t.endMs = e.ts;
-        break;
-    }
-  }
+  const turnSpanId = (turnId: string) => `turn:native:${sessionId}:${turnId}`;
 
-  const spans: TraceSpan[] = [];
-  for (const turnId of order) {
-    const t = turns.get(turnId)!;
-    const turnSpanId = `turn:native:${sessionId}:${turnId}`;
-    spans.push({
-      id: turnSpanId,
+  const rebuildTurnSpans = (t: TurnAccum): void => {
+    const tsId = turnSpanId(t.turnId);
+    spanById.set(tsId, {
+      id: tsId,
       sessionId,
       type: "turn",
       name: "Agent Turn",
@@ -355,9 +342,9 @@ export function nativeEventsToSpans(events: NativeEvent[], opts: NativeSpanOptio
     for (const toolCallId of t.toolOrder) {
       const call = t.tools.get(toolCallId)!;
       const res = t.results.get(toolCallId);
-      spans.push({
+      spanById.set(`tool:${toolCallId}`, {
         id: `tool:${toolCallId}`,
-        parentId: turnSpanId,
+        parentId: tsId,
         sessionId,
         type: "tool",
         name: call.name,
@@ -372,9 +359,75 @@ export function nativeEventsToSpans(events: NativeEvent[], opts: NativeSpanOptio
         },
       });
     }
-  }
+  };
 
-  return spans;
+  return {
+    applyEvents(newEvents) {
+      const dirty = new Set<string>();
+      for (const e of newEvents) {
+        const t = ensureTurn(e.turnId, e.ts);
+        dirty.add(e.turnId);
+        if (e.ts > t.endMs) t.endMs = e.ts;
+        switch (e.type) {
+          case "turn_start":
+            t.startMs = e.ts;
+            t.model = e.model;
+            break;
+          case "tool_call":
+            if (!t.tools.has(e.toolCallId)) t.toolOrder.push(e.toolCallId);
+            t.tools.set(e.toolCallId, { name: e.name, input: e.input, startMs: e.ts });
+            break;
+          case "tool_result":
+            t.results.set(e.toolCallId, { output: e.output, isError: e.isError, endMs: e.ts });
+            break;
+          case "reasoning":
+            t.reasoning += (t.reasoning ? "\n\n" : "") + e.text;
+            break;
+          case "usage":
+            t.tokens = {
+              input: e.input,
+              output: e.output,
+              cacheRead: e.cacheRead,
+              cacheCreation: e.cacheCreation,
+            };
+            break;
+          case "turn_end":
+            t.status = e.status;
+            t.endMs = e.ts;
+            break;
+        }
+      }
+
+      for (const turnId of dirty) {
+        rebuildTurnSpans(turns.get(turnId)!);
+      }
+
+      const spans: TraceSpan[] = [];
+      for (const turnId of order) {
+        const t = turns.get(turnId)!;
+        spans.push(spanById.get(turnSpanId(turnId))!);
+        for (const toolCallId of t.toolOrder) {
+          spans.push(spanById.get(`tool:${toolCallId}`)!);
+        }
+      }
+      return spans;
+    },
+  };
+}
+
+/**
+ * Build TraceSpans from native transcript events.
+ *
+ * Each `turn_start` opens a turn span (running until its `turn_end`); tool_call
+ * / tool_result pairs (matched by tool_call id) become tool spans parented to
+ * their turn. Turns are emitted in start order.
+ *
+ * One-shot wrapper over `createNativeSpanAccumulator` for callers (tests,
+ * `GET_TRACES`, usage-ledger backfill) that just want a full parse and don't
+ * need to keep state between calls.
+ */
+export function nativeEventsToSpans(events: NativeEvent[], opts: NativeSpanOptions): TraceSpan[] {
+  return createNativeSpanAccumulator(opts).applyEvents(events);
 }
 
 // ── Watcher ─────────────────────────────────────────────────────────────────────
@@ -400,6 +453,7 @@ export function watchNativeTranscript(
   const file = nativeTranscriptPath(sessionId);
   const dir = path.dirname(file);
   const reader = createNativeTranscriptReader(file);
+  let accumulator = createNativeSpanAccumulator({ sessionId });
   let closed = false;
   let debounceTimer: NodeJS.Timeout | null = null;
   let pollTimer: NodeJS.Timeout | null = null;
@@ -410,10 +464,15 @@ export function watchNativeTranscript(
   const refresh = async () => {
     if (closed) return;
     try {
-      // Incremental read — only appended bytes are parsed per change.
-      const events = await reader.readAll();
+      // Incremental read — only appended bytes are parsed per change, and
+      // only the new events (not the whole cumulative history) are folded
+      // into the span accumulator (issue #207).
+      const { newEntries, didReset } = await reader.readIncremental();
+      if (didReset) accumulator = createNativeSpanAccumulator({ sessionId });
+      if (newEntries.length === 0 && !didReset) return;
+      const spans = accumulator.applyEvents(newEntries);
       lastEmit = Date.now();
-      cb.onUpdate(nativeEventsToSpans(events, { sessionId }));
+      cb.onUpdate(spans);
     } catch (err) {
       cb.onError?.(err);
     }
