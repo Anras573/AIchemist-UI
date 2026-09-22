@@ -40,7 +40,10 @@ export interface ElectronAPI {
     issueNumber?: number
   ) => Promise<Res<typeof CH.CREATE_SESSION>>;
   listSessions: (projectId: string) => Promise<Res<typeof CH.LIST_SESSIONS>>;
-  getSession: (sessionId: string) => Promise<Res<typeof CH.GET_SESSION>>;
+  getSession: (
+    sessionId: string,
+    options?: { limit?: number; beforeMessageId?: string }
+  ) => Promise<Res<typeof CH.GET_SESSION>>;
   deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) => Promise<Res<typeof CH.DELETE_SESSION>>;
   saveMessage: (args: {
     sessionId: string;
@@ -226,7 +229,7 @@ const api: ElectronAPI = {
   createSession: (projectId, providerOverride, issueNumber) =>
     invoke(CH.CREATE_SESSION, { projectId, providerOverride, issueNumber }),
   listSessions: (projectId) => invoke(CH.LIST_SESSIONS, projectId),
-  getSession: (sessionId) => invoke(CH.GET_SESSION, sessionId),
+  getSession: (sessionId, options) => invoke(CH.GET_SESSION, sessionId, options),
   deleteSession: (sessionId, options) => invoke(CH.DELETE_SESSION, sessionId, options),
   saveMessage: (args) => invoke(CH.SAVE_MESSAGE, args),
   updateSessionTitle: (sessionId, title) => invoke(CH.UPDATE_SESSION_TITLE, sessionId, title),

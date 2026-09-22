@@ -35,7 +35,8 @@ export const ipc = {
   createSession: (projectId: string, providerOverride?: Provider, issueNumber?: number) =>
     window.electronAPI.createSession(projectId, providerOverride, issueNumber),
   listSessions: (projectId: string) => window.electronAPI.listSessions(projectId),
-  getSession: (sessionId: string) => window.electronAPI.getSession(sessionId),
+  getSession: (sessionId: string, options?: { limit?: number; beforeMessageId?: string }) =>
+    window.electronAPI.getSession(sessionId, options),
   deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) =>
     window.electronAPI.deleteSession(sessionId, options),
   saveMessage: (args: { sessionId: string; role: MessageRole; content: string }) =>

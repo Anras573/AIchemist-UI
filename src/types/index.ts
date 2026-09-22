@@ -196,6 +196,13 @@ export interface Session {
   disabled_mcp_servers?: string[] | null;
   /** GitHub issue number linked at session creation time. Null when no issue is linked. */
   github_issue_number?: number | null;
+  /**
+   * Whether older messages exist beyond the `messages` page returned by this
+   * call. Always `false` when `getSession()`/`GET_SESSION` was called without
+   * pagination options (full history). Drives the "load older" affordance in
+   * `TimelinePanel` (Virtuoso's `startReached`).
+   */
+  has_more_messages?: boolean;
 }
 
 // ─── Workflows ───────────────────────────────────────────────────────────────

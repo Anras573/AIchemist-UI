@@ -93,10 +93,86 @@ export function listSessions(db: Database, projectId: string): Session[] {
   }));
 }
 
+/** Default number of most-recent messages `getSession()` returns when a caller opts into pagination without specifying `limit` explicitly. */
+export const DEFAULT_MESSAGE_PAGE_SIZE = 150;
+
+export interface GetSessionOptions {
+  /**
+   * Max number of messages to load. Omitting both `limit` and
+   * `beforeMessageId` loads the full history (back-compat default). Passing
+   * either one opts into pagination — `limit` alone loads the most recent
+   * page, `limit` + `beforeMessageId` loads the page immediately older than
+   * that message (oldest-first order, like the full-history result).
+   */
+  limit?: number;
+  /** Load the page of messages immediately before this message id, for "load older" pagination. */
+  beforeMessageId?: string;
+}
+
+type MessageRow = {
+  rowid: number;
+  id: string;
+  session_id: string;
+  role: string;
+  content: string;
+  created_at: string;
+  agent: string | null;
+};
+
 /**
- * Fetch a single session with its full message history.
+ * Loads one page of messages, oldest-first, for the paginated branch of
+ * `getSession()`. Fetches `pageSize + 1` rows (newest-first via `rowid`, the
+ * table's insertion order) to detect whether an older page remains, then
+ * trims and reverses back to the oldest-first order every caller expects.
  */
-export function getSession(db: Database, sessionId: string): Session {
+function loadMessagePage(
+  db: Database,
+  sessionId: string,
+  options: GetSessionOptions
+): { rows: MessageRow[]; hasMore: boolean } {
+  const pageSize = options.limit ?? DEFAULT_MESSAGE_PAGE_SIZE;
+
+  let cursorRowid: number | undefined;
+  if (options.beforeMessageId) {
+    const cursorRow = stmt(db, "SELECT rowid FROM messages WHERE id = ?").get(
+      options.beforeMessageId
+    ) as { rowid: number } | undefined;
+    if (!cursorRow) {
+      // Stale cursor (message no longer exists) — nothing older to return.
+      return { rows: [], hasMore: false };
+    }
+    cursorRowid = cursorRow.rowid;
+  }
+
+  const rows = (
+    cursorRowid !== undefined
+      ? stmt(
+          db,
+          `SELECT rowid, id, session_id, role, content, created_at, agent
+             FROM messages WHERE session_id = ? AND rowid < ?
+             ORDER BY rowid DESC LIMIT ?`
+        ).all(sessionId, cursorRowid, pageSize + 1)
+      : stmt(
+          db,
+          `SELECT rowid, id, session_id, role, content, created_at, agent
+             FROM messages WHERE session_id = ?
+             ORDER BY rowid DESC LIMIT ?`
+        ).all(sessionId, pageSize + 1)
+  ) as MessageRow[];
+
+  const hasMore = rows.length > pageSize;
+  return { rows: rows.slice(0, pageSize).reverse(), hasMore };
+}
+
+/**
+ * Fetch a single session with its message history.
+ *
+ * With no `options`, loads the full history (back-compat default — existing
+ * callers that don't opt into pagination are unaffected). Passing `limit`
+ * and/or `beforeMessageId` loads one page instead; `has_more_messages` on the
+ * returned session then indicates whether an older page remains.
+ */
+export function getSession(db: Database, sessionId: string, options: GetSessionOptions = {}): Session {
   const row = stmt(
     db,
     "SELECT id, project_id, title, status, created_at, provider, model, branch, workspace_path, agent, skills, disabled_mcp_servers, github_issue_number FROM sessions WHERE id = ?"
@@ -122,20 +198,23 @@ export function getSession(db: Database, sessionId: string): Session {
     throw new Error(`Session not found: ${sessionId}`);
   }
 
-  const messageRows = stmt(
-    db,
-    `SELECT id, session_id, role, content, created_at, agent
-       FROM messages
-       WHERE session_id = ?
-       ORDER BY created_at ASC`
-  ).all(sessionId) as {
-    id: string;
-    session_id: string;
-    role: string;
-    content: string;
-    created_at: string;
-    agent: string | null;
-  }[];
+  const paginate = options.limit !== undefined || options.beforeMessageId !== undefined;
+  let messageRows: MessageRow[];
+  let hasMoreMessages = false;
+
+  if (paginate) {
+    const page = loadMessagePage(db, sessionId, options);
+    messageRows = page.rows;
+    hasMoreMessages = page.hasMore;
+  } else {
+    messageRows = stmt(
+      db,
+      `SELECT rowid, id, session_id, role, content, created_at, agent
+         FROM messages
+         WHERE session_id = ?
+         ORDER BY created_at ASC`
+    ).all(sessionId) as MessageRow[];
+  }
 
   // Load tool_calls for all messages in one query and group by message_id
   const toolCallsByMessageId = new Map<string, ToolCall[]>();
@@ -202,6 +281,7 @@ export function getSession(db: Database, sessionId: string): Session {
     skills: parseJsonStringArray(row.skills),
     disabled_mcp_servers: parseJsonStringArray(row.disabled_mcp_servers),
     github_issue_number: row.github_issue_number,
+    has_more_messages: hasMoreMessages,
   };
 }
 
