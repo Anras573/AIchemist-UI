@@ -1,6 +1,6 @@
 import type { McpSdkServerConfigWithInstance, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { Database } from "better-sqlite3";
-import type { AgentInfo, ProjectConfig } from "../../src/types/index";
+import type { AgentInfo, FileChange, ProjectConfig } from "../../src/types/index";
 
 import * as crypto from "crypto";
 import * as fs from "fs";
@@ -80,6 +80,64 @@ function extractToolResultText(content: unknown): string {
       .join("\n");
   }
   return String(content ?? "");
+}
+
+/**
+ * Files larger than this are skipped for diffing (see readFileForDiff/buildFileChange
+ * below). Reading + diffing a multi-MB file synchronously would block the main
+ * process's single event loop, stalling IPC for every other session in the app.
+ */
+const MAX_DIFF_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
+
+/**
+ * Reads a file's content for before/after diff capture, asynchronously so the
+ * main process event loop is never blocked. Stats the file first and skips
+ * the read entirely (returning `tooLarge: true`) when it exceeds
+ * MAX_DIFF_FILE_BYTES, rather than loading a huge buffer just to diff it.
+ * A missing/unreadable file resolves to `{ buffer: null, tooLarge: false }`
+ * (treated as "new file" / "deleted file" by the caller).
+ */
+async function readFileForDiff(filePath: string): Promise<{ buffer: Buffer | null; tooLarge: boolean }> {
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (stat.size > MAX_DIFF_FILE_BYTES) {
+      return { buffer: null, tooLarge: true };
+    }
+    const buffer = await fs.promises.readFile(filePath);
+    return { buffer, tooLarge: false };
+  } catch {
+    return { buffer: null, tooLarge: false };
+  }
+}
+
+/**
+ * Builds the FileChange event for a native write/edit tool call from its
+ * captured before/after buffers. Pure (no I/O) so it's unit-testable in
+ * isolation from the SDK message loop.
+ */
+export function buildFileChange(params: {
+  filePath: string;
+  relPath: string;
+  before: Buffer | null;
+  beforeTooLarge: boolean;
+  after: Buffer | null;
+  afterTooLarge: boolean;
+}): FileChange {
+  const { filePath, relPath, before, beforeTooLarge, after, afterTooLarge } = params;
+
+  if (beforeTooLarge || afterTooLarge) {
+    return { path: filePath, relativePath: relPath, diff: "", operation: "write", tooLarge: true };
+  }
+
+  const isBinary = (before !== null && isBinaryBuffer(before)) || (after !== null && isBinaryBuffer(after));
+  if (isBinary) {
+    return { path: filePath, relativePath: relPath, diff: "", operation: "write", isBinary: true };
+  }
+
+  const beforeText = before ? before.toString("utf8") : "";
+  const afterText = after ? after.toString("utf8") : "";
+  const diff = createPatch(relPath, beforeText, afterText, "", "");
+  return { path: filePath, relativePath: relPath, diff, operation: "write" };
 }
 
 // ── Main export ────────────────────────────────────────────────────────────────
@@ -392,7 +450,7 @@ export async function runClaudeAgentTurn(params: {
   // Map tool_use_id → DB toolCallId for native tools (so we can update status on result)
   const toolUseIdToDbId = new Map<string, string>();
   // Map tool_use_id → { filePath, beforeContent } for native Write/Edit tracking
-  const pendingFileChanges = new Map<string, { filePath: string; before: Buffer | null }>();
+  const pendingFileChanges = new Map<string, { filePath: string; before: Buffer | null; tooLarge: boolean }>();
 
   // Accumulated token usage for this turn (emitted after message_delta)
   let turnInputTokens = 0;
@@ -460,9 +518,8 @@ export async function runClaudeAgentTurn(params: {
                 const inp = b.input as Record<string, unknown> | undefined;
                 const filePath = (inp?.["file_path"] ?? inp?.["notebook_path"]) as string | undefined;
                 if (filePath) {
-                  let before: Buffer | null = null;
-                  try { before = fs.readFileSync(filePath); } catch { /* new file */ }
-                  pendingFileChanges.set(b.id, { filePath, before });
+                  const { buffer: before, tooLarge } = await readFileForDiff(filePath);
+                  pendingFileChanges.set(b.id, { filePath, before, tooLarge });
                 }
               }
             }
@@ -508,20 +565,16 @@ export async function runClaudeAgentTurn(params: {
               const lowerOutput = output.toLowerCase();
               if (!lowerOutput.startsWith("error") && !lowerOutput.includes("permission denied")) {
                 const relPath = path.relative(projectPath, pending.filePath) || path.basename(pending.filePath);
-                let afterBuf: Buffer | null = null;
-                try { afterBuf = fs.readFileSync(pending.filePath); } catch { /* deleted */ }
+                const { buffer: afterBuf, tooLarge: afterTooLarge } = await readFileForDiff(pending.filePath);
 
-                const isBinary = (pending.before !== null && isBinaryBuffer(pending.before))
-                  || (afterBuf !== null && isBinaryBuffer(afterBuf));
-
-                if (isBinary) {
-                  emitter.fileChange({ path: pending.filePath, relativePath: relPath, diff: "", operation: "write", isBinary: true });
-                } else {
-                  const before = pending.before ? pending.before.toString("utf8") : "";
-                  const after = afterBuf ? afterBuf.toString("utf8") : "";
-                  const diff = createPatch(relPath, before, after, "", "");
-                  emitter.fileChange({ path: pending.filePath, relativePath: relPath, diff, operation: "write" });
-                }
+                emitter.fileChange(buildFileChange({
+                  filePath: pending.filePath,
+                  relPath,
+                  before: pending.before,
+                  beforeTooLarge: pending.tooLarge,
+                  after: afterBuf,
+                  afterTooLarge,
+                }));
               }
             }
           }

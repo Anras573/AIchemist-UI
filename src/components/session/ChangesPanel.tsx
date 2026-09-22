@@ -54,7 +54,7 @@ function CollapsibleChange({ change }: { change: FileChange }) {
           <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
         )}
         <span className="truncate flex-1 text-foreground">{change.relativePath}</span>
-        {!change.isBinary && <DiffStats diff={change.diff} />}
+        {!change.isBinary && !change.tooLarge && <DiffStats diff={change.diff} />}
         <span
           className={cn(
             "text-[10px] px-1.5 py-0.5 rounded font-sans font-medium shrink-0",
@@ -71,6 +71,10 @@ function CollapsibleChange({ change }: { change: FileChange }) {
           {change.isBinary ? (
             <p className="text-xs text-muted-foreground italic px-3 py-2">
               Binary file — diff not available.
+            </p>
+          ) : change.tooLarge ? (
+            <p className="text-xs text-muted-foreground italic px-3 py-2">
+              File too large — diff not computed.
             </p>
           ) : (
             <CodeBlock code={change.diff} language="diff" />
