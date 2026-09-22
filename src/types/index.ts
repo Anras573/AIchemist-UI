@@ -353,6 +353,8 @@ export interface FileChange {
   operation: "write" | "delete";
   /** True when the file is binary — no diff is available. */
   isBinary?: boolean;
+  /** True when the file exceeded the diff size threshold — no diff was computed. */
+  tooLarge?: boolean;
 }
 
 export interface SessionFileChangeEvent {

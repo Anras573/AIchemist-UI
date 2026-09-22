@@ -71,6 +71,25 @@ describe("diff content rendering", () => {
     fireEvent.click(container.querySelector("button")!);
     expect(container.textContent).toContain(" unchanged");
   });
+
+  it("shows a size-limit message instead of a diff when the change is too large", () => {
+    useSessionStore.getState().addSession(makeSession("sess-big"));
+    useSessionStore.getState().setActiveSession("sess-big");
+    useSessionStore.getState().addFileChange("sess-big", makeFileChange({ tooLarge: true, diff: "" }));
+
+    const { container } = renderWithProviders(<ChangesPanel />);
+    fireEvent.click(container.querySelector("button")!);
+    expect(screen.getByText(/file too large/i)).toBeInTheDocument();
+  });
+
+  it("does not show diff stats for a too-large change", () => {
+    useSessionStore.getState().addSession(makeSession("sess-big2"));
+    useSessionStore.getState().setActiveSession("sess-big2");
+    useSessionStore.getState().addFileChange("sess-big2", makeFileChange({ tooLarge: true, diff: "" }));
+
+    renderWithProviders(<ChangesPanel />);
+    expect(screen.queryByText(/^\+\d/)).not.toBeInTheDocument();
+  });
 });
 
 // ─── Empty states ─────────────────────────────────────────────────────────────
