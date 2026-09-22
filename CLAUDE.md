@@ -94,6 +94,16 @@ bun run rebuild   # electron-rebuild -f -w better-sqlite3 -w node-pty
 
 **Testing xterm.js components:** jsdom has no canvas, so mock `@xterm/xterm` and `@xterm/addon-fit` using `vi.fn().mockImplementation(function() { ... })` (arrow functions are not constructors). Also stub `global.ResizeObserver` the same way.
 
+### Timeline virtualization (issue #208)
+
+`TimelinePanel.tsx` renders a session's message history through **`react-virtuoso`** instead of mounting every historical `MessageBubble` — a long-lived session (a `reuse`-strategy workflow, or a chat that's been going a while) would otherwise mount hundreds of fully-rendered Streamdown markdown components on every tab open / hydration.
+
+- `Virtuoso` owns the scroll container directly (`data={timelineItems}`, `itemContent`) — it replaced the `Conversation`/`ConversationContent` (`use-stick-to-bottom`) wrapper those items previously rendered into. Only messages/compaction markers near the viewport are mounted; `computeItemKey` keys on the message/compaction id for stable identity across re-sorts.
+- **Live, non-virtualized turn state** (in-flight tool calls, approvals, questions, the reasoning block, the streaming bubble, the queue-recovery card) renders through Virtuoso's `Footer` slot instead of being mapped inline. It's passed via the `context` prop, not component props — reassigning `components.Footer` itself on every render would make Virtuoso remount the whole list, so the `Footer` component reference stays stable and only its `context` value changes.
+- **Auto-scroll:** `followOutput` handles the common case (new items appended to `data`). It does **not** observe the Footer, since that grows independently of `data` (e.g. streaming text) — a separate effect nudges the real scroller (captured via `scrollerRef`) to the bottom on every footer-driving state change, but only when `atBottomStateChange` last reported the user was already at the bottom. The list also remounts on `activeSessionId` change (`key={activeSessionId}`) so `initialTopMostItemIndex` re-applies and positions the last message at the bottom on session switch.
+- **Testing:** jsdom has no layout engine, so `react-virtuoso` can't measure real item/viewport heights and would render an arbitrary (often near-empty) window. `TimelinePanel.test.tsx` mocks `react-virtuoso`'s `Virtuoso` to render every item directly (ignoring windowing) so content/ordering assertions keep testing real behavior rather than virtualization internals — follow the same pattern for any other view that adopts `react-virtuoso`.
+- **Not yet done (separate, deferred change):** `getSession()` / `GET_SESSION` (`electron/sessions.ts`) still load and return the full message + tool-call history in one IPC call with no pagination. Virtualization bounds the DOM/render cost; it doesn't bound hydration cost or IPC payload size for very old, very long sessions.
+
 ### Frontend data flow
 
 1. User message → `useAgentTurn.sendMessage()` (hook in `src/lib/hooks/`)
