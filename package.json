@@ -31,7 +31,7 @@
     "@github/copilot-sdk": "^1.0.14",
     "@modelcontextprotocol/sdk": "^1.30.1",
     "@octokit/rest": "^22.0.1",
-    "@openai/codex-sdk": "^0.142.5",
+    "@openai/codex-sdk": "^0.157.0",
     "@radix-ui/react-use-controllable-state": "^1.2.6",
     "@rive-app/react-webgl2": "^4.34.3",
     "@streamdown/cjk": "^1.0.3",
