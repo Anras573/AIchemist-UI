@@ -53,7 +53,18 @@ export async function checkForUpdates(): Promise<void> {
   }
 }
 
-/** Quits and installs the downloaded update. Only meaningful once `state === "downloaded"`. */
+/**
+ * Quits and installs the downloaded update. Only meaningful once `state === "downloaded"`.
+ *
+ * Windows uses an assisted NSIS installer (`oneClick: false` in electron-builder.yml, so
+ * the user can pick an install directory on first install). `quitAndInstall()`'s defaults
+ * (`isSilent: false, isForceRunAfter: false`) target the one-click installer — for the
+ * assisted installer they either pop an installer wizard the user has to click through, or
+ * silently do nothing and never relaunch (a long-standing electron-builder footgun:
+ * https://github.com/electron-userland/electron-builder/issues/2179). Passing
+ * `isSilent: true, isForceRunAfter: true` reuses the already-recorded install directory and
+ * forces a relaunch after the silent install completes, on every platform.
+ */
 export function quitAndInstall(): void {
-  autoUpdater.quitAndInstall();
+  autoUpdater.quitAndInstall(true, true);
 }
