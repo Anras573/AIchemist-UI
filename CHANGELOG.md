@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.2](https://github.com/Anras573/AIchemist-UI/compare/v1.0.1...v1.0.2) (2026-09-25)
+
+
+### Performance Improvements
+
+* make live trace-transcript span building incremental ([#207](https://github.com/Anras573/AIchemist-UI/issues/207)) ([#211](https://github.com/Anras573/AIchemist-UI/issues/211)) ([c5280c8](https://github.com/Anras573/AIchemist-UI/commit/c5280c81e44216c66b0c3ba07c2da423c428be38))
+* stop blocking the main process on synchronous file diffs ([#206](https://github.com/Anras573/AIchemist-UI/issues/206)) ([#209](https://github.com/Anras573/AIchemist-UI/issues/209)) ([1fde7d5](https://github.com/Anras573/AIchemist-UI/commit/1fde7d55561cf82c9acd25fb7570f3401d8229a9))
+* virtualize TimelinePanel message rendering with react-virtuoso ([#208](https://github.com/Anras573/AIchemist-UI/issues/208)) ([#212](https://github.com/Anras573/AIchemist-UI/issues/212)) ([4d8e0cc](https://github.com/Anras573/AIchemist-UI/commit/4d8e0ccc542acc85dadda8380cde3a91a02fb7a7))
+
 ## [1.0.1](https://github.com/Anras573/AIchemist-UI/compare/v1.0.0...v1.0.1) (2026-08-27)
 
 
