@@ -55,7 +55,7 @@
     "embla-carousel-react": "^8.6.0",
     "lucide-react": "^1.47.0",
     "media-chrome": "^4.19.2",
-    "motion": "^12.43.0",
+    "motion": "^13.4.4",
     "nanoid": "^6.0.1",
     "node-pty": "^1.1.0",
     "ollama": "0.6.3",
