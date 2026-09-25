@@ -77,9 +77,15 @@ const ev = {
     type: "item.completed",
     item: { id, type: "agent_message", text },
   }),
-  usage: (input = 10, output = 5, cached = 2): ThreadEvent => ({
+  usage: (input = 10, output = 5, cached = 2, cacheWrite = 0): ThreadEvent => ({
     type: "turn.completed",
-    usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output, reasoning_output_tokens: 0 },
+    usage: {
+      input_tokens: input,
+      cached_input_tokens: cached,
+      cache_write_input_tokens: cacheWrite,
+      output_tokens: output,
+      reasoning_output_tokens: 0,
+    },
   }),
   commandStarted: (id: string, command: string): ThreadEvent => ({
     type: "item.started",
@@ -261,18 +267,20 @@ describe("codexProvider (SDK-backed)", () => {
     expect(result).toBe("resumed");
   });
 
-  it("maps token usage onto the emitter (cached → cache_read)", async () => {
-    _setCodexForTests(makeCodex({ startThread: vi.fn(() => makeThread([ev.agentMessage("x"), ev.usage(100, 40, 7)])) }) as any);
+  it("maps token usage onto the emitter (cached → cache_read, cache_write → cache_creation)", async () => {
+    _setCodexForTests(
+      makeCodex({ startThread: vi.fn(() => makeThread([ev.agentMessage("x"), ev.usage(100, 40, 7, 3)])) }) as any,
+    );
 
     await codexProvider.run(makeParams());
 
     expect(lastEmitter().usage).toHaveBeenCalledWith({
       input_tokens: 100,
       output_tokens: 40,
-      cache_creation_input_tokens: 0,
+      cache_creation_input_tokens: 3,
       cache_read_input_tokens: 7,
     });
-    expect(recorderMock.usage).toHaveBeenCalledWith({ input: 100, output: 40, cacheRead: 7, cacheCreation: 0 });
+    expect(recorderMock.usage).toHaveBeenCalledWith({ input: 100, output: 40, cacheRead: 7, cacheCreation: 3 });
   });
 
   it("surfaces command_execution items as tool call + result on the timeline and recorder", async () => {
