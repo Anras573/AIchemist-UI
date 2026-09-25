@@ -1,58 +1,79 @@
-# Canvases — shared agent/user work surfaces
+# Canvases — full-stack work surfaces shared by the agent and the user
 
 Date: 2026-09-25
 
 ## Problem
 
 Everything an agent produces in AIchemist today is either chat text in the
-timeline or a file on disk (surfaced through the Changes / Files panels). There
-is no *structured, living artifact* that the agent and the user both work on:
-a plan the agent ticks off as it goes, a triage board the user reorders and the
-agent then acts on, a release checklist, a small dashboard.
+timeline or a file on disk (surfaced through the Changes / Files panels). For a
+lot of work, chat is the wrong UI: "it's not at all obvious what to do when
+your only method of interaction is a textarea." There is no structured, living
+surface that the agent and the user both operate on — a board the user
+reorders and the agent then acts on, a database browser, a package manager, a
+blog-post editor, a game.
 
-GitHub's Copilot app ships this as **canvas extensions**
-(<https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-canvas-extensions>):
-"a shared, interactive surface for a work artifact" that opens in the right
-side panel, which "the agent can update … while it works, and you can edit on
-that same surface". An extension is a folder (`package.json` + `extension.mjs`
-+ optional JSON state) under `.github/extensions/` (team) or
-`~/.copilot/extensions/` (personal); it exposes agent-callable methods (the
-kanban example: `get_board`, `add_card`, `move_card`); and a `/create-canvas`
-skill lets the agent author new ones.
+GitHub's Copilot app ships this as **canvases**. Sources:
 
-The public docs stop there — they do not describe the rendering technology,
-the extension API, or the sandbox model. This document therefore designs an
-AIchemist-native equivalent inspired by the feature rather than a
-wire-compatible implementation of it.
+- Docs — <https://docs.github.com/en/copilot/how-tos/github-copilot-app/working-with-canvas-extensions>
+- Blog — <https://github.blog/ai-and-ml/github-copilot/when-chat-is-the-wrong-ui/>
 
-Most of the plumbing already exists: the right-hand `ContextPanel` tab strip,
-per-provider tool registration (the memory tools are the closest precedent),
-the approval gate, numbered SQLite migrations, and skill/agent discovery.
+What those sources establish:
+
+- A canvas is "a little full-stack application that runs inside of the GitHub
+  Copilot app with no browser chrome", opened in the right side panel.
+- It is **full-stack, not just a web page**: canvases "can call third-party
+  APIs, yes, but they can also execute code locally on your machine."
+- It is **bidirectional**: "the agent can communicate with the server part of
+  that app and the server can communicate back." The agent calls methods the
+  extension declares (kanban example: `get_board`, `add_card`, `move_card`);
+  the user edits the same surface through its UI controls.
+- It is **authored by the agent**: "Building a canvas is as simple as asking
+  for it … the agent knows what a canvas is" (via a `/create-canvas` skill).
+- It is **packaged as a folder** — `package.json` + an entry file
+  (`extension.mjs`) + optional JSON state — under `.github/extensions/`
+  (team, committed) or `~/.copilot/extensions/` (personal).
+- Showcased canvases: Connect 4 against the agent; a winget (Windows Package
+  Manager) UI; a SQLite browser with IntelliSense; a Jekyll post editor; an
+  "agent loop" workflow canvas that uses GitHub issues as its state store.
+
+Neither source documents the extension API, the rendering technology, the
+agent↔server protocol, or any sandbox model. This document designs an
+AIchemist-native equivalent with the same capabilities, not a
+wire-compatible clone.
+
+The showcase examples fix the capability bar: winget and SQLite need local
+process / file access, the issues canvas needs network, Connect 4 needs the
+canvas to **start** an agent turn ("your move"). A purely declarative or
+browser-only canvas cannot do any of them, so a canvas must be able to run
+real server-side code.
 
 ## Goals
 
-- A first-class **Canvas**: a named, project-scoped artifact with persisted
-  JSON state, a UI rendered in the right panel, and a set of agent-callable
-  tools that read and mutate that state.
-- **Two-way sync**: an agent tool call updates the open UI immediately; a user
-  edit in the UI is visible to the agent on its next read — through one shared
-  state-transition path, not two.
-- **Works on every provider** (Claude, Copilot, Ollama, OpenAI-compatible,
-  Codex), consistent with the per-session provider lock.
-- **User-authored canvases** discovered from disk (project + global), and a
-  `/create-canvas` skill so the agent can author new ones.
-- **Safe by construction**: a canvas shipped inside a cloned repo must not be
-  able to run arbitrary code in the main process or reach `window.electronAPI`.
+- A first-class **Canvas**: a server module + a UI, rendered in the right
+  panel, with agent-callable tools, able to run local code and reach the
+  network.
+- **Bidirectional**: the agent calls the canvas's tools; the canvas can push
+  UI updates and can **send a message into the session** to start an agent
+  turn.
+- **One tool path for all five providers** (Claude, Copilot, Ollama,
+  OpenAI-compatible, Codex), respecting the per-session provider lock.
+- **Agent-authorable**: the agent knows canvases exist and can build one on
+  request (`/create-canvas`), and the result hot-reloads into the panel.
+- **Explicit trust**: canvas server code runs only after the user trusts it,
+  isolated from the Electron main process and from the renderer's privileged
+  bridge.
 
 ## Non-goals
 
-- Wire compatibility with Copilot's `extension.mjs` API (undocumented). An
-  importer can be revisited once GitHub publishes the contract.
-- Real-time multi-user collaboration. One app, one user; "shared" means shared
-  between the user and the agent.
-- Canvases that run arbitrary Node code in the main process (see Security).
-- Canvas-specific network access. The iframe gets no network (CSP); anything
-  that needs the network goes through the agent's existing tools.
+- Wire compatibility with Copilot's `extension.mjs` API (undocumented). A
+  best-effort importer is a later phase.
+- A true security sandbox for canvas *server* code. Trusted server code runs
+  with the user's privileges, the same trust level as a stdio MCP server in a
+  project's `.mcp.json`. We isolate it for **stability** and to keep it away
+  from AIchemist's own privileged surfaces, and we gate it behind **consent** —
+  we don't pretend to contain it.
+- Real-time multi-user collaboration. "Shared" means shared between one user
+  and their agent.
 
 ## Design
 
@@ -60,121 +81,202 @@ the approval gate, numbered SQLite migrations, and skill/agent discovery.
 
 | Term | Meaning |
 |---|---|
-| **Canvas definition** | A folder on disk (or a built-in) containing a manifest, UI, and optional initial state. Reusable. |
-| **Canvas instance** | One definition bound to a project, with its own persisted state (e.g. "Release 2.4 checklist"). A definition can have many instances. |
-| **Canvas tool** | An agent-callable operation declared by the definition, executed against an instance's state. |
-| **Action** | The single state-transition unit. Both agent tool calls and UI edits are expressed as actions and go through the same reducer. |
+| **Canvas definition** | A folder on disk (or a built-in): manifest + server module + UI assets. Reusable. |
+| **Canvas instance** | A definition bound to a project with its own persisted state (e.g. "Release 2.4 board"). One definition can back many instances. |
+| **Canvas host** | The running process for one instance: loads the server module, owns its state, serves its tools. |
+| **Canvas tool** | An agent-callable method the server declares. |
 
 ### Definition format
 
 ```
 <root>/<canvas-name>/
-  canvas.json      # manifest (required)
-  index.html       # UI entry (required for user canvases)
-  *.js / *.css     # UI assets, loaded relatively
-  initial.json     # initial state for new instances (optional)
+  canvas.json        # manifest (required)
+  server.mjs         # server module (required)
+  ui/index.html      # UI entry (required) + any assets under ui/
+  package.json       # optional; dependencies installed on trust (see Lifecycle)
 ```
 
 `canvas.json`:
 
 ```jsonc
 {
-  "name": "kanban",
-  "description": "Agentic kanban board",
+  "name": "sqlite-browser",
+  "description": "Browse and query a SQLite database",
   "version": 1,
-  "entry": "index.html",
-  "stateSchema": { /* JSON Schema for the state document */ },
-  "tools": [
-    {
-      "name": "move_card",
-      "description": "Move a card to another column",
-      "inputSchema": { /* JSON Schema */ },
-      "effect": { "kind": "patch", "ops": [ /* JSON-Patch template, see below */ ] },
-      "approval": "none"          // "none" | "ask" — defaults to "none"
-    },
-    {
-      "name": "get_board",
-      "description": "Return the whole board",
-      "inputSchema": { "type": "object", "properties": {} },
-      "effect": { "kind": "read", "pointer": "" }
-    }
-  ]
+  "server": "server.mjs",
+  "ui": "ui/index.html",
+  "attachByDefault": false   // auto-attach to new sessions in this project
 }
 ```
 
-Discovery locations (priority order, higher suppresses same-named lower —
-same rule as skills):
+Tools are declared in code, not in the manifest, because their handlers are
+code. Discovery tiers (higher suppresses same-named lower, like skills):
 
 | Tier | Path |
 |---|---|
 | Project | `<projectPath>/.agents/canvases/*/` |
 | Global | `~/.aichemist/canvases/*/` |
-| Built-in | shipped with the app (`kanban`, `markdown`, `checklist`) |
+| Built-in | shipped with the app (`kanban`, `checklist`, `markdown`) |
 
-`.agents/` matches where project skills and Copilot agents already live.
-`electron/canvas/discovery.ts` mirrors `skills-discovery.ts`, and validates
-each manifest with zod; an invalid manifest is skipped with a logged reason
-(and surfaced in the settings hub), never fatal.
+`.agents/` matches where project skills and Copilot agents already live. A
+manifest failing zod validation is skipped with a logged reason and shown in
+the settings hub; it never breaks discovery.
 
-### Declarative tool effects (v1)
+### Server SDK
 
-To keep repo-shipped canvases from executing code in the main process, v1
-tools are **declarative**. An effect is one of:
+`server.mjs` default-exports a definition built with a small SDK
+(`@aichemist/canvas`, resolved by the host — no install needed):
 
-- `read` — return the value at a JSON Pointer into the state.
-- `patch` — apply an RFC 6902 JSON-Patch whose values/paths may interpolate
-  tool arguments (`{ "op": "add", "path": "/columns/${column}/cards/-",
-  "value": { "id": "${$uuid}", "title": "${title}" } }`). Interpolation is
-  done on the parsed structure, never by string-concatenating JSON.
-- `move` — sugar for the common "remove from list A, insert into list B by id"
-  case that is awkward to express in raw JSON-Patch.
+```js
+import { defineCanvas, z } from "@aichemist/canvas";
 
-After every mutating effect the new state is validated against
-`stateSchema`; a failing patch is rejected (tool error returned to the agent,
-state unchanged). This covers kanban / checklist / triage / table canvases,
-which is the bulk of the documented examples.
+export default defineCanvas({
+  initialState: { columns: { todo: [], doing: [], done: [] } },
 
-A later phase may add **UI-hosted handlers** (the tool call is forwarded to
-the canvas iframe, which computes the new state in its sandbox) for canvases
-whose logic outgrows JSON-Patch — see Phasing.
+  tools: {
+    get_board: {
+      description: "Return the whole board",
+      input: z.object({}),
+      handler: (_args, ctx) => ctx.state.get(),
+    },
+    move_card: {
+      description: "Move a card to another column",
+      input: z.object({ id: z.string(), to: z.enum(["todo", "doing", "done"]) }),
+      approval: "none",                  // "none" | "ask" (default "ask")
+      handler: ({ id, to }, ctx) => {
+        ctx.state.update((s) => moveCard(s, id, to));
+        return { ok: true };
+      },
+    },
+  },
 
-### Rendering — sandboxed iframe, custom protocol
+  // Messages from the UI (button clicks, drags, form submits).
+  async onUiMessage(msg, ctx) {
+    if (msg.type === "move") ctx.state.update((s) => moveCard(s, msg.id, msg.to));
+    if (msg.type === "ask-agent") await ctx.agent.send(`Please triage card ${msg.id}`);
+  },
+});
+```
 
-The canvas UI renders in an `<iframe sandbox="allow-scripts">` inside a new
-`CanvasPanel`. Assets are served by a privileged-but-read-only custom
-protocol, `aichemist-canvas://<definition-id>/<path>`, registered in the main
-process (`protocol.handle`) and restricted to files *inside* the resolved
-definition folder (path-traversal checked after `realpath`).
+The `ctx` object passed to every handler:
+
+| API | Purpose |
+|---|---|
+| `ctx.state.get()` / `set(v)` / `update(fn)` | Persisted JSON state for this instance (SQLite-backed, see Data model). Every change bumps `revision` and pushes to the UI. |
+| `ctx.ui.send(msg)` | Push an arbitrary message to the UI (beyond state sync — e.g. query results, progress). |
+| `ctx.agent.send(text, opts?)` | Send a message into an attached session, starting (or queueing) an agent turn — the "server can communicate back" path. See below. |
+| `ctx.project` | `{ id, path }` — the project the instance belongs to. |
+| `ctx.log` | Structured logs, shown in the canvas's debug drawer. |
+
+Everything else is plain Node: `child_process` for winget, `better-sqlite3`
+or `node:sqlite` for the SQLite browser, `fetch` for the GitHub-issues canvas.
+Canvases are free to keep state elsewhere (a `.db` file, GitHub issues) and
+use `ctx.state` only for UI state.
+
+### Runtime — canvas host process
+
+Each **active** instance runs in its own Electron `utilityProcess`
+(`utilityProcess.fork`), started by a `CanvasHostManager` in the main process:
+
+- **Not the main process** — a crash, a hang, or a busy loop in canvas code
+  can't take down AIchemist; a stuck host is killed and restarted.
+- **No Electron privileges** — the host has no `BrowserWindow`, no IPC
+  handlers, no access to `window.electronAPI`; it talks to main only over its
+  own `MessagePort` using a narrow, zod-validated message set.
+- `cwd` = project path; environment is AIchemist's env **minus** API keys
+  (`ANTHROPIC_*`, `GITHUB_TOKEN`, `OPENAI_*`, …) — a canvas that needs a
+  credential declares it and the user supplies it (later phase), rather than
+  inheriting every provider key by default.
+
+Lifecycle:
+
+- **Start** when the instance is opened in the panel, or when a turn runs in a
+  session it is attached to.
+- **Idle stop** after N minutes (default 10) with no open panel and no running
+  turn; state is persisted, so a restart is transparent.
+- **Crash** → restart with exponential backoff (max 3 in 60 s), then an
+  error state in the panel with logs and a "Restart" button.
+- **Dev reload** — the definition folder is watched (same `fs.watch` +
+  debounce approach as workflow file triggers); a change restarts the host and
+  reloads the UI. This is what makes agent-authored canvases feel live.
+- **Dependencies** — if `package.json` declares dependencies, `bun install`
+  runs in the definition folder once, **after** the trust prompt, with output
+  shown in the panel.
+
+### Agent tools — one loopback MCP endpoint for all providers
+
+Rather than adapting canvas tools per provider, the main process runs a single
+**loopback streamable-HTTP MCP server** (`127.0.0.1`, random port, per-launch
+bearer token). Each attached instance is exposed at
+`/canvas/<canvasId>/session/<sessionId>/mcp` and injected into the turn as a
+managed MCP server named `canvas-<slug>`:
+
+| Provider | How it arrives |
+|---|---|
+| Claude | Added to `query({ mcpServers })` alongside managed servers (HTTP entry) |
+| Copilot | Added to `SessionConfig.mcpServers` (HTTP). The attached-canvas set is folded into `provider_state.copilot.mcpFp`, so attach/detach forces a fresh `createSession` — `resumeSession` ignores new MCP servers |
+| Codex | Added to `CodexOptions.config.mcp_servers` as `{ url, http_headers }`; re-read on every spawn, so no fingerprint |
+| Ollama / OpenAI-compatible | Reached through `createManagedMcpBridge()` like any managed HTTP server |
+
+All four adapters in `electron/mcp/managed.ts` already handle HTTP entries,
+so this adds **no per-provider tool code** and Codex (which runs its own tool
+loop and can only reach us over MCP) is covered on day one.
+
+Requests arrive in main, which forwards `tools/list` / `tools/call` to the
+instance's host over its `MessagePort`. Because the session id is in the path,
+main can do the gating itself:
+
+- **Approval** — Claude's `PreToolUse` hook passes every `mcp__*` tool
+  through unexamined, so canvas tools can't rely on it. The loopback server
+  calls `requiresApproval()` / `requestApproval()` itself (with the session's
+  `nonInteractive` flag) for tools whose `approval` isn't `"none"`, so
+  unattended workflow runs get the existing auto-deny for free.
+- **Scoping** — a request for a canvas not attached to that session, or with a
+  bad token, is rejected.
+
+Only **attached** canvases are injected, so the tool list stays small. A short
+system-prompt addendum (like `buildMemoryContext`) lists attached canvases and
+their descriptions.
+
+### UI — sandboxed iframe + message bridge
+
+The UI renders in an `<iframe sandbox="allow-scripts">` inside `CanvasPanel`,
+loaded from a custom protocol `aichemist-canvas://<canvasId>/<path>`
+(`protocol.handle` in main), which serves only files under the definition's
+`ui/` folder (`realpath` + prefix check).
 
 - **No `allow-same-origin`** → opaque origin: no access to the host DOM,
-  cookies, storage, or `window.electronAPI`.
-- **CSP** response header on every served file: `default-src
-  aichemist-canvas: 'unsafe-inline'; connect-src 'none'` — no network.
-- **No `<webview>`**: `webviewTag` stays disabled in `BrowserWindow`.
-- Built-in canvases are plain React components rendered directly (no iframe) —
-  they are app code and don't need isolation.
+  storage, or `window.electronAPI`. `webviewTag` stays disabled.
+- **CSP** on served files: `default-src aichemist-canvas: 'unsafe-inline';
+  connect-src 'none'`. The UI has **no network**; anything network- or
+  system-bound goes through the server, where trust applies. (This is
+  the reason for the "full-stack" split: the page stays inert, the server is
+  where power lives.)
+- **Bridge**: iframe ⇄ `postMessage` ⇄ `CanvasFrame` (checks
+  `event.source === iframe.contentWindow`, zod-validates) ⇄ IPC ⇄ main ⇄
+  `MessagePort` ⇄ host. A helper script `aichemist-canvas-client.js` (served by
+  the protocol) gives authors `canvas.onState(fn)`, `canvas.onMessage(fn)`,
+  `canvas.send(msg)` and handles the handshake + theme tokens (light/dark).
+- **Built-in canvases** use the same SDK and the same iframe path — they
+  dogfood the API, so the first phase proves what users will build on.
 
-### Host ↔ canvas protocol (`postMessage`)
+### Server → agent: starting turns
 
-A tiny versioned message protocol, validated with zod on the host side:
+`ctx.agent.send(text, { sessionId? })` is how Connect 4 says "your move" and
+how a workflow canvas kicks off the next step:
 
-| Direction | Message | Purpose |
-|---|---|---|
-| host → canvas | `{ type: "init", state, theme, canvas }` | First paint; `theme` carries light/dark tokens |
-| host → canvas | `{ type: "state", state, revision, origin }` | New state after any action (`origin`: `"agent"` \| `"user"`) |
-| canvas → host | `{ type: "action", tool, args, baseRevision }` | User edit — invokes a declared tool by name |
-| canvas → host | `{ type: "ready" }` | Handshake |
-
-Canvases can only mutate state by invoking their **own declared tools** — the
-UI and the agent share one vocabulary, so there is exactly one reducer. A tiny
-optional helper script (`aichemist-canvas.js`, served by the protocol) wraps
-the handshake for authors.
-
-Concurrency: every instance has a monotonically increasing `revision`. A UI
-action carries `baseRevision`; the host applies actions serially per instance
-(they are small, synchronous patches), so a stale `baseRevision` is simply
-re-validated against the current state rather than rejected — the UI always
-re-renders from the authoritative `state` push that follows.
+- Target: the given session, which must have the instance attached; if
+  omitted and exactly one session is attached, that one; otherwise an error.
+- Delivery: `enqueueTurn()` in `electron/ipc/agent-turn-queue.ts` — so a busy
+  session queues rather than races, and the turn goes through the normal
+  runner (status persistence, crash recovery, usage ledger).
+- Visibility: the message is persisted as a user message tagged
+  `source: "canvas:<name>"` and rendered with a canvas badge in the timeline,
+  so the user can always see what the canvas asked the agent to do.
+- Guardrails: rate-limited per instance (e.g. 1 in-flight + 5/minute), and
+  refused while the session is `paused` awaiting approval. Turns started with
+  no window attached are `nonInteractive` via the existing `executeAgentTurn`
+  rule.
 
 ### Data model
 
@@ -186,166 +288,195 @@ CREATE TABLE canvases (
   project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   definition   TEXT NOT NULL,       -- definition name, resolved via discovery
   title        TEXT NOT NULL,
-  state        TEXT NOT NULL,       -- JSON document
+  state        TEXT NOT NULL,       -- ctx.state JSON document
   revision     INTEGER NOT NULL DEFAULT 0,
   created_at   TEXT NOT NULL,
   updated_at   TEXT NOT NULL
 );
-CREATE TABLE session_canvases (       -- which canvases a session exposes to its agent
+CREATE TABLE session_canvases (       -- canvases a session exposes to its agent
   session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   canvas_id    TEXT NOT NULL REFERENCES canvases(id) ON DELETE CASCADE,
   PRIMARY KEY (session_id, canvas_id)
 );
+CREATE TABLE canvas_trust (           -- consent to run a definition's server code
+  project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  definition   TEXT NOT NULL,
+  content_hash TEXT NOT NULL,         -- hash of server + manifest + package.json
+  trusted_at   TEXT NOT NULL,
+  PRIMARY KEY (project_id, definition)
+);
 ```
 
-- Instances are **project-scoped** (a board outlives any one session);
-  attachment to a session is explicit, like the per-session skill toggle.
-- State lives in SQLite, not in the definition folder — keeps repo checkouts
-  clean and makes state survive definition edits. A definition's
-  `initial.json` seeds new instances only. "Export to file" can come later for
-  teams that want state committed.
-- Snake-case field names in `src/types/index.ts` (`Canvas`, `CanvasDefinition`),
-  per convention.
+Plus a nullable `source TEXT` column on `messages` for canvas-originated user
+messages. Instances are project-scoped (a board outlives a session);
+attachment to a session is explicit, like the per-session skill toggle.
+`ctx.state` is capped (e.g. 1 MB) — larger data belongs in the canvas's own
+storage.
+
+### Trust model
+
+Canvas server code is arbitrary code with the user's privileges. Consent:
+
+| Tier | Default |
+|---|---|
+| Built-in | Trusted (app code) |
+| Global (`~/.aichemist/canvases/`) | Trusted — the user put it there |
+| Project (`.agents/canvases/`) | **Untrusted until approved**: first open shows the manifest, the server entry path and dependency list, and asks to trust. Stored in `canvas_trust` with a content hash; any change to the server, manifest or `package.json` (e.g. after `git pull`) re-prompts. |
+
+Agent-authored canvases are written through `write_file` (approval-gated like
+any file write) and still hit the trust prompt before first run — the
+"approve the file write" step and the "run this code" step stay separate.
+Until trusted, the panel can show the UI with the host stopped (read-only,
+no tools), so the user can see what they're agreeing to run.
 
 ### Main-process module layout
 
 | Module | Role |
 |---|---|
-| `electron/canvas/manifest.ts` | zod schema for `canvas.json`; effect interpolation |
+| `electron/canvas/manifest.ts` | zod schema for `canvas.json` |
 | `electron/canvas/discovery.ts` | Scan project / global / built-in tiers |
-| `electron/canvas/store.ts` | CRUD over `canvases` / `session_canvases`; `applyAction(db, canvasId, tool, args, origin)` — the single reducer: resolve effect → apply → schema-validate → bump revision → persist → emit `CANVAS_STATE` |
+| `electron/canvas/store.ts` | CRUD over `canvases` / `session_canvases` / `canvas_trust`; state persistence + revision |
+| `electron/canvas/host-manager.ts` | `CanvasHostManager` — spawn / stop / restart / idle-stop `utilityProcess` hosts; dev-reload watcher; `MessagePort` routing |
+| `electron/canvas/host/` | Code that runs **inside** the host: SDK (`defineCanvas`, `ctx`), module loader, message loop |
+| `electron/canvas/mcp-endpoint.ts` | Loopback streamable-HTTP MCP server: auth, scoping, approval gate, forwarding to hosts |
 | `electron/canvas/protocol.ts` | `aichemist-canvas://` handler + CSP |
-| `electron/canvas/tools.ts` | Provider-neutral tool list for a session: one `canvas_<canvasId-short>__<tool>` per declared tool on each attached canvas, plus `list_canvases` |
+| `electron/canvas/agent-bridge.ts` | `ctx.agent.send` → `enqueueTurn`, rate limiting |
 | `electron/ipc/canvas-handlers.ts` | IPC handlers (below) |
 
-### Agent tools across providers
-
-`tools.ts` produces provider-neutral `{ name, description, inputSchema,
-execute }` entries whose `execute` calls `applyAction(..., "agent")`. Each
-provider adapts them exactly as it already adapts the memory tools:
-
-| Provider | Registration |
-|---|---|
-| Claude | Added to the in-process `aichemist-tools` MCP server (`createApprovalMcpServer`) |
-| Copilot | `defineTool` entries. The attached-canvas set (ids + definition versions) is folded into the MCP fingerprint in `provider_state.copilot.mcpFp` so attaching/detaching forces a fresh `createSession` — `resumeSession` ignores new tools, same footgun as MCP servers |
-| Ollama / OpenAI-compatible | Appended to the local tool list; executed through `runGatedTool` (so they get the approval gate + tool-call persistence + native-transcript recording for free) |
-| Codex | Codex executes its own tools, so it can only reach canvases over MCP. A loopback **streamable-HTTP MCP server** (`127.0.0.1`, random port, per-launch bearer token) is injected as an extra entry in `CodexOptions.config.mcp_servers`. Deferred to Phase 3 |
-
-Tool names are namespaced per instance so two attached boards don't collide.
-Only canvases **attached to the session** contribute tools, bounding
-tool-list growth. A short system-prompt addendum (like `buildMemoryContext`)
-lists attached canvases and their descriptions.
-
-Approval: `approval: "none"` tools skip the gate; `"ask"` tools go through
-`requiresApproval` / `requestApproval` like any other gated tool, so
-`nonInteractive` workflow runs get the existing auto-deny behaviour for free.
+The injection hook: wherever runners call
+`loadManagedMcpServers({ excludeNames })`, merge in
+`canvasMcpServersForSession(db, sessionId)`.
 
 ### IPC surface
 
 | Channel | Kind | Purpose |
 |---|---|---|
-| `CANVAS_LIST_DEFINITIONS` | req/res | Discovered definitions for a project |
-| `CANVAS_LIST` | req/res | Instances for a project (+ which are attached to a session) |
-| `CANVAS_CREATE` | req/res | New instance from a definition (zod-validated) |
-| `CANVAS_DELETE` / `CANVAS_RENAME` | req/res | Instance management |
+| `CANVAS_LIST_DEFINITIONS` | req/res | Discovered definitions for a project (+ trust state, manifest errors) |
+| `CANVAS_LIST` | req/res | Instances for a project (+ attachment for a session) |
+| `CANVAS_CREATE` / `CANVAS_DELETE` / `CANVAS_RENAME` | req/res | Instance management (`CREATE` zod-validated) |
 | `CANVAS_ATTACH` | req/res | Toggle an instance on/off for a session |
-| `CANVAS_GET` | req/res | `{ canvas, state, revision }` for first paint |
-| `CANVAS_ACTION` | req/res | User edit → `applyAction(..., "user")` (zod-validated) |
-| `CANVAS_STATE` | push | `{ canvasId, state, revision, origin }` after any action |
+| `CANVAS_TRUST` | req/res | Record consent for a project definition (hash-bound) |
+| `CANVAS_OPEN` / `CANVAS_CLOSE` | req/res | Panel lifecycle → start host / allow idle stop; returns `{ state, revision }` |
+| `CANVAS_UI_MESSAGE` | req/res | UI → server (`onUiMessage`), zod-validated |
+| `CANVAS_RESTART` | req/res | Manual host restart |
+| `CANVAS_EVENT` | push | `{ canvasId, kind: "state" \| "message" \| "status" \| "log", … }` |
 
 Each follows the standard checklist: `ipc-channels.ts` → `ipc-contract.ts` →
-validator (for `CREATE` / `ACTION`) → handler → `preload.ts` → `src/lib/ipc.ts`.
+validator → handler → `preload.ts` → `src/lib/ipc.ts`.
 
 ### Renderer
 
 - New `"canvas"` tab in `ToolStrip` / `ContextPanel` (icon: `LayoutDashboard`),
-  **lazy-loaded** (`React.lazy` + `Suspense`) like `TracesPanel`.
-- `CanvasPanel`: instance picker (with "New canvas…" from a definition list)
-  plus the rendered canvas. Built-ins render as React components; user
-  canvases render in the sandboxed iframe via a `CanvasFrame` component that
-  owns the `postMessage` bridge.
-- `useCanvasStore` (Zustand, not persisted — SQLite is the source of truth):
-  `stateByCanvas`, `revisionByCanvas`, `applyStatePush()`. `useSessionEvents`
-  routes `CANVAS_STATE` pushes into it.
-- **Auto-switch**: when an agent tool call mutates a canvas and the panel is
-  closed, reuse the existing `tabSwitchRequest` mechanism (as `ChangesPanel`
-  does) to surface the Canvas tab.
-- Settings hub: a **Canvases** section listing definitions (source tier,
-  manifest errors), mirroring Skills / Agents sections.
+  lazy-loaded like `TracesPanel`.
+- `CanvasPanel`: instance picker, "New canvas…" from definitions, attach
+  toggle for the active session, host status (starting / running / crashed /
+  untrusted), a debug drawer (logs), and the `CanvasFrame`.
+- Canvas message bubbles in `TimelinePanel` get a small canvas badge
+  (`message.source`).
+- `useCanvasStore` (Zustand, not persisted): `stateByCanvas`,
+  `revisionByCanvas`, `statusByCanvas`; `useSessionEvents` routes
+  `CANVAS_EVENT` into it.
+- Auto-switch to the Canvas tab when an agent tool call targets a canvas and
+  the panel is closed (reuse `tabSwitchRequest`, as `ChangesPanel` does).
+- Settings hub: a **Canvases** section — definitions by tier, trust state
+  (revoke), manifest errors — mirroring Skills / Agents.
+- Later: pop a canvas out into its own chromeless `BrowserWindow`.
 
-### `/create-canvas` skill
+### Agent awareness and `/create-canvas`
 
-A bundled skill (`.agents/skills/create-canvas/SKILL.md` template, installed
-to the global tier on first run or shipped as a built-in skill) that teaches
-the agent the manifest schema, the effect language, the `postMessage`
-protocol, and the helper script; it writes the definition into
-`<projectPath>/.agents/canvases/<name>/` with the normal `write_file` tool
-(so creation is approval-gated like any file write). Discovery re-scans on
-panel open, so the new definition appears without a restart.
+"The agent knows what a canvas is" — so:
 
-## Security
+- Every turn's system context carries a one-paragraph note that canvases
+  exist and that the `create-canvas` skill can build one (cheap; no tool
+  cost).
+- A bundled `create-canvas` skill documents the folder layout, the manifest,
+  the server SDK, the UI client helper and the trust/reload flow, with the
+  kanban built-in as a worked example. The agent writes the definition to
+  `<projectPath>/.agents/canvases/<name>/` (or the global dir on request),
+  creates an instance, attaches it, and the dev-reload watcher opens it.
+
+## Alternatives considered
+
+- **Declarative-only canvases** (tools as JSON-Patch templates over a state
+  document, no server code) — the earlier draft of this doc. Safe, but can't
+  implement any of the showcased canvases (winget, SQLite, Jekyll, GitHub
+  issues, turn-starting Connect 4). Rejected as the primary model.
+- **Canvas code in the main process** — simplest, but a canvas crash or busy
+  loop takes down the app and canvas code sits next to every privileged
+  handler. Rejected in favour of `utilityProcess`.
+- **Per-provider in-process tools** (like memory tools) — five adapters, and
+  still needs an MCP endpoint for Codex. The loopback MCP server is one path
+  for all providers.
+- **Each canvas runs its own HTTP server, iframe points at it** — closer to
+  "full-stack app", but opens a port per canvas, needs CORS/auth per canvas,
+  and gives the UI a network origin. The message bridge keeps the UI inert.
+
+## Security summary
 
 | Threat | Mitigation |
 |---|---|
-| Repo-shipped canvas runs code in main process | v1 effects are declarative data only; no `require`/`import` of canvas files in main |
-| Canvas UI reaches `window.electronAPI` / host DOM | `sandbox="allow-scripts"` without `allow-same-origin` → opaque origin |
-| Canvas exfiltrates data | CSP `connect-src 'none'`; no network in iframe |
-| Path traversal via protocol | `realpath` + prefix check against the definition folder |
-| Forged `postMessage` | Host checks `event.source === iframe.contentWindow`; payloads zod-validated; actions limited to that canvas's declared tools |
-| Oversized state | Cap state JSON (e.g. 1 MB) in `applyAction`; reject with `invalid_input` |
-| Prompt injection via canvas content | Canvas state is returned to the agent as tool *output* (same trust level as file reads); `"ask"` approval available for destructive tools |
-
-Project-tier canvases come from whatever repo is open. Show a one-time
-"This project provides N canvases" trust prompt before first rendering them
-(persisted per project), analogous to how untrusted project MCP config should
-be treated.
+| Repo ships malicious canvas code | Project-tier trust prompt, content-hash bound, re-prompt on change |
+| Canvas crash / hang affects app | Separate `utilityProcess`, kill + backoff restart |
+| Canvas reaches AIchemist internals | No Electron privileges in host; narrow validated `MessagePort` protocol; UI in opaque-origin sandboxed iframe |
+| Canvas harvests provider keys | API-key env vars stripped from host env |
+| Canvas UI exfiltrates data | CSP `connect-src 'none'` on UI; network only in (trusted) server |
+| Other local processes call canvas tools | Loopback bind + per-launch bearer token + session/attachment scoping |
+| Canvas floods the agent | `ctx.agent.send` rate limit; visible, badged messages |
+| Path traversal via protocol | `realpath` + prefix check against `ui/` |
+| Prompt injection via canvas output | Tool results are untrusted data like file reads; destructive tools default to `approval: "ask"` |
 
 ## Error handling
 
-- Invalid manifest → skipped + shown in settings; never breaks discovery.
-- Effect fails (bad pointer, schema violation, size cap) → tool error to the
-  agent with the reason; state and revision unchanged; no push.
-- Definition deleted while instances exist → instance shows a "definition
-  missing" state with export/delete; its tools are not offered.
-- Iframe crashes / never sends `ready` → panel shows an error with reload.
-- `CANVAS_STATE` push with no window (headless workflow) → no-op; state is in
-  SQLite and the panel hydrates via `CANVAS_GET` when opened.
+- Invalid manifest → skipped, shown in settings.
+- Host fails to start / crashes → backoff restart, then error state with logs
+  and Restart; its MCP tools return a clear "canvas unavailable" error rather
+  than hanging the turn.
+- Tool call timeout (default 60 s, per-tool override) → error to the agent.
+- Definition deleted with instances remaining → "definition missing" state
+  with export/delete; no tools offered.
+- Iframe never sends `ready` → reload affordance.
+- No window attached (headless workflow) → host still runs for tool calls;
+  UI events are dropped and the panel hydrates via `CANVAS_OPEN`.
 
 ## Testing
 
-- `manifest.test.ts`: schema validation, interpolation (including hostile
-  argument values that look like JSON-Patch paths), `move` sugar.
-- `store.test.ts`: `applyAction` — revision bumps, schema rejection, size cap,
-  serial application, push emission, cascade deletes.
-- `discovery.test.ts`: tier priority/suppression, invalid manifests.
-- `protocol.test.ts`: traversal rejection, CSP header present.
-- Provider tests: canvas tools registered for attached canvases only; Copilot
-  fingerprint changes on attach/detach; `runGatedTool` path for Ollama /
-  OpenAI-compatible; `nonInteractive` auto-deny for `"ask"` tools.
-- Renderer: `CanvasPanel` + `CanvasFrame` with a mocked iframe `postMessage`
-  (source check, action round-trip, state push re-render); built-in Kanban
-  component tests.
+- `manifest.test.ts`, `discovery.test.ts`: validation, tier suppression.
+- `host-manager.test.ts`: spawn/stop/idle/backoff with a fake process factory
+  (test seam like `_setCodexFactoryForTests`).
+- Host SDK tests run in-process against the host message loop: `ctx.state`
+  revisions, `ctx.ui.send`, handler errors → tool errors.
+- `mcp-endpoint.test.ts`: token + scoping rejection, approval gate incl.
+  `nonInteractive` auto-deny, forwarding, timeouts.
+- `agent-bridge.test.ts`: attachment check, `enqueueTurn` wiring, rate limit,
+  `source` tagging.
+- Provider tests: canvas servers merged into managed MCP for attached
+  canvases only; Copilot fingerprint changes on attach/detach.
+- `protocol.test.ts`: traversal rejection, CSP header.
+- Renderer: `CanvasFrame` with mocked `postMessage` (source check, round
+  trip), `CanvasPanel` status states, timeline canvas badge.
 
 ## Phasing
 
-1. **Built-in canvases + sync loop.** Migration, `store.ts`, IPC, `CanvasPanel`
-   tab, built-in `kanban` / `checklist` / `markdown` as React components, and
-   canvas tools for Claude, Copilot, Ollama, OpenAI-compatible. Proves the
-   agent ↔ UI loop end-to-end with no untrusted code.
-2. **User-authored canvases.** Discovery, declarative manifests, custom
-   protocol + sandboxed iframe, `postMessage` protocol and helper script,
-   project trust prompt, settings-hub section.
-3. **Authoring + reach.** `/create-canvas` skill; Codex support via the
-   loopback HTTP MCP server; auto-switch polish.
-4. **Optional.** UI-hosted (iframe-sandboxed) tool handlers for canvases that
-   outgrow JSON-Patch; state export to a file; an importer for Copilot
-   `.github/extensions` if/when that API is documented.
+1. **Runtime spine with a built-in.** Migration, store, `CanvasHostManager`,
+   host SDK, loopback MCP endpoint (all providers), protocol + `CanvasFrame`,
+   `CanvasPanel` tab, built-in **kanban** written against the SDK. Proves
+   agent tool → state → UI and UI → state → agent read end-to-end.
+2. **User canvases.** Discovery tiers, trust prompt + `canvas_trust`, dev
+   reload, dependency install, settings-hub section, API-key env stripping.
+3. **Server → agent and authoring.** `ctx.agent.send` + timeline badge,
+   `create-canvas` skill + system-context note, auto-switch, more built-ins
+   (checklist, markdown).
+4. **Optional.** Pop-out windows, per-canvas declared secrets, workflow
+   `canvases` field, an importer for Copilot `.github/extensions` once that
+   API is documented.
 
 ## Open questions
 
-- Should a canvas auto-attach to new sessions in its project (opt-out) or stay
-  opt-in? Proposal: opt-in, with a per-canvas "attach to new sessions" flag.
-- Do workflows get a `canvases` field so a scheduled triage run can update a
-  board? Cheap once Phase 1 lands — `session_canvases` rows at run creation.
-- Is Copilot's own canvas format stable enough to target directly in Phase 4,
-  or should we only ever import?
+- Auto-attach: opt-in per session, with `attachByDefault` in the manifest as
+  the opt-out escape hatch — is that the right default?
+- Should workflows get a `canvases` field so a scheduled run can drive a
+  board? Cheap once Phase 1 lands (`session_canvases` rows at run creation).
+- Is `utilityProcess` enough isolation, or do we eventually want an OS-level
+  sandbox (macOS `sandbox-exec`, Windows AppContainer) as an opt-in for
+  project canvases?
+- Target Copilot's extension format directly, or only ever import it?
