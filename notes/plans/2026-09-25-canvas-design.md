@@ -105,7 +105,12 @@ real server-side code.
   "version": 1,
   "server": "server.mjs",
   "ui": "ui/index.html",
-  "attachByDefault": false   // auto-attach to new sessions in this project
+  "attachByDefault": false,  // auto-attach to new sessions in this project
+  "permissions": {           // declared intent — shown in the trust prompt,
+    "fs": ["${project}"],    // NOT enforced in v1 (see "OS-level sandboxing")
+    "network": ["api.github.com"],
+    "exec": ["git"]
+  }
 }
 ```
 
@@ -176,7 +181,10 @@ use `ctx.state` only for UI state.
 ### Runtime — canvas host process
 
 Each **active** instance runs in its own Electron `utilityProcess`
-(`utilityProcess.fork`), started by a `CanvasHostManager` in the main process:
+(`utilityProcess.fork`), started by a `CanvasHostManager` in the main process.
+All launching goes through a single `spawnCanvasHost()` seam so a sandboxed
+launcher can replace it later without touching the rest (see "OS-level
+sandboxing"):
 
 - **Not the main process** — a crash, a hang, or a busy loop in canvas code
   can't take down AIchemist; a stuck host is killed and restarted.
@@ -327,7 +335,74 @@ Agent-authored canvases are written through `write_file` (approval-gated like
 any file write) and still hit the trust prompt before first run — the
 "approve the file write" step and the "run this code" step stay separate.
 Until trusted, the panel can show the UI with the host stopped (read-only,
-no tools), so the user can see what they're agreeing to run.
+no tools), so the user can see what they're agreeing to run. The prompt also
+lists the manifest's declared `permissions` (unenforced in v1).
+
+### OS-level sandboxing (deferred)
+
+`utilityProcess` isolation protects against crashes, not malicious code. An
+OS-level sandbox around the host would add real containment. It is
+**deliberately deferred**, but v1 is shaped so it can be added later.
+
+**Pros**
+
+- **Real containment.** Could stop a trusted canvas from reading `~/.ssh` or
+  `~/.aichemist/.env`, writing outside the project, or reaching arbitrary
+  hosts. Crash isolation does none of that.
+- **Supply-chain defence.** `package.json` dependencies mean trusting a whole
+  npm tree, not just the canvas author. A sandbox limits what a compromised
+  transitive dependency can do.
+- **Agent-authored canvases.** A canvas the agent writes can be shaped by
+  prompt injection (a malicious issue or README). A sandbox bounds the damage
+  even after the user clicks "trust".
+- **Better trust UX.** Canvases could run sandboxed by default, with the prompt
+  asking only about escalations ("wants network access to api.github.com").
+  That is a clearer decision than "run this code?".
+- **Precedent to reuse.** Codex sandboxes its own tools (Seatbelt / Landlock +
+  seccomp), and Claude Code uses `sandbox-exec` + bubblewrap. Users already
+  know the model, and the policies are there to learn from.
+- **Enforced permissions.** The manifest's declared `permissions` become real.
+
+**Cons**
+
+- **Three unequal backends.** macOS `sandbox-exec` is deprecated and its policy
+  language (SBPL) is undocumented, though still widely used. On Linux,
+  bubblewrap may be absent, some distros block unprivileged user namespaces
+  (e.g. Ubuntu 24.04's AppArmor restriction), and Landlock depends on the
+  kernel version. On Windows, AppContainer / restricted tokens are awkward with
+  Node (file ACLs, loopback exemption, capabilities).
+- **Clashes with the showcase use cases.** winget triggers UAC elevation. The
+  SQLite browser opens arbitrary files. Jekyll needs a Ruby toolchain from
+  `~`. The issues canvas needs the network and a token. Each needs escalation,
+  and designing the permissions language, prompts and defaults is bigger work
+  than the sandbox itself.
+- **Breaks the host transport.** `utilityProcess.fork` can't be launched inside
+  `sandbox-exec` or bubblewrap. The host would become a plain Node process
+  (`ELECTRON_RUN_AS_NODE`) started through the wrapper, talking over stdio or
+  a socket instead of a `MessagePort`.
+- **Domain rules need a proxy.** OS sandboxes filter by IP and port, not
+  hostname. Allowing only `api.github.com` means a filtering proxy in main with
+  the canvas's traffic forced through it, as Claude Code does.
+- **Child processes are confined too.** That's good for security, but `git`,
+  `bun`, `sqlite3` and winget all run under the same policy, which is a common
+  source of confusing breakage.
+- **Harder to debug.** Denials show up as generic `EPERM` / `ENOENT`. Canvas
+  authors, including the agent, need "blocked by sandbox: X" messages, which
+  means parsing per-OS denial logs.
+- **Ongoing cost.** Three OS backends need CI coverage, and OS updates can
+  break the policies (macOS in particular).
+- **False sense of security if partial.** If Windows is unsandboxed or policies
+  are loose, users may trust it more than they should.
+
+**What v1 does to keep the door open**
+
+1. All host launching goes through `spawnCanvasHost()` in `CanvasHostManager`.
+2. The manifest's `permissions` field (`fs` / `network` / `exec`) ships from
+   day one and is shown in the trust prompt, so users see what the canvas
+   intends and a future sandbox already has its policy.
+3. When it's time, start with **opt-in, project-tier canvases on macOS and
+   Linux**, reusing Codex's and Claude Code's backends and policies. Windows
+   waits for a clear AppContainer approach.
 
 ### Main-process module layout
 
@@ -418,6 +493,7 @@ validator → handler → `preload.ts` → `src/lib/ipc.ts`.
 | Repo ships malicious canvas code | Project-tier trust prompt, content-hash bound, re-prompt on change |
 | Canvas crash / hang affects app | Separate `utilityProcess`, kill + backoff restart |
 | Canvas reaches AIchemist internals | No Electron privileges in host; narrow validated `MessagePort` protocol; UI in opaque-origin sandboxed iframe |
+| Trusted canvas reads/writes beyond the project | **Not mitigated in v1** — declared `permissions` shown in trust prompt only; OS-level sandbox deferred |
 | Canvas harvests provider keys | API-key env vars stripped from host env |
 | Canvas UI exfiltrates data | CSP `connect-src 'none'` on UI; network only in (trusted) server |
 | Other local processes call canvas tools | Loopback bind + per-launch bearer token + session/attachment scoping |
@@ -461,12 +537,14 @@ validator → handler → `preload.ts` → `src/lib/ipc.ts`.
    host SDK, loopback MCP endpoint (all providers), protocol + `CanvasFrame`,
    `CanvasPanel` tab, built-in **kanban** written against the SDK. Proves
    agent tool → state → UI and UI → state → agent read end-to-end.
-2. **User canvases.** Discovery tiers, trust prompt + `canvas_trust`, dev
-   reload, dependency install, settings-hub section, API-key env stripping.
+2. **User canvases.** Discovery tiers, trust prompt + `canvas_trust` (showing
+   declared `permissions`), dev reload, dependency install, settings-hub
+   section, API-key env stripping.
 3. **Server → agent and authoring.** `ctx.agent.send` + timeline badge,
    `create-canvas` skill + system-context note, auto-switch, more built-ins
    (checklist, markdown).
-4. **Optional.** Pop-out windows, per-canvas declared secrets, workflow
+4. **Optional.** Opt-in OS-level sandbox for project canvases (macOS +
+   Linux first), pop-out windows, per-canvas declared secrets, workflow
    `canvases` field, an importer for Copilot `.github/extensions` once that
    API is documented.
 
@@ -476,7 +554,6 @@ validator → handler → `preload.ts` → `src/lib/ipc.ts`.
   the opt-out escape hatch — is that the right default?
 - Should workflows get a `canvases` field so a scheduled run can drive a
   board? Cheap once Phase 1 lands (`session_canvases` rows at run creation).
-- Is `utilityProcess` enough isolation, or do we eventually want an OS-level
-  sandbox (macOS `sandbox-exec`, Windows AppContainer) as an opt-in for
-  project canvases?
+- When should the deferred OS-level sandbox land (see "OS-level sandboxing")?
+  Does a real third-party canvas ecosystem have to appear first?
 - Target Copilot's extension format directly, or only ever import it?
