@@ -30,7 +30,7 @@ import {
  * without it, the manager's timer usually races the host's own and fires
  * first, masking the host's real timeout error with a generic one.
  */
-const TOOL_CALL_TIMEOUT_GRACE_MS = 5_000;
+export const TOOL_CALL_TIMEOUT_GRACE_MS = 5_000;
 
 // ─── Process abstraction (test seam) ────────────────────────────────────────
 
@@ -175,6 +175,8 @@ interface HostRecord {
   restartTimestamps: number[];
   /** Set while `stop()` is tearing this host down, so its `exit` isn't treated as a crash. */
   stopping: boolean;
+  /** Whether this spawn is a backoff-scheduled restart after a crash, vs. a fresh `start()` — read by `failStart()` so a restart attempt that itself fails to become ready still counts against the crash budget instead of quietly landing on `"stopped"`. */
+  isRestartAttempt: boolean;
   stopWaiters: Array<() => void>;
   readyWaiters: ReadyWaiter[];
 }
@@ -221,7 +223,9 @@ export class CanvasHostManager {
     }
   }
 
+  /** No-ops when the status isn't actually changing, so consumers never see a duplicate notification. */
   private setStatus(record: HostRecord, status: CanvasHostStatus): void {
+    if (record.status === status) return;
     record.status = status;
     this.callHook("onStatusChanged", record.canvasId, status);
   }
@@ -264,7 +268,8 @@ export class CanvasHostManager {
     canvasId: string,
     opts: StartCanvasHostOptions,
     state: unknown,
-    revision: number
+    revision: number,
+    spawnOpts?: { isRestartAttempt?: boolean }
   ): Promise<void> {
     const prior = this.hosts.get(canvasId);
     const childProcess = this.spawn({
@@ -292,6 +297,7 @@ export class CanvasHostManager {
       startTimer: null,
       restartTimestamps: prior?.restartTimestamps ?? [],
       stopping: false,
+      isRestartAttempt: spawnOpts?.isRestartAttempt ?? false,
       stopWaiters: [],
       readyWaiters: [],
     };
@@ -344,11 +350,22 @@ export class CanvasHostManager {
    * `"starting"` so it isn't stuck forever: without this, the next `start()`
    * call would see `"starting"`, push a new waiter with no timer of its own,
    * and hang, while the failed process kept running untracked.
+   *
+   * When this attempt was itself a backoff-scheduled restart
+   * (`record.isRestartAttempt`), the failure counts against the crash budget
+   * via `recordCrashAndScheduleRestart` instead of landing on a plain
+   * `"stopped"` — otherwise a canvas whose `server.mjs` starts throwing on
+   * import right after a crash would sit quietly "stopped" rather than ever
+   * reaching `"errored"`.
    */
   private failStart(record: HostRecord, err: Error): void {
     record.stopping = true;
     this.rejectReadyWaiters(record, err);
-    this.setStatus(record, "stopped");
+    if (record.isRestartAttempt) {
+      this.recordCrashAndScheduleRestart(record);
+    } else {
+      this.setStatus(record, "stopped");
+    }
     try {
       record.process.kill();
     } catch (killErr) {
@@ -381,21 +398,28 @@ export class CanvasHostManager {
         else pending.reject(new Error(msg.error?.message ?? "Canvas tool call failed"));
         break;
       }
-      case "state.changed":
+      case "state.changed": {
         // A canvas can trigger this by writing state past the store's 1MB cap,
         // or by writing after its row was deleted out from under it — neither
         // is allowed to reach main as an uncaught exception. The host's local
-        // state/revision can drift from the DB when this happens; there is no
-        // ack path back to `ctx.state.set` yet to prevent that (tracked as a
-        // follow-up), so this is a backstop, not a full fix.
+        // state/revision can drift from the DB when this happens (tracked as
+        // a follow-up: https://github.com/Anras573/AIchemist-UI/issues/233 —
+        // the host has no ack path yet to reject `ctx.state.set` when the
+        // persist fails), so this is a backstop, not a full fix. Emitting the
+        // *store's* returned state/revision here (rather than the host's own
+        // `msg.state`/`msg.revision`) at least keeps every consumer of this
+        // hook — including the eventual UI sync — seeing only the DB's
+        // authoritative value instead of drifting right along with the host.
+        let saved;
         try {
-          setCanvasState(this.db, record.canvasId, msg.state);
+          saved = setCanvasState(this.db, record.canvasId, msg.state);
         } catch (err) {
           console.error(`[canvas-host-manager] failed to persist state for ${record.canvasId}:`, err);
           break;
         }
-        this.callHook("onStateChanged", record.canvasId, msg.state, msg.revision);
+        this.callHook("onStateChanged", record.canvasId, saved.state, saved.revision);
         break;
+      }
       case "ui.message":
         this.callHook("onUiMessage", record.canvasId, msg.message);
         break;
@@ -420,7 +444,14 @@ export class CanvasHostManager {
     record.pendingCalls.clear();
 
     if (record.stopping) {
-      this.setStatus(record, "stopped");
+      // A restart attempt that itself failed (`failStart` with
+      // `isRestartAttempt`) has already driven this record to "crashed" or
+      // "errored" via `recordCrashAndScheduleRestart` before killing the
+      // process — don't let this (possibly later-arriving, and by now
+      // irrelevant) exit downgrade that decision back to a plain "stopped".
+      if (record.status !== "crashed" && record.status !== "errored") {
+        this.setStatus(record, "stopped");
+      }
       this.rejectReadyWaiters(record, new Error("Canvas host was stopped"));
       const waiters = record.stopWaiters;
       record.stopWaiters = [];
@@ -429,7 +460,19 @@ export class CanvasHostManager {
     }
 
     this.rejectReadyWaiters(record, new Error("Canvas host exited before becoming ready"));
+    this.recordCrashAndScheduleRestart(record);
+  }
 
+  /**
+   * Records a crash — an unexpected exit, or a restart attempt that itself
+   * failed to become ready — against the backoff budget: schedules the next
+   * attempt ("crashed") or gives up ("errored") once `maxRestarts` is spent
+   * within `restartWindowMs`. Shared by `handleExit` (a running host died)
+   * and `failStart` (a backoff-scheduled restart's own start attempt failed,
+   * which must still count against the budget rather than quietly landing on
+   * `"stopped"`).
+   */
+  private recordCrashAndScheduleRestart(record: HostRecord): void {
     const now = Date.now();
     record.restartTimestamps = record.restartTimestamps.filter((t) => now - t < this.restartWindowMs);
     record.restartTimestamps.push(now);
@@ -445,7 +488,9 @@ export class CanvasHostManager {
     record.restartTimer = setTimeout(() => {
       const canvas = getCanvas(this.db, record.canvasId);
       if (!canvas) return; // Deleted while backing off — nothing left to restart.
-      this.spawnHost(record.canvasId, record.startOpts, canvas.state, canvas.revision).catch((err: unknown) => {
+      this.spawnHost(record.canvasId, record.startOpts, canvas.state, canvas.revision, {
+        isRestartAttempt: true,
+      }).catch((err: unknown) => {
         console.error(`[canvas-host-manager] restart of ${record.canvasId} failed:`, err);
       });
     }, delayMs);
@@ -479,6 +524,18 @@ export class CanvasHostManager {
       const timer = setTimeout(() => {
         record.pendingCalls.delete(callId);
         reject(new CanvasHostTimeoutError(`Canvas host did not reply to tool "${tool}" within ${timeoutMs}ms`));
+        // This fired after the tool's own timeout plus a grace margin, so the
+        // host's event loop is genuinely stuck (its own per-tool timer would
+        // otherwise have answered by now) — recover it like any other crash
+        // instead of leaving a permanently wedged process marked "running"
+        // that would time out every future call the same way. Not a deliberate
+        // `stop()` (no `record.stopping`), so `handleExit` routes this through
+        // the normal backoff → "errored" path, per #222's acceptance criteria.
+        try {
+          record.process.kill();
+        } catch (killErr) {
+          console.error(`[canvas-host-manager] failed to kill unresponsive host ${canvasId}:`, killErr);
+        }
       }, timeoutMs);
       record.pendingCalls.set(callId, { resolve, reject, timer });
       record.process.postMessage({ type: "tool.call", callId, tool, args });
