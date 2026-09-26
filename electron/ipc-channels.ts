@@ -148,6 +148,13 @@ export const WORKFLOW_DELETE           = "workflow:delete";
 export const WORKFLOW_LIST_RUNS        = "workflow:list-runs";
 export const WORKFLOW_RUN_UPDATED      = "workflow:run-updated"; // push: main → renderer
 
+// ── Canvases ──────────────────────────────────────────────────────────────────
+export const CANVAS_LIST                = "canvas:list";
+export const CANVAS_CREATE              = "canvas:create";
+export const CANVAS_DELETE              = "canvas:delete";
+export const CANVAS_RENAME              = "canvas:rename";
+export const CANVAS_ATTACH              = "canvas:attach";
+
 // ── Auto-update (electron-updater) ────────────────────────────────────────────
 export const UPDATE_CHECK              = "update:check";
 export const UPDATE_INSTALL            = "update:install";

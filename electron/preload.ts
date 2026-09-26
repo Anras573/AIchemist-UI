@@ -164,6 +164,18 @@ export interface ElectronAPI {
     provider?: string;
   }) => Promise<Res<typeof CH.CREATE_SKILL>>;
 
+  // ── Canvases ──────────────────────────────────────────────────────────────
+  canvasList: (args: { projectId: string; sessionId?: string }) => Promise<Res<typeof CH.CANVAS_LIST>>;
+  canvasCreate: (args: {
+    projectId: string;
+    definition: string;
+    title: string;
+    initialState?: unknown;
+  }) => Promise<Res<typeof CH.CANVAS_CREATE>>;
+  canvasDelete: (canvasId: string) => Promise<Res<typeof CH.CANVAS_DELETE>>;
+  canvasRename: (canvasId: string, title: string) => Promise<Res<typeof CH.CANVAS_RENAME>>;
+  canvasAttach: (sessionId: string, canvasId: string, attached: boolean) => Promise<Res<typeof CH.CANVAS_ATTACH>>;
+
   // ── Workflows ─────────────────────────────────────────────────────────────
   workflowList: (args?: { projectId?: string }) => Promise<Res<typeof CH.WORKFLOW_LIST>>;
   workflowUpsert: (
@@ -291,6 +303,12 @@ const api: ElectronAPI = {
   writeSkillFile: (args) => invoke(CH.WRITE_SKILL_FILE, args),
   deleteSkillDir: (skillPath) => invoke(CH.DELETE_SKILL_DIR, skillPath),
   createSkill: (args) => invoke(CH.CREATE_SKILL, args),
+  canvasList: (args) => invoke(CH.CANVAS_LIST, args),
+  canvasCreate: (args) => invoke(CH.CANVAS_CREATE, args),
+  canvasDelete: (canvasId) => invoke(CH.CANVAS_DELETE, { canvasId }),
+  canvasRename: (canvasId, title) => invoke(CH.CANVAS_RENAME, { canvasId, title }),
+  canvasAttach: (sessionId, canvasId, attached) => invoke(CH.CANVAS_ATTACH, { sessionId, canvasId, attached }),
+
   workflowList: (args) => invoke(CH.WORKFLOW_LIST, args ?? {}),
   workflowUpsert: (input) => invoke(CH.WORKFLOW_UPSERT, input),
   workflowRunNow: (workflowId) => invoke(CH.WORKFLOW_RUN_NOW, { workflowId }),

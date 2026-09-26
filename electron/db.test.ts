@@ -46,7 +46,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
 
-    expect(userVersion(db)).toBe(7);
+    expect(userVersion(db)).toBe(8);
     const cols = columnNames(db, "sessions");
     for (const c of EXPECTED_SESSION_COLUMNS) {
       expect(cols).toContain(c);
@@ -118,11 +118,60 @@ describe("migrate", () => {
     }
   });
 
+  it("creates the canvases, session_canvases, and canvas_trust tables at v8", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+
+    expect(userVersion(db)).toBe(8);
+    const tables = tableNames(db);
+    expect(tables).toContain("canvases");
+    expect(tables).toContain("session_canvases");
+    expect(tables).toContain("canvas_trust");
+
+    for (const c of ["project_id", "definition", "title", "state", "revision", "created_at", "updated_at"]) {
+      expect(columnNames(db, "canvases")).toContain(c);
+    }
+    expect(columnNames(db, "session_canvases")).toEqual(
+      expect.arrayContaining(["session_id", "canvas_id"])
+    );
+    for (const c of ["project_id", "definition", "content_hash", "trusted_at"]) {
+      expect(columnNames(db, "canvas_trust")).toContain(c);
+    }
+    expect(columnNames(db, "messages")).toContain("source");
+  });
+
+  it("cascades project/session deletes onto canvases the same way as other project-scoped tables", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+
+    db.prepare("INSERT INTO projects (id, name, path, created_at) VALUES ('p1', 'P', '/tmp/p1', 'now')").run();
+    db.prepare(
+      "INSERT INTO sessions (id, project_id, title, status, created_at) VALUES ('s1', 'p1', 'S', 'idle', 'now')"
+    ).run();
+    db.prepare(
+      "INSERT INTO canvases (id, project_id, definition, title, state, revision, created_at, updated_at) VALUES ('c1', 'p1', 'kanban', 'Board', 'null', 0, 'now', 'now')"
+    ).run();
+    db.prepare("INSERT INTO session_canvases (session_id, canvas_id) VALUES ('s1', 'c1')").run();
+    db.prepare(
+      "INSERT INTO canvas_trust (project_id, definition, content_hash, trusted_at) VALUES ('p1', 'kanban', 'hash1', 'now')"
+    ).run();
+
+    // Deleting the session only removes its attachment, not the canvas.
+    db.prepare("DELETE FROM sessions WHERE id = 's1'").run();
+    expect(db.prepare("SELECT * FROM session_canvases").all()).toHaveLength(0);
+    expect(db.prepare("SELECT * FROM canvases WHERE id = 'c1'").get()).toBeDefined();
+
+    // Deleting the project cascades the canvas and its trust record.
+    db.prepare("DELETE FROM projects WHERE id = 'p1'").run();
+    expect(db.prepare("SELECT * FROM canvases").all()).toHaveLength(0);
+    expect(db.prepare("SELECT * FROM canvas_trust").all()).toHaveLength(0);
+  });
+
   it("is idempotent — running twice does not error or change the version", () => {
     const db = new Database(":memory:");
     migrate(db);
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(7);
+    expect(userVersion(db)).toBe(8);
   });
 
   it("does not throw when provider_state already exists below user_version 2", () => {
@@ -131,7 +180,7 @@ describe("migrate", () => {
     // Simulate a dev build / partial migration: column exists but version rewound.
     db.exec("PRAGMA user_version = 1;");
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(7);
+    expect(userVersion(db)).toBe(8);
   });
 
   it("upgrades a legacy database (columns present, user_version 0) without error", () => {
@@ -156,7 +205,7 @@ describe("migrate", () => {
 
     expect(() => migrate(db)).not.toThrow();
 
-    expect(userVersion(db)).toBe(7);
+    expect(userVersion(db)).toBe(8);
     expect(columnNames(db, "sessions")).toContain("provider_state");
     expect(tableNames(db)).toContain("workflows");
     // Existing data is preserved, including the legacy copilot id used as a dead read.

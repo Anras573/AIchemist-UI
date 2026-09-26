@@ -47,6 +47,8 @@ import type {
   WorkflowRun,
   WorkflowAutonomy,
   WorkflowSessionStrategy,
+  Canvas,
+  CanvasListItem,
   BudgetConfig,
   BudgetStatus,
   SpendingSummary,
@@ -254,6 +256,22 @@ export type IpcContract = {
   // ── Changes (git) ─────────────────────────────────────────────────────────────
   [CH.GET_GIT_DIFF]: { args: [projectPath: string]; result: string | { error: string } };
   [CH.GET_GIT_BRANCH]: { args: [projectPath: string]; result: string | null };
+
+  // ── Canvases ──────────────────────────────────────────────────────────────────
+  [CH.CANVAS_LIST]: {
+    args: [args: { projectId: string; sessionId?: string }];
+    result: CanvasListItem[];
+  };
+  [CH.CANVAS_CREATE]: {
+    args: [args: { projectId: string; definition: string; title: string; initialState?: unknown }];
+    result: Canvas;
+  };
+  [CH.CANVAS_DELETE]: { args: [args: { canvasId: string }]; result: { ok: boolean } };
+  [CH.CANVAS_RENAME]: { args: [args: { canvasId: string; title: string }]; result: Canvas };
+  [CH.CANVAS_ATTACH]: {
+    args: [args: { sessionId: string; canvasId: string; attached: boolean }];
+    result: { attached: boolean };
+  };
 
   // ── Workflows ─────────────────────────────────────────────────────────────────
   [CH.WORKFLOW_LIST]: { args: [args: { projectId?: string }]; result: Workflow[] };

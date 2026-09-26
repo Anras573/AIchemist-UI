@@ -169,6 +169,50 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
     `);
   },
+  // v8 — Canvases (issue #221, part of epic #220). The persistence layer every
+  // other canvas issue builds on: instances are project-scoped (a board
+  // outlives a session) and explicitly attached to sessions, like the
+  // per-session skill toggle, so `session_canvases` is a plain join table with
+  // no columns of its own. `canvases.state` holds the ctx.state JSON document;
+  // `revision` is bumped on every state write so consumers can detect changes
+  // cheaply. `canvas_trust` records per-project consent to run a definition's
+  // server code, keyed by a content hash so an edited definition (e.g. after a
+  // `git pull`) re-prompts. `messages.source` is added now (nullable, unused
+  // until later canvas issues) so canvas-originated user messages don't need
+  // yet another migration.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS canvases (
+          id           TEXT PRIMARY KEY,
+          project_id   TEXT NOT NULL,
+          definition   TEXT NOT NULL,
+          title        TEXT NOT NULL,
+          state        TEXT NOT NULL,
+          revision     INTEGER NOT NULL DEFAULT 0,
+          created_at   TEXT NOT NULL,
+          updated_at   TEXT NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS session_canvases (
+          session_id   TEXT NOT NULL,
+          canvas_id    TEXT NOT NULL,
+          PRIMARY KEY (session_id, canvas_id),
+          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (canvas_id) REFERENCES canvases(id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS canvas_trust (
+          project_id   TEXT NOT NULL,
+          definition   TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          trusted_at   TEXT NOT NULL,
+          PRIMARY KEY (project_id, definition),
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_canvases_project ON canvases(project_id);
+      CREATE INDEX IF NOT EXISTS idx_session_canvases_canvas ON session_canvases(canvas_id);
+    `);
+    addColumnIfMissing(db, "messages", "source", "TEXT");
+  },
 ];
 
 /**

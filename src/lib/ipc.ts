@@ -132,6 +132,15 @@ export const ipc = {
   createSkill: (args: { name: string; projectPath: string; scope: "global" | "project"; content: string; provider?: string }) =>
     window.electronAPI.createSkill(args),
 
+  // Canvases
+  canvasList: (args: { projectId: string; sessionId?: string }) => window.electronAPI.canvasList(args),
+  canvasCreate: (args: { projectId: string; definition: string; title: string; initialState?: unknown }) =>
+    window.electronAPI.canvasCreate(args),
+  canvasDelete: (canvasId: string) => window.electronAPI.canvasDelete(canvasId),
+  canvasRename: (canvasId: string, title: string) => window.electronAPI.canvasRename(canvasId, title),
+  canvasAttach: (sessionId: string, canvasId: string, attached: boolean) =>
+    window.electronAPI.canvasAttach(sessionId, canvasId, attached),
+
   // Workflows
   workflowList: (args?: { projectId?: string }) => window.electronAPI.workflowList(args),
   workflowUpsert: (input: Parameters<typeof window.electronAPI.workflowUpsert>[0]) =>

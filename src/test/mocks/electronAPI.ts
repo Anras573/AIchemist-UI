@@ -122,6 +122,29 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     createSkill: vi.fn().mockResolvedValue({ skillPath: "" }),
     // Safe default shapes (stable ids + valid ISO timestamps) so tests that
     // don't override still get usable, invariant-respecting objects.
+    canvasList: vi.fn().mockResolvedValue([]),
+    canvasCreate: vi.fn().mockResolvedValue({
+      id: "mock-canvas-id",
+      project_id: "mock-project-id",
+      definition: "kanban",
+      title: "Mock canvas",
+      state: null,
+      revision: 0,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+    }),
+    canvasDelete: vi.fn().mockResolvedValue({ ok: true }),
+    canvasRename: vi.fn().mockResolvedValue({
+      id: "mock-canvas-id",
+      project_id: "mock-project-id",
+      definition: "kanban",
+      title: "Mock canvas",
+      state: null,
+      revision: 0,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+    }),
+    canvasAttach: vi.fn().mockResolvedValue({ attached: true }),
     workflowList: vi.fn().mockResolvedValue([]),
     workflowUpsert: vi.fn().mockResolvedValue({
       id: "mock-workflow-id",
