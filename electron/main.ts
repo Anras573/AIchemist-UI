@@ -26,6 +26,7 @@ import { WorkflowScheduler } from "./agent/workflow-scheduler";
 import { CanvasHostManager } from "./canvas/host-manager";
 import { CanvasMcpEndpoint, setActiveCanvasMcpEndpoint } from "./canvas/mcp-endpoint";
 import { registerCanvasProtocol, registerCanvasProtocolScheme } from "./canvas/protocol";
+import { installCanvasFrameNavigationGuard } from "./canvas/frame-navigation-guard";
 import { TrayController } from "./tray";
 import { initAutoUpdater, checkForUpdates } from "./updater";
 
@@ -89,6 +90,15 @@ function createWindow(): BrowserWindow {
       webviewTag: false,
     },
   });
+
+  // A canvas <iframe> (sandbox="allow-scripts", no allow-same-origin) can
+  // still navigate itself — the CSP's connect-src doesn't cover navigation,
+  // and the sandbox attribute only blocks top-level navigation/popups/forms.
+  // Without this, canvas UI code could redirect its own iframe off the
+  // aichemist-canvas:// origin to exfiltrate data and hand the message
+  // bridge to the resulting remote page (found in review on PR #235 — see
+  // frame-navigation-guard.ts for the full writeup).
+  installCanvasFrameNavigationGuard(win.webContents);
 
   if (process.env["ELECTRON_RENDERER_URL"]) {
     win.loadURL(process.env["ELECTRON_RENDERER_URL"]);

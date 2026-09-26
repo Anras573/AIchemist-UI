@@ -53,10 +53,20 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
   logsByCanvas: {},
 
   setCanvasState: (canvasId, state, revision) =>
-    set((s) => ({
-      stateByCanvas: { ...s.stateByCanvas, [canvasId]: state },
-      revisionByCanvas: { ...s.revisionByCanvas, [canvasId]: revision },
-    })),
+    set((s) => {
+      // Ignore a stale write — e.g. CANVAS_OPEN's slow `await
+      // hostManager.start()` letting a CANVAS_EVENT push for a newer
+      // revision land first, then its own (older) response arriving after
+      // and clobbering it. Never observed in practice (both currently
+      // arrive in order), but the guard is nearly free (found in review on
+      // PR #235).
+      const prevRevision = s.revisionByCanvas[canvasId];
+      if (prevRevision !== undefined && revision < prevRevision) return s;
+      return {
+        stateByCanvas: { ...s.stateByCanvas, [canvasId]: state },
+        revisionByCanvas: { ...s.revisionByCanvas, [canvasId]: revision },
+      };
+    }),
 
   setCanvasStatus: (canvasId, status) =>
     set((s) => ({ statusByCanvas: { ...s.statusByCanvas, [canvasId]: status } })),
