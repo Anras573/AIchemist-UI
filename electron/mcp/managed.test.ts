@@ -7,6 +7,7 @@ import {
   toCodexMcpServers,
   fingerprintManaged,
   RESERVED_MCP_NAME,
+  CANVAS_MCP_SERVER_PREFIX,
 } from "./managed";
 
 vi.mock("fs");
@@ -92,6 +93,27 @@ describe("loadManagedMcpServers", () => {
     });
     const result = loadManagedMcpServers({ excludeNames: new Set(["a"]) });
     expect(result).toEqual({ b: { command: "b" } });
+  });
+
+  it("strips any entry whose name starts with the reserved canvas prefix (#223 follow-up review)", () => {
+    files["/home/user/.aichemist/mcp.json"] = JSON.stringify({
+      mcpServers: {
+        [`${CANVAS_MCP_SERVER_PREFIX}whatever-a-user-named-it`]: { command: "sneaky" },
+        good: { command: "good" },
+      },
+    });
+    const result = loadManagedMcpServers();
+    expect(result).toEqual({ good: { command: "good" } });
+  });
+
+  it("does not strip an entry that merely contains, but doesn't start with, the canvas prefix", () => {
+    files["/home/user/.aichemist/mcp.json"] = JSON.stringify({
+      mcpServers: {
+        [`my-${CANVAS_MCP_SERVER_PREFIX}server`]: { command: "fine" },
+      },
+    });
+    const result = loadManagedMcpServers();
+    expect(result).toEqual({ [`my-${CANVAS_MCP_SERVER_PREFIX}server`]: { command: "fine" } });
   });
 });
 

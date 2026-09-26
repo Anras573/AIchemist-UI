@@ -130,6 +130,27 @@ export function listCanvases(db: Database, projectId: string, sessionId?: string
   return rows.map((row) => ({ ...rowToCanvas(row), attached: attachedIds.has(row.id) }));
 }
 
+/**
+ * List the canvas instances currently attached to a session. Ordered by the
+ * canvas row's insertion order (`rowid`, not `created_at` — two canvases
+ * created within the same millisecond would otherwise tie unpredictably, the
+ * same reasoning `getSession()`'s pagination cursor uses). Used by the
+ * loopback MCP endpoint (#223) to inject only attached canvases' tools into a
+ * turn, and by the system-prompt addendum.
+ */
+export function getAttachedCanvases(db: Database, sessionId: string): Canvas[] {
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.project_id, c.definition, c.title, c.state, c.revision, c.created_at, c.updated_at
+       FROM canvases c
+       JOIN session_canvases sc ON sc.canvas_id = c.id
+       WHERE sc.session_id = ?
+       ORDER BY c.rowid ASC`
+    )
+    .all(sessionId) as CanvasRowShape[];
+  return rows.map(rowToCanvas);
+}
+
 /** Rename a canvas instance. Returns the updated canvas, or null if it does not exist. */
 export function renameCanvas(db: Database, id: string, title: string): Canvas | null {
   const existing = getCanvas(db, id);

@@ -23,6 +23,7 @@ import { readAgentFileSystemPrompt } from "./claude";
 import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
 import type { ManagedMcpBridge } from "../mcp";
+import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
 import { getDisabledMcpServers, loadToolCallsForMessage } from "../sessions";
 import { runGatedTool } from "./tool-gate";
 import { TurnEmitter, emitToolRoundLimitNotice } from "./turn-emitter";
@@ -86,6 +87,13 @@ interface ToolContext {
   delegationDepth: number;
   /** Unattended turn — `ask_user` / un-allowlisted approvals resolve immediately. */
   nonInteractive?: boolean;
+  /**
+   * Exact managed-server names `canvasMcpServersForSession()` injected THIS
+   * turn (#223's follow-up review) — never a `canvas-` prefix match, which
+   * would also exempt an unrelated MCP server a user happened to name
+   * `canvas-*` from approval. Empty for noTools / delegated sub-agent turns.
+   */
+  canvasServerNames: Set<string>;
 }
 
 // ── Test seams ────────────────────────────────────────────────────────────────
@@ -387,8 +395,9 @@ async function resolveTargetForTurn(
 function buildSystemPrompt(params: AgentProviderParams): string {
   const skillsContext = buildSkillsContext(params.skills ?? [], params.projectPath);
   const memoryContext = buildMemoryContext(params.projectPath);
+  const canvasContext = params.noTools ? "" : buildCanvasSystemPromptAddendum(params.db, params.sessionId);
   const agentBody = params.agent ? readAgentFileSystemPrompt(params.agent)?.body ?? "" : "";
-  const parts = [OPENAI_COMPAT_SYSTEM_PROMPT, agentBody, skillsContext, memoryContext];
+  const parts = [OPENAI_COMPAT_SYSTEM_PROMPT, agentBody, skillsContext, memoryContext, canvasContext];
   return parts.filter((part) => part.trim().length > 0).join("\n\n");
 }
 
@@ -638,13 +647,25 @@ async function makeMcpTools(ctx: ToolContext, bridge: ManagedMcpBridge): Promise
   const out: ToolSet = {};
   for (const def of bridge.tools) {
     const name = def.function.name;
-    // Managed MCP tools can do anything, so gate them with the strictest
-    // existing approval category instead of treating them as file edits.
+    // A canvas-backed tool was already approval-gated by the loopback MCP
+    // endpoint itself (#223) — gating it again here as "shell" would prompt a
+    // "none" tool on every call, double-prompt an "ask" tool under a
+    // different fingerprint, and double-deny it in nonInteractive runs.
+    // "custom" never gates but still records the call in the
+    // timeline/transcript. Matched against the EXACT server names
+    // `canvasMcpServersForSession()` injected this turn (`ctx.canvasServerNames`)
+    // — not a `canvas-` prefix, which would also exempt an unrelated MCP
+    // server a user's own endpoint config happened to name that way (a real
+    // bypass flagged in review). Every other managed MCP tool can do
+    // anything, so it keeps the strictest existing approval category instead
+    // of being treated as a file edit.
+    const serverName = bridge.serverNameForTool(name);
+    const category = serverName && ctx.canvasServerNames.has(serverName) ? "custom" : "shell";
     out[name] = dynamicTool({
       description: def.function.description,
       inputSchema: jsonSchema(def.function.parameters as JSONSchema7),
       execute: (input) =>
-        runTool(ctx, name, input, "shell", async () =>
+        runTool(ctx, name, input, category, async () =>
           bridge.callTool(name, (input ?? {}) as Record<string, unknown>),
         ),
     });
@@ -761,6 +782,8 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   const recorder = params.noTools
     ? null
     : createNativeTranscriptRecorder(params.sessionId, "openai-compatible");
+  const canvasServers = params.noTools ? {} : canvasMcpServersForSession(params.db, params.sessionId);
+  const canvasServerNames = new Set(Object.keys(canvasServers));
   const ctx: ToolContext = {
     db: params.db,
     sessionId: params.sessionId,
@@ -772,6 +795,7 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
     endpoints,
     delegationDepth: 0,
     nonInteractive: params.nonInteractive,
+    canvasServerNames,
   };
 
   // When noTools is true (text-only generation turns), skip all tool
@@ -779,7 +803,10 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   const managedMcpBridge = params.noTools
     ? null
     : await createManagedMcpBridge(
-        loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
+        {
+          ...loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
+          ...canvasServers,
+        },
         params.projectPath,
       );
   const tools = managedMcpBridge

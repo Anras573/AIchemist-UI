@@ -3,6 +3,7 @@ import type { ProjectConfig } from "../../src/types/index";
 
 import { createPlaceholderMessage, updateMessageContent, loadToolCallsForMessage, updateSessionStatus } from "../sessions";
 import { recordUsage } from "../usage-ledger";
+import { markSessionNonInteractive, getActiveCanvasMcpEndpoint } from "../canvas/mcp-endpoint";
 import { claudeProvider } from "./claude";
 import { copilotProvider } from "./copilot";
 import { ollamaProvider } from "./ollama";
@@ -67,6 +68,15 @@ export async function runAgentTurn(params: {
   // Discard any usage reading left over from a prior turn on this session so a
   // provider that never calls usage() this turn doesn't record stale numbers.
   clearLastUsage(sessionId);
+  // Lets the canvas loopback MCP endpoint (which is decoupled from any turn's
+  // call stack) look up whether the turn currently running on this session is
+  // unattended, so a canvas tool call mid-turn gets the same auto-deny other
+  // gated tools do. Cleared in both the success and error paths below.
+  markSessionNonInteractive(sessionId, !!nonInteractive);
+  // Same idea for CanvasHostManager's idle-stop (#222): a turn attached to a
+  // canvas shouldn't have that canvas's host idle-stopped mid-turn just
+  // because the turn outlasted the idle timeout.
+  getActiveCanvasMcpEndpoint()?.setTurnActive(sessionId, true);
 
   // Create a placeholder assistant message that tool calls can FK-reference
   const placeholderMsg = createPlaceholderMessage(db, { sessionId, agent });
@@ -125,6 +135,8 @@ export async function runAgentTurn(params: {
 
     emitter.status("idle");
     updateSessionStatus(db, sessionId, "idle");
+    markSessionNonInteractive(sessionId, false);
+    getActiveCanvasMcpEndpoint()?.setTurnActive(sessionId, false);
   } catch (err) {
     if (skipPersistence) {
       db.prepare("DELETE FROM messages WHERE id = ?").run(placeholderMsg.id);
@@ -135,6 +147,8 @@ export async function runAgentTurn(params: {
       }
     }
     clearLastUsage(sessionId);
+    markSessionNonInteractive(sessionId, false);
+    getActiveCanvasMcpEndpoint()?.setTurnActive(sessionId, false);
     emitter.status("error");
     updateSessionStatus(db, sessionId, "error");
     throw err;

@@ -149,6 +149,21 @@ export class CanvasHostTimeoutError extends Error {
   }
 }
 
+/**
+ * Distinguishes a genuine tool-level failure (the host is fine; the tool
+ * itself said no — bad input, a handler's own thrown error, an unknown tool
+ * name) from every other way `callTool()` can reject (host not running, the
+ * manager's timeout, the host exiting mid-call). Callers — the canvas MCP
+ * endpoint (#223) — use this to surface the tool's own message to the model
+ * instead of a generic "canvas unavailable", which would hide it.
+ */
+export class CanvasToolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CanvasToolError";
+  }
+}
+
 interface PendingCall {
   resolve(result: unknown): void;
   reject(err: Error): void;
@@ -395,7 +410,7 @@ export class CanvasHostManager {
         clearTimeout(pending.timer);
         record.pendingCalls.delete(msg.callId);
         if (msg.ok) pending.resolve(msg.result);
-        else pending.reject(new Error(msg.error?.message ?? "Canvas tool call failed"));
+        else pending.reject(new CanvasToolError(msg.error?.message ?? "Canvas tool call failed"));
         break;
       }
       case "state.changed": {

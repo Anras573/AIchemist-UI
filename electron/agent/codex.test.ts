@@ -3,7 +3,7 @@ import type { AgentProviderParams } from "./provider";
 import type { ThreadEvent } from "@openai/codex-sdk";
 
 // ── Hoisted mock state ────────────────────────────────────────────────────────
-const { recorderMock, loadManagedMcpServersMock } = vi.hoisted(() => ({
+const { recorderMock, loadManagedMcpServersMock, canvasMcpServersForSessionMock } = vi.hoisted(() => ({
   recorderMock: {
     turnStart: vi.fn(),
     reasoning: vi.fn(),
@@ -13,6 +13,7 @@ const { recorderMock, loadManagedMcpServersMock } = vi.hoisted(() => ({
     toolResult: vi.fn(),
   },
   loadManagedMcpServersMock: vi.fn(() => ({})),
+  canvasMcpServersForSessionMock: vi.fn(() => ({})),
 }));
 
 // Safety net: if a test path ever reaches the lazy SDK import (it shouldn't —
@@ -50,6 +51,10 @@ vi.mock("../mcp/managed", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../mcp/managed")>();
   return { ...actual, loadManagedMcpServers: loadManagedMcpServersMock };
 });
+vi.mock("../canvas/mcp-endpoint", () => ({
+  canvasMcpServersForSession: canvasMcpServersForSessionMock,
+  buildCanvasSystemPromptAddendum: vi.fn(() => ""),
+}));
 
 import {
   codexProvider,
@@ -167,6 +172,7 @@ describe("codexProvider (SDK-backed)", () => {
     vi.mocked(providerSessionStore.get).mockReturnValue({});
     vi.mocked(getDisabledMcpServers).mockReturnValue([]);
     loadManagedMcpServersMock.mockReturnValue({});
+    canvasMcpServersForSessionMock.mockReturnValue({});
     // These tests target the exec transport, so disable the app-server (interactive
     // turns fall back to exec). The app-server transport has its own describe below.
     _setAppServerConnectorForTests(throwingConnector);
@@ -215,6 +221,39 @@ describe("codexProvider (SDK-backed)", () => {
     // …and the managed server lands in the Codex config as `mcp_servers`.
     expect(captured!.config).toEqual({
       mcp_servers: { docs: { command: "docs-server", args: ["--stdio"] } },
+    });
+  });
+
+  it("merges attached canvases' loopback MCP entries (#223) alongside managed servers", async () => {
+    loadManagedMcpServersMock.mockReturnValue({ docs: { command: "docs-server" } });
+    canvasMcpServersForSessionMock.mockReturnValue({
+      "canvas-kanban-abcd1234": {
+        type: "http",
+        url: "http://127.0.0.1:1234/canvas/c1/session/session-123/mcp",
+        headers: { Authorization: "Bearer secret" },
+      },
+    });
+
+    let captured: { config?: unknown } | null = null;
+    _setCodexForTests(null);
+    _setCodexFactoryForTests((options) => {
+      captured = options;
+      return makeCodex({
+        startThread: vi.fn(() => makeThread([ev.agentMessage("ok"), ev.usage()])),
+      }) as never;
+    });
+
+    await codexProvider.run(makeParams());
+
+    expect(canvasMcpServersForSessionMock).toHaveBeenCalledWith(expect.anything(), "session-123");
+    expect(captured!.config).toEqual({
+      mcp_servers: {
+        docs: { command: "docs-server" },
+        "canvas-kanban-abcd1234": {
+          url: "http://127.0.0.1:1234/canvas/c1/session/session-123/mcp",
+          http_headers: { Authorization: "Bearer secret" },
+        },
+      },
     });
   });
 
@@ -649,6 +688,7 @@ describe("codexProvider (app-server transport)", () => {
     vi.mocked(providerSessionStore.get).mockReturnValue({});
     vi.mocked(getDisabledMcpServers).mockReturnValue([]);
     loadManagedMcpServersMock.mockReturnValue({});
+    canvasMcpServersForSessionMock.mockReturnValue({});
     vi.spyOn(console, "warn").mockImplementation(() => {});
     _setCodexForTests(makeCodex() as any); // for the fallback test
   });

@@ -11,6 +11,15 @@ vi.mock("../mcp/approval", () => ({
   createManagedMcpBridge: vi.fn(),
 }));
 
+const canvasMock = vi.hoisted(() => ({
+  servers: vi.fn(() => ({}) as Record<string, unknown>),
+}));
+vi.mock("../canvas/mcp-endpoint", () => ({
+  canvasMcpServersForSession: canvasMock.servers,
+  buildCanvasSystemPromptAddendum: vi.fn(() => ""),
+  CANVAS_MCP_SERVER_PREFIX: "canvas-",
+}));
+
 // Control the agent file's `model:` frontmatter without touching ~/.claude/agents.
 const agentFileMock = vi.hoisted(() => ({ result: null as { body: string; model?: string } | null }));
 vi.mock("./claude", () => ({
@@ -44,6 +53,7 @@ import {
 } from "./memory";
 import type { OpenAiEndpointsMap } from "../openai-endpoints";
 import { createManagedMcpBridge } from "../mcp/approval";
+import { resolveApproval } from "./approval";
 
 const FINISH_USAGE = {
   inputTokens: { total: 7, noCache: 7, cacheRead: undefined, cacheWrite: undefined },
@@ -136,10 +146,12 @@ beforeEach(() => {
   // touch the real ~/.aichemist/memory.
   _setMemoryRootForTests(path.join(tempDir, "aichemist"));
   _resetOpenAiCompatProbeCache();
+  canvasMock.servers.mockReturnValue({});
   vi.mocked(createManagedMcpBridge).mockResolvedValue({
     tools: [],
     hasTool: () => false,
     callTool: async () => "",
+    serverNameForTool: () => undefined,
     close: async () => {},
   });
 });
@@ -566,6 +578,161 @@ describe("openai-compat turn execution", () => {
 
     expect(capturedTools ?? []).toEqual([]);
     expect(createManagedMcpBridge).not.toHaveBeenCalled();
+  });
+
+  it("merges attached canvases' loopback MCP entries (#223) into the managed-server map passed to the bridge", async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    canvasMock.servers.mockReturnValue({
+      "canvas-kanban-abcd1234": {
+        type: "http",
+        url: "http://127.0.0.1:1234/canvas/c1/session/s-canvas/mcp",
+        headers: { Authorization: "Bearer secret" },
+      },
+    });
+    vi.mocked(createManagedMcpBridge).mockResolvedValue({
+      tools: [],
+      hasTool: () => false,
+      callTool: async () => "",
+      serverNameForTool: () => undefined,
+      close: async () => {},
+    });
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({ doStream: async () => textStream(["ok"]) }),
+    );
+
+    await runOpenAiCompatTurn({
+      db: makeDb([]) as never,
+      sessionId: "s-canvas",
+      messageId: "m-placeholder",
+      prompt: "hi",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "local/m", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+    } as never);
+
+    expect(canvasMock.servers).toHaveBeenCalledWith(expect.anything(), "s-canvas");
+    expect(createManagedMcpBridge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "canvas-kanban-abcd1234": expect.objectContaining({ url: "http://127.0.0.1:1234/canvas/c1/session/s-canvas/mcp" }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("routes a canvas-backed bridge tool ('none' approval) through without prompting (#223)", async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    const toolName = "mcp__canvas_kanban_abcd1234__get_board__11112222";
+    const callTool = vi.fn().mockResolvedValue("the board");
+    // The exact server name canvasMcpServersForSession() injected this turn —
+    // matching by exact membership, not a "canvas-" prefix, is what #223's
+    // follow-up review requires (a prefix match would also exempt an
+    // unrelated MCP server sharing the prefix).
+    canvasMock.servers.mockReturnValue({
+      "canvas-kanban-abcd1234": { type: "http", url: "http://127.0.0.1:1/mcp", headers: {} },
+    });
+    vi.mocked(createManagedMcpBridge).mockResolvedValue({
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: toolName,
+            description: "canvas-kanban-abcd1234 — get_board — Return the board",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+      hasTool: (name: string) => name === toolName,
+      serverNameForTool: (name: string) => (name === toolName ? "canvas-kanban-abcd1234" : undefined),
+      callTool,
+      close: async () => {},
+    });
+
+    let call = 0;
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({
+        doStream: async () => {
+          call += 1;
+          if (call === 1) return toolCallStream("call-1", toolName, {});
+          return textStream(["Done."]);
+        },
+      }),
+    );
+
+    const send = vi.fn();
+    const text = await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "check the board" }]) as never,
+      sessionId: "s-canvas-tool",
+      messageId: "m-placeholder",
+      prompt: "check the board",
+      projectPath: makeTempProject(),
+      // Even approval_mode "all" must not matter — a canvas tool's own gating
+      // happened at the endpoint, so this provider must never re-gate it.
+      projectConfig: { model: "local/m", approval_mode: "all", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    expect(text).toBe("Done.");
+    expect(callTool).toHaveBeenCalledWith(toolName, {});
+    expect(send).not.toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.anything());
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_RESULT,
+      expect.objectContaining({ tool_name: toolName, output: "the board" }),
+    );
+  });
+
+  it('still gates a non-canvas managed tool whose server name merely starts with "canvas-" (#223)', async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    const toolName = "mcp__canvas_x__lookup__abcdef12";
+    const callTool = vi.fn().mockResolvedValue("bridge result");
+    // No canvas attached this turn — "canvas-x" merely shares the reserved
+    // prefix (loadManagedMcpServers() would actually drop such an entry; this
+    // mock stands in for "whatever survived to the bridge").
+    canvasMock.servers.mockReturnValue({});
+    vi.mocked(createManagedMcpBridge).mockResolvedValue({
+      tools: [
+        {
+          type: "function",
+          function: { name: toolName, description: "canvas-x — lookup", parameters: { type: "object", properties: {} } },
+        },
+      ],
+      hasTool: (name: string) => name === toolName,
+      serverNameForTool: (name: string) => (name === toolName ? "canvas-x" : undefined),
+      callTool,
+      close: async () => {},
+    });
+
+    let call = 0;
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({
+        doStream: async () => {
+          call += 1;
+          if (call === 1) return toolCallStream("call-1", toolName, {});
+          return textStream(["Done."]);
+        },
+      }),
+    );
+
+    const send = vi.fn();
+    send.mockImplementation((channel: string, payload: { approval_id?: string }) => {
+      if (channel === CH.SESSION_APPROVAL_REQUIRED && payload.approval_id) {
+        resolveApproval(payload.approval_id, true);
+      }
+    });
+
+    const text = await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "use the tool" }]) as never,
+      sessionId: "s-not-canvas",
+      messageId: "m-placeholder",
+      prompt: "use the tool",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "local/m", approval_mode: "all", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    expect(text).toBe("Done.");
+    // A prefix match would have exempted this tool from approval — it must
+    // still be gated as "shell" like any other managed MCP tool.
+    expect(send).toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.objectContaining({ tool_name: toolName }));
   });
 
   it("surfaces stream errors as turn failures", async () => {

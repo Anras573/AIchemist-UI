@@ -6,13 +6,14 @@
  * never imports this module: it only ever talks to a host over the same
  * transport shape from the *other* end.
  */
+import { z } from "zod";
 import {
   DEFAULT_TOOL_TIMEOUT_MS,
   type CanvasToolDescriptor,
   type HostToMainMessage,
   type MainToHostMessage,
 } from "../host-protocol";
-import type { CanvasServerDefinition, CanvasToolContext } from "./sdk";
+import type { CanvasServerDefinition, CanvasTool, CanvasToolContext } from "./sdk";
 
 export interface HostTransport {
   send(message: HostToMainMessage): void;
@@ -62,12 +63,31 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, tool: string): P
   });
 }
 
+/**
+ * Converts a tool's zod `input` schema to JSON Schema so `tools/list` can
+ * advertise real arguments instead of a permissive empty object (#223's
+ * review) — without this the model has to guess a tool's shape from its
+ * description alone. Never throws: an author's schema that `z.toJSONSchema()`
+ * can't convert (an unsupported zod construct) falls back to `undefined`
+ * rather than breaking `tools/list` for every other tool the canvas declares;
+ * the endpoint falls back to a permissive schema for that one tool.
+ */
+function toolInputSchema(tool: CanvasTool): Record<string, unknown> | undefined {
+  try {
+    return z.toJSONSchema(tool.input) as Record<string, unknown>;
+  } catch (err) {
+    console.warn(`[canvas-host] Failed to convert input schema to JSON Schema: ${err instanceof Error ? err.message : String(err)}`);
+    return undefined;
+  }
+}
+
 function toolDescriptors(definition: CanvasServerDefinition): CanvasToolDescriptor[] {
   return Object.entries(definition.tools ?? {}).map(([name, tool]) => ({
     name,
     description: tool.description,
     approval: tool.approval ?? "ask",
     timeoutMs: tool.timeoutMs,
+    inputSchema: toolInputSchema(tool),
   }));
 }
 

@@ -16,6 +16,7 @@ import type { ToolCategory } from "./approval";
 import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
 import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory } from "./memory";
+import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
 import { readAgentFileSystemPrompt } from "./claude";
 import { classifyNativeTool, runGatedTool } from "./tool-gate";
 import type { GatedToolContext } from "./tool-gate";
@@ -255,11 +256,13 @@ export function composeCopilotSystemMessage(opts: {
   agentBody: string | null;
   skillsContext: string;
   memoryContext: string;
+  /** System-prompt addendum listing attached canvases (see `buildCanvasSystemPromptAddendum`). Defaults to "". */
+  canvasContext?: string;
   noTools?: boolean;
 }): { content: string; mode: "replace" | "append" } {
-  const { agentBody, skillsContext, memoryContext, noTools } = opts;
+  const { agentBody, skillsContext, memoryContext, canvasContext = "", noTools } = opts;
   const toolGuidance = noTools ? "" : MEMORY_INSTRUCTION + ASK_USER_INSTRUCTION;
-  const augmentation = toolGuidance + memoryContext;
+  const augmentation = toolGuidance + memoryContext + canvasContext;
   if (agentBody) {
     return { content: agentBody + skillsContext + augmentation, mode: "replace" };
   }
@@ -289,6 +292,16 @@ export async function runCopilotAgentTurn(params: {
 
   const emitter = new TurnEmitter(webContents, sessionId);
   const gateCtx: GatedToolContext = { db, sessionId, messageId, projectConfig, emitter, nonInteractive };
+
+  // Computed once, up front, so `onPermissionRequest` (defined below, called
+  // later during the SDK session) and the managedMcpRaw merge (further down)
+  // both check membership in the EXACT set of server names injected this
+  // turn — never a `canvas-` prefix match, which would also exempt an
+  // unrelated MCP server (e.g. from the project's own `.mcp.json`, which the
+  // Copilot SDK discovers itself) that happens to be named `canvas-*` (#223's
+  // follow-up review).
+  const canvasServers = noTools ? {} : canvasMcpServersForSession(db, sessionId);
+  const canvasServerNames = new Set(Object.keys(canvasServers));
 
   // ── Tool definitions ────────────────────────────────────────────────────────
 
@@ -502,7 +515,22 @@ export async function runCopilotAgentTurn(params: {
         break;
       case "write":
       case "read":
+        category = "filesystem";
+        break;
       case "mcp":
+        // A canvas-backed server was already approval-gated by the loopback
+        // MCP endpoint itself (#223) — gating it again here would
+        // double-prompt an "ask" tool under a different fingerprint, or
+        // prompt a "none" tool at all whenever the project's approval config
+        // happens to gate MCP calls. Matched against the EXACT server names
+        // injected this turn (`canvasServerNames`) — never a `canvas-` prefix
+        // match, which would also auto-approve an unrelated MCP server (e.g.
+        // from the project's own `.mcp.json`) that happens to share the
+        // prefix. Every other MCP server keeps its existing filesystem-category
+        // gating.
+        if (canvasServerNames.has(request.serverName)) {
+          return { kind: "approve-once" };
+        }
         category = "filesystem";
         break;
       case "url":
@@ -544,6 +572,7 @@ export async function runCopilotAgentTurn(params: {
   // guidance in would duplicate it; and in noTools turns there is no guidance at
   // all, leaving the saved notes as read-only context.
   const memoryContext = buildMemoryContext(projectPath, { includeToolGuidance: false });
+  const canvasContext = buildCanvasSystemPromptAddendum(db, sessionId);
 
   // When a specific agent is selected, inject its system prompt via `systemMessage`
   // using replace mode so the agent's instructions ARE the primary context.
@@ -569,6 +598,7 @@ export async function runCopilotAgentTurn(params: {
       agentBody: selected.body,
       skillsContext,
       memoryContext,
+      canvasContext,
       noTools,
     });
     systemMessageContent = composed.content;
@@ -594,6 +624,7 @@ export async function runCopilotAgentTurn(params: {
       agentBody: null,
       skillsContext,
       memoryContext,
+      canvasContext,
       noTools,
     });
     systemMessageContent = composed.content;
@@ -606,9 +637,19 @@ export async function runCopilotAgentTurn(params: {
   // Per-session disabled servers are filtered out BEFORE fingerprinting so
   // toggling a server off naturally invalidates the cached SDK session.
   // Skipped entirely when noTools is true (text-only generation turns).
+  // Attached canvases (#223) are folded in BEFORE fingerprinting — attach/detach
+  // changes this map, so `fingerprintManaged()` naturally invalidates the cached
+  // SDK session the same way toggling a regular managed server does, with no
+  // separate canvas-specific fingerprint logic needed. Side effect (accepted,
+  // see CLAUDE.md's "Copilot SDK — Agent / MCP-fingerprint change detection"):
+  // a canvas entry's url/token carry the endpoint's per-launch port/token, so
+  // this fingerprint also changes on every app relaunch.
   const managedMcpRaw = noTools
     ? {}
-    : loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) });
+    : {
+        ...loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) }),
+        ...canvasServers,
+      };
   const mcpFingerprint = fingerprintManaged(managedMcpRaw);
 
   const sessionConfig = {

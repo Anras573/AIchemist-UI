@@ -158,8 +158,18 @@ describe("CanvasHostManager — start, list & call tools, state persistence", ()
 
     expect(manager.getStatus(canvas.id)).toBe("running");
     expect(manager.getTools(canvas.id)).toEqual([
-      { name: "get_board", description: "Return the board", approval: "ask" },
-      { name: "add_card", description: "Add a card", approval: "ask" },
+      {
+        name: "get_board",
+        description: "Return the board",
+        approval: "ask",
+        inputSchema: z.toJSONSchema(z.object({})),
+      },
+      {
+        name: "add_card",
+        description: "Add a card",
+        approval: "ask",
+        inputSchema: z.toJSONSchema(z.object({ title: z.string() })),
+      },
     ]);
 
     // Env passed to the fake process factory never carries provider keys.

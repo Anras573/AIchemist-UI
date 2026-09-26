@@ -28,3 +28,11 @@ jobs:
 
       - name: Build
         run: bun run build
+
+      # Exercises the BUILT output (not TS source, which the vitest suite
+      # already covers) — registers dist/main/host/loader-hook.js for real
+      # and imports @aichemist/canvas the way an actual canvas server.mjs
+      # does. Catches interop bugs (e.g. a named export a CJS build can't
+      # satisfy) the unit tests can't see. See #223's review on PR #234.
+      - name: Canvas SDK smoke test (built output)
+        run: bun run smoke:canvas-sdk

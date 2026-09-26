@@ -59,6 +59,15 @@ export interface ManagedMcpBridge {
   tools: OllamaMcpToolDefinition[];
   hasTool(name: string): boolean;
   callTool(name: string, args: Record<string, unknown>): Promise<string>;
+  /**
+   * The managed-server name a bridge function name was generated from (see
+   * `makeFunctionName`), or undefined for an unknown name. Lets a caller tell
+   * a canvas-backed tool (server name `canvas-*`, already approval-gated by
+   * the canvas MCP endpoint itself — see electron/canvas/mcp-endpoint.ts)
+   * apart from an ordinary managed MCP tool, which callers still gate
+   * themselves (see ollama.ts / openai-compat.ts's `executeTool`/`makeMcpTools`).
+   */
+  serverNameForTool(name: string): string | undefined;
   close(): Promise<void>;
 }
 
@@ -170,6 +179,7 @@ export async function createManagedMcpBridge(map: McpServersMap, cwd?: string): 
       tools: [],
       hasTool: () => false,
       callTool: async () => "Error: Unsupported MCP tool",
+      serverNameForTool: () => undefined,
       close: async () => {},
     };
   }
@@ -183,6 +193,7 @@ export async function createManagedMcpBridge(map: McpServersMap, cwd?: string): 
       tools: [],
       hasTool: () => false,
       callTool: async () => "Error: Unsupported MCP tool",
+      serverNameForTool: () => undefined,
       close: async () => {},
     };
   }
@@ -237,6 +248,9 @@ export async function createManagedMcpBridge(map: McpServersMap, cwd?: string): 
     tools,
     hasTool(name: string): boolean {
       return bindings.has(name);
+    },
+    serverNameForTool(name: string): string | undefined {
+      return bindings.get(name)?.serverName;
     },
     async callTool(name: string, args: Record<string, unknown>): Promise<string> {
       const binding = bindings.get(name);

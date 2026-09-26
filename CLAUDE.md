@@ -576,6 +576,8 @@ if (resumeId && ((prior.agent ?? "") !== normalizedAgent || (prior.mcpFp ?? "") 
 providerSessionStore.set(db, sessionId, "copilot", { sessionId: session.sessionId, agent: normalizedAgent || null, mcpFp: normalizedMcpFp || null });
 ```
 
+**Known tradeoff: a Copilot session with an attached canvas resets on every app relaunch.** A canvas's managed-MCP entry (`electron/canvas/mcp-endpoint.ts`) embeds the loopback endpoint's per-launch **port** and bearer **token** in its `url`/`headers`, both of which change every time the app starts. Since that entry is folded into `managedMcpRaw` before `fingerprintManaged()` (see above), `mcpFp` therefore also changes on every relaunch — the first turn after a restart always sees `resumeId = null` and starts a fresh Copilot SDK session, losing that session's in-SDK conversation state (the AIchemist session and its message history in SQLite are unaffected; only Copilot's own internal state resets, the same way it already does on any agent/MCP config change). This is accepted as-is rather than fixed: the alternative (persist the port and token across restarts, try the old port first) trades away the per-launch-token hardening that's the whole point of the endpoint being loopback-only + freshly-keyed each run, for a continuity benefit that's already this rough for any other MCP/agent config change. Decided in the review on #223 (PR #234) — revisit only if this proves disruptive in practice.
+
 ### Tool call persistence — placeholder message pattern
 
 Tool calls are stored in the `tool_calls` table with a `message_id NOT NULL` FK. The assistant message is created **before** `provider.run()` so tool calls have a valid FK to reference immediately:
