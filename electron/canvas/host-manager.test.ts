@@ -173,22 +173,45 @@ describe("CanvasHostManager — start, list & call tools, state persistence", ()
     expect(persisted?.revision).toBe(1);
   });
 
-  it("onStateChanged reports the store's authoritative revision, not the host's own count", async () => {
-    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
-    const { factory } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+  it("onStateChanged reports the store's authoritative revision, not the host's own count, even after a rejected write", async () => {
+    // A local definition (not the shared KANBAN_DEFINITION, to avoid rippling
+    // into its other tests' exact getTools() assertions): `set_board`
+    // replaces the whole board outright, so a later small write's result
+    // doesn't depend on — and isn't itself blown past the cap by — whatever
+    // an earlier rejected write left behind in the host's local state.
+    const definition = defineCanvas({
+      initialState: { cards: [] as string[] },
+      tools: {
+        set_board: {
+          description: "Replace the whole board",
+          input: z.object({ cards: z.array(z.string()) }),
+          handler: (args, ctx) => {
+            ctx.state.set({ cards: args.cards });
+            return ctx.state.get();
+          },
+        },
+      },
+    });
+    const canvas = createCanvas(db, { projectId: "p1", definition: "board", title: "Board" });
+    const { factory } = createInProcessHostFactory({ "/defs/board/server.mjs": definition });
     const onStateChanged = vi.fn();
     const manager = new CanvasHostManager(db, { spawn: factory, hooks: { onStateChanged } });
-    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+    await manager.start(canvas.id, { serverPath: "/defs/board/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
 
-    await manager.callTool(canvas.id, "add_card", { title: "One" });
-    await manager.callTool(canvas.id, "add_card", { title: "Two" });
+    await manager.callTool(canvas.id, "set_board", { cards: ["One"] }); // DB + host revision both 1
 
-    // Both calls emitted the DB's own post-write revision (1, then 2) — this
-    // only diverges from the host's own count once a write is rejected (see
-    // "a state persistence failure is a backstop" below), but sourcing it
-    // from setCanvasState's return value here (rather than trusting the
-    // host's self-reported msg.revision) is what keeps every consumer
-    // pointed at the DB even when that happens.
+    // Rejected by the store's 1MB cap: the host's own local revision still
+    // advances to 2 (see "a state persistence failure is a backstop" below),
+    // but the DB's stays at 1 — this is where the two diverge.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    await manager.callTool(canvas.id, "set_board", { cards: ["x".repeat(2 * 1024 * 1024)] });
+    consoleError.mockRestore();
+
+    await manager.callTool(canvas.id, "set_board", { cards: ["One", "Two"] }); // host revision 3, DB revision 2
+
+    // Without the fix (emitting the host's own msg.revision), the last call
+    // here would report 3 — the host's count — instead of 2, the DB's.
+    expect(onStateChanged).toHaveBeenCalledTimes(2); // the rejected write's onStateChanged is skipped entirely
     expect(onStateChanged).toHaveBeenNthCalledWith(1, canvas.id, { cards: ["One"] }, 1);
     expect(onStateChanged).toHaveBeenNthCalledWith(2, canvas.id, { cards: ["One", "Two"] }, 2);
   });
@@ -652,6 +675,34 @@ describe("CanvasHostManager — callTool sizes its safety net off the tool's own
     // (which would have rejected this call 65 seconds earlier).
     await vi.advanceTimersByTimeAsync(125_000);
     await assertion;
+  });
+
+  it("a caller-supplied timeoutMs shorter than the tool's own budget rejects the call but never kills a healthy host", async () => {
+    vi.useFakeTimers();
+    const canvas = createCanvas(db, { projectId: "p1", definition: "slow", title: "Slow" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/slow/server.mjs": SLOW_DEFINITION });
+    const manager = new CanvasHostManager(db, { spawn: factory });
+    await manager.start(canvas.id, { serverPath: "/defs/slow/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    // SLOW_DEFINITION's `slow` tool declares timeoutMs: 120_000 and resolves
+    // after 90s (well within its own budget) — but this caller asks to give
+    // up after only 1s, far short of that.
+    const pending = manager.callTool(canvas.id, "slow", {}, { timeoutMs: 1_000 });
+    const assertion = expect(pending).rejects.toThrow(/did not reply to tool "slow" within 1000ms/);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+
+    // The call's own promise gave up early, exactly as the caller asked, but
+    // the host itself was never touched: it is not the "hung host" case, and
+    // must not be killed, restarted, or spend any of its crash budget.
+    expect(processes[0].killed).toBe(false);
+    expect(manager.getStatus(canvas.id)).toBe("running");
+
+    // The tool keeps running regardless and finishes normally — proving the
+    // host really was healthy the whole time, not merely "not yet killed".
+    await vi.advanceTimersByTimeAsync(89_000);
+    expect(processes[0].killed).toBe(false);
+    expect(manager.getStatus(canvas.id)).toBe("running");
   });
 
   it("recovers a hung host instead of leaving it wedged 'running' forever (#222 acceptance criterion)", async () => {

@@ -499,9 +499,14 @@ export class CanvasHostManager {
   /**
    * Sends a tool call to a running host and resolves with its result (or
    * rejects with the tool's error). Rejects immediately if the host isn't
-   * running, and — as a safety net on top of, never instead of, the host's
-   * own per-tool timeout — after that tool's `timeoutMs` (or the host's 60s
-   * default) plus a grace margin if the host never replies at all.
+   * running. Otherwise settles no later than `opts.timeoutMs` (default: the
+   * tool's own `timeoutMs`, or the host's 60s default, plus a grace margin) —
+   * but the host is only ever killed once that grace-padded *tool budget*
+   * has elapsed, regardless of a shorter `opts.timeoutMs`: a caller-supplied
+   * override controls only how soon this one call gives up waiting, never
+   * whether the host itself gets treated as hung. Without that split, an
+   * aggressive caller timeout on a legitimately slow tool would kill a
+   * perfectly healthy host and spend a crash from its restart budget.
    */
   callTool(canvasId: string, tool: string, args: unknown, opts?: { timeoutMs?: number }): Promise<unknown> {
     const record = this.hosts.get(canvasId);
@@ -516,14 +521,24 @@ export class CanvasHostManager {
     // timeout error. Falls back to `toolCallTimeoutMs` for a tool name the
     // host never declared (e.g. a typo'd call, which errors back quickly).
     const descriptor = record.tools.find((t) => t.name === tool);
-    const timeoutMs =
-      opts?.timeoutMs ??
-      (descriptor ? (descriptor.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS) + TOOL_CALL_TIMEOUT_GRACE_MS : this.toolCallTimeoutMs);
+    const toolBudgetMs = descriptor
+      ? (descriptor.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS) + TOOL_CALL_TIMEOUT_GRACE_MS
+      : this.toolCallTimeoutMs;
+    const timeoutMs = opts?.timeoutMs ?? toolBudgetMs;
 
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        record.pendingCalls.delete(callId);
+      // Settles THIS call's promise at the caller's requested timeout. Never
+      // touches `pendingCalls` or the process directly — when `timeoutMs` is
+      // shorter than `toolBudgetMs`, the call below still needs to observe
+      // whatever the host does with this callId afterward.
+      setTimeout(() => {
         reject(new CanvasHostTimeoutError(`Canvas host did not reply to tool "${tool}" within ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return; // the host replied, or the process already exited, before its real budget elapsed
+        record.pendingCalls.delete(callId);
         // This fired after the tool's own timeout plus a grace margin, so the
         // host's event loop is genuinely stuck (its own per-tool timer would
         // otherwise have answered by now) — recover it like any other crash
@@ -536,8 +551,19 @@ export class CanvasHostManager {
         } catch (killErr) {
           console.error(`[canvas-host-manager] failed to kill unresponsive host ${canvasId}:`, killErr);
         }
-      }, timeoutMs);
-      record.pendingCalls.set(callId, { resolve, reject, timer });
+      }, toolBudgetMs);
+
+      record.pendingCalls.set(callId, {
+        resolve: (result) => {
+          settled = true;
+          resolve(result);
+        },
+        reject: (err) => {
+          settled = true;
+          reject(err);
+        },
+        timer,
+      });
       record.process.postMessage({ type: "tool.call", callId, tool, args });
     });
   }
