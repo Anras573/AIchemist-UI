@@ -130,17 +130,31 @@
     button.className = "add-card-toggle";
     button.textContent = "+ Add card";
 
-    var form = document.createElement("form");
+    // Not a <form>: the iframe sandbox is "allow-scripts" only (no
+    // "allow-forms"), which blocks the form-submission algorithm before the
+    // "submit" event ever fires — a real submit here would silently do
+    // nothing. A plain button + keydown handles both click and Enter without
+    // needing form submission at all.
+    var form = document.createElement("div");
     form.className = "add-card-form hidden";
     var input = document.createElement("input");
     input.type = "text";
     input.placeholder = "Card title";
     var submit = document.createElement("button");
-    submit.type = "submit";
+    submit.type = "button";
     submit.textContent = "Add";
 
     form.appendChild(input);
     form.appendChild(submit);
+
+    function submitAdd() {
+      var title = input.value.trim();
+      if (!title) return;
+      window.canvas.send({ type: "add", column: columnId, title: title });
+      input.value = "";
+      form.classList.add("hidden");
+      button.classList.remove("hidden");
+    }
 
     button.addEventListener("click", function () {
       button.classList.add("hidden");
@@ -148,14 +162,9 @@
       input.focus();
     });
 
-    form.addEventListener("submit", function (event) {
-      event.preventDefault();
-      var title = input.value.trim();
-      if (!title) return;
-      window.canvas.send({ type: "add", column: columnId, title: title });
-      input.value = "";
-      form.classList.add("hidden");
-      button.classList.remove("hidden");
+    submit.addEventListener("click", submitAdd);
+    input.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") submitAdd();
     });
 
     wrapper.appendChild(button);
