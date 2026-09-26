@@ -27,6 +27,8 @@ const TracesPanel = lazy(() => import("./TracesPanel").then((m) => ({ default: m
 const InteractiveTerminal = lazy(() =>
   import("./InteractiveTerminal").then((m) => ({ default: m.InteractiveTerminal }))
 );
+// The canvas panel embeds a sandboxed iframe most sessions never open.
+const CanvasPanel = lazy(() => import("./CanvasPanel").then((m) => ({ default: m.CanvasPanel })));
 
 function PanelFallback() {
   return (
@@ -228,7 +230,7 @@ function MemoryFileViewer({ filePath }: { filePath: string }) {
 
 // ── ContextPanel ──────────────────────────────────────────────────────────────
 
-export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes" | "mcp" | "memory" | "github" | "spending";
+export type ContextTab = "files" | "terminal" | "skills" | "traces" | "changes" | "mcp" | "memory" | "github" | "spending" | "canvas";
 
 /**
  * Right panel content — renders whichever tool is active (files or terminal).
@@ -301,6 +303,7 @@ export function ContextPanel({
       : activeTab === "memory" ? "Memory"
       : activeTab === "github" ? "GitHub"
       : activeTab === "spending" ? "Spending"
+      : activeTab === "canvas" ? "Canvas"
       : "Skills";
 
   return (
@@ -380,6 +383,10 @@ export function ContextPanel({
           <GitHubPanel />
         ) : activeTab === "spending" ? (
           <SpendingPanel />
+        ) : activeTab === "canvas" ? (
+          <Suspense fallback={<PanelFallback />}>
+            <CanvasPanel />
+          </Suspense>
         ) : activeTab === "terminal" ? (
           activeProject ? (
             <Suspense fallback={<PanelFallback />}>

@@ -333,6 +333,32 @@ export interface CanvasTrust {
   trusted_at: string;
 }
 
+/**
+ * A canvas host process's lifecycle state, mirroring
+ * `electron/canvas/host-manager.ts`'s `CanvasHostStatus`. Duplicated here
+ * (rather than imported) because the renderer can only type-import from
+ * `electron/` for Node-only modules — same rule as the tool-round-cap bounds
+ * in `SettingsView.tsx`.
+ */
+export type CanvasHostStatus = "starting" | "running" | "stopped" | "crashed" | "errored";
+
+/**
+ * Push payload for `CANVAS_EVENT` (main → renderer): a host status change, a
+ * persisted state write, a UI message relayed from the host, or a debug log
+ * line. Exactly one of `state`/`revision`, `message`, `status`, or
+ * `level`/`args` is populated, matching `kind`.
+ */
+export interface CanvasEvent {
+  canvasId: string;
+  kind: "state" | "message" | "status" | "log";
+  state?: unknown;
+  revision?: number;
+  message?: unknown;
+  status?: CanvasHostStatus;
+  level?: "log" | "warn" | "error";
+  args?: unknown[];
+}
+
 // ─── IPC event payloads ──────────────────────────────────────────────────────
 
 export interface SessionStatusEvent {

@@ -175,6 +175,10 @@ export interface ElectronAPI {
   canvasDelete: (canvasId: string) => Promise<Res<typeof CH.CANVAS_DELETE>>;
   canvasRename: (canvasId: string, title: string) => Promise<Res<typeof CH.CANVAS_RENAME>>;
   canvasAttach: (sessionId: string, canvasId: string, attached: boolean) => Promise<Res<typeof CH.CANVAS_ATTACH>>;
+  canvasOpen: (canvasId: string) => Promise<Res<typeof CH.CANVAS_OPEN>>;
+  canvasClose: (canvasId: string) => Promise<Res<typeof CH.CANVAS_CLOSE>>;
+  canvasUiMessage: (canvasId: string, message: unknown) => Promise<Res<typeof CH.CANVAS_UI_MESSAGE>>;
+  canvasRestart: (canvasId: string) => Promise<Res<typeof CH.CANVAS_RESTART>>;
 
   // ── Workflows ─────────────────────────────────────────────────────────────
   workflowList: (args?: { projectId?: string }) => Promise<Res<typeof CH.WORKFLOW_LIST>>;
@@ -308,6 +312,10 @@ const api: ElectronAPI = {
   canvasDelete: (canvasId) => invoke(CH.CANVAS_DELETE, { canvasId }),
   canvasRename: (canvasId, title) => invoke(CH.CANVAS_RENAME, { canvasId, title }),
   canvasAttach: (sessionId, canvasId, attached) => invoke(CH.CANVAS_ATTACH, { sessionId, canvasId, attached }),
+  canvasOpen: (canvasId) => invoke(CH.CANVAS_OPEN, { canvasId }),
+  canvasClose: (canvasId) => invoke(CH.CANVAS_CLOSE, { canvasId }),
+  canvasUiMessage: (canvasId, message) => invoke(CH.CANVAS_UI_MESSAGE, { canvasId, message }),
+  canvasRestart: (canvasId) => invoke(CH.CANVAS_RESTART, { canvasId }),
 
   workflowList: (args) => invoke(CH.WORKFLOW_LIST, args ?? {}),
   workflowUpsert: (input) => invoke(CH.WORKFLOW_UPSERT, input),

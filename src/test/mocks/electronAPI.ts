@@ -145,6 +145,10 @@ export function createElectronAPIMock(): Window["electronAPI"] {
       updated_at: "2026-01-01T00:00:00.000Z",
     }),
     canvasAttach: vi.fn().mockResolvedValue({ attached: true }),
+    canvasOpen: vi.fn().mockResolvedValue({ state: null, revision: 0, status: "running" }),
+    canvasClose: vi.fn().mockResolvedValue({ state: null, revision: 0 }),
+    canvasUiMessage: vi.fn().mockResolvedValue({ ok: true }),
+    canvasRestart: vi.fn().mockResolvedValue({ state: null, revision: 0, status: "running" }),
     workflowList: vi.fn().mockResolvedValue([]),
     workflowUpsert: vi.fn().mockResolvedValue({
       id: "mock-workflow-id",

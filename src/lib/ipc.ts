@@ -140,6 +140,10 @@ export const ipc = {
   canvasRename: (canvasId: string, title: string) => window.electronAPI.canvasRename(canvasId, title),
   canvasAttach: (sessionId: string, canvasId: string, attached: boolean) =>
     window.electronAPI.canvasAttach(sessionId, canvasId, attached),
+  canvasOpen: (canvasId: string) => window.electronAPI.canvasOpen(canvasId),
+  canvasClose: (canvasId: string) => window.electronAPI.canvasClose(canvasId),
+  canvasUiMessage: (canvasId: string, message: unknown) => window.electronAPI.canvasUiMessage(canvasId, message),
+  canvasRestart: (canvasId: string) => window.electronAPI.canvasRestart(canvasId),
 
   // Workflows
   workflowList: (args?: { projectId?: string }) => window.electronAPI.workflowList(args),
@@ -205,6 +209,7 @@ export const IPC_CHANNELS = {
   CONFIG_WARNING: "config:warning",
   WORKTREE_WARNING: "worktree:warning",
   WORKFLOW_RUN_UPDATED: "workflow:run-updated",
+  CANVAS_EVENT: "canvas:event",
   UPDATE_STATUS: "update:status",
 } as const;
 
