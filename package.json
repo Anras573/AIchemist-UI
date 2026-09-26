@@ -1,7 +1,7 @@
 {
   "name": "aichemist-ui",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "AIchemist — an Electron desktop client for coding agents.",
   "author": {
     "name": "Anras573",
