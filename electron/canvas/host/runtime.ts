@@ -67,6 +67,7 @@ function toolDescriptors(definition: CanvasServerDefinition): CanvasToolDescript
     name,
     description: tool.description,
     approval: tool.approval ?? "ask",
+    timeoutMs: tool.timeoutMs,
   }));
 }
 

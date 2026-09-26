@@ -18,6 +18,9 @@ export const CanvasToolDescriptorSchema = z.object({
   name: z.string(),
   description: z.string(),
   approval: z.enum(["none", "ask"]),
+  /** The tool's own timeout, if it overrode the host's default — used by the
+   *  manager to size its safety-net timeout so it doesn't race the host's. */
+  timeoutMs: z.number().int().positive().optional(),
 });
 export type CanvasToolDescriptor = z.infer<typeof CanvasToolDescriptorSchema>;
 

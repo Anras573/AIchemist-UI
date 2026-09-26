@@ -59,6 +59,27 @@ describe("createCanvasHostRuntime — init and tool listing", () => {
     ]);
   });
 
+  it("includes a tool's timeoutMs in its descriptor so the manager can size its own safety net off it", () => {
+    const transport = createFakeTransport();
+    const definition = defineCanvas({
+      tools: {
+        slow: {
+          description: "A tool that needs longer than the default",
+          input: z.object({}),
+          timeoutMs: 120_000,
+          handler: () => "done",
+        },
+      },
+    });
+    createCanvasHostRuntime({ definition, transport, project: PROJECT });
+    transport.emit({ type: "init", state: null, revision: 0 });
+
+    expect(transport.sent).toContainEqual({
+      type: "ready",
+      tools: [{ name: "slow", description: "A tool that needs longer than the default", approval: "ask", timeoutMs: 120_000 }],
+    });
+  });
+
   it("falls back to the definition's initialState when init carries no persisted state", () => {
     const transport = createFakeTransport();
     const definition = defineCanvas({ initialState: { seeded: true } });

@@ -341,6 +341,27 @@ describe("CanvasHostManager — crash restart with backoff", () => {
     processes[2].crash();
     expect(manager.getStatus(canvas.id)).toBe("crashed");
   });
+
+  it("carries panelOpen/turnActive across a crash restart, so the idle timer doesn't fire for a still-open panel", async () => {
+    vi.useFakeTimers();
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const manager = new CanvasHostManager(db, { spawn: factory, idleStopMs: 1000, restartBaseDelayMs: 100 });
+    const startOpts = { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" };
+
+    await manager.start(canvas.id, startOpts);
+    manager.setPanelOpen(canvas.id, true);
+
+    processes[0].crash();
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.waitFor(() => expect(manager.getStatus(canvas.id)).toBe("running"));
+
+    // The renderer never re-calls setPanelOpen after a restart it didn't ask
+    // for, so the manager must remember the panel was left open on its own.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(manager.getStatus(canvas.id)).toBe("running");
+    expect(processes[1].killed).toBe(false);
+  });
 });
 
 // ─── stop / stopAll ──────────────────────────────────────────────────────────
@@ -373,6 +394,38 @@ describe("CanvasHostManager — stop / stopAll", () => {
     expect(manager.getStatus(c1.id)).toBe("stopped");
     expect(manager.getStatus(c2.id)).toBe("stopped");
   });
+
+  it("stop() resolves for an already-crashed/errored host instead of hanging on a second exit that will never come", async () => {
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    // maxRestarts: 0 -> the very first crash exhausts the budget and lands directly in "errored".
+    const manager = new CanvasHostManager(db, { spawn: factory, maxRestarts: 0 });
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    processes[0].crash();
+    expect(manager.getStatus(canvas.id)).toBe("errored");
+
+    // Real UtilityProcess#kill() on an already-exited process returns false and
+    // fires no further "exit" — this must not depend on one to resolve.
+    await expect(manager.stop(canvas.id)).resolves.toBeUndefined();
+    expect(manager.getStatus(canvas.id)).toBe("stopped");
+  });
+
+  it("stopAll() resolves even when one host is crashed/errored", async () => {
+    const c1 = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board 1" });
+    const c2 = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board 2" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const manager = new CanvasHostManager(db, { spawn: factory, maxRestarts: 0 });
+    await manager.start(c1.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+    await manager.start(c2.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    processes[0].crash();
+    expect(manager.getStatus(c1.id)).toBe("errored");
+
+    await expect(manager.stopAll()).resolves.toBeUndefined();
+    expect(manager.getStatus(c1.id)).toBe("stopped");
+    expect(manager.getStatus(c2.id)).toBe("stopped");
+  });
 });
 
 // ─── start() timeout / init.error ───────────────────────────────────────────
@@ -399,5 +452,135 @@ describe("CanvasHostManager — start failures", () => {
     await expect(
       manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" })
     ).rejects.toThrow(/unknown definition/);
+  });
+
+  it("a later start() after a timed-out attempt is a fresh, independent attempt instead of hanging forever", async () => {
+    vi.useFakeTimers();
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const neverReadyProcesses: FakeCanvasHostProcess[] = [];
+    const neverReadyFactory: CanvasHostProcessFactory = () => {
+      const proc = new FakeCanvasHostProcess();
+      neverReadyProcesses.push(proc);
+      return proc;
+    };
+    const manager = new CanvasHostManager(db, { spawn: neverReadyFactory, startTimeoutMs: 5000 });
+    const startOpts = { serverPath: "/nope", projectId: "p1", projectPath: "/tmp/p1" };
+
+    const firstAttempt = manager.start(canvas.id, startOpts);
+    const firstAssertion = expect(firstAttempt).rejects.toThrow(/did not become ready/);
+    await vi.advanceTimersByTimeAsync(5000);
+    await firstAssertion;
+    expect(manager.getStatus(canvas.id)).not.toBe("starting");
+    expect(neverReadyProcesses[0].killed).toBe(true); // the never-ready process is cleaned up, not leaked
+
+    // Without the fix, the record stayed stuck in "starting" forever, so this
+    // second start() would push a waiter with no timer of its own onto the
+    // dead first record and hang — never resolving OR rejecting. Here it must
+    // spawn a genuinely new process and run its own independent timeout.
+    const secondAttempt = manager.start(canvas.id, startOpts);
+    const secondAssertion = expect(secondAttempt).rejects.toThrow(/did not become ready/);
+    await vi.advanceTimersByTimeAsync(5000);
+    await secondAssertion;
+    expect(neverReadyProcesses).toHaveLength(2);
+  });
+});
+
+// ─── callTool honors a tool's own timeoutMs ─────────────────────────────────
+
+describe("CanvasHostManager — callTool sizes its safety net off the tool's own timeout", () => {
+  const SLOW_DEFINITION = defineCanvas({
+    tools: {
+      slow: {
+        description: "Needs longer than the host's 60s default",
+        input: z.object({}),
+        timeoutMs: 120_000,
+        handler: () => new Promise((resolve) => setTimeout(() => resolve("done"), 90_000)),
+      },
+    },
+  });
+
+  it("does not cut off a tool whose declared timeoutMs exceeds the manager's own default", async () => {
+    vi.useFakeTimers();
+    const canvas = createCanvas(db, { projectId: "p1", definition: "slow", title: "Slow" });
+    const { factory } = createInProcessHostFactory({ "/defs/slow/server.mjs": SLOW_DEFINITION });
+    // toolCallTimeoutMs (60s) is the manager's *fallback* default — a tool
+    // that reports its own 120s timeoutMs must not be bound by it.
+    const manager = new CanvasHostManager(db, { spawn: factory });
+    await manager.start(canvas.id, { serverPath: "/defs/slow/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    const pending = manager.callTool(canvas.id, "slow", {});
+    const assertion = expect(pending).resolves.toBe("done");
+    // Past the manager's 60s default and the host's own un-overridden default —
+    // only reachable because the manager read `slow`'s reported 120s timeoutMs.
+    await vi.advanceTimersByTimeAsync(90_000);
+    await assertion;
+  });
+
+  it("times out a genuinely unresponsive host at the tool's own timeoutMs plus a grace margin, not the manager's 60s default", async () => {
+    vi.useFakeTimers();
+    const canvas = createCanvas(db, { projectId: "p1", definition: "slow", title: "Slow" });
+    // A host that reports the same `slow` tool (declaring timeoutMs: 120_000)
+    // but never replies to any tool.call at all — unlike a real runtime, which
+    // always eventually replies with its own timeout error (covered above and
+    // in runtime.test.ts), this simulates the host being truly wedged, so only
+    // the manager's own safety net can ever settle the call.
+    const factory: CanvasHostProcessFactory = () => {
+      const proc = new FakeCanvasHostProcess();
+      queueMicrotask(() =>
+        proc.emit("message", {
+          type: "ready",
+          tools: [{ name: "slow", description: "Never replies", approval: "ask", timeoutMs: 120_000 }],
+        })
+      );
+      return proc;
+    };
+    const manager = new CanvasHostManager(db, { spawn: factory });
+    await manager.start(canvas.id, { serverPath: "/defs/slow/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    const pending = manager.callTool(canvas.id, "slow", {});
+    const assertion = expect(pending).rejects.toThrow(/did not reply/);
+    // Settles at the tool's reported 120s + grace — proves the manager read
+    // the descriptor's timeoutMs rather than falling back to its own 60s default
+    // (which would have rejected this call 65 seconds earlier).
+    await vi.advanceTimersByTimeAsync(125_000);
+    await assertion;
+  });
+});
+
+// ─── state.changed persistence failures don't crash the manager ────────────
+
+describe("CanvasHostManager — a state persistence failure is a backstop, not an uncaught throw", () => {
+  it("logs and skips onStateChanged when the state exceeds the store's cap, keeping the host running", async () => {
+    const canvas = createCanvas(db, {
+      projectId: "p1",
+      definition: "kanban",
+      title: "Board",
+      initialState: { cards: [] },
+    });
+    const { factory } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const onStateChanged = vi.fn();
+    const manager = new CanvasHostManager(db, { spawn: factory, hooks: { onStateChanged } });
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const hugeTitle = "x".repeat(2 * 1024 * 1024);
+      await expect(
+        manager.callTool(canvas.id, "add_card", { title: hugeTitle })
+      ).resolves.toEqual({ cards: [hugeTitle] });
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    // The manager stayed healthy: no uncaught throw, no onStateChanged for the
+    // rejected write, the DB is untouched by the oversized write (store.ts
+    // validates before mutating the row), and the host is still responsive
+    // to further calls afterward (even though its in-memory state has now
+    // drifted from the DB — the known, documented limitation of this backstop).
+    expect(onStateChanged).not.toHaveBeenCalled();
+    expect(manager.getStatus(canvas.id)).toBe("running");
+    expect(getCanvas(db, canvas.id)?.state).toEqual({ cards: [] });
+
+    await expect(manager.callTool(canvas.id, "get_board", {})).resolves.toBeDefined();
   });
 });

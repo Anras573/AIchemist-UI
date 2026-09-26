@@ -24,6 +24,14 @@ import {
   type HostToMainMessage,
 } from "./host-protocol";
 
+/**
+ * Added on top of a tool's own timeout (its `timeoutMs`, or the host's
+ * 60s default) when computing the manager-side safety net in `callTool()` —
+ * without it, the manager's timer usually races the host's own and fires
+ * first, masking the host's real timeout error with a generic one.
+ */
+const TOOL_CALL_TIMEOUT_GRACE_MS = 5_000;
+
 // ─── Process abstraction (test seam) ────────────────────────────────────────
 
 /** The subset of Electron's `UtilityProcess` this manager depends on. */
@@ -130,7 +138,7 @@ export interface CanvasHostManagerOptions {
   restartBaseDelayMs?: number;
   /** How long `start()` waits for the host's `ready` message. Default 10 s. */
   startTimeoutMs?: number;
-  /** Manager-side safety net if a host never replies to a tool call at all. */
+  /** Manager-side safety net for a call to a tool name the host never declared. */
   toolCallTimeoutMs?: number;
 }
 
@@ -273,8 +281,12 @@ export class CanvasHostManager {
       status: "starting",
       tools: [],
       pendingCalls: new Map(),
-      panelOpen: false,
-      turnActive: false,
+      // Carried over (not reset) across a crash restart — the renderer only
+      // calls setPanelOpen/setTurnActive on a *change*, so a restart that
+      // forgot these would let the idle timer stop a host whose panel is
+      // still open or whose turn is still running.
+      panelOpen: prior?.panelOpen ?? false,
+      turnActive: prior?.turnActive ?? false,
       idleTimer: null,
       restartTimer: null,
       startTimer: null,
@@ -291,7 +303,7 @@ export class CanvasHostManager {
     });
 
     record.startTimer = setTimeout(() => {
-      this.rejectReadyWaiters(
+      this.failStart(
         record,
         new CanvasHostTimeoutError(`Canvas host did not become ready within ${this.startTimeoutMs}ms`)
       );
@@ -325,6 +337,25 @@ export class CanvasHostManager {
     for (const waiter of waiters) waiter.reject(err);
   }
 
+  /**
+   * Terminates a start attempt that failed before reaching `"running"` (start
+   * timeout, or an `init.error` message) — rejects whoever's waiting on
+   * `start()`, kills the (never-ready) process, and moves the record out of
+   * `"starting"` so it isn't stuck forever: without this, the next `start()`
+   * call would see `"starting"`, push a new waiter with no timer of its own,
+   * and hang, while the failed process kept running untracked.
+   */
+  private failStart(record: HostRecord, err: Error): void {
+    record.stopping = true;
+    this.rejectReadyWaiters(record, err);
+    this.setStatus(record, "stopped");
+    try {
+      record.process.kill();
+    } catch (killErr) {
+      console.error(`[canvas-host-manager] failed to kill unready host ${record.canvasId}:`, killErr);
+    }
+  }
+
   private handleMessage(record: HostRecord, raw: unknown): void {
     const parsed = HostToMainMessageSchema.safeParse(raw);
     if (!parsed.success) return;
@@ -339,7 +370,7 @@ export class CanvasHostManager {
         break;
       case "init.error":
         console.error(`[canvas-host-manager] host ${record.canvasId} failed to initialize:`, msg.error);
-        this.rejectReadyWaiters(record, new Error(msg.error));
+        this.failStart(record, new Error(msg.error));
         break;
       case "tool.result": {
         const pending = record.pendingCalls.get(msg.callId);
@@ -351,7 +382,18 @@ export class CanvasHostManager {
         break;
       }
       case "state.changed":
-        setCanvasState(this.db, record.canvasId, msg.state);
+        // A canvas can trigger this by writing state past the store's 1MB cap,
+        // or by writing after its row was deleted out from under it — neither
+        // is allowed to reach main as an uncaught exception. The host's local
+        // state/revision can drift from the DB when this happens; there is no
+        // ack path back to `ctx.state.set` yet to prevent that (tracked as a
+        // follow-up), so this is a backstop, not a full fix.
+        try {
+          setCanvasState(this.db, record.canvasId, msg.state);
+        } catch (err) {
+          console.error(`[canvas-host-manager] failed to persist state for ${record.canvasId}:`, err);
+          break;
+        }
         this.callHook("onStateChanged", record.canvasId, msg.state, msg.revision);
         break;
       case "ui.message":
@@ -412,9 +454,9 @@ export class CanvasHostManager {
   /**
    * Sends a tool call to a running host and resolves with its result (or
    * rejects with the tool's error). Rejects immediately if the host isn't
-   * running, and after `toolCallTimeoutMs` if the host never replies at all
-   * (on top of — not instead of — the host's own per-tool timeout, which
-   * produces an ordinary error result long before this fires in practice).
+   * running, and — as a safety net on top of, never instead of, the host's
+   * own per-tool timeout — after that tool's `timeoutMs` (or the host's 60s
+   * default) plus a grace margin if the host never replies at all.
    */
   callTool(canvasId: string, tool: string, args: unknown, opts?: { timeoutMs?: number }): Promise<unknown> {
     const record = this.hosts.get(canvasId);
@@ -423,7 +465,15 @@ export class CanvasHostManager {
     }
 
     const callId = crypto.randomUUID();
-    const timeoutMs = opts?.timeoutMs ?? this.toolCallTimeoutMs;
+    // Sized off the tool's own timeout (as reported at `ready`) plus a grace
+    // margin, so this safety net only fires when the host is truly
+    // unresponsive — never racing (and masking) the host's own per-tool
+    // timeout error. Falls back to `toolCallTimeoutMs` for a tool name the
+    // host never declared (e.g. a typo'd call, which errors back quickly).
+    const descriptor = record.tools.find((t) => t.name === tool);
+    const timeoutMs =
+      opts?.timeoutMs ??
+      (descriptor ? (descriptor.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS) + TOOL_CALL_TIMEOUT_GRACE_MS : this.toolCallTimeoutMs);
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -454,6 +504,18 @@ export class CanvasHostManager {
       clearTimeout(record.idleTimer);
       record.idleTimer = null;
     }
+
+    // A "crashed" or "errored" host's process has already exited — handleExit
+    // already ran once and won't run again for it, so kill()ing it again would
+    // never produce a second "exit" event to resolve on. Clean up directly
+    // instead of waiting on one, or restart() (the only way out of "errored")
+    // and stopAll() at app quit would hang forever.
+    if (record.status === "crashed" || record.status === "errored") {
+      record.stopping = true;
+      this.setStatus(record, "stopped");
+      return Promise.resolve();
+    }
+
     record.stopping = true;
     const stopped = new Promise<void>((resolve) => record.stopWaiters.push(resolve));
     record.process.kill();
