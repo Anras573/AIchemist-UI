@@ -18,6 +18,7 @@ import { registerLibraryHandlers } from "./ipc/library-handlers";
 import { registerGitHubHandlers } from "./ipc/github-handlers";
 import { registerMcpHandlers } from "./ipc/mcp-handlers";
 import { registerWorkflowHandlers } from "./ipc/workflow-handlers";
+import { registerCanvasHandlers } from "./ipc/canvas-handlers";
 import { registerBudgetHandlers } from "./ipc/budget-handlers";
 import { registerSpendingHandlers } from "./ipc/spending-handlers";
 import { registerUpdateHandlers } from "./ipc/update-handlers";
@@ -116,6 +117,7 @@ function registerAllHandlers(scheduler: WorkflowScheduler): void {
   registerGitHubHandlers();
   registerMcpHandlers();
   registerWorkflowHandlers(db, scheduler);
+  registerCanvasHandlers(db);
   registerBudgetHandlers(db);
   registerSpendingHandlers(db);
   registerUpdateHandlers();

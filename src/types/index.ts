@@ -171,6 +171,8 @@ export interface Message {
   tool_calls: ToolCall[];
   created_at: string;
   agent?: string | null;
+  /** Origin tag for canvas-originated user messages (e.g. "canvas:kanban"). Null for ordinary messages. */
+  source?: string | null;
 }
 
 export interface Session {
@@ -268,6 +270,67 @@ export interface WorkflowRun {
   ended_at: string | null;
   /** Error message when status === "error". */
   error: string | null;
+}
+
+// ─── Canvases ────────────────────────────────────────────────────────────────
+
+/**
+ * A canvas instance: a definition (a folder on disk, or a built-in) bound to a
+ * project with its own persisted state. One definition can back many
+ * instances — e.g. several kanban boards in the same project. Instances are
+ * project-scoped (a board outlives a session); attachment to a session is
+ * explicit, tracked separately (see `CanvasListItem.attached`).
+ */
+export interface Canvas {
+  id: string;
+  project_id: string;
+  /** Definition name, resolved via discovery (project → global → built-in tiers). */
+  definition: string;
+  title: string;
+  /** Persisted `ctx.state` JSON document (parsed, not the raw string). */
+  state: unknown;
+  /** Bumped on every state write. */
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A canvas as listed for a specific session — adds whether it's attached to it. */
+export interface CanvasListItem extends Canvas {
+  attached: boolean;
+}
+
+/**
+ * Shape of a canvas definition's manifest (`canvas.json`). Discovery of these
+ * from disk (project / global / built-in tiers) lands in a later issue
+ * (#226) — this type exists now so the store and its callers can reference
+ * the shape without a circular dependency once discovery is added.
+ */
+export interface CanvasDefinition {
+  name: string;
+  description: string;
+  version: number;
+  /** Path to the server module, relative to the definition folder. */
+  server: string;
+  /** Path to the UI entry file, relative to the definition folder. */
+  ui: string;
+  /** Auto-attach to new sessions in the owning project. */
+  attachByDefault?: boolean;
+  /** Declared intent, shown in the trust prompt — unenforced in v1. */
+  permissions?: {
+    fs?: string[];
+    network?: string[];
+    exec?: string[];
+  };
+}
+
+/** Consent record for running a definition's server code within a project. */
+export interface CanvasTrust {
+  project_id: string;
+  definition: string;
+  /** Hash of the definition's server + manifest + package.json, to detect edits. */
+  content_hash: string;
+  trusted_at: string;
 }
 
 // ─── IPC event payloads ──────────────────────────────────────────────────────

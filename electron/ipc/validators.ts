@@ -180,6 +180,30 @@ const mcpMarketplaceUninstallSchema = z.object({
   entryId: z.string().trim().min(1),
 });
 
+const canvasCreateSchema = z.object({
+  projectId: z.string().trim().min(1),
+  definition: z.string().trim().min(1),
+  title: z.string().trim().min(1),
+  // `initialState` is arbitrary JSON (or absent); the 1 MB cap and JSON-
+  // serializability are enforced by createCanvas() -> serializeState(), not here.
+  initialState: z.unknown().optional(),
+});
+
+const canvasDeleteSchema = z.object({
+  canvasId: z.string().trim().min(1),
+});
+
+const canvasRenameSchema = z.object({
+  canvasId: z.string().trim().min(1),
+  title: z.string().trim().min(1),
+});
+
+const canvasAttachSchema = z.object({
+  sessionId: z.string().trim().min(1),
+  canvasId: z.string().trim().min(1),
+  attached: z.boolean(),
+});
+
 /**
  * Per-channel argument validators. Keyed by channel constant so a new mutation
  * channel can opt in with one entry.
@@ -201,4 +225,8 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.SPENDING_GET_SUMMARY]: unary(spendingGetSummarySchema, CH.SPENDING_GET_SUMMARY),
   [CH.MCP_MARKETPLACE_INSTALL]: unary(mcpMarketplaceInstallSchema, CH.MCP_MARKETPLACE_INSTALL),
   [CH.MCP_MARKETPLACE_UNINSTALL]: unary(mcpMarketplaceUninstallSchema, CH.MCP_MARKETPLACE_UNINSTALL),
+  [CH.CANVAS_CREATE]: unary(canvasCreateSchema, CH.CANVAS_CREATE),
+  [CH.CANVAS_DELETE]: unary(canvasDeleteSchema, CH.CANVAS_DELETE),
+  [CH.CANVAS_RENAME]: unary(canvasRenameSchema, CH.CANVAS_RENAME),
+  [CH.CANVAS_ATTACH]: unary(canvasAttachSchema, CH.CANVAS_ATTACH),
 };
