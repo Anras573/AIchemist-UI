@@ -1,6 +1,6 @@
 import type { Database } from "better-sqlite3";
 import * as CH from "../ipc-channels";
-import type { Canvas, CanvasHostStatus, CanvasListItem } from "../../src/types/index";
+import type { Canvas, CanvasDefinition, CanvasHostStatus, CanvasListItem } from "../../src/types/index";
 import {
   createCanvas,
   deleteCanvas,
@@ -9,7 +9,7 @@ import {
   renameCanvas,
   setCanvasAttached,
 } from "../canvas/store";
-import { resolveCanvasServerPath } from "../canvas/definitions";
+import { listBuiltinCanvasDefinitions, resolveCanvasServerPath } from "../canvas/definitions";
 import type { CanvasHostStatus as HostManagerStatus, StartCanvasHostOptions } from "../canvas/host-manager";
 import { listProjects } from "../projects";
 import { handle } from "./handle";
@@ -50,6 +50,11 @@ function resolveStartOptions(db: Database, canvas: Canvas): StartCanvasHostOptio
  * restart.
  */
 export function registerCanvasHandlers(db: Database, hostManager: CanvasHostManagerLike): void {
+  // Only the built-in tier for now — #226 will extend this to also scan the
+  // project/global discovery tiers, so "New canvas…" can offer kanban before
+  // that lands (per #225's scope).
+  handle(CH.CANVAS_LIST_DEFINITIONS, (): CanvasDefinition[] => listBuiltinCanvasDefinitions());
+
   handle(
     CH.CANVAS_LIST,
     (_event, args: { projectId: string; sessionId?: string }): CanvasListItem[] =>

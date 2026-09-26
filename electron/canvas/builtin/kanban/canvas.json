@@ -1,0 +1,9 @@
+{
+  "name": "kanban",
+  "description": "A kanban board with todo/doing/done columns — drag cards, or ask the agent to add, move, update, or remove them.",
+  "version": 1,
+  "server": "server.mjs",
+  "ui": "ui/index.html",
+  "attachByDefault": false,
+  "permissions": {}
+}

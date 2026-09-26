@@ -16,6 +16,13 @@ files:
   - dist/main/**
   - dist/preload/**
   - dist/renderer/**
+  # Built-in canvas definitions (#225) are plain, unbundled .mjs/HTML/JS/CSS —
+  # loaded straight off disk by the canvas host (server.mjs) and the
+  # aichemist-canvas:// protocol (ui/), never compiled by electron-vite — so
+  # they ship as source, at the same relative path electron/canvas/definitions.ts
+  # resolves them from (`<app root>/electron/canvas/builtin`, computed relative
+  # to dist/main so it also works unpackaged in dev).
+  - electron/canvas/builtin/**
   - package.json
   - "!**/*.map"
 asarUnpack:

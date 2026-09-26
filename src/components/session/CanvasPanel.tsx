@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CanvasFrame } from "./CanvasFrame";
-import type { CanvasHostStatus, CanvasListItem } from "@/types";
+import type { CanvasDefinition, CanvasHostStatus, CanvasListItem } from "@/types";
 
 const STATUS_STYLES: Record<CanvasHostStatus, string> = {
   starting: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
@@ -83,6 +83,20 @@ export function CanvasPanel() {
     () => (activeProjectId ? ipc.canvasList({ projectId: activeProjectId, sessionId: activeSessionId ?? undefined }) : Promise.resolve([])),
     { ttl: 5_000 }
   );
+
+  // CANVAS_LIST_DEFINITIONS only lists the built-in tier so far (#226 will
+  // extend it to scan the project/global directories too) — this is what
+  // lets "New canvas…" offer kanban without a free-text definition name.
+  const { data: definitions } = useIpcQuery<CanvasDefinition[]>(
+    "canvas-definitions",
+    () => ipc.canvasListDefinitions(),
+    { ttl: 60_000 }
+  );
+
+  useEffect(() => {
+    if (createDefinition || !definitions?.length) return;
+    setCreateDefinition(definitions[0].name);
+  }, [definitions, createDefinition]);
 
   // Reset the selection when the project changes; default to the first
   // canvas once the list loads if nothing is selected yet.
@@ -227,12 +241,19 @@ export function CanvasPanel() {
               placeholder="Title (e.g. Release board)"
               className="h-7 text-xs"
             />
-            <Input
+            <select
               value={createDefinition}
               onChange={(e) => setCreateDefinition(e.target.value)}
-              placeholder="Definition name (e.g. kanban)"
-              className="h-7 text-xs font-mono"
-            />
+              className="h-7 rounded-md border border-input bg-transparent px-2 text-xs"
+              aria-label="Canvas definition"
+            >
+              {!definitions?.length && <option value="">No definitions available</option>}
+              {definitions?.map((d) => (
+                <option key={d.name} value={d.name} title={d.description}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
             {createError && <p className="text-[11px] text-destructive">{createError}</p>}
             <div className="flex justify-end gap-1.5">
               <Button size="xs" variant="ghost" onClick={() => setShowCreate(false)}>

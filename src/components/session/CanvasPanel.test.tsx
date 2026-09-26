@@ -169,10 +169,11 @@ describe("CanvasPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "New canvas" }));
     const titleInput = await screen.findByPlaceholderText(/Title/);
-    const definitionInput = screen.getByPlaceholderText(/Definition name/);
+    const definitionSelect = await screen.findByLabelText("Canvas definition");
 
     fireEvent.change(titleInput, { target: { value: "New board" } });
-    fireEvent.change(definitionInput, { target: { value: "kanban" } });
+    // "kanban" is already selected by default (the only built-in definition).
+    expect(definitionSelect).toHaveValue("kanban");
 
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
