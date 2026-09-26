@@ -25,8 +25,13 @@ import { registerUpdateHandlers } from "./ipc/update-handlers";
 import { WorkflowScheduler } from "./agent/workflow-scheduler";
 import { CanvasHostManager } from "./canvas/host-manager";
 import { CanvasMcpEndpoint, setActiveCanvasMcpEndpoint } from "./canvas/mcp-endpoint";
+import { registerCanvasProtocol, registerCanvasProtocolScheme } from "./canvas/protocol";
 import { TrayController } from "./tray";
 import { initAutoUpdater, checkForUpdates } from "./updater";
+
+// Must run before app.whenReady() — Electron requires privileged-scheme
+// registration to happen before the app is ready.
+registerCanvasProtocolScheme();
 
 // How often to silently check for a new release in the background, on top of
 // the one-shot check shortly after startup. electron-updater auto-downloads
@@ -78,6 +83,10 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Explicit even though it's Electron's default — a canvas UI's
+      // isolation (aichemist-canvas:// + sandboxed iframe, see CanvasFrame)
+      // depends on there being no other way to load privileged content.
+      webviewTag: false,
     },
   });
 
@@ -103,9 +112,11 @@ let updateCheckInterval: NodeJS.Timeout | undefined;
 let workflowScheduler: WorkflowScheduler | null = null;
 
 // Canvas host supervisor (#222) + the loopback MCP endpoint that exposes
-// attached canvases' tools to every provider (#223). Both are created once at
-// startup; the endpoint is torn down on quit so a relaunch gets a fresh
-// per-launch bearer token.
+// attached canvases' tools to every provider (#223), plus the panel-facing
+// IPC (#224). All three are created once at startup; the host manager's
+// hooks push CANVAS_EVENT (state/message/status/log) to the renderer, and
+// the endpoint is torn down on quit so a relaunch gets a fresh per-launch
+// bearer token.
 let canvasHostManager: CanvasHostManager | null = null;
 let canvasMcpEndpoint: CanvasMcpEndpoint | null = null;
 
@@ -114,7 +125,7 @@ let canvasMcpEndpoint: CanvasMcpEndpoint | null = null;
 // tray is the user's handle on the otherwise windowless process.
 let tray: TrayController | null = null;
 
-function registerAllHandlers(scheduler: WorkflowScheduler): void {
+function registerAllHandlers(scheduler: WorkflowScheduler, hostManager: CanvasHostManager): void {
   cleanupTerminals = registerTerminalHandlers(() => mainWin);
   registerSettingsHandlers(db);
   registerTraceHandlers(db, () => mainWin);
@@ -126,7 +137,7 @@ function registerAllHandlers(scheduler: WorkflowScheduler): void {
   registerGitHubHandlers();
   registerMcpHandlers();
   registerWorkflowHandlers(db, scheduler);
-  registerCanvasHandlers(db);
+  registerCanvasHandlers(db, hostManager);
   registerBudgetHandlers(db);
   registerSpendingHandlers(db);
   registerUpdateHandlers();
@@ -158,13 +169,32 @@ app.whenReady().then(() => {
     });
 
   workflowScheduler = new WorkflowScheduler({ db, activeTurns, getMainWindow });
-  registerAllHandlers(workflowScheduler);
+
+  // Canvas host supervisor — created before registerAllHandlers() so its
+  // hooks (pushing CANVAS_EVENT for a state write, a relayed UI message, a
+  // status change, or a debug log line) are wired before any IPC handler
+  // can start a host. getMainWindow() is safe to call from a hook even before
+  // createWindow() runs below: it just resolves to null until then, and
+  // webContents.send() on a null window is a no-op via the optional chain.
+  canvasHostManager = new CanvasHostManager(db, {
+    hooks: {
+      onStateChanged: (canvasId, state, revision) =>
+        getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "state", state, revision }),
+      onUiMessage: (canvasId, message) =>
+        getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "message", message }),
+      onStatusChanged: (canvasId, status) =>
+        getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "status", status }),
+      onLog: (canvasId, level, args) =>
+        getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "log", level, args }),
+    },
+  });
+  registerAllHandlers(workflowScheduler, canvasHostManager);
+  registerCanvasProtocol(db);
 
   // Canvas loopback MCP endpoint (#223) — starts before the window so the
   // first turn on any session can already reach it. A failure here must never
   // block app startup: canvases just stay unreachable (tool calls report
   // "canvas unavailable") until the next launch.
-  canvasHostManager = new CanvasHostManager(db);
   canvasMcpEndpoint = new CanvasMcpEndpoint({ db, hostManager: canvasHostManager, getMainWindow });
   canvasMcpEndpoint
     .start()

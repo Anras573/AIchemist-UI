@@ -49,6 +49,7 @@ import type {
   WorkflowSessionStrategy,
   Canvas,
   CanvasListItem,
+  CanvasHostStatus,
   BudgetConfig,
   BudgetStatus,
   SpendingSummary,
@@ -271,6 +272,22 @@ export type IpcContract = {
   [CH.CANVAS_ATTACH]: {
     args: [args: { sessionId: string; canvasId: string; attached: boolean }];
     result: { attached: boolean };
+  };
+  [CH.CANVAS_OPEN]: {
+    args: [args: { canvasId: string }];
+    result: { state: unknown; revision: number; status: CanvasHostStatus | "unknown" };
+  };
+  [CH.CANVAS_CLOSE]: {
+    args: [args: { canvasId: string }];
+    result: { state: unknown; revision: number };
+  };
+  [CH.CANVAS_UI_MESSAGE]: {
+    args: [args: { canvasId: string; message: unknown }];
+    result: { ok: boolean };
+  };
+  [CH.CANVAS_RESTART]: {
+    args: [args: { canvasId: string }];
+    result: { state: unknown; revision: number; status: CanvasHostStatus | "unknown" };
   };
 
   // ── Workflows ─────────────────────────────────────────────────────────────────

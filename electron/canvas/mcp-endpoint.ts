@@ -26,10 +26,7 @@
  * session) is rejected before any host is touched.
  */
 import * as crypto from "node:crypto";
-import * as fs from "node:fs";
 import * as http from "node:http";
-import * as os from "node:os";
-import * as nodePath from "node:path";
 import type { BrowserWindow } from "electron";
 import type { Database } from "better-sqlite3";
 
@@ -39,10 +36,13 @@ import { listProjects } from "../projects";
 import { getSession } from "../sessions";
 import { getAttachedCanvases, getCanvas, isCanvasAttached } from "./store";
 import { CanvasToolError, type CanvasHostManager, type StartCanvasHostOptions } from "./host-manager";
+import { _setCanvasesRootForTests, resolveCanvasServerPath } from "./definitions";
 import { requestApproval, requiresApproval } from "../agent/approval";
 import { TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "../agent/tool-gate";
 import type { McpServerEntry, McpServersMap } from "../mcp/config";
 import { CANVAS_MCP_SERVER_PREFIX } from "../mcp/managed";
+
+export { _setCanvasesRootForTests, resolveCanvasServerPath };
 
 // ── Public constants ─────────────────────────────────────────────────────────
 
@@ -77,67 +77,6 @@ export function markSessionNonInteractive(sessionId: string, nonInteractive: boo
 /** Whether the turn currently running on this session (if any) is unattended. */
 export function isSessionNonInteractive(sessionId: string): boolean {
   return nonInteractiveSessions.has(sessionId);
-}
-
-// ── Definition resolution (stand-in for #226's discovery tiers) ─────────────
-
-/** Test seam: override the global canvases directory (default `~/.aichemist/canvases`). Pass null to restore. */
-let canvasesRootOverride: string | null = null;
-export function _setCanvasesRootForTests(dir: string | null): void {
-  canvasesRootOverride = dir;
-}
-function canvasesRoot(): string {
-  return canvasesRootOverride ?? nodePath.join(os.homedir(), ".aichemist", "canvases");
-}
-
-/**
- * Resolves a canvas definition's `server.mjs` path from disk.
- *
- * This is a minimal stand-in for the full discovery tiers (project → global →
- * built-in, with manifest validation) that #226 will add — it covers only the
- * **global** directory (`~/.aichemist/canvases/`) so an attached canvas's host
- * can actually be started end-to-end today, which is this issue's job ("the
- * first issue that actually starts a real host"), without running arbitrary
- * repo-shipped code.
- *
- * Deliberately does NOT resolve the project tier
- * (`<projectPath>/.agents/canvases/`) yet: that tier is untrusted-by-default
- * per the design doc and must not execute before the trust prompt (#227)
- * exists to gate it — a cloned repo shipping `.agents/canvases/<name>/` would
- * otherwise have its `server.mjs` run silently (and shadow a same-named
- * global definition) the moment a turn lists tools. Global-tier definitions
- * are "the user put it there", so they're trusted per the design doc's trust
- * model table.
- *
- * `definition` is untrusted input (round-tripped from the `canvases` table,
- * ultimately from `CANVAS_CREATE`'s `definition` field) — rejected outright if
- * it isn't a plain name, so a value like `../../x` can't escape the canvases
- * directory. Returns null when no `server.mjs` is found; callers surface that
- * as "canvas unavailable" rather than throwing a discovery-shaped error that
- * doesn't exist yet.
- */
-export function resolveCanvasServerPath(definition: string): string | null {
-  if (!isSafeDefinitionName(definition)) return null;
-
-  const canvasesDir = canvasesRoot();
-  const candidate = nodePath.join(canvasesDir, definition, "server.mjs");
-
-  // Defense in depth on top of isSafeDefinitionName: confirm the resolved
-  // path is still inside canvasesDir before ever touching the filesystem.
-  const resolvedBase = nodePath.resolve(canvasesDir) + nodePath.sep;
-  if (!nodePath.resolve(candidate).startsWith(resolvedBase)) return null;
-
-  try {
-    if (fs.statSync(candidate).isFile()) return candidate;
-  } catch {
-    // Not found.
-  }
-  return null;
-}
-
-/** A definition name may not contain path separators or traverse (`..`). */
-function isSafeDefinitionName(name: string): boolean {
-  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name) && name !== "." && !name.includes("..");
 }
 
 /**

@@ -154,6 +154,11 @@ export const CANVAS_CREATE              = "canvas:create";
 export const CANVAS_DELETE              = "canvas:delete";
 export const CANVAS_RENAME              = "canvas:rename";
 export const CANVAS_ATTACH              = "canvas:attach";
+export const CANVAS_OPEN                = "canvas:open";
+export const CANVAS_CLOSE               = "canvas:close";
+export const CANVAS_UI_MESSAGE          = "canvas:ui-message";
+export const CANVAS_RESTART             = "canvas:restart";
+export const CANVAS_EVENT               = "canvas:event"; // push: main → renderer
 
 // ── Auto-update (electron-updater) ────────────────────────────────────────────
 export const UPDATE_CHECK              = "update:check";

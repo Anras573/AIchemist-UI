@@ -2,11 +2,13 @@ import { useEffect } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { onSessionEvent, IPC_CHANNELS, useIpc, onThinkingDelta, onThinkingDone } from "@/lib/ipc";
 import { useSessionStore, type PendingQuestion } from "@/lib/store/useSessionStore";
+import { useCanvasStore } from "@/lib/store/useCanvasStore";
 import type {
   SessionStatusEvent,
   SessionDeltaEvent,
   SessionMessageEvent,
   SessionUsageEvent,
+  CanvasEvent,
 } from "@/types";
 
 // Actual payload shapes from the main process
@@ -121,6 +123,15 @@ export function useSessionEvents() {
       dequeueMessage: s.dequeueMessage,
       setQueuePaused: s.setQueuePaused,
       clearQueuePaused: s.clearQueuePaused,
+    }))
+  );
+
+  const { setCanvasState, setCanvasStatus, pushCanvasMessage, pushCanvasLog } = useCanvasStore(
+    useShallow((s) => ({
+      setCanvasState: s.setCanvasState,
+      setCanvasStatus: s.setCanvasStatus,
+      pushCanvasMessage: s.pushCanvasMessage,
+      pushCanvasLog: s.pushCanvasLog,
     }))
   );
 
@@ -254,6 +265,23 @@ export function useSessionEvents() {
           setQueuePaused(payload.session_id, payload.remaining_count, payload.failed_message_id);
         }
       ),
+
+      onSessionEvent<CanvasEvent>(IPC_CHANNELS.CANVAS_EVENT, (payload) => {
+        switch (payload.kind) {
+          case "state":
+            setCanvasState(payload.canvasId, payload.state, payload.revision ?? 0);
+            break;
+          case "message":
+            pushCanvasMessage(payload.canvasId, payload.message);
+            break;
+          case "status":
+            if (payload.status) setCanvasStatus(payload.canvasId, payload.status);
+            break;
+          case "log":
+            if (payload.level) pushCanvasLog(payload.canvasId, payload.level, payload.args ?? []);
+            break;
+        }
+      }),
     ];
 
     return () => unsubs.forEach((fn) => fn());
@@ -279,5 +307,9 @@ export function useSessionEvents() {
     setQueuePaused,
     clearQueuePaused,
     clearLiveToolCalls,
+    setCanvasState,
+    setCanvasStatus,
+    pushCanvasMessage,
+    pushCanvasLog,
   ]);
 }

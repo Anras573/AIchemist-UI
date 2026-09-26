@@ -204,6 +204,17 @@ const canvasAttachSchema = z.object({
   attached: z.boolean(),
 });
 
+const canvasIdSchema = z.object({
+  canvasId: z.string().trim().min(1),
+});
+
+const canvasUiMessageSchema = z.object({
+  canvasId: z.string().trim().min(1),
+  // `message` is arbitrary, canvas-defined JSON — the host's own onUiMessage
+  // decides what shape it wants, matching CANVAS_CREATE's `initialState`.
+  message: z.unknown(),
+});
+
 /**
  * Per-channel argument validators. Keyed by channel constant so a new mutation
  * channel can opt in with one entry.
@@ -229,4 +240,8 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.CANVAS_DELETE]: unary(canvasDeleteSchema, CH.CANVAS_DELETE),
   [CH.CANVAS_RENAME]: unary(canvasRenameSchema, CH.CANVAS_RENAME),
   [CH.CANVAS_ATTACH]: unary(canvasAttachSchema, CH.CANVAS_ATTACH),
+  [CH.CANVAS_OPEN]: unary(canvasIdSchema, CH.CANVAS_OPEN),
+  [CH.CANVAS_CLOSE]: unary(canvasIdSchema, CH.CANVAS_CLOSE),
+  [CH.CANVAS_UI_MESSAGE]: unary(canvasUiMessageSchema, CH.CANVAS_UI_MESSAGE),
+  [CH.CANVAS_RESTART]: unary(canvasIdSchema, CH.CANVAS_RESTART),
 };

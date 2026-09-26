@@ -5,6 +5,7 @@ import { createElectronAPIMock } from "./mocks/electronAPI";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useGitHubPrStore } from "@/lib/store/useGitHubPrStore";
+import { useCanvasStore } from "@/lib/store/useCanvasStore";
 import { _resetIpcQueryCache } from "@/lib/hooks/useIpcQuery";
 
 // Zustand's persist middleware calls createJSONStorage(() => window.localStorage)
@@ -68,6 +69,15 @@ beforeEach(() => {
   // Clear per-session PR form drafts so an open form in one test doesn't leak
   // into the next test that reuses the same session id.
   useGitHubPrStore.setState({ forms: {} });
+  // Canvas panel state (host status/state/logs) is keyed by canvas id, which
+  // tests across files tend to reuse — reset so nothing leaks between tests.
+  useCanvasStore.setState({
+    stateByCanvas: {},
+    revisionByCanvas: {},
+    statusByCanvas: {},
+    lastMessageByCanvas: {},
+    logsByCanvas: {},
+  });
   localStorage.clear();
 
   // jsdom doesn't implement matchMedia — provide a stub
