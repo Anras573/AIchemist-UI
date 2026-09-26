@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/Anras573/AIchemist-UI/compare/v1.0.3...v1.1.0) (2026-09-26)
+
+
+### Features
+
+* **canvas:** add host runtime + server SDK ([#232](https://github.com/Anras573/AIchemist-UI/issues/232)) ([bd4ff99](https://github.com/Anras573/AIchemist-UI/commit/bd4ff990cc415aa402b05e897395c1e4840ecac1))
+* **canvas:** add persistence layer for canvas instances ([#221](https://github.com/Anras573/AIchemist-UI/issues/221)) ([#230](https://github.com/Anras573/AIchemist-UI/issues/230)) ([4b40ff0](https://github.com/Anras573/AIchemist-UI/commit/4b40ff0cf015a181eff106a8f5baed7e04e09b04))
+
 ## [1.0.3](https://github.com/Anras573/AIchemist-UI/compare/v1.0.2...v1.0.3) (2026-09-25)
 
 
