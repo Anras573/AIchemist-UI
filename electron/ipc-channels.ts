@@ -149,6 +149,7 @@ export const WORKFLOW_LIST_RUNS        = "workflow:list-runs";
 export const WORKFLOW_RUN_UPDATED      = "workflow:run-updated"; // push: main → renderer
 
 // ── Canvases ──────────────────────────────────────────────────────────────────
+export const CANVAS_LIST_DEFINITIONS    = "canvas:list-definitions";
 export const CANVAS_LIST                = "canvas:list";
 export const CANVAS_CREATE              = "canvas:create";
 export const CANVAS_DELETE              = "canvas:delete";
