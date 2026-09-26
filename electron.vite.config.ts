@@ -22,19 +22,24 @@ export default defineConfig({
         // right next to `dist/main/main.js`. Before this (#223), nothing built
         // `host/*.ts`, so a packaged app had no host to spawn.
         //
-        // `loader-hook.ts` and `sdk.ts` must ALSO be separate entries, not
-        // just modules `entry.ts` bundles in: `entry.ts` registers
-        // `host/loader-hook.js` with Node's `module.register()` by file URL
-        // (a loader hook runs as its own module in a separate loader thread,
-        // so it can't be inlined into `entry.js`'s bundle), and that hook in
-        // turn resolves `@aichemist/canvas` to `host/sdk.js` by file URL for
-        // an arbitrary canvas `server.mjs` to import at runtime — a file path
-        // only exists to resolve if `sdk.ts` was built standalone.
+        // `loader-hook.ts` must ALSO be a separate entry, not just a module
+        // `entry.ts` bundles in: `entry.ts` registers `host/loader-hook.js`
+        // with Node's `module.register()` by file URL (a loader hook runs as
+        // its own module in a separate loader thread, so it can't be inlined
+        // into `entry.js`'s bundle).
+        //
+        // `host/sdk.ts` is deliberately NOT built here — this "main" build
+        // emits CommonJS, and a CJS build of `sdk.ts` can't satisfy a canvas
+        // `server.mjs`'s `import { defineCanvas, z } from "@aichemist/canvas"`
+        // (Node's CJS/ESM interop can't see the named `z` re-export through a
+        // CJS getter). It's built separately, as real ESM, by
+        // scripts/build-canvas-sdk-esm.mjs (see package.json's "build"
+        // script) — `loader-hook.ts` resolves `@aichemist/canvas` to that
+        // output path.
         entry: {
           main: path.resolve(__dirname, "electron/main.ts"),
           "host/entry": path.resolve(__dirname, "electron/canvas/host/entry.ts"),
           "host/loader-hook": path.resolve(__dirname, "electron/canvas/host/loader-hook.ts"),
-          "host/sdk": path.resolve(__dirname, "electron/canvas/host/sdk.ts"),
         },
       },
       rollupOptions: {

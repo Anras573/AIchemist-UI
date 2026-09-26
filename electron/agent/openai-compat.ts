@@ -23,7 +23,11 @@ import { readAgentFileSystemPrompt } from "./claude";
 import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
 import type { ManagedMcpBridge } from "../mcp";
-import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
+import {
+  canvasMcpServersForSession,
+  buildCanvasSystemPromptAddendum,
+  CANVAS_MCP_SERVER_PREFIX,
+} from "../canvas/mcp-endpoint";
 import { getDisabledMcpServers, loadToolCallsForMessage } from "../sessions";
 import { runGatedTool } from "./tool-gate";
 import { TurnEmitter, emitToolRoundLimitNotice } from "./turn-emitter";
@@ -640,13 +644,21 @@ async function makeMcpTools(ctx: ToolContext, bridge: ManagedMcpBridge): Promise
   const out: ToolSet = {};
   for (const def of bridge.tools) {
     const name = def.function.name;
-    // Managed MCP tools can do anything, so gate them with the strictest
-    // existing approval category instead of treating them as file edits.
+    // A canvas-backed tool (server name canvas-*) was already approval-gated
+    // by the loopback MCP endpoint itself (#223) — gating it again here as
+    // "shell" would prompt a "none" tool on every call, double-prompt an
+    // "ask" tool under a different fingerprint, and double-deny it in
+    // nonInteractive runs. "custom" never gates but still records the call in
+    // the timeline/transcript. Every other managed MCP tool can do anything,
+    // so it keeps the strictest existing approval category instead of being
+    // treated as a file edit.
+    const serverName = bridge.serverNameForTool(name);
+    const category = serverName?.startsWith(CANVAS_MCP_SERVER_PREFIX) ? "custom" : "shell";
     out[name] = dynamicTool({
       description: def.function.description,
       inputSchema: jsonSchema(def.function.parameters as JSONSchema7),
       execute: (input) =>
-        runTool(ctx, name, input, "shell", async () =>
+        runTool(ctx, name, input, category, async () =>
           bridge.callTool(name, (input ?? {}) as Record<string, unknown>),
         ),
     });

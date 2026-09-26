@@ -21,6 +21,17 @@ export const CanvasToolDescriptorSchema = z.object({
   /** The tool's own timeout, if it overrode the host's default — used by the
    *  manager to size its safety-net timeout so it doesn't race the host's. */
   timeoutMs: z.number().int().positive().optional(),
+  /**
+   * The tool's `input` zod schema, converted to JSON Schema via
+   * `z.toJSONSchema()` (see `toolDescriptors()` in `host/runtime.ts`) — this
+   * is what lets the model know a tool's arguments (`tools/list`'s
+   * `inputSchema`) instead of guessing from the description alone (#223's
+   * review). Optional/unknown-shaped rather than a nested zod schema: it
+   * crosses the `MessagePort` as plain JSON, and a tool whose schema somehow
+   * fails to convert falls back to a permissive schema at the endpoint
+   * rather than breaking `tools/list` for every other tool on the canvas.
+   */
+  inputSchema: z.record(z.string(), z.unknown()).optional(),
 });
 export type CanvasToolDescriptor = z.infer<typeof CanvasToolDescriptorSchema>;
 

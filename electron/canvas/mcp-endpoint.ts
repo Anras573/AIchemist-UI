@@ -38,7 +38,7 @@ import { getProjectConfig } from "../projects";
 import { listProjects } from "../projects";
 import { getSession } from "../sessions";
 import { getAttachedCanvases, getCanvas, isCanvasAttached } from "./store";
-import type { CanvasHostManager, StartCanvasHostOptions } from "./host-manager";
+import { CanvasToolError, type CanvasHostManager, type StartCanvasHostOptions } from "./host-manager";
 import { requestApproval, requiresApproval } from "../agent/approval";
 import { TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "../agent/tool-gate";
 import type { McpServerEntry, McpServersMap } from "../mcp/config";
@@ -80,30 +80,63 @@ export function isSessionNonInteractive(sessionId: string): boolean {
 
 // ── Definition resolution (stand-in for #226's discovery tiers) ─────────────
 
+/** Test seam: override the global canvases directory (default `~/.aichemist/canvases`). Pass null to restore. */
+let canvasesRootOverride: string | null = null;
+export function _setCanvasesRootForTests(dir: string | null): void {
+  canvasesRootOverride = dir;
+}
+function canvasesRoot(): string {
+  return canvasesRootOverride ?? nodePath.join(os.homedir(), ".aichemist", "canvases");
+}
+
 /**
  * Resolves a canvas definition's `server.mjs` path from disk.
  *
  * This is a minimal stand-in for the full discovery tiers (project → global →
- * built-in, with manifest validation) that #226 will add — it covers the
- * project and global directories so an attached canvas's host can actually be
- * started end-to-end today, which is this issue's job ("the first issue that
- * actually starts a real host"). Returns null when no `server.mjs` is found
- * under either tier; callers surface that as "canvas unavailable" rather than
- * throwing a discovery-shaped error that doesn't exist yet.
+ * built-in, with manifest validation) that #226 will add — it covers only the
+ * **global** directory (`~/.aichemist/canvases/`) so an attached canvas's host
+ * can actually be started end-to-end today, which is this issue's job ("the
+ * first issue that actually starts a real host"), without running arbitrary
+ * repo-shipped code.
+ *
+ * Deliberately does NOT resolve the project tier
+ * (`<projectPath>/.agents/canvases/`) yet: that tier is untrusted-by-default
+ * per the design doc and must not execute before the trust prompt (#227)
+ * exists to gate it — a cloned repo shipping `.agents/canvases/<name>/` would
+ * otherwise have its `server.mjs` run silently (and shadow a same-named
+ * global definition) the moment a turn lists tools. Global-tier definitions
+ * are "the user put it there", so they're trusted per the design doc's trust
+ * model table.
+ *
+ * `definition` is untrusted input (round-tripped from the `canvases` table,
+ * ultimately from `CANVAS_CREATE`'s `definition` field) — rejected outright if
+ * it isn't a plain name, so a value like `../../x` can't escape the canvases
+ * directory. Returns null when no `server.mjs` is found; callers surface that
+ * as "canvas unavailable" rather than throwing a discovery-shaped error that
+ * doesn't exist yet.
  */
-export function resolveCanvasServerPath(definition: string, projectPath: string): string | null {
-  const candidates = [
-    nodePath.join(projectPath, ".agents", "canvases", definition, "server.mjs"),
-    nodePath.join(os.homedir(), ".aichemist", "canvases", definition, "server.mjs"),
-  ];
-  for (const candidate of candidates) {
-    try {
-      if (fs.statSync(candidate).isFile()) return candidate;
-    } catch {
-      // Not found under this tier — try the next.
-    }
+export function resolveCanvasServerPath(definition: string): string | null {
+  if (!isSafeDefinitionName(definition)) return null;
+
+  const canvasesDir = canvasesRoot();
+  const candidate = nodePath.join(canvasesDir, definition, "server.mjs");
+
+  // Defense in depth on top of isSafeDefinitionName: confirm the resolved
+  // path is still inside canvasesDir before ever touching the filesystem.
+  const resolvedBase = nodePath.resolve(canvasesDir) + nodePath.sep;
+  if (!nodePath.resolve(candidate).startsWith(resolvedBase)) return null;
+
+  try {
+    if (fs.statSync(candidate).isFile()) return candidate;
+  } catch {
+    // Not found.
   }
   return null;
+}
+
+/** A definition name may not contain path separators or traverse (`..`). */
+function isSafeDefinitionName(name: string): boolean {
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name) && name !== "." && !name.includes("..");
 }
 
 /**
@@ -125,6 +158,14 @@ function tryGetAttachedCanvases(db: Database, sessionId: string): Canvas[] {
 // ── Naming / injection helpers ───────────────────────────────────────────────
 
 /** Slugifies a canvas's title into a stable, unique-enough managed-server name. */
+/**
+ * Every canvas-backed managed-server name starts with this. Ollama and
+ * OpenAI-compatible use it to recognize a canvas tool reached through their
+ * `ManagedMcpBridge` (via `serverNameForTool()`) and route it around their own
+ * approval gate — the endpoint itself already gated it (#223).
+ */
+export const CANVAS_MCP_SERVER_PREFIX = "canvas-";
+
 export function canvasServerName(canvas: Pick<Canvas, "id" | "title">): string {
   const slug =
     canvas.title
@@ -133,7 +174,7 @@ export function canvasServerName(canvas: Pick<Canvas, "id" | "title">): string {
       .replace(/^-+|-+$/g, "")
       .slice(0, 32) || "canvas";
   const shortId = canvas.id.replace(/-/g, "").slice(0, 8);
-  return `canvas-${slug}-${shortId}`;
+  return `${CANVAS_MCP_SERVER_PREFIX}${slug}-${shortId}`;
 }
 
 /** The subset of `CanvasMcpEndpoint` that server-map/context builders need. */
@@ -232,10 +273,27 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.end(payload);
 }
 
+/**
+ * Constant-time bearer-token check. Loopback-only makes a timing side channel
+ * low-risk here, but `crypto.timingSafeEqual` is a free hardening (#223's
+ * review). `timingSafeEqual` throws on a length mismatch, so that's checked
+ * first — the length itself isn't secret, only the token's content is.
+ */
+function isValidBearerToken(header: string | undefined, token: string): boolean {
+  if (!header) return false;
+  const expected = Buffer.from(`Bearer ${token}`, "utf8");
+  const actual = Buffer.from(header, "utf8");
+  if (expected.length !== actual.length) return false;
+  return crypto.timingSafeEqual(expected, actual);
+}
+
 // ── The endpoint ──────────────────────────────────────────────────────────────
 
 /** The subset of `CanvasHostManager` the endpoint depends on (test seam). */
-export type CanvasHostManagerLike = Pick<CanvasHostManager, "start" | "getStatus" | "getTools" | "callTool">;
+export type CanvasHostManagerLike = Pick<
+  CanvasHostManager,
+  "start" | "getStatus" | "getTools" | "callTool" | "setTurnActive"
+>;
 
 export interface CanvasMcpEndpointOptions {
   db: Database;
@@ -295,6 +353,25 @@ export class CanvasMcpEndpoint {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
+  /**
+   * Marks whether a turn is currently running on `sessionId`, for every
+   * canvas currently attached to it — so `CanvasHostManager`'s idle-stop
+   * (#222) never stops a host mid-turn just because it's been running longer
+   * than the idle timeout. Called by `electron/agent/runner.ts` alongside
+   * `markSessionNonInteractive()` (#223's review). Fail-safe and a no-op for
+   * a canvas whose host was never started — `setTurnActive` on the manager
+   * already no-ops for an unknown canvas id.
+   */
+  setTurnActive(sessionId: string, active: boolean): void {
+    try {
+      for (const canvas of tryGetAttachedCanvases(this.db, sessionId)) {
+        this.hostManager.setTurnActive(canvas.id, active);
+      }
+    } catch (err) {
+      console.error(`[canvas-mcp-endpoint] setTurnActive(${sessionId}, ${active}) failed:`, err);
+    }
+  }
+
   // ── Request handling ────────────────────────────────────────────────────────
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -312,7 +389,7 @@ export class CanvasMcpEndpoint {
     }
 
     const authHeader = req.headers.authorization;
-    if (authHeader !== `Bearer ${this._token}`) {
+    if (!isValidBearerToken(authHeader, this._token)) {
       sendJson(res, 401, { error: "unauthorized" });
       return;
     }
@@ -381,13 +458,14 @@ export class CanvasMcpEndpoint {
   ): Promise<Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>> {
     await this.ensureHostRunning(canvasId, sessionId);
     const tools = this.hostManager.getTools(canvasId) ?? [];
-    // CanvasToolDescriptor carries no JSON Schema (the host's zod schemas stay
-    // in-process — see host-protocol.ts) — a permissive object schema is the
-    // best we can advertise until that's threaded through.
     return tools.map((t) => ({
       name: t.name,
       description: t.description,
-      inputSchema: { type: "object", properties: {}, additionalProperties: true },
+      // The host converts each tool's zod `input` schema to JSON Schema (see
+      // `toolDescriptors()` in host/runtime.ts) — fall back to a permissive
+      // object schema only for the rare tool whose schema failed to convert,
+      // rather than hiding argument shapes for every tool on the canvas.
+      inputSchema: t.inputSchema ?? { type: "object", properties: {}, additionalProperties: true },
     }));
   }
 
@@ -417,6 +495,14 @@ export class CanvasMcpEndpoint {
       const text = typeof result === "string" ? result : JSON.stringify(result ?? null);
       return { content: [{ type: "text", text }] };
     } catch (err) {
+      // A CanvasToolError means the host is fine and the TOOL said no (bad
+      // input, an unknown tool name it validated itself, the handler's own
+      // thrown error) — surface its own message so the model can correct
+      // itself, rather than the generic "canvas unavailable" that would hide
+      // it. Every other rejection (not running, the manager's safety-net
+      // timeout, the host exiting mid-call) really does mean the host is
+      // unreachable.
+      if (err instanceof CanvasToolError) return toolErrorContent(err.message);
       console.error(`[canvas-mcp-endpoint] tool call "${toolName}" on ${canvasId} failed:`, err);
       return toolErrorContent(CANVAS_UNAVAILABLE_MESSAGE);
     }
@@ -432,7 +518,7 @@ export class CanvasMcpEndpoint {
     const project = listProjects(this.db).find((p) => p.id === session.project_id);
     if (!project) throw new Error(CANVAS_UNAVAILABLE_MESSAGE);
 
-    const serverPath = resolveCanvasServerPath(canvas.definition, project.path);
+    const serverPath = resolveCanvasServerPath(canvas.definition);
     if (!serverPath) throw new Error(CANVAS_UNAVAILABLE_MESSAGE);
 
     const startOpts: StartCanvasHostOptions = {

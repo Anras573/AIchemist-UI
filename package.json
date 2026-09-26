@@ -11,13 +11,14 @@
   "scripts": {
     "postinstall": "node scripts/ensure-electron.js",
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "electron-vite build && node scripts/build-canvas-sdk-esm.mjs",
     "start": "electron-vite preview",
     "rebuild": "electron-rebuild -f -w better-sqlite3 -w node-pty",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "smoke:canvas-sdk": "node scripts/smoke-test-canvas-sdk.mjs",
     "dist:win": "electron-builder --win --publish never",
     "dist:mac": "electron-builder --mac --publish never",
     "dist:linux": "electron-builder --linux --publish never"
@@ -89,6 +90,7 @@
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "esbuild": "^0.28.2",
     "jsdom": "^30.1.1",
     "rollup-plugin-visualizer": "^7.1.1",
     "tailwindcss": "^4.3.3",

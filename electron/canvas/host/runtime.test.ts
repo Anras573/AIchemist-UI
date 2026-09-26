@@ -23,6 +23,9 @@ function createFakeTransport(): HostTransport & {
 
 const PROJECT = { id: "proj-1", path: "/tmp/proj-1" };
 
+/** What `toolDescriptors()` converts a bare `z.object({})` input schema to (#223). */
+const EMPTY_OBJECT_SCHEMA = z.toJSONSchema(z.object({}));
+
 describe("createCanvasHostRuntime — init and tool listing", () => {
   it("replies to init with the persisted state/revision and the tool list", () => {
     const transport = createFakeTransport();
@@ -52,8 +55,8 @@ describe("createCanvasHostRuntime — init and tool listing", () => {
       {
         type: "ready",
         tools: [
-          { name: "get_count", description: "Return the count", approval: "ask" },
-          { name: "bump", description: "Bump the count", approval: "none" },
+          { name: "get_count", description: "Return the count", approval: "ask", inputSchema: EMPTY_OBJECT_SCHEMA },
+          { name: "bump", description: "Bump the count", approval: "none", inputSchema: EMPTY_OBJECT_SCHEMA },
         ],
       },
     ]);
@@ -76,7 +79,15 @@ describe("createCanvasHostRuntime — init and tool listing", () => {
 
     expect(transport.sent).toContainEqual({
       type: "ready",
-      tools: [{ name: "slow", description: "A tool that needs longer than the default", approval: "ask", timeoutMs: 120_000 }],
+      tools: [
+        {
+          name: "slow",
+          description: "A tool that needs longer than the default",
+          approval: "ask",
+          timeoutMs: 120_000,
+          inputSchema: EMPTY_OBJECT_SCHEMA,
+        },
+      ],
     });
   });
 

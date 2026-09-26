@@ -565,6 +565,62 @@ describe("ollama provider", () => {
     expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({ tool_name: toolName, output: "bridge result" }));
   });
 
+  it("routes a canvas-backed bridge tool ('none' approval) through without prompting (#223)", async () => {
+    let recordedCategory: string | undefined;
+    const db = makeDb([
+      { id: "m-placeholder", role: "user", content: "placeholder" },
+      { id: "m-user", role: "user", content: "check the board" },
+    ], (sql, args) => {
+      if (sql.includes("INSERT INTO tool_calls")) {
+        recordedCategory = String(args[5] ?? "");
+      }
+    });
+    const send = vi.fn();
+    const toolName = "mcp__canvas_kanban_abcd1234__get_board__11112222";
+    const callTool = vi.fn().mockResolvedValue("the board");
+    ollamaMocks.bridge.mockResolvedValue({
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: toolName,
+            description: "canvas-kanban-abcd1234 — get_board — Return the board",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+      hasTool: (name: string) => name === toolName,
+      serverNameForTool: (name: string) => (name === toolName ? "canvas-kanban-abcd1234" : undefined),
+      callTool,
+      close: async () => {},
+    });
+    ollamaMocks.chat
+      .mockResolvedValueOnce(
+        streamChunks([
+          { message: { content: "", tool_calls: [{ function: { name: toolName, arguments: {} } }] } },
+        ]),
+      )
+      .mockResolvedValueOnce({ message: { content: "Done" } });
+
+    await expect(
+      runOllamaAgentTurn({
+        db: db as never,
+        sessionId: "s-canvas",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "all", approval_rules: [] } as never,
+        webContents: { send } as never,
+      } as never),
+    ).resolves.toBe("Done");
+
+    expect(callTool).toHaveBeenCalledWith(toolName, {});
+    // The canvas MCP endpoint already gated this tool ("none" approval) —
+    // routing it through the "shell" bridge gate too would prompt on every
+    // call, which this asserts against.
+    expect(send).not.toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.anything());
+    expect(recordedCategory).toBe("custom");
+    expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({ tool_name: toolName, output: "the board" }));
+  });
+
   it("surfaces a truncation notice (and keeps partial text) when the tool-round cap is hit", async () => {
     settingsMock.maxToolRounds = 1;
     const projectPath = makeTempProject();

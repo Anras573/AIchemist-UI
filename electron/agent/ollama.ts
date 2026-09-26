@@ -4,7 +4,11 @@ import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory }
 import { readAgentFileSystemPrompt } from "./claude";
 import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
-import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
+import {
+  canvasMcpServersForSession,
+  buildCanvasSystemPromptAddendum,
+  CANVAS_MCP_SERVER_PREFIX,
+} from "../canvas/mcp-endpoint";
 import { loadToolCallsForMessage } from "../sessions";
 import { runGatedTool } from "./tool-gate";
 import { TurnEmitter, emitToolRoundLimitNotice } from "./turn-emitter";
@@ -546,7 +550,11 @@ function runTool(
 async function executeTool(
   ctx: ToolExecutionContext,
   toolCall: OllamaToolCall,
-  managedMcpBridge: { hasTool(name: string): boolean; callTool(name: string, args: Record<string, unknown>): Promise<string> },
+  managedMcpBridge: {
+    hasTool(name: string): boolean;
+    callTool(name: string, args: Record<string, unknown>): Promise<string>;
+    serverNameForTool?(name: string): string | undefined;
+  },
 ): Promise<string> {
   const name = toolCall.function.name;
   const args = toolCall.function.arguments ?? {};
@@ -634,9 +642,17 @@ async function executeTool(
       });
     default:
       if (managedMcpBridge.hasTool(name)) {
-        // Managed MCP tools can do anything, so gate them with the strictest
-        // existing approval category instead of treating them as file edits.
-        return runTool(ctx, name, args, "shell", async () => managedMcpBridge.callTool(name, args));
+        // A canvas-backed tool (server name canvas-*) was already
+        // approval-gated by the loopback MCP endpoint itself (#223) — gating
+        // it again here as "shell" would prompt a "none" tool on every call,
+        // double-prompt an "ask" tool under a different fingerprint, and
+        // double-deny it in nonInteractive runs. "custom" never gates but
+        // still records the call in the timeline/transcript. Every other
+        // managed MCP tool can do anything, so it keeps the strictest
+        // existing approval category instead of being treated as a file edit.
+        const serverName = managedMcpBridge.serverNameForTool?.(name);
+        const category = serverName?.startsWith(CANVAS_MCP_SERVER_PREFIX) ? "custom" : "shell";
+        return runTool(ctx, name, args, category, async () => managedMcpBridge.callTool(name, args));
       }
       // Route through runTool so the attempt is visible in the UI timeline
       // and persisted to tool_calls — including calls from misbehaving sub-agents.

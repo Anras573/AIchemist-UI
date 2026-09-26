@@ -17,6 +17,7 @@ const canvasMock = vi.hoisted(() => ({
 vi.mock("../canvas/mcp-endpoint", () => ({
   canvasMcpServersForSession: canvasMock.servers,
   buildCanvasSystemPromptAddendum: vi.fn(() => ""),
+  CANVAS_MCP_SERVER_PREFIX: "canvas-",
 }));
 
 // Control the agent file's `model:` frontmatter without touching ~/.claude/agents.
@@ -149,6 +150,7 @@ beforeEach(() => {
     tools: [],
     hasTool: () => false,
     callTool: async () => "",
+    serverNameForTool: () => undefined,
     close: async () => {},
   });
 });
@@ -590,6 +592,7 @@ describe("openai-compat turn execution", () => {
       tools: [],
       hasTool: () => false,
       callTool: async () => "",
+      serverNameForTool: () => undefined,
       close: async () => {},
     });
     _setClientFactory(() => () =>
@@ -612,6 +615,60 @@ describe("openai-compat turn execution", () => {
         "canvas-kanban-abcd1234": expect.objectContaining({ url: "http://127.0.0.1:1234/canvas/c1/session/s-canvas/mcp" }),
       }),
       expect.anything(),
+    );
+  });
+
+  it("routes a canvas-backed bridge tool ('none' approval) through without prompting (#223)", async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    const toolName = "mcp__canvas_kanban_abcd1234__get_board__11112222";
+    const callTool = vi.fn().mockResolvedValue("the board");
+    vi.mocked(createManagedMcpBridge).mockResolvedValue({
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: toolName,
+            description: "canvas-kanban-abcd1234 — get_board — Return the board",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+      hasTool: (name: string) => name === toolName,
+      serverNameForTool: (name: string) => (name === toolName ? "canvas-kanban-abcd1234" : undefined),
+      callTool,
+      close: async () => {},
+    });
+
+    let call = 0;
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({
+        doStream: async () => {
+          call += 1;
+          if (call === 1) return toolCallStream("call-1", toolName, {});
+          return textStream(["Done."]);
+        },
+      }),
+    );
+
+    const send = vi.fn();
+    const text = await runOpenAiCompatTurn({
+      db: makeDb([{ id: "m-user", role: "user", content: "check the board" }]) as never,
+      sessionId: "s-canvas-tool",
+      messageId: "m-placeholder",
+      prompt: "check the board",
+      projectPath: makeTempProject(),
+      // Even approval_mode "all" must not matter — a canvas tool's own gating
+      // happened at the endpoint, so this provider must never re-gate it.
+      projectConfig: { model: "local/m", approval_mode: "all", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    expect(text).toBe("Done.");
+    expect(callTool).toHaveBeenCalledWith(toolName, {});
+    expect(send).not.toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.anything());
+    expect(send).toHaveBeenCalledWith(
+      CH.SESSION_TOOL_RESULT,
+      expect.objectContaining({ tool_name: toolName, output: "the board" }),
     );
   });
 

@@ -16,7 +16,11 @@ import type { ToolCategory } from "./approval";
 import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
 import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory } from "./memory";
-import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
+import {
+  canvasMcpServersForSession,
+  buildCanvasSystemPromptAddendum,
+  CANVAS_MCP_SERVER_PREFIX,
+} from "../canvas/mcp-endpoint";
 import { readAgentFileSystemPrompt } from "./claude";
 import { classifyNativeTool, runGatedTool } from "./tool-gate";
 import type { GatedToolContext } from "./tool-gate";
@@ -505,7 +509,18 @@ export async function runCopilotAgentTurn(params: {
         break;
       case "write":
       case "read":
+        category = "filesystem";
+        break;
       case "mcp":
+        // A canvas-backed server (name canvas-*) was already approval-gated
+        // by the loopback MCP endpoint itself (#223) — gating it again here
+        // would double-prompt an "ask" tool under a different fingerprint,
+        // or prompt a "none" tool at all whenever the project's approval
+        // config happens to gate MCP calls. Every other MCP server keeps its
+        // existing filesystem-category gating.
+        if (request.serverName.startsWith(CANVAS_MCP_SERVER_PREFIX)) {
+          return { kind: "approve-once" };
+        }
         category = "filesystem";
         break;
       case "url":
@@ -615,7 +630,10 @@ export async function runCopilotAgentTurn(params: {
   // Attached canvases (#223) are folded in BEFORE fingerprinting — attach/detach
   // changes this map, so `fingerprintManaged()` naturally invalidates the cached
   // SDK session the same way toggling a regular managed server does, with no
-  // separate canvas-specific fingerprint logic needed.
+  // separate canvas-specific fingerprint logic needed. Side effect (accepted,
+  // see CLAUDE.md's "Copilot SDK — Agent / MCP-fingerprint change detection"):
+  // a canvas entry's url/token carry the endpoint's per-launch port/token, so
+  // this fingerprint also changes on every app relaunch.
   const managedMcpRaw = noTools
     ? {}
     : {

@@ -21,9 +21,10 @@ import {
   markSessionNonInteractive,
   resolveCanvasServerPath,
   buildCanvasSystemPromptAddendum,
+  _setCanvasesRootForTests,
   type CanvasHostManagerLike,
 } from "./mcp-endpoint";
-import type { CanvasHostStatus } from "./host-manager";
+import { CanvasToolError, type CanvasHostStatus } from "./host-manager";
 
 // ─── Fake host manager ───────────────────────────────────────────────────────
 
@@ -31,6 +32,7 @@ class FakeHostManager implements CanvasHostManagerLike {
   status: CanvasHostStatus = "running";
   tools: CanvasToolDescriptor[] = [];
   start = vi.fn(async () => {});
+  setTurnActive = vi.fn((_canvasId: string, _active: boolean) => {});
   callToolImpl: (tool: string, args: unknown) => unknown = () => "ok";
 
   getStatus(): CanvasHostStatus | undefined {
@@ -57,12 +59,15 @@ let hostManager: FakeHostManager;
 let endpoint: CanvasMcpEndpoint;
 let webContentsSend: ReturnType<typeof vi.fn>;
 let getMainWindow: () => { webContents: { send: ReturnType<typeof vi.fn> } } | null;
+let canvasesRoot: string;
 
 beforeEach(async () => {
   db = new Database(":memory:");
   migrate(db);
 
   projectPath = fs.mkdtempSync(nodePath.join(os.tmpdir(), "canvas-mcp-test-"));
+  canvasesRoot = fs.mkdtempSync(nodePath.join(os.tmpdir(), "canvas-mcp-global-"));
+  _setCanvasesRootForTests(canvasesRoot);
   const project = addProject(db, projectPath);
   projectId = project.id;
 
@@ -89,6 +94,8 @@ afterEach(async () => {
   await endpoint.stop();
   db.close();
   fs.rmSync(projectPath, { recursive: true, force: true });
+  fs.rmSync(canvasesRoot, { recursive: true, force: true });
+  _setCanvasesRootForTests(null);
   markSessionNonInteractive(sessionId, false);
 });
 
@@ -158,7 +165,7 @@ describe("scoping", () => {
 
 describe("tools/list", () => {
   it("forwards the host's declared tools, starting the host if not running", async () => {
-    const dir = nodePath.join(projectPath, ".agents", "canvases", "kanban");
+    const dir = nodePath.join(canvasesRoot, "kanban");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(nodePath.join(dir, "server.mjs"), "export default {};");
 
@@ -183,6 +190,31 @@ describe("tools/list", () => {
     hostManager.status = "running";
     await rpc(routePath(canvasId, sessionId), { jsonrpc: "2.0", id: 1, method: "tools/list" });
     expect(hostManager.start).not.toHaveBeenCalled();
+  });
+
+  it("advertises the host's real inputSchema (#223) so the model knows a tool's arguments", async () => {
+    hostManager.tools = [
+      {
+        name: "move_card",
+        description: "Move a card",
+        approval: "ask",
+        inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+      },
+    ];
+    const res = await rpc(routePath(canvasId, sessionId), { jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const body = (await res.json()) as { result: { tools: Array<{ inputSchema: unknown }> } };
+    expect(body.result.tools[0].inputSchema).toEqual({
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+    });
+  });
+
+  it("falls back to a permissive inputSchema when the host's descriptor has none", async () => {
+    hostManager.tools = [{ name: "get_board", description: "Return the board", approval: "none" }];
+    const res = await rpc(routePath(canvasId, sessionId), { jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const body = (await res.json()) as { result: { tools: Array<{ inputSchema: unknown }> } };
+    expect(body.result.tools[0].inputSchema).toEqual({ type: "object", properties: {}, additionalProperties: true });
   });
 });
 
@@ -288,8 +320,8 @@ describe("tools/call approval gate", () => {
 describe("host unavailable", () => {
   it("returns a clear error when the host fails to start (no definition on disk)", async () => {
     hostManager.status = "stopped";
-    // No .agents/canvases/kanban/server.mjs was ever created under projectPath,
-    // so resolveCanvasServerPath() returns null and ensureHostRunning() throws
+    // No <canvasesRoot>/kanban/server.mjs was ever created, so
+    // resolveCanvasServerPath() returns null and ensureHostRunning() throws
     // before ever calling hostManager.start().
     const res = await rpc(routePath(canvasId, sessionId), { jsonrpc: "2.0", id: 1, method: "tools/list" });
     const body = (await res.json()) as { error?: { message: string } };
@@ -309,6 +341,22 @@ describe("host unavailable", () => {
     const body = (await res.json()) as { result: { isError?: boolean; content: Array<{ text: string }> } };
     expect(body.result.isError).toBe(true);
     expect(body.result.content[0].text).toBe(CANVAS_UNAVAILABLE_MESSAGE);
+  });
+
+  it("surfaces the tool's own error message instead of 'canvas unavailable' when the host is fine but the tool itself failed", async () => {
+    hostManager.tools = [{ name: "move_card", description: "Move a card", approval: "none" }];
+    hostManager.callToolImpl = () => new CanvasToolError('Invalid input for tool "move_card": card not found');
+
+    const res = await rpc(routePath(canvasId, sessionId), {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "move_card", arguments: { id: "missing" } },
+    });
+    const body = (await res.json()) as { result: { isError?: boolean; content: Array<{ text: string }> } };
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toBe('Invalid input for tool "move_card": card not found');
+    expect(body.result.content[0].text).not.toBe(CANVAS_UNAVAILABLE_MESSAGE);
   });
 });
 
@@ -398,6 +446,28 @@ describe("buildCanvasSystemPromptAddendum", () => {
   });
 });
 
+describe("setTurnActive", () => {
+  it("forwards to the host manager for every canvas attached to the session", () => {
+    const other = createCanvas(db, { projectId, definition: "kanban", title: "Other board" });
+    setCanvasAttached(db, sessionId, other.id, true);
+
+    endpoint.setTurnActive(sessionId, true);
+    expect(hostManager.setTurnActive).toHaveBeenCalledWith(canvasId, true);
+    expect(hostManager.setTurnActive).toHaveBeenCalledWith(other.id, true);
+
+    hostManager.setTurnActive.mockClear();
+    endpoint.setTurnActive(sessionId, false);
+    expect(hostManager.setTurnActive).toHaveBeenCalledWith(canvasId, false);
+    expect(hostManager.setTurnActive).toHaveBeenCalledWith(other.id, false);
+  });
+
+  it("is a no-op for a session with nothing attached", () => {
+    setCanvasAttached(db, sessionId, canvasId, false);
+    expect(() => endpoint.setTurnActive(sessionId, true)).not.toThrow();
+    expect(hostManager.setTurnActive).not.toHaveBeenCalled();
+  });
+});
+
 describe("Copilot mcpFp invalidation on attach/detach (#223)", () => {
   // copilot.ts merges canvasMcpServersForSession() into managedMcpRaw BEFORE
   // calling fingerprintManaged() — this proves that merge is enough on its
@@ -422,15 +492,32 @@ describe("Copilot mcpFp invalidation on attach/detach (#223)", () => {
 });
 
 describe("resolveCanvasServerPath", () => {
-  it("finds a project-tier definition's server.mjs", () => {
+  it("finds a global-tier definition's server.mjs", () => {
+    const dir = nodePath.join(canvasesRoot, "kanban");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, "server.mjs"), "export default {};");
+
+    expect(resolveCanvasServerPath("kanban")).toBe(nodePath.join(dir, "server.mjs"));
+  });
+
+  it("does NOT resolve a project-tier definition (untrusted until #227's trust prompt lands)", () => {
     const dir = nodePath.join(projectPath, ".agents", "canvases", "kanban");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(nodePath.join(dir, "server.mjs"), "export default {};");
 
-    expect(resolveCanvasServerPath("kanban", projectPath)).toBe(nodePath.join(dir, "server.mjs"));
+    expect(resolveCanvasServerPath("kanban")).toBeNull();
   });
 
-  it("returns null when no definition is found under either tier", () => {
-    expect(resolveCanvasServerPath("does-not-exist", projectPath)).toBeNull();
+  it("returns null when no definition is found", () => {
+    expect(resolveCanvasServerPath("does-not-exist")).toBeNull();
+  });
+
+  it("rejects a definition name that attempts path traversal", () => {
+    // A malicious canvas row could try to escape canvasesRoot via `definition`.
+    expect(resolveCanvasServerPath("../etc")).toBeNull();
+    expect(resolveCanvasServerPath("..")).toBeNull();
+    expect(resolveCanvasServerPath("a/../../b")).toBeNull();
+    expect(resolveCanvasServerPath("a/b")).toBeNull();
+    expect(resolveCanvasServerPath("a\\b")).toBeNull();
   });
 });
