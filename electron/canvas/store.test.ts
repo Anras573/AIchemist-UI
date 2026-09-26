@@ -6,6 +6,7 @@ import {
   CANVAS_STATE_MAX_BYTES,
   createCanvas,
   deleteCanvas,
+  getAttachedCanvases,
   getCanvas,
   getCanvasState,
   getCanvasTrust,
@@ -82,6 +83,31 @@ describe("listCanvases", () => {
 
     expect(listCanvases(db, "p1")).toHaveLength(1);
     expect(listCanvases(db, "p2")).toHaveLength(1);
+  });
+});
+
+describe("getAttachedCanvases", () => {
+  it("returns only canvases attached to the given session, oldest first", () => {
+    const a = createCanvas(db, { projectId: "p1", definition: "kanban", title: "A" });
+    const b = createCanvas(db, { projectId: "p1", definition: "checklist", title: "B" });
+    createCanvas(db, { projectId: "p1", definition: "kanban", title: "Unattached" });
+    setCanvasAttached(db, "s1", a.id, true);
+    setCanvasAttached(db, "s1", b.id, true);
+
+    const attached = getAttachedCanvases(db, "s1");
+    expect(attached.map((c) => c.id)).toEqual([a.id, b.id]);
+  });
+
+  it("returns an empty array when the session has nothing attached", () => {
+    createCanvas(db, { projectId: "p1", definition: "kanban", title: "A" });
+    expect(getAttachedCanvases(db, "s1")).toEqual([]);
+  });
+
+  it("stops listing a canvas once it's detached", () => {
+    const a = createCanvas(db, { projectId: "p1", definition: "kanban", title: "A" });
+    setCanvasAttached(db, "s1", a.id, true);
+    setCanvasAttached(db, "s1", a.id, false);
+    expect(getAttachedCanvases(db, "s1")).toEqual([]);
   });
 });
 

@@ -17,6 +17,7 @@ import { readAgentFileSystemPrompt } from "./claude";
 import { createNativeTranscriptRecorder, type NativeTranscriptRecorder } from "../native-transcript";
 import { getDisabledMcpServers } from "../sessions";
 import { loadManagedMcpServers, toCodexMcpServers } from "../mcp/managed";
+import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
 import type { Database } from "better-sqlite3";
 import type { AgentProvider, AgentProviderParams } from "./provider";
 import type {
@@ -107,9 +108,15 @@ async function getCodex(config?: CodexConfig): Promise<Codex> {
  * resume-invalidation needed (unlike Copilot).
  */
 function buildCodexMcpConfig(db: Database, sessionId: string): CodexConfig | undefined {
-  const managed = loadManagedMcpServers({
-    excludeNames: new Set(getDisabledMcpServers(db, sessionId)),
-  });
+  const managed = {
+    ...loadManagedMcpServers({
+      excludeNames: new Set(getDisabledMcpServers(db, sessionId)),
+    }),
+    // Attached canvases (#223) — Codex re-reads `--config` on every spawn, so
+    // attach/detach simply takes effect on the next turn like any other
+    // managed-server change, no invalidation fingerprint needed.
+    ...canvasMcpServersForSession(db, sessionId),
+  };
   const mcpServers = toCodexMcpServers(managed);
   if (Object.keys(mcpServers).length === 0) return undefined;
   return { mcp_servers: mcpServers } as CodexConfig;
@@ -174,8 +181,9 @@ type CodexAgentPrompt = ReturnType<typeof readAgentFileSystemPrompt>;
 function buildSystemPreamble(params: AgentProviderParams, agentPrompt: CodexAgentPrompt): string {
   const skillsContext = buildSkillsContext(params.skills ?? [], params.projectPath);
   const memoryContext = buildMemoryContext(params.projectPath, { includeToolGuidance: false });
+  const canvasContext = params.noTools ? "" : buildCanvasSystemPromptAddendum(params.db, params.sessionId);
   const agentBody = agentPrompt?.body ?? "";
-  return [agentBody, skillsContext, memoryContext]
+  return [agentBody, skillsContext, memoryContext, canvasContext]
     .filter((part) => part.trim().length > 0)
     .join("\n\n");
 }

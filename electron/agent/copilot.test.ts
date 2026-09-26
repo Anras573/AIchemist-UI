@@ -137,4 +137,34 @@ describe("composeCopilotSystemMessage", () => {
     expect(content).not.toContain("ask_user");
     expect(content).toContain(MEMORY_BLOCK);
   });
+
+  it("appends the attached-canvases addendum (#223) after the memory block, in both modes", () => {
+    const CANVAS_BLOCK = "\n\nAttached canvases — full-stack work surfaces...:\n- Release board (kanban)";
+
+    const withAgent = composeCopilotSystemMessage({
+      agentBody: "Be a careful coder.",
+      skillsContext: "",
+      memoryContext: MEMORY_BLOCK,
+      canvasContext: CANVAS_BLOCK,
+    });
+    expect(withAgent.content).toContain(CANVAS_BLOCK);
+    expect(withAgent.content.indexOf(MEMORY_BLOCK)).toBeLessThan(withAgent.content.indexOf(CANVAS_BLOCK));
+
+    const withoutAgent = composeCopilotSystemMessage({
+      agentBody: null,
+      skillsContext: "",
+      memoryContext: MEMORY_BLOCK,
+      canvasContext: CANVAS_BLOCK,
+    });
+    expect(withoutAgent.content).toContain(CANVAS_BLOCK);
+  });
+
+  it("defaults canvasContext to empty when omitted", () => {
+    const { content } = composeCopilotSystemMessage({
+      agentBody: null,
+      skillsContext: "",
+      memoryContext: "",
+    });
+    expect(content).not.toContain("Attached canvases");
+  });
 });

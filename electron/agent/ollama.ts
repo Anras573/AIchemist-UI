@@ -4,6 +4,7 @@ import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory }
 import { readAgentFileSystemPrompt } from "./claude";
 import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
+import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
 import { loadToolCallsForMessage } from "../sessions";
 import { runGatedTool } from "./tool-gate";
 import { TurnEmitter, emitToolRoundLimitNotice } from "./turn-emitter";
@@ -185,8 +186,9 @@ async function loadClient(): Promise<OllamaClientLike> {
 function buildSystemPrompt(params: AgentProviderParams): string {
   const skillsContext = buildSkillsContext(params.skills ?? [], params.projectPath);
   const memoryContext = buildMemoryContext(params.projectPath);
+  const canvasContext = params.noTools ? "" : buildCanvasSystemPromptAddendum(params.db, params.sessionId);
   const agentBody = params.agent ? readAgentFileSystemPrompt(params.agent)?.body ?? "" : "";
-  const parts = [OLLAMA_SYSTEM_PROMPT, agentBody, skillsContext, memoryContext];
+  const parts = [OLLAMA_SYSTEM_PROMPT, agentBody, skillsContext, memoryContext, canvasContext];
   return parts.filter((part) => part.trim().length > 0).join("\n\n");
 }
 
@@ -751,7 +753,10 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   const managedMcpBridge = params.noTools
     ? null
     : await createManagedMcpBridge(
-        loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
+        {
+          ...loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
+          ...canvasMcpServersForSession(params.db, params.sessionId),
+        },
         params.projectPath,
       );
   const tools = params.noTools ? [] : [...makeToolDefinitions(), ...(managedMcpBridge?.tools ?? [])];

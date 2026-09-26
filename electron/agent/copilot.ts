@@ -16,6 +16,7 @@ import type { ToolCategory } from "./approval";
 import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
 import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory } from "./memory";
+import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
 import { readAgentFileSystemPrompt } from "./claude";
 import { classifyNativeTool, runGatedTool } from "./tool-gate";
 import type { GatedToolContext } from "./tool-gate";
@@ -255,11 +256,13 @@ export function composeCopilotSystemMessage(opts: {
   agentBody: string | null;
   skillsContext: string;
   memoryContext: string;
+  /** System-prompt addendum listing attached canvases (see `buildCanvasSystemPromptAddendum`). Defaults to "". */
+  canvasContext?: string;
   noTools?: boolean;
 }): { content: string; mode: "replace" | "append" } {
-  const { agentBody, skillsContext, memoryContext, noTools } = opts;
+  const { agentBody, skillsContext, memoryContext, canvasContext = "", noTools } = opts;
   const toolGuidance = noTools ? "" : MEMORY_INSTRUCTION + ASK_USER_INSTRUCTION;
-  const augmentation = toolGuidance + memoryContext;
+  const augmentation = toolGuidance + memoryContext + canvasContext;
   if (agentBody) {
     return { content: agentBody + skillsContext + augmentation, mode: "replace" };
   }
@@ -544,6 +547,7 @@ export async function runCopilotAgentTurn(params: {
   // guidance in would duplicate it; and in noTools turns there is no guidance at
   // all, leaving the saved notes as read-only context.
   const memoryContext = buildMemoryContext(projectPath, { includeToolGuidance: false });
+  const canvasContext = buildCanvasSystemPromptAddendum(db, sessionId);
 
   // When a specific agent is selected, inject its system prompt via `systemMessage`
   // using replace mode so the agent's instructions ARE the primary context.
@@ -569,6 +573,7 @@ export async function runCopilotAgentTurn(params: {
       agentBody: selected.body,
       skillsContext,
       memoryContext,
+      canvasContext,
       noTools,
     });
     systemMessageContent = composed.content;
@@ -594,6 +599,7 @@ export async function runCopilotAgentTurn(params: {
       agentBody: null,
       skillsContext,
       memoryContext,
+      canvasContext,
       noTools,
     });
     systemMessageContent = composed.content;
@@ -606,9 +612,16 @@ export async function runCopilotAgentTurn(params: {
   // Per-session disabled servers are filtered out BEFORE fingerprinting so
   // toggling a server off naturally invalidates the cached SDK session.
   // Skipped entirely when noTools is true (text-only generation turns).
+  // Attached canvases (#223) are folded in BEFORE fingerprinting — attach/detach
+  // changes this map, so `fingerprintManaged()` naturally invalidates the cached
+  // SDK session the same way toggling a regular managed server does, with no
+  // separate canvas-specific fingerprint logic needed.
   const managedMcpRaw = noTools
     ? {}
-    : loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) });
+    : {
+        ...loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) }),
+        ...canvasMcpServersForSession(db, sessionId),
+      };
   const mcpFingerprint = fingerprintManaged(managedMcpRaw);
 
   const sessionConfig = {

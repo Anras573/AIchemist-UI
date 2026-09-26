@@ -17,6 +17,7 @@ import {
   toClaudeMcpServers,
 } from "../mcp";
 import { buildSkillsContext } from "./skills";
+import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
 import { getAnthropicConfig, resolveClaudePath } from "../config";
 import { requestApproval, requiresApproval } from "./approval";
 import type { ToolCategory } from "./approval";
@@ -341,6 +342,7 @@ export async function runClaudeAgentTurn(params: {
   //    - No agent → use the default assistant prompt.
   //    In both cases, active skills context is appended.
   const skillsContext = buildSkillsContext(skills ?? [], projectPath);
+  const canvasContext = buildCanvasSystemPromptAddendum(db, sessionId);
   let systemPrompt: string;
   let sdkAgent: string | undefined;
 
@@ -348,7 +350,7 @@ export async function runClaudeAgentTurn(params: {
     const agentFile = readAgentFileSystemPrompt(agent);
     if (agentFile) {
       // File-based agent: use its body as the system prompt
-      systemPrompt = agentFile.body + skillsContext + askUserInstruction;
+      systemPrompt = agentFile.body + skillsContext + canvasContext + askUserInstruction;
       if (agentFile.model) effectiveModel = resolveModel(agentFile.model);
     } else {
       // SDK built-in agent (no local file): delegate to the SDK
@@ -356,13 +358,13 @@ export async function runClaudeAgentTurn(params: {
       systemPrompt =
         "You are a helpful AI assistant with access to the user's project files and tools. " +
         "Be concise and precise. When using tools, explain what you're doing before calling them." +
-        skillsContext + askUserInstruction;
+        skillsContext + canvasContext + askUserInstruction;
     }
   } else {
     systemPrompt =
       "You are a helpful AI assistant with access to the user's project files and tools. " +
       "Be concise and precise. When using tools, explain what you're doing before calling them." +
-      skillsContext + askUserInstruction;
+      skillsContext + canvasContext + askUserInstruction;
   }
 
   // 6. Stream the query generator
@@ -390,9 +392,13 @@ export async function runClaudeAgentTurn(params: {
             // simply omits the user-disabled servers — Claude takes mcpServers
             // fresh per query() call, no cache invalidation needed.
             mcpServers: {
-              ...toClaudeMcpServers(
-                loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) }),
-              ),
+              ...toClaudeMcpServers({
+                ...loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) }),
+                // Attached canvases' loopback MCP entries (#223) — only present
+                // once the endpoint has started and only for canvases actually
+                // attached to this session.
+                ...canvasMcpServersForSession(db, sessionId),
+              }),
               // mcpServer is non-null here (only null when noTools is true)
               "aichemist-tools": mcpServer!,
             },

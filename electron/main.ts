@@ -23,6 +23,8 @@ import { registerBudgetHandlers } from "./ipc/budget-handlers";
 import { registerSpendingHandlers } from "./ipc/spending-handlers";
 import { registerUpdateHandlers } from "./ipc/update-handlers";
 import { WorkflowScheduler } from "./agent/workflow-scheduler";
+import { CanvasHostManager } from "./canvas/host-manager";
+import { CanvasMcpEndpoint, setActiveCanvasMcpEndpoint } from "./canvas/mcp-endpoint";
 import { TrayController } from "./tray";
 import { initAutoUpdater, checkForUpdates } from "./updater";
 
@@ -100,6 +102,13 @@ let updateCheckInterval: NodeJS.Timeout | undefined;
 // register. Module-level so before-quit can stop its jobs.
 let workflowScheduler: WorkflowScheduler | null = null;
 
+// Canvas host supervisor (#222) + the loopback MCP endpoint that exposes
+// attached canvases' tools to every provider (#223). Both are created once at
+// startup; the endpoint is torn down on quit so a relaunch gets a fresh
+// per-launch bearer token.
+let canvasHostManager: CanvasHostManager | null = null;
+let canvasMcpEndpoint: CanvasMcpEndpoint | null = null;
+
 // Optional menu-bar/system-tray icon. Present only while ≥1 enabled scheduled
 // workflow is armed — that is exactly when the app survives window close, so the
 // tray is the user's handle on the otherwise windowless process.
@@ -150,6 +159,20 @@ app.whenReady().then(() => {
 
   workflowScheduler = new WorkflowScheduler({ db, activeTurns, getMainWindow });
   registerAllHandlers(workflowScheduler);
+
+  // Canvas loopback MCP endpoint (#223) — starts before the window so the
+  // first turn on any session can already reach it. A failure here must never
+  // block app startup: canvases just stay unreachable (tool calls report
+  // "canvas unavailable") until the next launch.
+  canvasHostManager = new CanvasHostManager(db);
+  canvasMcpEndpoint = new CanvasMcpEndpoint({ db, hostManager: canvasHostManager, getMainWindow });
+  canvasMcpEndpoint
+    .start()
+    .then(() => setActiveCanvasMcpEndpoint(canvasMcpEndpoint))
+    .catch((err: unknown) => {
+      console.error("[startup] Canvas MCP endpoint failed to start:", err);
+    });
+
   const win = createWindow();
 
   // Auto-update: check shortly after launch (once the window can receive the
@@ -221,6 +244,9 @@ app.on("before-quit", () => {
   clearInterval(updateCheckInterval);
   tray?.destroy();
   workflowScheduler?.stopAll();
+  setActiveCanvasMcpEndpoint(null);
+  void canvasMcpEndpoint?.stop();
+  void canvasHostManager?.stopAll();
 
   // Gracefully shut down all registered providers that implement stop()
   for (const name of getProviderNames()) {

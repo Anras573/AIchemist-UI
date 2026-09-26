@@ -53,6 +53,20 @@ describe("needsApproval", () => {
     });
   });
 
+  describe("canvas category", () => {
+    it("always requires approval regardless of mode=none", () => {
+      expect(needsApproval(makeConfig("none"), "canvas")).toBe(true);
+    });
+
+    it("always requires approval regardless of mode=all", () => {
+      expect(needsApproval(makeConfig("all"), "canvas")).toBe(true);
+    });
+
+    it("always requires approval regardless of mode=custom with no matching rule", () => {
+      expect(needsApproval(makeConfig("custom"), "canvas")).toBe(true);
+    });
+  });
+
   describe('mode: "all"', () => {
     it("requires approval for filesystem", () => {
       expect(needsApproval(makeConfig("all"), "filesystem")).toBe(true);

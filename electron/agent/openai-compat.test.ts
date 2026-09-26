@@ -11,6 +11,14 @@ vi.mock("../mcp/approval", () => ({
   createManagedMcpBridge: vi.fn(),
 }));
 
+const canvasMock = vi.hoisted(() => ({
+  servers: vi.fn(() => ({}) as Record<string, unknown>),
+}));
+vi.mock("../canvas/mcp-endpoint", () => ({
+  canvasMcpServersForSession: canvasMock.servers,
+  buildCanvasSystemPromptAddendum: vi.fn(() => ""),
+}));
+
 // Control the agent file's `model:` frontmatter without touching ~/.claude/agents.
 const agentFileMock = vi.hoisted(() => ({ result: null as { body: string; model?: string } | null }));
 vi.mock("./claude", () => ({
@@ -136,6 +144,7 @@ beforeEach(() => {
   // touch the real ~/.aichemist/memory.
   _setMemoryRootForTests(path.join(tempDir, "aichemist"));
   _resetOpenAiCompatProbeCache();
+  canvasMock.servers.mockReturnValue({});
   vi.mocked(createManagedMcpBridge).mockResolvedValue({
     tools: [],
     hasTool: () => false,
@@ -566,6 +575,44 @@ describe("openai-compat turn execution", () => {
 
     expect(capturedTools ?? []).toEqual([]);
     expect(createManagedMcpBridge).not.toHaveBeenCalled();
+  });
+
+  it("merges attached canvases' loopback MCP entries (#223) into the managed-server map passed to the bridge", async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    canvasMock.servers.mockReturnValue({
+      "canvas-kanban-abcd1234": {
+        type: "http",
+        url: "http://127.0.0.1:1234/canvas/c1/session/s-canvas/mcp",
+        headers: { Authorization: "Bearer secret" },
+      },
+    });
+    vi.mocked(createManagedMcpBridge).mockResolvedValue({
+      tools: [],
+      hasTool: () => false,
+      callTool: async () => "",
+      close: async () => {},
+    });
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({ doStream: async () => textStream(["ok"]) }),
+    );
+
+    await runOpenAiCompatTurn({
+      db: makeDb([]) as never,
+      sessionId: "s-canvas",
+      messageId: "m-placeholder",
+      prompt: "hi",
+      projectPath: makeTempProject(),
+      projectConfig: { model: "local/m", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+    } as never);
+
+    expect(canvasMock.servers).toHaveBeenCalledWith(expect.anything(), "s-canvas");
+    expect(createManagedMcpBridge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "canvas-kanban-abcd1234": expect.objectContaining({ url: "http://127.0.0.1:1234/canvas/c1/session/s-canvas/mcp" }),
+      }),
+      expect.anything(),
+    );
   });
 
   it("surfaces stream errors as turn failures", async () => {

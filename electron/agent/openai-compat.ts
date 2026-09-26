@@ -23,6 +23,7 @@ import { readAgentFileSystemPrompt } from "./claude";
 import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
 import type { ManagedMcpBridge } from "../mcp";
+import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
 import { getDisabledMcpServers, loadToolCallsForMessage } from "../sessions";
 import { runGatedTool } from "./tool-gate";
 import { TurnEmitter, emitToolRoundLimitNotice } from "./turn-emitter";
@@ -387,8 +388,9 @@ async function resolveTargetForTurn(
 function buildSystemPrompt(params: AgentProviderParams): string {
   const skillsContext = buildSkillsContext(params.skills ?? [], params.projectPath);
   const memoryContext = buildMemoryContext(params.projectPath);
+  const canvasContext = params.noTools ? "" : buildCanvasSystemPromptAddendum(params.db, params.sessionId);
   const agentBody = params.agent ? readAgentFileSystemPrompt(params.agent)?.body ?? "" : "";
-  const parts = [OPENAI_COMPAT_SYSTEM_PROMPT, agentBody, skillsContext, memoryContext];
+  const parts = [OPENAI_COMPAT_SYSTEM_PROMPT, agentBody, skillsContext, memoryContext, canvasContext];
   return parts.filter((part) => part.trim().length > 0).join("\n\n");
 }
 
@@ -779,7 +781,10 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   const managedMcpBridge = params.noTools
     ? null
     : await createManagedMcpBridge(
-        loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
+        {
+          ...loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
+          ...canvasMcpServersForSession(params.db, params.sessionId),
+        },
         params.projectPath,
       );
   const tools = managedMcpBridge

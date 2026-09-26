@@ -140,7 +140,15 @@ export function isProjectAllowed(config: ProjectConfig, toolName: string, args: 
 
 // ── Approval policy ───────────────────────────────────────────────────────────
 
-export type ToolCategory = "filesystem" | "shell" | "web";
+/**
+ * `"canvas"` covers a canvas host tool declared `approval: "ask"` (#223) — like
+ * `"shell"`, it always gates (see `needsApproval`) regardless of the project's
+ * `approval_mode`/`approval_rules`, since a canvas author's own per-tool
+ * `approval` field — not the project's filesystem/shell/web policy — is what
+ * decided this tool needs a prompt in the first place. Session/project
+ * allowlisting still applies via `isSessionAllowed`/`isProjectAllowed`.
+ */
+export type ToolCategory = "filesystem" | "shell" | "web" | "canvas";
 
 /**
  * Returns true if the given tool category requires user approval under the
@@ -151,7 +159,7 @@ export function needsApproval(
   config: ProjectConfig,
   category: ToolCategory
 ): boolean {
-  if (category === "shell") return true;
+  if (category === "shell" || category === "canvas") return true;
   if (config.approval_mode === "all") return true;
   if (config.approval_mode === "none") return false;
   const rule = config.approval_rules.find((r) => r.tool_category === category);
