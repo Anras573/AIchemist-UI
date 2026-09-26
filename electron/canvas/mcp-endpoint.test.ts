@@ -466,6 +466,31 @@ describe("setTurnActive", () => {
     expect(() => endpoint.setTurnActive(sessionId, true)).not.toThrow();
     expect(hostManager.setTurnActive).not.toHaveBeenCalled();
   });
+
+  it("applies to a host started lazily mid-turn — the common case: no host record yet when the turn starts (#223 follow-up review)", async () => {
+    const dir = nodePath.join(canvasesRoot, "kanban");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, "server.mjs"), "export default {};");
+
+    // No host record exists yet for this canvas — mirrors a session's first
+    // turn, or one after an idle stop.
+    hostManager.status = "stopped";
+    hostManager.start = vi.fn(async () => {
+      hostManager.status = "running";
+    });
+
+    // runner.ts calls this at turn start, BEFORE the first tool call ever
+    // starts the host. It forwards to the manager unconditionally (asserted
+    // above), so clear that call and prove ensureHostRunning re-applies it
+    // once the host actually exists.
+    endpoint.setTurnActive(sessionId, true);
+    hostManager.setTurnActive.mockClear();
+
+    await rpc(routePath(canvasId, sessionId), { jsonrpc: "2.0", id: 1, method: "tools/list" });
+
+    expect(hostManager.start).toHaveBeenCalledOnce();
+    expect(hostManager.setTurnActive).toHaveBeenCalledWith(canvasId, true);
+  });
 });
 
 describe("Copilot mcpFp invalidation on attach/detach (#223)", () => {
@@ -514,10 +539,30 @@ describe("resolveCanvasServerPath", () => {
 
   it("rejects a definition name that attempts path traversal", () => {
     // A malicious canvas row could try to escape canvasesRoot via `definition`.
-    expect(resolveCanvasServerPath("../etc")).toBeNull();
+    // These alone don't prove the guard does anything — none resolves to a
+    // real file even without it (statSync just misses). The next test proves
+    // the guard actually blocks a real escape.
     expect(resolveCanvasServerPath("..")).toBeNull();
     expect(resolveCanvasServerPath("a/../../b")).toBeNull();
     expect(resolveCanvasServerPath("a/b")).toBeNull();
     expect(resolveCanvasServerPath("a\\b")).toBeNull();
+  });
+
+  it("rejects a traversal definition that WOULD resolve to a real server.mjs outside canvasesRoot without the guard", () => {
+    // Place server.mjs at the traversal target itself, one level above
+    // canvasesRoot, so a definition that escaped the guard would genuinely
+    // find and return it — not just miss on a nonexistent path.
+    const outside = nodePath.join(nodePath.dirname(canvasesRoot), `canvas-mcp-evil-${Date.now()}`);
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(nodePath.join(outside, "server.mjs"), "export default {};");
+    try {
+      const definition = nodePath.relative(canvasesRoot, outside);
+      expect(definition).toContain(".."); // sanity: this really is a traversal
+      // Without isSafeDefinitionName()/the resolved-path prefix check, this
+      // would resolve to `nodePath.join(outside, "server.mjs")` — a real file.
+      expect(resolveCanvasServerPath(definition)).toBeNull();
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 });

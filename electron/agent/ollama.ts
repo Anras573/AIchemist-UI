@@ -4,11 +4,7 @@ import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory }
 import { readAgentFileSystemPrompt } from "./claude";
 import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
-import {
-  canvasMcpServersForSession,
-  buildCanvasSystemPromptAddendum,
-  CANVAS_MCP_SERVER_PREFIX,
-} from "../canvas/mcp-endpoint";
+import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
 import { loadToolCallsForMessage } from "../sessions";
 import { runGatedTool } from "./tool-gate";
 import { TurnEmitter, emitToolRoundLimitNotice } from "./turn-emitter";
@@ -112,6 +108,13 @@ interface ToolExecutionContext {
   recorder: NativeTranscriptRecorder | null;
   /** Unattended turn — `ask_user` / un-allowlisted approvals resolve immediately. */
   nonInteractive?: boolean;
+  /**
+   * Exact managed-server names `canvasMcpServersForSession()` injected THIS
+   * turn (#223's follow-up review) — never a `canvas-` prefix match, which
+   * would also exempt an unrelated MCP server a user/repo happened to name
+   * `canvas-*` from approval. Empty for noTools / delegated sub-agent turns.
+   */
+  canvasServerNames: Set<string>;
 }
 
 export const OLLAMA_NO_MODELS_ERROR =
@@ -642,16 +645,20 @@ async function executeTool(
       });
     default:
       if (managedMcpBridge.hasTool(name)) {
-        // A canvas-backed tool (server name canvas-*) was already
-        // approval-gated by the loopback MCP endpoint itself (#223) — gating
-        // it again here as "shell" would prompt a "none" tool on every call,
-        // double-prompt an "ask" tool under a different fingerprint, and
-        // double-deny it in nonInteractive runs. "custom" never gates but
-        // still records the call in the timeline/transcript. Every other
-        // managed MCP tool can do anything, so it keeps the strictest
-        // existing approval category instead of being treated as a file edit.
+        // A canvas-backed tool was already approval-gated by the loopback MCP
+        // endpoint itself (#223) — gating it again here as "shell" would
+        // prompt a "none" tool on every call, double-prompt an "ask" tool
+        // under a different fingerprint, and double-deny it in nonInteractive
+        // runs. "custom" never gates but still records the call in the
+        // timeline/transcript. Matched against the EXACT server names
+        // `canvasMcpServersForSession()` injected this turn (`ctx.canvasServerNames`)
+        // — not a `canvas-` prefix, which would also exempt an unrelated MCP
+        // server a user's own `~/.aichemist/mcp.json` happened to name that
+        // way (a real bypass flagged in review). Every other managed MCP tool
+        // can do anything, so it keeps the strictest existing approval
+        // category instead of being treated as a file edit.
         const serverName = managedMcpBridge.serverNameForTool?.(name);
-        const category = serverName?.startsWith(CANVAS_MCP_SERVER_PREFIX) ? "custom" : "shell";
+        const category = serverName && ctx.canvasServerNames.has(serverName) ? "custom" : "shell";
         return runTool(ctx, name, args, category, async () => managedMcpBridge.callTool(name, args));
       }
       // Route through runTool so the attempt is visible in the UI timeline
@@ -766,12 +773,14 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
 
   // When noTools is true (text-only generation turns), skip all tool definitions
   // and MCP bridge startup to prevent any filesystem/shell side-effects.
+  const canvasServers = params.noTools ? {} : canvasMcpServersForSession(params.db, params.sessionId);
+  const canvasServerNames = new Set(Object.keys(canvasServers));
   const managedMcpBridge = params.noTools
     ? null
     : await createManagedMcpBridge(
         {
           ...loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(params.db, params.sessionId)) }),
-          ...canvasMcpServersForSession(params.db, params.sessionId),
+          ...canvasServers,
         },
         params.projectPath,
       );
@@ -790,6 +799,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
     delegationDepth: 0,
     recorder,
     nonInteractive: params.nonInteractive,
+    canvasServerNames,
   };
 
   const systemPrompt = buildSystemPrompt(params);

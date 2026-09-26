@@ -42,6 +42,7 @@ import { CanvasToolError, type CanvasHostManager, type StartCanvasHostOptions } 
 import { requestApproval, requiresApproval } from "../agent/approval";
 import { TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "../agent/tool-gate";
 import type { McpServerEntry, McpServersMap } from "../mcp/config";
+import { CANVAS_MCP_SERVER_PREFIX } from "../mcp/managed";
 
 // ── Public constants ─────────────────────────────────────────────────────────
 
@@ -157,15 +158,14 @@ function tryGetAttachedCanvases(db: Database, sessionId: string): Canvas[] {
 
 // ── Naming / injection helpers ───────────────────────────────────────────────
 
-/** Slugifies a canvas's title into a stable, unique-enough managed-server name. */
 /**
- * Every canvas-backed managed-server name starts with this. Ollama and
- * OpenAI-compatible use it to recognize a canvas tool reached through their
- * `ManagedMcpBridge` (via `serverNameForTool()`) and route it around their own
- * approval gate — the endpoint itself already gated it (#223).
+ * Slugifies a canvas's title into a stable, unique-enough managed-server name,
+ * prefixed with `CANVAS_MCP_SERVER_PREFIX` (reserved in `electron/mcp/managed.ts`,
+ * imported here rather than redefined so there is exactly one place that owns
+ * the reservation). Providers identify a canvas-backed tool by exact
+ * membership in a turn's `canvasMcpServersForSession()` result, never by
+ * matching this prefix — see that module's docstring for why.
  */
-export const CANVAS_MCP_SERVER_PREFIX = "canvas-";
-
 export function canvasServerName(canvas: Pick<Canvas, "id" | "title">): string {
   const slug =
     canvas.title
@@ -308,6 +308,14 @@ export class CanvasMcpEndpoint {
   private server: http.Server | null = null;
   private _token = "";
   private _port: number | null = null;
+  /**
+   * Sessions with a turn currently running, so a host that `ensureHostRunning`
+   * starts *lazily, mid-turn* (the common case — a session's first turn, or
+   * one after an idle stop, always finds no host record yet) still gets
+   * `setTurnActive(true)` applied. `setTurnActive()` on a host that already
+   * existed when the turn started covers the rest. Review follow-up on #223.
+   */
+  private readonly activeTurnSessions = new Set<string>();
 
   constructor(options: CanvasMcpEndpointOptions) {
     this.db = options.db;
@@ -363,6 +371,8 @@ export class CanvasMcpEndpoint {
    * already no-ops for an unknown canvas id.
    */
   setTurnActive(sessionId: string, active: boolean): void {
+    if (active) this.activeTurnSessions.add(sessionId);
+    else this.activeTurnSessions.delete(sessionId);
     try {
       for (const canvas of tryGetAttachedCanvases(this.db, sessionId)) {
         this.hostManager.setTurnActive(canvas.id, active);
@@ -527,6 +537,14 @@ export class CanvasMcpEndpoint {
       projectPath: session.workspace_path ?? project.path,
     };
     await this.hostManager.start(canvasId, startOpts);
+    // A host that had no record yet (the common case — a session's first
+    // turn, or one after an idle stop) starts with turnActive: false. If the
+    // turn that just triggered this start is still active, apply it now so
+    // the idle timer this new host schedules on "ready" doesn't stop it
+    // before the turn ends (review follow-up on #223).
+    if (this.activeTurnSessions.has(sessionId)) {
+      this.hostManager.setTurnActive(canvasId, true);
+    }
   }
 
   /**

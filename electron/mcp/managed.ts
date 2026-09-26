@@ -22,9 +22,25 @@ import { readMcpServers } from "./config";
 export const RESERVED_MCP_NAME = "aichemist-tools";
 
 /**
+ * Reserved prefix for canvas-backed managed servers injected by
+ * `canvasMcpServersForSession()` (`electron/canvas/mcp-endpoint.ts`, #223) —
+ * see `canvasServerName()` there for how a canvas's name is built from it.
+ * Reserved here, the same way `RESERVED_MCP_NAME` is, so a user's own
+ * `~/.aichemist/mcp.json` entry can't collide with or shadow a canvas entry:
+ * every provider that merges canvas entries into this module's output treats
+ * exact membership in that turn's `canvasMcpServersForSession()` result as
+ * "already approval-gated by the endpoint" (never a "starts with canvas-"
+ * check, which would also exempt an unrelated server from approval — the
+ * vulnerability this reservation closes, found in #223's review).
+ */
+export const CANVAS_MCP_SERVER_PREFIX = "canvas-";
+
+/**
  * Read AIchemist-managed servers from `~/.aichemist/mcp.json`.
  * Returns an empty map if the file is missing or unreadable.
- * Filters out any entry that uses the reserved name and any name in
+ * Filters out any entry that uses the reserved name, any entry whose name
+ * starts with the reserved canvas prefix (logged — this is a name collision
+ * with a feature the user's own config didn't intend to hit), and any name in
  * `excludeNames` (used for per-session disable).
  */
 export function loadManagedMcpServers(opts?: { excludeNames?: Set<string> }): McpServersMap {
@@ -33,6 +49,12 @@ export function loadManagedMcpServers(opts?: { excludeNames?: Set<string> }): Mc
   const out: McpServersMap = {};
   for (const [name, entry] of Object.entries(raw)) {
     if (name === RESERVED_MCP_NAME) continue;
+    if (name.startsWith(CANVAS_MCP_SERVER_PREFIX)) {
+      console.warn(
+        `[managed-mcp] skipping "${name}": the "${CANVAS_MCP_SERVER_PREFIX}" prefix is reserved for canvas-backed servers`
+      );
+      continue;
+    }
     if (exclude?.has(name)) continue;
     out[name] = entry;
   }

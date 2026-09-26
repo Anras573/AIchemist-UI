@@ -16,11 +16,7 @@ import type { ToolCategory } from "./approval";
 import { requestQuestion } from "./question";
 import { buildSkillsContext } from "./skills";
 import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory } from "./memory";
-import {
-  canvasMcpServersForSession,
-  buildCanvasSystemPromptAddendum,
-  CANVAS_MCP_SERVER_PREFIX,
-} from "../canvas/mcp-endpoint";
+import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
 import { readAgentFileSystemPrompt } from "./claude";
 import { classifyNativeTool, runGatedTool } from "./tool-gate";
 import type { GatedToolContext } from "./tool-gate";
@@ -297,6 +293,16 @@ export async function runCopilotAgentTurn(params: {
   const emitter = new TurnEmitter(webContents, sessionId);
   const gateCtx: GatedToolContext = { db, sessionId, messageId, projectConfig, emitter, nonInteractive };
 
+  // Computed once, up front, so `onPermissionRequest` (defined below, called
+  // later during the SDK session) and the managedMcpRaw merge (further down)
+  // both check membership in the EXACT set of server names injected this
+  // turn — never a `canvas-` prefix match, which would also exempt an
+  // unrelated MCP server (e.g. from the project's own `.mcp.json`, which the
+  // Copilot SDK discovers itself) that happens to be named `canvas-*` (#223's
+  // follow-up review).
+  const canvasServers = noTools ? {} : canvasMcpServersForSession(db, sessionId);
+  const canvasServerNames = new Set(Object.keys(canvasServers));
+
   // ── Tool definitions ────────────────────────────────────────────────────────
 
   const writeFileTool = defineTool<{ path: string; content: string }>(
@@ -512,13 +518,17 @@ export async function runCopilotAgentTurn(params: {
         category = "filesystem";
         break;
       case "mcp":
-        // A canvas-backed server (name canvas-*) was already approval-gated
-        // by the loopback MCP endpoint itself (#223) — gating it again here
-        // would double-prompt an "ask" tool under a different fingerprint,
-        // or prompt a "none" tool at all whenever the project's approval
-        // config happens to gate MCP calls. Every other MCP server keeps its
-        // existing filesystem-category gating.
-        if (request.serverName.startsWith(CANVAS_MCP_SERVER_PREFIX)) {
+        // A canvas-backed server was already approval-gated by the loopback
+        // MCP endpoint itself (#223) — gating it again here would
+        // double-prompt an "ask" tool under a different fingerprint, or
+        // prompt a "none" tool at all whenever the project's approval config
+        // happens to gate MCP calls. Matched against the EXACT server names
+        // injected this turn (`canvasServerNames`) — never a `canvas-` prefix
+        // match, which would also auto-approve an unrelated MCP server (e.g.
+        // from the project's own `.mcp.json`) that happens to share the
+        // prefix. Every other MCP server keeps its existing filesystem-category
+        // gating.
+        if (canvasServerNames.has(request.serverName)) {
           return { kind: "approve-once" };
         }
         category = "filesystem";
@@ -638,7 +648,7 @@ export async function runCopilotAgentTurn(params: {
     ? {}
     : {
         ...loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) }),
-        ...canvasMcpServersForSession(db, sessionId),
+        ...canvasServers,
       };
   const mcpFingerprint = fingerprintManaged(managedMcpRaw);
 

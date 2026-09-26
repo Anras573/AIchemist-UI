@@ -13,6 +13,14 @@ vi.mock("../mcp/approval", () => ({
   createManagedMcpBridge: vi.fn(),
 }));
 
+const canvasMock = vi.hoisted(() => ({
+  servers: vi.fn(() => ({}) as Record<string, unknown>),
+}));
+vi.mock("../canvas/mcp-endpoint", () => ({
+  canvasMcpServersForSession: canvasMock.servers,
+  buildCanvasSystemPromptAddendum: vi.fn(() => ""),
+}));
+
 // Control the agent file's `model:` frontmatter without touching ~/.claude/agents.
 const agentFileMock = vi.hoisted(() => ({ result: null as { body: string; model?: string } | null }));
 vi.mock("./claude", () => ({
@@ -104,6 +112,7 @@ describe("ollama provider", () => {
     vi.clearAllMocks();
     settingsMock.maxToolRounds = 8;
     agentFileMock.result = null;
+    canvasMock.servers.mockReturnValue({});
     _resetOllamaClientForTests();
     const tracesDir = fs.mkdtempSync(path.join(process.cwd(), ".ollama-traces-"));
     tempDirs.push(tracesDir);
@@ -578,6 +587,13 @@ describe("ollama provider", () => {
     const send = vi.fn();
     const toolName = "mcp__canvas_kanban_abcd1234__get_board__11112222";
     const callTool = vi.fn().mockResolvedValue("the board");
+    // The exact server name canvasMcpServersForSession() injected this turn —
+    // matching by exact membership, not a "canvas-" prefix, is what #223's
+    // follow-up review requires (a prefix match would also exempt an
+    // unrelated MCP server sharing the prefix).
+    canvasMock.servers.mockReturnValue({
+      "canvas-kanban-abcd1234": { type: "http", url: "http://127.0.0.1:1/mcp", headers: {} },
+    });
     ollamaMocks.bridge.mockResolvedValue({
       tools: [
         {
@@ -619,6 +635,57 @@ describe("ollama provider", () => {
     expect(send).not.toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.anything());
     expect(recordedCategory).toBe("custom");
     expect(send).toHaveBeenCalledWith(CH.SESSION_TOOL_RESULT, expect.objectContaining({ tool_name: toolName, output: "the board" }));
+  });
+
+  it('still gates a non-canvas managed tool whose server name merely starts with "canvas-" (#223)', async () => {
+    const db = makeDb([
+      { id: "m-placeholder", role: "user", content: "placeholder" },
+      { id: "m-user", role: "user", content: "use the tool" },
+    ]);
+    const send = vi.fn();
+    const toolName = "mcp__canvas_x__lookup__abcdef12";
+    const callTool = vi.fn().mockResolvedValue("bridge result");
+    // No canvas attached this turn — this "canvas-x" server is the user's
+    // own ~/.aichemist/mcp.json entry, which merely happens to share the
+    // reserved prefix (loadManagedMcpServers() would actually drop it, but
+    // the bridge mock here stands in for "whatever survived to the bridge").
+    canvasMock.servers.mockReturnValue({});
+    ollamaMocks.bridge.mockResolvedValue({
+      tools: [
+        {
+          type: "function",
+          function: { name: toolName, description: "canvas-x — lookup", parameters: { type: "object", properties: {} } },
+        },
+      ],
+      hasTool: (name: string) => name === toolName,
+      serverNameForTool: (name: string) => (name === toolName ? "canvas-x" : undefined),
+      callTool,
+      close: async () => {},
+    });
+    send.mockImplementation((channel: string, payload: { approval_id?: string }) => {
+      if (channel === CH.SESSION_APPROVAL_REQUIRED && payload.approval_id) {
+        resolveApproval(payload.approval_id, true);
+      }
+    });
+    ollamaMocks.chat
+      .mockResolvedValueOnce(
+        streamChunks([{ message: { content: "", tool_calls: [{ function: { name: toolName, arguments: {} } }] } }]),
+      )
+      .mockResolvedValueOnce({ message: { content: "Done" } });
+
+    await expect(
+      runOllamaAgentTurn({
+        db: db as never,
+        sessionId: "s-not-canvas",
+        messageId: "m-placeholder",
+        projectConfig: { model: "qwen2.5:latest", approval_mode: "custom", approval_rules: [{ tool_category: "filesystem", policy: "never" }] } as never,
+        webContents: { send } as never,
+      } as never),
+    ).resolves.toBe("Done");
+
+    // A prefix match would have exempted this tool from approval — it must
+    // still be gated as "shell" like any other managed MCP tool.
+    expect(send).toHaveBeenCalledWith(CH.SESSION_APPROVAL_REQUIRED, expect.objectContaining({ tool_name: toolName }));
   });
 
   it("surfaces a truncation notice (and keeps partial text) when the tool-round cap is hit", async () => {
