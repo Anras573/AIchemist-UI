@@ -20,6 +20,8 @@ import type { CanvasHostProcess, CanvasHostProcessFactory, CanvasHostHooks } fro
 
 class FakeCanvasHostProcess extends EventEmitter implements CanvasHostProcess {
   killed = false;
+  /** Tracks whether the process has already emitted `exit`, for real once. */
+  exited = false;
   pid: number | undefined = 4242;
   readonly messagesToHost: unknown[] = [];
 
@@ -28,15 +30,31 @@ class FakeCanvasHostProcess extends EventEmitter implements CanvasHostProcess {
     this.emit("__toHost", message);
   }
 
+  /**
+   * Mirrors real `UtilityProcess#kill()`: returns `false` and emits no
+   * (second) `exit` once the process has already exited — via an earlier
+   * `kill()` OR a `crash()`. Getting this wrong previously masked the
+   * "stop() never resolves for a crashed/errored host" bug: the old,
+   * over-generous `kill()` re-emitted `exit` even for an already-crashed
+   * process, so a test exercising `stop()`/`restart()` on such a host passed
+   * whether or not the manager's own fix was in place.
+   */
   kill(): boolean {
+    if (this.exited) return false;
     if (this.killed) return true;
     this.killed = true;
-    queueMicrotask(() => this.emit("exit", 0));
+    queueMicrotask(() => {
+      if (this.exited) return;
+      this.exited = true;
+      this.emit("exit", 0);
+    });
     return true;
   }
 
   /** Simulates an unexpected crash (not a manager-requested stop). */
   crash(code = 1): void {
+    if (this.exited) return;
+    this.exited = true;
     this.emit("exit", code);
   }
 }
