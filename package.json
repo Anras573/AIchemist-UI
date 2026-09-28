@@ -10,7 +10,7 @@
   "main": "dist/main/main.js",
   "scripts": {
     "postinstall": "node scripts/ensure-electron.js",
-    "dev": "electron-vite dev",
+    "dev": "node scripts/build-canvas-sdk-esm.mjs && electron-vite dev",
     "build": "electron-vite build && node scripts/build-canvas-sdk-esm.mjs",
     "start": "electron-vite preview",
     "rebuild": "electron-rebuild -f -w better-sqlite3 -w node-pty",
