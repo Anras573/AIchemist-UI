@@ -33,9 +33,19 @@ export default defineConfig({
         // `server.mjs`'s `import { defineCanvas, z } from "@aichemist/canvas"`
         // (Node's CJS/ESM interop can't see the named `z` re-export through a
         // CJS getter). It's built separately, as real ESM, by
-        // scripts/build-canvas-sdk-esm.mjs (see package.json's "build"
-        // script) — `loader-hook.ts` resolves `@aichemist/canvas` to that
-        // output path.
+        // scripts/build-canvas-sdk-esm.mjs, to `dist/canvas-sdk/sdk.mjs` — a
+        // SIBLING of this build's own `outDir` (`dist/main`), not a
+        // subdirectory of it: this "main" build (and `electron-vite preview`'s
+        // internal rebuild before it launches Electron) empties `dist/main`
+        // on every invocation, so a `host/sdk.mjs` written inside it by a
+        // later step would only survive until the next thing that rebuilds
+        // `dist/main` — see that script's header for the incident (#225's
+        // review on PR #236) this design avoids. It's run as a step of both
+        // package.json's "build" and "dev" scripts (electron-vite's watch
+        // mode never re-runs it on its own, so a canvas host would otherwise
+        // fail to start with "no such file ... sdk.mjs" the first time
+        // `bun run dev` is used after a fresh checkout) — `loader-hook.ts`
+        // resolves `@aichemist/canvas` to that output path.
         entry: {
           main: path.resolve(__dirname, "electron/main.ts"),
           "host/entry": path.resolve(__dirname, "electron/canvas/host/entry.ts"),

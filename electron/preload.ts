@@ -165,6 +165,7 @@ export interface ElectronAPI {
   }) => Promise<Res<typeof CH.CREATE_SKILL>>;
 
   // ── Canvases ──────────────────────────────────────────────────────────────
+  canvasListDefinitions: () => Promise<Res<typeof CH.CANVAS_LIST_DEFINITIONS>>;
   canvasList: (args: { projectId: string; sessionId?: string }) => Promise<Res<typeof CH.CANVAS_LIST>>;
   canvasCreate: (args: {
     projectId: string;
@@ -307,6 +308,7 @@ const api: ElectronAPI = {
   writeSkillFile: (args) => invoke(CH.WRITE_SKILL_FILE, args),
   deleteSkillDir: (skillPath) => invoke(CH.DELETE_SKILL_DIR, skillPath),
   createSkill: (args) => invoke(CH.CREATE_SKILL, args),
+  canvasListDefinitions: () => invoke(CH.CANVAS_LIST_DEFINITIONS),
   canvasList: (args) => invoke(CH.CANVAS_LIST, args),
   canvasCreate: (args) => invoke(CH.CANVAS_CREATE, args),
   canvasDelete: (canvasId) => invoke(CH.CANVAS_DELETE, { canvasId }),

@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Kanban</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div id="board" class="board" aria-live="polite"></div>
+    <template id="card-template">
+      <div class="card" draggable="true">
+        <div class="card-title"></div>
+        <div class="card-description"></div>
+        <div class="card-actions">
+          <button type="button" class="card-edit" aria-label="Edit card">Edit</button>
+          <button type="button" class="card-remove" aria-label="Remove card">×</button>
+        </div>
+      </div>
+    </template>
+    <script src="/aichemist-canvas-client.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

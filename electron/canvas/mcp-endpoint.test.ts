@@ -320,10 +320,14 @@ describe("tools/call approval gate", () => {
 describe("host unavailable", () => {
   it("returns a clear error when the host fails to start (no definition on disk)", async () => {
     hostManager.status = "stopped";
-    // No <canvasesRoot>/kanban/server.mjs was ever created, so
-    // resolveCanvasServerPath() returns null and ensureHostRunning() throws
-    // before ever calling hostManager.start().
-    const res = await rpc(routePath(canvasId, sessionId), { jsonrpc: "2.0", id: 1, method: "tools/list" });
+    // A definition name that isn't the built-in kanban tier and has no
+    // <canvasesRoot>/<name>/server.mjs either, so resolveCanvasServerPath()
+    // returns null and ensureHostRunning() throws before ever calling
+    // hostManager.start().
+    const missing = createCanvas(db, { projectId, definition: "no-such-definition", title: "Missing" });
+    setCanvasAttached(db, sessionId, missing.id, true);
+
+    const res = await rpc(routePath(missing.id, sessionId), { jsonrpc: "2.0", id: 1, method: "tools/list" });
     const body = (await res.json()) as { error?: { message: string } };
     expect(body.error?.message).toBe(CANVAS_UNAVAILABLE_MESSAGE);
   });
@@ -526,11 +530,13 @@ describe("resolveCanvasServerPath", () => {
   });
 
   it("does NOT resolve a project-tier definition (untrusted until #227's trust prompt lands)", () => {
-    const dir = nodePath.join(projectPath, ".agents", "canvases", "kanban");
+    // Not "kanban" — that name now has a trusted built-in fallback (#225),
+    // which would mask the project-tier miss this test is actually about.
+    const dir = nodePath.join(projectPath, ".agents", "canvases", "widgets");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(nodePath.join(dir, "server.mjs"), "export default {};");
 
-    expect(resolveCanvasServerPath("kanban")).toBeNull();
+    expect(resolveCanvasServerPath("widgets")).toBeNull();
   });
 
   it("returns null when no definition is found", () => {
