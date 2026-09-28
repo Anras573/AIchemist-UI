@@ -24,6 +24,7 @@ import {
   CanvasTrustError,
   computeCanvasContentHash,
   getProjectCanvasTrustStatus,
+  hasSymlinksInDefinition,
   installCanvasDependencies,
   resolveTrustedCanvasServerPath,
   revokeProjectCanvasTrust,
@@ -254,6 +255,19 @@ export function registerCanvasHandlers(db: Database, hostManager: CanvasHostMana
         throw new IpcError(
           "conflict",
           "This canvas definition changed since it was reviewed. Re-open the trust prompt to review the current content before trusting it."
+        );
+      }
+
+      // A symlink anywhere in the hashed scope means the hash the check above
+      // just confirmed can't actually stand for "what code would run" (#227
+      // review) — `computeCanvasContentHash` never follows or hashes a
+      // symlink at all, so one appearing/pointing somewhere new wouldn't even
+      // change the hash the TOCTOU check just compared. Refuse independently
+      // of that check, same as the node_modules refusal below.
+      if (hasSymlinksInDefinition(dir)) {
+        throw new IpcError(
+          "invalid_input",
+          "This canvas contains a symlink, which isn't supported — AIchemist can't verify what code a symlink actually points to. Remove it (or replace it with a real file/folder) to trust this canvas."
         );
       }
 

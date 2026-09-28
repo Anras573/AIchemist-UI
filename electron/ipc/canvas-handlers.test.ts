@@ -619,6 +619,28 @@ describe("CANVAS_TRUST_STATUS / CANVAS_TRUST_GRANT / CANVAS_TRUST_REVOKE", () =>
       expect(env.error.code).toBe("invalid_input");
       expect(env.error.message).toMatch(/node_modules/);
     });
+
+    it("refuses to grant while the definition contains a symlink", async () => {
+      writeDefinition("widgets");
+      const defDir = nodePath.join(projectDir, ".agents", "canvases", "widgets");
+      fs.writeFileSync(nodePath.join(defDir, "real.mjs"), "export const x = 1;");
+      fs.symlinkSync(nodePath.join(defDir, "real.mjs"), nodePath.join(defDir, "lib.mjs"));
+
+      const status = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, { projectId: "p3", definition: "widgets" });
+      expect(status.ok).toBe(true);
+      if (!status.ok || !status.data) return;
+      expect(status.data.blockedReason).toMatch(/symlink/i);
+
+      const env = await call(CH.CANVAS_TRUST_GRANT, {
+        projectId: "p3",
+        definition: "widgets",
+        expectedContentHash: status.data.contentHash,
+      });
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe("invalid_input");
+      expect(env.error.message).toMatch(/symlink/i);
+    });
   });
 
   describe("CANVAS_TRUST_REVOKE", () => {

@@ -19,6 +19,7 @@ const STATUS: CanvasTrustStatus = {
   contentHash: "hash-at-display-time",
   trusted: false,
   trustedAt: null,
+  blockedReason: null,
 };
 
 describe("CanvasTrustPrompt (#227)", () => {
@@ -63,5 +64,19 @@ describe("CanvasTrustPrompt (#227)", () => {
     await waitFor(() => expect(onStale).toHaveBeenCalledTimes(1));
     expect(onTrusted).not.toHaveBeenCalled();
     expect(screen.getByText(/changed since it was reviewed/i)).toBeInTheDocument();
+  });
+
+  it("shows the blocked reason and hides the Trust and run button when the definition contains a symlink", () => {
+    const blocked: CanvasTrustStatus = {
+      ...STATUS,
+      blockedReason: "This canvas contains a symlink, which isn't supported.",
+    };
+    renderWithProviders(
+      <CanvasTrustPrompt projectId="p1" status={blocked} onTrusted={vi.fn()} onStale={vi.fn()} />
+    );
+
+    expect(screen.getByText(/can't be trusted/i)).toBeInTheDocument();
+    expect(screen.getByText(/contains a symlink/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Trust and run/i })).not.toBeInTheDocument();
   });
 });

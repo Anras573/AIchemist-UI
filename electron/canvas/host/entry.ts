@@ -20,9 +20,16 @@ import { createCanvasHostRuntime, type HostTransport } from "./runtime";
 import type { CanvasServerDefinition } from "./sdk";
 
 // Makes `import { defineCanvas, z } from "@aichemist/canvas"` resolvable from
-// a canvas's `server.mjs`, with no install step — see `loader-hook.ts`. Must
-// run before the first dynamic `import()` of a server module below.
-register(pathToFileURL(nodePath.join(__dirname, "loader-hook.js")).href);
+// a canvas's `server.mjs`, with no install step, and confines every other
+// import to the definition folder (#227 review on PR #238) — see
+// `loader-hook.ts`. Must run before the first dynamic `import()` of a server
+// module below. `process.argv` is available synchronously, so the definition
+// folder is derived here even though `main()` below re-reads the same argv
+// for its own (already-existing) validation.
+const definitionDir = process.argv[2] ? nodePath.dirname(process.argv[2]) : null;
+register(pathToFileURL(nodePath.join(__dirname, "loader-hook.js")).href, {
+  data: { definitionDir },
+});
 
 function send(message: HostToMainMessage): void {
   process.parentPort.postMessage(message);

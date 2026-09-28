@@ -15,6 +15,7 @@ import {
   _setCanvasInstallSpawnForTests,
   computeCanvasContentHash,
   getProjectCanvasTrustStatus,
+  hasSymlinksInDefinition,
   installCanvasDependencies,
   isProjectCanvasTrusted,
   resolveTrustedCanvasServerPath,
@@ -167,6 +168,78 @@ describe("computeCanvasContentHash", () => {
     fs.writeFileSync(nodePath.join(dir, "node_modules", "is-number", "index.js"), "module.exports = () => false;");
     expect(computeCanvasContentHash(dir)).toBe(before);
   });
+
+  // #227 review (round 2): a symlinked module (or server.mjs itself) is
+  // never followed by the walk, so it silently dropped out of the hash
+  // entirely — editing its target changed nothing. These document that the
+  // hash itself stays blind to it (expected — a symlink is never followed);
+  // `hasSymlinksInDefinition` (below) is what actually catches this.
+  it("is unaffected by a symlink's target changing, since the walk never follows it", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    // The target lives OUTSIDE the definition folder entirely (the actual
+    // #227 review scenario: a symlink to `<project>/shared.mjs`) — a target
+    // inside the folder would just get hashed directly as its own real file,
+    // which isn't the gap being demonstrated here.
+    const outside = fs.mkdtempSync(nodePath.join(os.tmpdir(), "trust-symlink-target-"));
+    const realFile = nodePath.join(outside, "shared.mjs");
+    fs.writeFileSync(realFile, "export const x = 1;");
+    fs.symlinkSync(realFile, nodePath.join(dir, "lib.mjs"));
+    try {
+      const before = computeCanvasContentHash(dir);
+      fs.writeFileSync(realFile, "export const x = 2;");
+      expect(computeCanvasContentHash(dir)).toBe(before);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("hasSymlinksInDefinition", () => {
+  it("is false for a definition with no symlinks", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    expect(hasSymlinksInDefinition(dir)).toBe(false);
+  });
+
+  it("is true for a symlinked module server.mjs imports", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    fs.writeFileSync(nodePath.join(dir, "real.mjs"), "export const x = 1;");
+    fs.symlinkSync(nodePath.join(dir, "real.mjs"), nodePath.join(dir, "lib.mjs"));
+    expect(hasSymlinksInDefinition(dir)).toBe(true);
+  });
+
+  it("is true when server.mjs itself is a symlink", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    const realServer = nodePath.join(dir, "real-server.mjs");
+    fs.writeFileSync(realServer, "export default {};");
+    fs.rmSync(nodePath.join(dir, "server.mjs"));
+    fs.symlinkSync(realServer, nodePath.join(dir, "server.mjs"));
+    expect(hasSymlinksInDefinition(dir)).toBe(true);
+  });
+
+  it("ignores a symlink inside node_modules (excluded from the scan entirely)", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    fs.mkdirSync(nodePath.join(dir, "node_modules"), { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, "real-dep.js"), "module.exports = {};");
+    fs.symlinkSync(nodePath.join(dir, "real-dep.js"), nodePath.join(dir, "node_modules", "dep.js"));
+    expect(hasSymlinksInDefinition(dir)).toBe(false);
+  });
+
+  it("ignores a symlink at the root literally named ui or node_modules", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    const realUi = fs.mkdtempSync(nodePath.join(os.tmpdir(), "real-ui-"));
+    fs.symlinkSync(realUi, nodePath.join(dir, "ui"));
+    expect(hasSymlinksInDefinition(dir)).toBe(false);
+    fs.rmSync(realUi, { recursive: true, force: true });
+  });
+
+  it("does not descend into a symlinked directory even if it isn't excluded by name", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    const realLib = fs.mkdtempSync(nodePath.join(os.tmpdir(), "real-lib-"));
+    fs.writeFileSync(nodePath.join(realLib, "x.mjs"), "export default 1;");
+    fs.symlinkSync(realLib, nodePath.join(dir, "lib"));
+    expect(hasSymlinksInDefinition(dir)).toBe(true);
+    fs.rmSync(realLib, { recursive: true, force: true });
+  });
 });
 
 // ─── Status ──────────────────────────────────────────────────────────────────
@@ -182,6 +255,23 @@ describe("getProjectCanvasTrustStatus", () => {
     expect(status?.trustedAt).toBeNull();
     expect(status?.dependencies).toEqual({ names: ["vitest", "zod"], hasPackageJson: true });
     expect(status?.manifest.name).toBe("widgets");
+    expect(status?.blockedReason).toBeNull();
+  });
+
+  it("reports blockedReason (and never trusted) when the definition contains a symlink, even if a stale trust record's hash matches", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    // Trust first, while there's no symlink yet — the stored hash is the
+    // "clean" one, and computeCanvasContentHash never sees the symlink
+    // that's about to appear (it's never followed), so the hash alone
+    // wouldn't catch this.
+    trustProjectCanvas(db, projectId, projectPath, "widgets");
+    fs.writeFileSync(nodePath.join(dir, "real.mjs"), "export const x = 1;");
+    fs.symlinkSync(nodePath.join(dir, "real.mjs"), nodePath.join(dir, "lib.mjs"));
+
+    const status = getProjectCanvasTrustStatus(db, projectId, projectPath, "widgets");
+    expect(status?.trusted).toBe(false);
+    expect(status?.trustedAt).toBeNull();
+    expect(status?.blockedReason).toMatch(/symlink/i);
   });
 
   it("returns null for a definition that doesn't exist", () => {

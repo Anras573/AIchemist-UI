@@ -390,10 +390,17 @@ export interface CanvasTrustStatus {
   manifest: CanvasDefinition;
   dependencies: CanvasDependencyInfo;
   contentHash: string;
-  /** True iff a stored trust record's `content_hash` matches `contentHash`. */
+  /** True iff a stored trust record's `content_hash` matches `contentHash`. Always false when `blockedReason` is set. */
   trusted: boolean;
   /** The stored record's `trusted_at`, only when `trusted` is true. */
   trustedAt: string | null;
+  /**
+   * Set when this definition structurally can't be trusted regardless of
+   * content hash (currently: it contains a symlink, #227 review) — the
+   * prompt shows this instead of offering "Trust and run", since a grant
+   * would just be refused anyway.
+   */
+  blockedReason: string | null;
 }
 
 /** Result of running `bun install` in a just-trusted definition's folder — `{ ok: true, output: "" }` when it declares no `package.json` (most canvases). */

@@ -57,16 +57,33 @@ function isExcludedDir(name: string, isRoot: boolean): boolean {
   return false;
 }
 
+export interface DefinitionScan {
+  /** Every regular file under `defDir` in the hashed scope (relative, POSIX-style paths, sorted). */
+  files: string[];
+  /**
+   * Any symlink (file or directory) found in the hashed scope (relative
+   * paths, sorted) — never followed, since a `Dirent`'s `isFile()`/
+   * `isDirectory()` are both false for one. Previously that just meant a
+   * symlinked module silently dropped out of the hash (#227 review on PR
+   * #238: a symlinked `server.mjs`, or a module it imports through a
+   * symlink, could change after approval with no re-prompt at all, since it
+   * was never in the hashed set to begin with). Now surfaced so callers
+   * (`getProjectCanvasTrustStatus`, `CANVAS_TRUST_GRANT`) can refuse a
+   * definition containing one outright, the same way they already refuse a
+   * pre-existing `node_modules` — rather than silently hashing around it.
+   */
+  symlinks: string[];
+}
+
 /**
- * Recursively lists every regular file under `defDir` (relative, POSIX-style
- * paths, sorted), skipping excluded directories and symlinks — a symlink
- * Dirent reports `isFile()`/`isDirectory()` as both false, so it's silently
- * skipped rather than followed, closing off a canvas pointing a hashed path
- * outside its own folder. Fail-open per file/dir (an unreadable subtree is
- * skipped, not thrown) — same stance as `discoverCanvasDefinitions`.
+ * Recursively scans `defDir`, skipping excluded directories (`isExcludedDir`)
+ * and never following a symlink (collected separately instead — see
+ * `DefinitionScan.symlinks`). Fail-open per file/dir (an unreadable subtree
+ * is skipped, not thrown) — same stance as `discoverCanvasDefinitions`.
  */
-function collectHashableFiles(defDir: string): string[] {
-  const results: string[] = [];
+function scanDefinition(defDir: string): DefinitionScan {
+  const files: string[] = [];
+  const symlinks: string[] = [];
   function walk(relDir: string): void {
     let entries: fs.Dirent[];
     try {
@@ -76,16 +93,33 @@ function collectHashableFiles(defDir: string): string[] {
     }
     for (const entry of entries) {
       const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
+      const excluded = isExcludedDir(entry.name, relDir === "");
+      if (entry.isSymbolicLink()) {
+        if (!excluded) symlinks.push(relPath);
+        continue;
+      }
       if (entry.isDirectory()) {
-        if (isExcludedDir(entry.name, relDir === "")) continue;
+        if (excluded) continue;
         walk(relPath);
       } else if (entry.isFile()) {
-        results.push(relPath);
+        files.push(relPath);
       }
     }
   }
   walk("");
-  return results.sort();
+  files.sort();
+  symlinks.sort();
+  return { files, symlinks };
+}
+
+/**
+ * Whether any symlink sits in a project definition's hashed scope (outside
+ * `node_modules`, which is never hashed or walked in the first place). Used
+ * to refuse trust outright rather than silently hash around it — see
+ * `DefinitionScan.symlinks`'s docstring.
+ */
+export function hasSymlinksInDefinition(defDir: string): boolean {
+  return scanDefinition(defDir).symlinks.length > 0;
 }
 
 /**
@@ -111,7 +145,7 @@ function collectHashableFiles(defDir: string): string[] {
  */
 export function computeCanvasContentHash(defDir: string): string {
   const hash = crypto.createHash("sha256");
-  for (const relPath of collectHashableFiles(defDir)) {
+  for (const relPath of scanDefinition(defDir).files) {
     let content: Buffer;
     try {
       content = fs.readFileSync(nodePath.join(defDir, relPath));
@@ -184,7 +218,14 @@ export function getProjectCanvasTrustStatus(
 
   const contentHash = computeCanvasContentHash(dir);
   const record = getCanvasTrust(db, projectId, definition);
-  const trusted = record !== null && record.content_hash === contentHash;
+  // A symlink in the hashed scope means the hash can't actually stand for
+  // "what code would run" (#227 review) — never report this one as trusted,
+  // whatever a stale record says, and surface why so the prompt can explain
+  // it instead of just refusing a "Trust and run" click with no context.
+  const blockedReason = hasSymlinksInDefinition(dir)
+    ? "This canvas contains a symlink, which isn't supported — AIchemist can't verify what code a symlink actually points to. Remove it (or replace it with a real file/folder) to trust this canvas."
+    : null;
+  const trusted = blockedReason === null && record !== null && record.content_hash === contentHash;
 
   return {
     definition,
@@ -194,6 +235,7 @@ export function getProjectCanvasTrustStatus(
     contentHash,
     trusted,
     trustedAt: trusted ? record!.trusted_at : null,
+    blockedReason,
   };
 }
 

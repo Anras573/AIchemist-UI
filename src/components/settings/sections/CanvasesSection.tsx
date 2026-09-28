@@ -44,6 +44,14 @@ function ProjectCanvasTrust({ projectId, definition }: { projectId: string; defi
   // above already surfaces that as a manifest error; nothing to show here.
   if (status === null) return null;
 
+  if (status.blockedReason) {
+    return (
+      <span className="text-[10px] font-medium shrink-0 text-destructive" title={status.blockedReason}>
+        unsupported
+      </span>
+    );
+  }
+
   if (!status.trusted) {
     return <span className="text-[10px] font-medium shrink-0 text-amber-500">not trusted</span>;
   }

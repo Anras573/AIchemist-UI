@@ -61,6 +61,7 @@ describe("CanvasesSection (hub)", () => {
       contentHash: "hash",
       trusted: false,
       trustedAt: null,
+      blockedReason: null,
     });
 
     renderWithProviders(<CanvasesSection projectId="proj-1" />);
@@ -82,6 +83,7 @@ describe("CanvasesSection (hub)", () => {
       contentHash: "hash",
       trusted: true,
       trustedAt: "2026-01-01T00:00:00.000Z",
+      blockedReason: null,
     });
     vi.mocked(window.electronAPI.canvasTrustRevoke).mockResolvedValue({ ok: true });
 
@@ -93,6 +95,28 @@ describe("CanvasesSection (hub)", () => {
     await waitFor(() =>
       expect(window.electronAPI.canvasTrustRevoke).toHaveBeenCalledWith({ projectId: "proj-1", definition: "board" })
     );
+  });
+
+  it("shows an unsupported badge (not a plain not-trusted one) when the definition is blocked (#227)", async () => {
+    vi.mocked(window.electronAPI.canvasListDefinitions).mockResolvedValue({
+      definitions: [PROJECT_BOARD],
+      errors: [],
+    });
+    vi.mocked(window.electronAPI.canvasTrustStatus).mockResolvedValue({
+      definition: "board",
+      path: "/proj/.agents/canvases/board",
+      manifest: PROJECT_BOARD.manifest,
+      dependencies: { names: [], hasPackageJson: false },
+      contentHash: "hash",
+      trusted: false,
+      trustedAt: null,
+      blockedReason: "This canvas contains a symlink, which isn't supported.",
+    });
+
+    renderWithProviders(<CanvasesSection projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByText("unsupported")).toBeInTheDocument());
+    expect(screen.queryByText("not trusted")).not.toBeInTheDocument();
   });
 
   it("shows manifest errors separately from valid definitions", async () => {

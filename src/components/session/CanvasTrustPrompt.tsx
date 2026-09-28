@@ -66,44 +66,52 @@ export function CanvasTrustPrompt({ projectId, status, onTrusted, onStale }: Can
         <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
         <div className="min-w-0 flex-1 space-y-1.5">
           <p className="font-medium text-amber-700 dark:text-amber-400">
-            {status.trustedAt !== null
-              ? "This project canvas changed since it was trusted"
-              : "This project canvas hasn't been trusted"}
+            {status.blockedReason
+              ? "This project canvas can't be trusted"
+              : status.trustedAt !== null
+                ? "This project canvas changed since it was trusted"
+                : "This project canvas hasn't been trusted"}
           </p>
           <p className="text-muted-foreground">
-            <code className="text-[11px]">.agents/canvases/{status.definition}/</code> ships code from this
-            project that would run with your privileges. It's shown here read-only (no tools) until you trust
-            it — editing any of its files will ask again.
-          </p>
-
-          <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-            <dt className="font-medium text-foreground/80">Server</dt>
-            <dd>
-              <code>{status.definition}/server.mjs</code>
-            </dd>
-            <dt className="font-medium text-foreground/80">Dependencies</dt>
-            <dd>
-              {!dependencies.hasPackageJson
-                ? "none"
-                : dependencies.names.length > 0
-                  ? dependencies.names.join(", ")
-                  : "none declared (package.json present)"}
-            </dd>
-            {hasPermissions && (
+            {status.blockedReason ?? (
               <>
-                <dt className="font-medium text-foreground/80">Declares (unenforced)</dt>
-                <dd>
-                  {[
-                    permissions?.fs?.length ? `fs: ${permissions.fs.join(", ")}` : null,
-                    permissions?.network?.length ? `network: ${permissions.network.join(", ")}` : null,
-                    permissions?.exec?.length ? `exec: ${permissions.exec.join(", ")}` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </dd>
+                <code className="text-[11px]">.agents/canvases/{status.definition}/</code> ships code from this
+                project that would run with your privileges. It's shown here read-only (no tools) until you trust
+                it — editing any of its files will ask again.
               </>
             )}
-          </dl>
+          </p>
+
+          {!status.blockedReason && (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+              <dt className="font-medium text-foreground/80">Server</dt>
+              <dd>
+                <code>{status.definition}/server.mjs</code>
+              </dd>
+              <dt className="font-medium text-foreground/80">Dependencies</dt>
+              <dd>
+                {!dependencies.hasPackageJson
+                  ? "none"
+                  : dependencies.names.length > 0
+                    ? dependencies.names.join(", ")
+                    : "none declared (package.json present)"}
+              </dd>
+              {hasPermissions && (
+                <>
+                  <dt className="font-medium text-foreground/80">Declares (unenforced)</dt>
+                  <dd>
+                    {[
+                      permissions?.fs?.length ? `fs: ${permissions.fs.join(", ")}` : null,
+                      permissions?.network?.length ? `network: ${permissions.network.join(", ")}` : null,
+                      permissions?.exec?.length ? `exec: ${permissions.exec.join(", ")}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </dd>
+                </>
+              )}
+            </dl>
+          )}
 
           {error && <p className="text-destructive">{error}</p>}
           {installOutput && (
@@ -112,10 +120,12 @@ export function CanvasTrustPrompt({ projectId, status, onTrusted, onStale }: Can
             </pre>
           )}
 
-          <Button size="xs" onClick={() => void handleTrust()} disabled={trusting} className="gap-1.5">
-            {trusting ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-            Trust and run
-          </Button>
+          {!status.blockedReason && (
+            <Button size="xs" onClick={() => void handleTrust()} disabled={trusting} className="gap-1.5">
+              {trusting ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+              Trust and run
+            </Button>
+          )}
         </div>
       </div>
     </div>
