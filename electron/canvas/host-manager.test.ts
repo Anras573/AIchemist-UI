@@ -529,7 +529,7 @@ describe("CanvasHostManager — dev reload", () => {
     expect(onDevReload).toHaveBeenCalledTimes(1);
   });
 
-  it("stops a dev-reload restart loop once it exceeds the crash budget, ending in errored rather than looping forever", async () => {
+  it("stops a dev-reload restart loop once it exceeds its own budget, ending in errored rather than looping forever", async () => {
     const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
     const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
     const onDevReload = vi.fn();
@@ -537,8 +537,8 @@ describe("CanvasHostManager — dev reload", () => {
       spawn: factory,
       watchDefinitionDir: fakeWatchDefinitionDir,
       devReloadDebounceMs: 20,
-      maxRestarts: 2,
-      restartWindowMs: 60_000,
+      devReloadLoopMaxCount: 2,
+      devReloadLoopWindowMs: 60_000,
       hooks: { onDevReload },
     });
 
@@ -547,14 +547,14 @@ describe("CanvasHostManager — dev reload", () => {
     // Each cycle simulates a canvas whose own writes happen to land on a
     // source-looking extension (a generated "state.json" cache, say) — the
     // filename filter alone can't distinguish that from a real edit, so this
-    // exercises the second line of defense: the shared crash-restart budget.
+    // exercises the second line of defense: the dev-reload-only loop budget.
     for (let i = 0; i < 4; i++) {
       triggerDevChange("/defs/kanban", "state.json");
       await vi.advanceTimersByTimeAsync(20);
     }
 
     expect(manager.getStatus(canvas.id)).toBe("errored");
-    expect(onDevReload).toHaveBeenCalledTimes(2); // maxRestarts, then it gives up
+    expect(onDevReload).toHaveBeenCalledTimes(2); // devReloadLoopMaxCount, then it gives up
     expect(processes.length).toBeLessThan(10); // bounded — nowhere near "20 spawns in 3s"
 
     // The watcher was disarmed along with giving up — a further write does nothing.
@@ -562,6 +562,63 @@ describe("CanvasHostManager — dev reload", () => {
     await vi.advanceTimersByTimeAsync(50);
     expect(onDevReload).toHaveBeenCalledTimes(2);
     expect(manager.getStatus(canvas.id)).toBe("errored");
+  });
+
+  it("does not confuse a few ordinary, spaced-out edits with a loop (review regression on #237)", async () => {
+    // A tight loop budget (2) that would trip on a real loop within a couple
+    // of cycles must still tolerate more edits than that when they're spaced
+    // far enough apart to fall outside the loop window each time.
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const onDevReload = vi.fn();
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir: fakeWatchDefinitionDir,
+      devReloadDebounceMs: 20,
+      devReloadLoopMaxCount: 2,
+      devReloadLoopWindowMs: 100, // short window so widely-spaced saves fall outside it
+      hooks: { onDevReload },
+    });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    // Four saves of a real source file, well outside the (short) loop window
+    // each time — an author or agent editing at a normal pace.
+    for (let i = 0; i < 4; i++) {
+      triggerDevChange("/defs/kanban", "server.mjs");
+      await vi.advanceTimersByTimeAsync(200);
+    }
+
+    expect(manager.getStatus(canvas.id)).toBe("running");
+    expect(onDevReload).toHaveBeenCalledTimes(4);
+  });
+
+  it("dev-reload restarts never spend the crash-backoff budget — a real crash right after is still judged fresh", async () => {
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir: fakeWatchDefinitionDir,
+      devReloadDebounceMs: 20,
+      maxRestarts: 1, // a crash budget so tight that 3 shared "restarts" would have exhausted it
+      restartWindowMs: 60_000,
+    });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    for (let i = 0; i < 3; i++) {
+      triggerDevChange("/defs/kanban", "server.mjs");
+      await vi.advanceTimersByTimeAsync(20);
+    }
+    // Three dev reloads later, the host is healthy and running.
+    expect(manager.getStatus(canvas.id)).toBe("running");
+
+    // A genuine crash now still gets its own first backoff attempt rather
+    // than landing on "errored" immediately — proof the dev reloads above
+    // never touched restartTimestamps.
+    processes[processes.length - 1].crash();
+    await vi.advanceTimersByTimeAsync(1000); // restartBaseDelayMs (default) for attempt 1
+    expect(manager.getStatus(canvas.id)).toBe("running");
   });
 });
 

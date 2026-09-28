@@ -190,12 +190,70 @@ describe("CanvasPanel", () => {
     const definitionSelect = await screen.findByLabelText("Canvas definition");
 
     fireEvent.change(titleInput, { target: { value: "New board" } });
-    // "kanban" is already selected by default (the only built-in definition).
-    expect(definitionSelect).toHaveValue("kanban");
+    // "kanban" is already selected by default (the only built-in definition),
+    // keyed as "<tier>:<id>" so a same-id project entry can't collide with it.
+    expect(definitionSelect).toHaveValue("builtin:kanban");
 
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => {
+      expect(window.electronAPI.canvasCreate).toHaveBeenCalledWith({
+        projectId: "proj-1",
+        definition: "kanban",
+        title: "New board",
+      });
+    });
+  });
+
+  it("distinguishes a same-id project and built-in definition in the picker, and creates the selected one (review regression on #237)", async () => {
+    vi.mocked(window.electronAPI.canvasList).mockResolvedValue([]);
+    vi.mocked(window.electronAPI.canvasListDefinitions).mockResolvedValue({
+      definitions: [
+        {
+          id: "kanban",
+          tier: "project",
+          path: "/proj/.agents/canvases/kanban",
+          manifest: { name: "kanban", description: "Untrusted project override", version: 1, server: "server.mjs", ui: "ui/index.html" },
+        },
+        {
+          id: "kanban",
+          tier: "builtin",
+          path: "/app/electron/canvas/builtin/kanban",
+          manifest: { name: "kanban", description: "The real one", version: 1, server: "server.mjs", ui: "ui/index.html" },
+        },
+      ],
+      errors: [],
+    });
+    vi.mocked(window.electronAPI.canvasCreate).mockResolvedValue({
+      id: "canvas-new",
+      project_id: "proj-1",
+      definition: "kanban",
+      title: "New board",
+      state: null,
+      revision: 0,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+    });
+
+    renderWithProviders(<CanvasPanel />);
+    await waitFor(() => expect(screen.getByText(/No canvases yet/)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "New canvas" }));
+    const definitionSelect = await screen.findByLabelText<HTMLSelectElement>("Canvas definition");
+
+    // Two distinct options exist (no silently-collapsed duplicate), and the
+    // picker defaults to the runnable one, not the disabled project entry.
+    const optionValues = Array.from(definitionSelect.options).map((o) => o.value);
+    expect(optionValues).toEqual(["project:kanban", "builtin:kanban"]);
+    expect(definitionSelect).toHaveValue("builtin:kanban");
+    const projectOption = Array.from(definitionSelect.options).find((o) => o.value === "project:kanban");
+    expect(projectOption?.disabled).toBe(true);
+
+    fireEvent.change(screen.getByPlaceholderText(/Title/), { target: { value: "New board" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      // The runnable built-in "kanban" is created, not the untrusted project one.
       expect(window.electronAPI.canvasCreate).toHaveBeenCalledWith({
         projectId: "proj-1",
         definition: "kanban",

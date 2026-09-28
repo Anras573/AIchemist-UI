@@ -41,6 +41,10 @@ export const TOOL_CALL_TIMEOUT_GRACE_MS = 5_000;
  */
 export const CANVAS_DEV_RELOAD_DEBOUNCE_MS = 500;
 
+/** Default budget for `devReloadLoopMaxCount` / `devReloadLoopWindowMs` — see `CanvasHostManagerOptions`. */
+export const DEFAULT_DEV_RELOAD_LOOP_MAX_COUNT = 10;
+export const DEFAULT_DEV_RELOAD_LOOP_WINDOW_MS = 30_000;
+
 /** Test seam mirrors `FileWatchFactory` in `workflow-scheduler.ts` — lets tests inject a fake `fs.watch`. */
 export type CanvasFileWatchListener = (eventType: fs.WatchEventType, filename: string | Buffer | null) => void;
 export type CanvasFileWatchFactory = (
@@ -195,6 +199,22 @@ export interface CanvasHostManagerOptions {
   devReloadDebounceMs?: number;
   /** Test seam: inject a fake `fs.watch` for the dev-reload watcher. */
   watchDefinitionDir?: CanvasFileWatchFactory;
+  /**
+   * Dev-reload restart loop detection — deliberately its own budget,
+   * separate from `maxRestarts`/`restartWindowMs` (the crash budget): a
+   * human or agent iterating on a canvas's files at a normal pace (a few
+   * saves a minute) must never eat into, or get caught by, the crash budget
+   * meant for genuine unexpected exits (found in review on #237). More than
+   * `devReloadLoopMaxCount` dev-reload-triggered restarts within
+   * `devReloadLoopWindowMs` stops the host and marks it `"errored"` instead
+   * of restarting forever. Default 10 within 30 s — generous enough that
+   * ordinary editing (or an agent writing a few files in one turn) never
+   * trips it, while a self-write loop (which cycles roughly every debounce +
+   * startup interval) still hits it within seconds.
+   */
+  devReloadLoopMaxCount?: number;
+  /** Sliding window `devReloadLoopMaxCount` is measured over. Default 30 s. */
+  devReloadLoopWindowMs?: number;
 }
 
 export class CanvasHostTimeoutError extends Error {
@@ -252,6 +272,8 @@ interface HostRecord {
   /** Armed once the host reaches "running" (see the `"ready"` case); watches the definition folder for dev reload. */
   devReloadWatcher: fs.FSWatcher | null;
   devReloadDebounceTimer: ReturnType<typeof setTimeout> | null;
+  /** Dev-reload's own loop-detection budget — separate from `restartTimestamps` (the crash budget). See `CanvasHostManagerOptions.devReloadLoopMaxCount`. */
+  devReloadTimestamps: number[];
 }
 
 // ─── Manager ─────────────────────────────────────────────────────────────────
@@ -269,6 +291,8 @@ export class CanvasHostManager {
   private readonly toolCallTimeoutMs: number;
   private readonly devReloadDebounceMs: number;
   private readonly watchDefinitionDir: CanvasFileWatchFactory;
+  private readonly devReloadLoopMaxCount: number;
+  private readonly devReloadLoopWindowMs: number;
 
   constructor(
     private readonly db: Database,
@@ -285,6 +309,8 @@ export class CanvasHostManager {
     this.toolCallTimeoutMs = options?.toolCallTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
     this.devReloadDebounceMs = options?.devReloadDebounceMs ?? CANVAS_DEV_RELOAD_DEBOUNCE_MS;
     this.watchDefinitionDir = options?.watchDefinitionDir ?? fs.watch;
+    this.devReloadLoopMaxCount = options?.devReloadLoopMaxCount ?? DEFAULT_DEV_RELOAD_LOOP_MAX_COUNT;
+    this.devReloadLoopWindowMs = options?.devReloadLoopWindowMs ?? DEFAULT_DEV_RELOAD_LOOP_WINDOW_MS;
   }
 
   private callHook<K extends keyof CanvasHostHooks>(
@@ -379,6 +405,7 @@ export class CanvasHostManager {
       readyWaiters: [],
       devReloadWatcher: null,
       devReloadDebounceTimer: null,
+      devReloadTimestamps: prior?.devReloadTimestamps ?? [],
     };
     this.hosts.set(canvasId, record);
     this.callHook("onStatusChanged", canvasId, "starting");
@@ -688,16 +715,15 @@ export class CanvasHostManager {
     return stopped;
   }
 
-  /** Stops and restarts a host, resetting its crash-backoff counter — an explicit user "Restart" deserves a clean slate. */
+  /** Stops and restarts a host, resetting both the crash-backoff and dev-reload-loop budgets — an explicit user "Restart" deserves a clean slate. */
   async restart(canvasId: string, opts: StartCanvasHostOptions): Promise<void> {
     await this.restartInternal(canvasId, opts, { resetBackoff: true });
   }
 
   /**
-   * Shared by the public `restart()` (resets the backoff budget) and
-   * `reloadForDevChange` (doesn't — a dev-reload restart shares the same
-   * crash budget so a runaway loop still ends in `"errored"`, see
-   * `reloadForDevChange`).
+   * Shared by the public `restart()` (resets both budgets) and
+   * `reloadForDevChange` (doesn't — a dev-reload restart manages its own
+   * `devReloadTimestamps` budget separately, see `reloadForDevChange`).
    */
   private async restartInternal(
     canvasId: string,
@@ -706,7 +732,10 @@ export class CanvasHostManager {
   ): Promise<void> {
     await this.stop(canvasId);
     const record = this.hosts.get(canvasId);
-    if (record && options.resetBackoff) record.restartTimestamps = [];
+    if (record && options.resetBackoff) {
+      record.restartTimestamps = [];
+      record.devReloadTimestamps = [];
+    }
     await this.start(canvasId, opts);
   }
 
@@ -808,24 +837,28 @@ export class CanvasHostManager {
    * change wouldn't need it, but a `ui/` change does, and debouncing folds
    * both into the same folder watch, so every dev-reload restart reports it).
    *
-   * Shares `record.restartTimestamps` (the crash-backoff budget) with the
-   * ordinary crash path: `isDevReloadSourceChange` filters out most
-   * self-writes, but it can't catch everything a canvas might do (writing a
-   * `.mjs` cache file, say), so this is the second line of defense — a
-   * canvas that keeps triggering reloads faster than `maxRestarts` allows
-   * within `restartWindowMs` gets stopped outright and marked `"errored"`
-   * (found in review on #237) rather than restarting forever. Unlike the
-   * crash path, there's no backoff delay here — a dev-reload restart is
-   * supposed to be immediate — just a hard cap on how many can happen.
+   * Uses its own loop budget (`record.devReloadTimestamps`,
+   * `devReloadLoopMaxCount` / `devReloadLoopWindowMs`) — deliberately
+   * **not** the crash budget (`restartTimestamps`/`maxRestarts`). An earlier
+   * version shared the crash budget as a second line of defense against
+   * whatever `isDevReloadSourceChange` doesn't filter out, but that meant a
+   * few ordinary saves (or an agent turn writing a handful of files) could
+   * exhaust a *human's* editing budget and pre-spend a *crash's* backoff
+   * budget too — a regression found in review on #237. The two are
+   * unrelated concerns: this budget is generous (default 10 within 30s)
+   * because it only needs to catch something cycling far faster than any
+   * person or turn would — a self-write loop restarts roughly every
+   * debounce + startup interval, so it blows through 10 in a few seconds —
+   * while never touching what the crash path uses to judge a real exit.
    */
   private async reloadForDevChange(canvasId: string, opts: StartCanvasHostOptions): Promise<void> {
     const record = this.hosts.get(canvasId);
     if (!record) return; // host was stopped/removed between the debounce firing and now
 
     const now = Date.now();
-    record.restartTimestamps = record.restartTimestamps.filter((t) => now - t < this.restartWindowMs);
-    record.restartTimestamps.push(now);
-    if (record.restartTimestamps.length > this.maxRestarts) {
+    record.devReloadTimestamps = record.devReloadTimestamps.filter((t) => now - t < this.devReloadLoopWindowMs);
+    record.devReloadTimestamps.push(now);
+    if (record.devReloadTimestamps.length > this.devReloadLoopMaxCount) {
       this.stopDevReloadLoop(record, canvasId);
       return;
     }
@@ -839,17 +872,17 @@ export class CanvasHostManager {
   }
 
   /**
-   * Terminal state for a dev-reload restart loop that exceeded the crash
+   * Terminal state for a dev-reload restart loop that exceeded its own
    * budget: disarms the watcher (a hands-off host has no reason to keep
    * watching) and kills the process, setting `"errored"` before the kill so
    * `handleExit` — which still fires — doesn't downgrade it back to
    * `"stopped"` (same ordering `failStart` uses for the same reason). A
-   * manual `restart()` is the only way out, and it resets the budget.
+   * manual `restart()` is the only way out, and it resets both budgets.
    */
   private stopDevReloadLoop(record: HostRecord, canvasId: string): void {
     console.error(
       `[canvas-host-manager] dev-reload restart loop detected for ${canvasId} ` +
-        `(more than ${this.maxRestarts} reload-triggered restarts within ${this.restartWindowMs}ms) — ` +
+        `(more than ${this.devReloadLoopMaxCount} dev-reload restarts within ${this.devReloadLoopWindowMs}ms) — ` +
         `stopping instead of restarting forever. Check whether the canvas's server writes files into its own definition folder.`
     );
     this.disarmDevReload(record);

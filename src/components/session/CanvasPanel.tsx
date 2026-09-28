@@ -27,6 +27,20 @@ const STATUS_LABELS: Record<CanvasHostStatus, string> = {
   errored: "Error",
 };
 
+/**
+ * Discovery can list two entries sharing the same `id` (e.g. a project's
+ * `.agents/canvases/kanban/` alongside the built-in `kanban` — the project
+ * one never suppresses a runnable one, see `discoverCanvasDefinitions`), so
+ * `id` alone isn't a safe `<option>` key/value: React would warn on the
+ * duplicate key, and a controlled `<select>` would resolve the value to
+ * whichever option matches first regardless of which one was actually
+ * clicked (found in review on #237). `tier` is always distinct for two
+ * same-`id` entries, so pairing them is enough to disambiguate.
+ */
+function definitionKey(d: CanvasDefinitionEntry): string {
+  return `${d.tier}:${d.id}`;
+}
+
 function StatusBadge({ status }: { status: CanvasHostStatus | undefined }) {
   if (!status) return null;
   return (
@@ -100,7 +114,7 @@ export function CanvasPanel() {
   useEffect(() => {
     if (createDefinition || !definitions?.length) return;
     const firstRunnable = definitions.find((d) => d.tier !== "project") ?? definitions[0];
-    setCreateDefinition(firstRunnable.id);
+    setCreateDefinition(definitionKey(firstRunnable));
   }, [definitions, createDefinition]);
 
   // Reset the selection when the project changes; default to the first
@@ -149,13 +163,14 @@ export function CanvasPanel() {
   }, [selectedCanvasId, definitionMissing]);
 
   async function handleCreate() {
-    if (!activeProjectId || !createTitle.trim() || !createDefinition.trim()) return;
+    const selectedDefinition = definitions?.find((d) => definitionKey(d) === createDefinition);
+    if (!activeProjectId || !createTitle.trim() || !selectedDefinition) return;
     setCreating(true);
     setCreateError(null);
     try {
       const created = await ipc.canvasCreate({
         projectId: activeProjectId,
-        definition: createDefinition.trim(),
+        definition: selectedDefinition.id,
         title: createTitle.trim(),
       });
       setCreateTitle("");
@@ -263,8 +278,8 @@ export function CanvasPanel() {
               {!definitions?.length && <option value="">No definitions available</option>}
               {definitions?.map((d) => (
                 <option
-                  key={d.id}
-                  value={d.id}
+                  key={definitionKey(d)}
+                  value={definitionKey(d)}
                   disabled={d.tier === "project"}
                   title={
                     d.tier === "project"
