@@ -133,7 +133,7 @@ export const ipc = {
     window.electronAPI.createSkill(args),
 
   // Canvases
-  canvasListDefinitions: () => window.electronAPI.canvasListDefinitions(),
+  canvasListDefinitions: (args?: { projectId?: string }) => window.electronAPI.canvasListDefinitions(args),
   canvasList: (args: { projectId: string; sessionId?: string }) => window.electronAPI.canvasList(args),
   canvasCreate: (args: { projectId: string; definition: string; title: string; initialState?: unknown }) =>
     window.electronAPI.canvasCreate(args),

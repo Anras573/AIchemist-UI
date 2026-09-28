@@ -122,15 +122,23 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     createSkill: vi.fn().mockResolvedValue({ skillPath: "" }),
     // Safe default shapes (stable ids + valid ISO timestamps) so tests that
     // don't override still get usable, invariant-respecting objects.
-    canvasListDefinitions: vi.fn().mockResolvedValue([
-      {
-        name: "kanban",
-        description: "A kanban board with todo/doing/done columns.",
-        version: 1,
-        server: "server.mjs",
-        ui: "ui/index.html",
-      },
-    ]),
+    canvasListDefinitions: vi.fn().mockResolvedValue({
+      definitions: [
+        {
+          id: "kanban",
+          tier: "builtin",
+          path: "/mock/builtin/kanban",
+          manifest: {
+            name: "kanban",
+            description: "A kanban board with todo/doing/done columns.",
+            version: 1,
+            server: "server.mjs",
+            ui: "ui/index.html",
+          },
+        },
+      ],
+      errors: [],
+    }),
     canvasList: vi.fn().mockResolvedValue([]),
     canvasCreate: vi.fn().mockResolvedValue({
       id: "mock-canvas-id",

@@ -141,6 +141,12 @@ export function canvasMcpServersForSession(
 
   const out: McpServersMap = {};
   for (const canvas of attached) {
+    // A definition deleted from disk while an instance still exists (#226's
+    // "definition missing" state) must not be advertised as a tool server —
+    // its host can never start, so a `tools/list` against it would just
+    // error. `getAttachedCanvases`/tools stay unaffected; this only trims
+    // what's offered to the model this turn.
+    if (!resolveCanvasServerPath(canvas.definition)) continue;
     const entry: McpServerEntry = {
       type: "http",
       url: `${endpoint.baseUrl}/canvas/${canvas.id}/session/${sessionId}/mcp`,
@@ -158,7 +164,9 @@ export function canvasMcpServersForSession(
  * attached.
  */
 export function buildCanvasSystemPromptAddendum(db: Database, sessionId: string): string {
-  const attached = tryGetAttachedCanvases(db, sessionId);
+  // Same "definition missing" exclusion as `canvasMcpServersForSession` —
+  // no point telling the model about a canvas whose tools aren't offered.
+  const attached = tryGetAttachedCanvases(db, sessionId).filter((c) => resolveCanvasServerPath(c.definition));
   if (attached.length === 0) return "";
   const lines = attached.map((c) => `- ${c.title} (${c.definition})`).join("\n");
   return (

@@ -113,6 +113,69 @@ describe("CANVAS_CREATE", () => {
   });
 });
 
+describe("CANVAS_LIST_DEFINITIONS", () => {
+  let globalRoot: string;
+  let projectDir: string;
+
+  beforeEach(() => {
+    globalRoot = fs.mkdtempSync(nodePath.join(os.tmpdir(), "canvas-handlers-global-"));
+    projectDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "canvas-handlers-project-"));
+    _setCanvasesRootForTests(globalRoot);
+    db.prepare("INSERT INTO projects (id, name, path, created_at) VALUES ('p2', 'P2', ?, 'now')").run(projectDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(globalRoot, { recursive: true, force: true });
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    _setCanvasesRootForTests(null);
+  });
+
+  function writeManifest(root: string, name: string): void {
+    const dir = nodePath.join(root, name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      nodePath.join(dir, "canvas.json"),
+      JSON.stringify({ name, description: "", version: 1, server: "server.mjs", ui: "ui/index.html" })
+    );
+  }
+
+  it("includes the built-in tier even with no projectId", async () => {
+    const env = await call<{ definitions: Array<{ id: string; tier: string }>; errors: unknown[] }>(
+      CH.CANVAS_LIST_DEFINITIONS,
+      {}
+    );
+    expect(env.ok).toBe(true);
+    if (!env.ok) return;
+    expect(env.data.definitions.some((d) => d.id === "kanban" && d.tier === "builtin")).toBe(true);
+  });
+
+  it("resolves the project tier from the given projectId's path", async () => {
+    writeManifest(nodePath.join(projectDir, ".agents", "canvases"), "board");
+
+    const env = await call<{ definitions: Array<{ id: string; tier: string }>; errors: unknown[] }>(
+      CH.CANVAS_LIST_DEFINITIONS,
+      { projectId: "p2" }
+    );
+    expect(env.ok).toBe(true);
+    if (!env.ok) return;
+    expect(env.data.definitions).toContainEqual(expect.objectContaining({ id: "board", tier: "project" }));
+  });
+
+  it("surfaces a manifest error without breaking the rest of the listing", async () => {
+    fs.mkdirSync(nodePath.join(globalRoot, "broken"), { recursive: true }); // no canvas.json
+    writeManifest(globalRoot, "sqlite-browser");
+
+    const env = await call<{ definitions: Array<{ id: string }>; errors: Array<{ id: string; tier: string }> }>(
+      CH.CANVAS_LIST_DEFINITIONS,
+      {}
+    );
+    expect(env.ok).toBe(true);
+    if (!env.ok) return;
+    expect(env.data.definitions.some((d) => d.id === "sqlite-browser")).toBe(true);
+    expect(env.data.errors).toContainEqual(expect.objectContaining({ id: "broken", tier: "global" }));
+  });
+});
+
 describe("CANVAS_LIST", () => {
   it("lists a project's canvases with attachment for the given session", async () => {
     const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "A" });

@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { EventEmitter } from "node:events";
+import type * as fs from "node:fs";
 import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { z } from "zod";
@@ -13,8 +14,13 @@ import { defineCanvas, type CanvasServerDefinition } from "./host/sdk";
 // from "electron"` is evaluated below.
 vi.mock("electron", () => ({ utilityProcess: { fork: vi.fn() } }));
 
-import { CanvasHostManager, buildHostEnv, TOOL_CALL_TIMEOUT_GRACE_MS } from "./host-manager";
-import type { CanvasHostProcess, CanvasHostProcessFactory, CanvasHostHooks } from "./host-manager";
+import { CanvasHostManager, buildHostEnv, TOOL_CALL_TIMEOUT_GRACE_MS, isDevReloadSourceChange } from "./host-manager";
+import type {
+  CanvasHostProcess,
+  CanvasHostProcessFactory,
+  CanvasHostHooks,
+  CanvasFileWatchFactory,
+} from "./host-manager";
 
 // ─── Fake host process ───────────────────────────────────────────────────────
 
@@ -326,6 +332,317 @@ describe("CanvasHostManager — idle stop", () => {
     expect(processes[0].killed).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(processes[0].killed).toBe(true);
+  });
+});
+
+// ─── Dev reload (#226) ────────────────────────────────────────────────────────
+
+describe("CanvasHostManager — dev reload", () => {
+  type FakeDevWatch = {
+    dir: string;
+    listener: Parameters<CanvasFileWatchFactory>[2];
+    closed: boolean;
+  };
+  let fakeWatches: FakeDevWatch[];
+
+  const fakeWatchDefinitionDir: CanvasFileWatchFactory = (dir, _options, listener) => {
+    const fake: FakeDevWatch = { dir, listener, closed: false };
+    const watcher = {
+      close: vi.fn(() => {
+        fake.closed = true;
+      }),
+      on: vi.fn(() => watcher),
+    } as unknown as fs.FSWatcher;
+    fakeWatches.push(fake);
+    return watcher;
+  };
+
+  function triggerDevChange(dir = "/defs/kanban", filename = "server.mjs"): void {
+    for (const fake of fakeWatches) {
+      if (!fake.closed && fake.dir === dir) fake.listener("change", filename);
+    }
+  }
+
+  beforeEach(() => {
+    fakeWatches = [];
+    vi.useFakeTimers();
+  });
+
+  it("arms a watcher on the definition's folder once the host becomes ready", async () => {
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const manager = new CanvasHostManager(db, { spawn: factory, watchDefinitionDir: fakeWatchDefinitionDir });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    expect(fakeWatches).toHaveLength(1);
+    expect(fakeWatches[0].dir).toBe("/defs/kanban");
+  });
+
+  it("debounces a burst of file events into a single restart, and fires onDevReload once it completes", async () => {
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const onDevReload = vi.fn();
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir: fakeWatchDefinitionDir,
+      devReloadDebounceMs: 20,
+      hooks: { onDevReload },
+    });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    // A burst of three events, each within the debounce window of the last,
+    // must coalesce into exactly one restart.
+    triggerDevChange();
+    await vi.advanceTimersByTimeAsync(5);
+    triggerDevChange();
+    await vi.advanceTimersByTimeAsync(5);
+    triggerDevChange();
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(processes).toHaveLength(2); // the original process, plus one restart
+    expect(processes[0].killed).toBe(true);
+    expect(manager.getStatus(canvas.id)).toBe("running");
+    expect(onDevReload).toHaveBeenCalledTimes(1);
+    expect(onDevReload).toHaveBeenCalledWith(canvas.id);
+  });
+
+  it("re-arms the watcher after a dev-triggered restart, so a later edit reloads again", async () => {
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const onDevReload = vi.fn();
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir: fakeWatchDefinitionDir,
+      devReloadDebounceMs: 20,
+      hooks: { onDevReload },
+    });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    triggerDevChange();
+    await vi.advanceTimersByTimeAsync(20);
+    expect(onDevReload).toHaveBeenCalledTimes(1);
+    expect(fakeWatches).toHaveLength(2); // the original watcher, plus the re-armed one
+
+    triggerDevChange();
+    await vi.advanceTimersByTimeAsync(20);
+    expect(onDevReload).toHaveBeenCalledTimes(2);
+    expect(processes).toHaveLength(3);
+  });
+
+  it("stops watching once the host is stopped, and drops a pending debounce", async () => {
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const onDevReload = vi.fn();
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir: fakeWatchDefinitionDir,
+      devReloadDebounceMs: 20,
+      hooks: { onDevReload },
+    });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+    triggerDevChange();
+    await manager.stop(canvas.id);
+
+    expect(fakeWatches[0].closed).toBe(true);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(onDevReload).not.toHaveBeenCalled();
+  });
+
+  it("is fail-safe when the definition folder can't be watched — the host still starts", async () => {
+    const throwingWatch: CanvasFileWatchFactory = () => {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    };
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const manager = new CanvasHostManager(db, { spawn: factory, watchDefinitionDir: throwingWatch });
+
+    await expect(
+      manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" })
+    ).resolves.toBeUndefined();
+    expect(manager.getStatus(canvas.id)).toBe("running");
+
+    errorSpy.mockRestore();
+  });
+
+  // ── Restart-loop guard (review on #237) ──────────────────────────────────
+
+  it("ignores a non-source file — a canvas writing its own data into its folder doesn't trigger a reload", async () => {
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const onDevReload = vi.fn();
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir: fakeWatchDefinitionDir,
+      devReloadDebounceMs: 20,
+      hooks: { onDevReload },
+    });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    triggerDevChange("/defs/kanban", "cache.db"); // e.g. a DB-browser canvas's own SQLite file
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(onDevReload).not.toHaveBeenCalled();
+  });
+
+  it("ignores writes under node_modules and dotfiles", async () => {
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const onDevReload = vi.fn();
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir: fakeWatchDefinitionDir,
+      devReloadDebounceMs: 20,
+      hooks: { onDevReload },
+    });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    triggerDevChange("/defs/kanban", "node_modules/some-pkg/index.js");
+    triggerDevChange("/defs/kanban", ".cache/tmp.json");
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(onDevReload).not.toHaveBeenCalled();
+  });
+
+  it("still reloads on a real source edit (server.mjs, canvas.json, or a ui/ file)", async () => {
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const onDevReload = vi.fn();
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir: fakeWatchDefinitionDir,
+      devReloadDebounceMs: 20,
+      hooks: { onDevReload },
+    });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    triggerDevChange("/defs/kanban", "ui/index.html");
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(onDevReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops a dev-reload restart loop once it exceeds its own budget, ending in errored rather than looping forever", async () => {
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const onDevReload = vi.fn();
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir: fakeWatchDefinitionDir,
+      devReloadDebounceMs: 20,
+      devReloadLoopMaxCount: 2,
+      devReloadLoopWindowMs: 60_000,
+      hooks: { onDevReload },
+    });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    // Each cycle simulates a canvas whose own writes happen to land on a
+    // source-looking extension (a generated "state.json" cache, say) — the
+    // filename filter alone can't distinguish that from a real edit, so this
+    // exercises the second line of defense: the dev-reload-only loop budget.
+    for (let i = 0; i < 4; i++) {
+      triggerDevChange("/defs/kanban", "state.json");
+      await vi.advanceTimersByTimeAsync(20);
+    }
+
+    expect(manager.getStatus(canvas.id)).toBe("errored");
+    expect(onDevReload).toHaveBeenCalledTimes(2); // devReloadLoopMaxCount, then it gives up
+    expect(processes.length).toBeLessThan(10); // bounded — nowhere near "20 spawns in 3s"
+
+    // The watcher was disarmed along with giving up — a further write does nothing.
+    triggerDevChange("/defs/kanban", "state.json");
+    await vi.advanceTimersByTimeAsync(50);
+    expect(onDevReload).toHaveBeenCalledTimes(2);
+    expect(manager.getStatus(canvas.id)).toBe("errored");
+  });
+
+  it("does not confuse a few ordinary, spaced-out edits with a loop (review regression on #237)", async () => {
+    // A tight loop budget (2) that would trip on a real loop within a couple
+    // of cycles must still tolerate more edits than that when they're spaced
+    // far enough apart to fall outside the loop window each time.
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const onDevReload = vi.fn();
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir: fakeWatchDefinitionDir,
+      devReloadDebounceMs: 20,
+      devReloadLoopMaxCount: 2,
+      devReloadLoopWindowMs: 100, // short window so widely-spaced saves fall outside it
+      hooks: { onDevReload },
+    });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    // Four saves of a real source file, well outside the (short) loop window
+    // each time — an author or agent editing at a normal pace.
+    for (let i = 0; i < 4; i++) {
+      triggerDevChange("/defs/kanban", "server.mjs");
+      await vi.advanceTimersByTimeAsync(200);
+    }
+
+    expect(manager.getStatus(canvas.id)).toBe("running");
+    expect(onDevReload).toHaveBeenCalledTimes(4);
+  });
+
+  it("dev-reload restarts never spend the crash-backoff budget — a real crash right after is still judged fresh", async () => {
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir: fakeWatchDefinitionDir,
+      devReloadDebounceMs: 20,
+      maxRestarts: 1, // a crash budget so tight that 3 shared "restarts" would have exhausted it
+      restartWindowMs: 60_000,
+    });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    for (let i = 0; i < 3; i++) {
+      triggerDevChange("/defs/kanban", "server.mjs");
+      await vi.advanceTimersByTimeAsync(20);
+    }
+    // Three dev reloads later, the host is healthy and running.
+    expect(manager.getStatus(canvas.id)).toBe("running");
+
+    // A genuine crash now still gets its own first backoff attempt rather
+    // than landing on "errored" immediately — proof the dev reloads above
+    // never touched restartTimestamps.
+    processes[processes.length - 1].crash();
+    await vi.advanceTimersByTimeAsync(1000); // restartBaseDelayMs (default) for attempt 1
+    expect(manager.getStatus(canvas.id)).toBe("running");
+  });
+});
+
+describe("isDevReloadSourceChange", () => {
+  it("treats an unknown filename (null) as a source change", () => {
+    expect(isDevReloadSourceChange(null)).toBe(true);
+  });
+
+  it("accepts source extensions", () => {
+    for (const name of ["server.mjs", "canvas.json", "index.js", "index.ts", "ui/index.html", "ui/styles.css"]) {
+      expect(isDevReloadSourceChange(name)).toBe(true);
+    }
+  });
+
+  it("rejects common data/cache extensions", () => {
+    for (const name of ["cache.db", "data.sqlite", "app.log", "state.tmp"]) {
+      expect(isDevReloadSourceChange(name)).toBe(false);
+    }
+  });
+
+  it("rejects anything under node_modules or a dotfile/dot-directory", () => {
+    expect(isDevReloadSourceChange("node_modules/pkg/index.js")).toBe(false);
+    expect(isDevReloadSourceChange(".git/HEAD")).toBe(false);
+    expect(isDevReloadSourceChange(".cache/tmp.json")).toBe(false);
   });
 });
 

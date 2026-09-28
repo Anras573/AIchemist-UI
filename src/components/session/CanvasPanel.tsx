@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CanvasFrame } from "./CanvasFrame";
-import type { CanvasDefinition, CanvasHostStatus, CanvasListItem } from "@/types";
+import type { CanvasDefinitionEntry, CanvasDiscoveryResult, CanvasHostStatus, CanvasListItem } from "@/types";
 
 const STATUS_STYLES: Record<CanvasHostStatus, string> = {
   starting: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
@@ -26,6 +26,20 @@ const STATUS_LABELS: Record<CanvasHostStatus, string> = {
   crashed: "Crashed",
   errored: "Error",
 };
+
+/**
+ * Discovery can list two entries sharing the same `id` (e.g. a project's
+ * `.agents/canvases/kanban/` alongside the built-in `kanban` — the project
+ * one never suppresses a runnable one, see `discoverCanvasDefinitions`), so
+ * `id` alone isn't a safe `<option>` key/value: React would warn on the
+ * duplicate key, and a controlled `<select>` would resolve the value to
+ * whichever option matches first regardless of which one was actually
+ * clicked (found in review on #237). `tier` is always distinct for two
+ * same-`id` entries, so pairing them is enough to disambiguate.
+ */
+function definitionKey(d: CanvasDefinitionEntry): string {
+  return `${d.tier}:${d.id}`;
+}
 
 function StatusBadge({ status }: { status: CanvasHostStatus | undefined }) {
   if (!status) return null;
@@ -64,6 +78,7 @@ export function CanvasPanel() {
   const statusByCanvas = useCanvasStore((s) => s.statusByCanvas);
   const lastMessageByCanvas = useCanvasStore((s) => s.lastMessageByCanvas);
   const logsByCanvas = useCanvasStore((s) => s.logsByCanvas);
+  const reloadNonceByCanvas = useCanvasStore((s) => s.reloadNonceByCanvas);
   const setCanvasState = useCanvasStore((s) => s.setCanvasState);
   const setCanvasStatus = useCanvasStore((s) => s.setCanvasStatus);
   const clearCanvasLogs = useCanvasStore((s) => s.clearCanvasLogs);
@@ -84,18 +99,22 @@ export function CanvasPanel() {
     { ttl: 5_000 }
   );
 
-  // CANVAS_LIST_DEFINITIONS only lists the built-in tier so far (#226 will
-  // extend it to scan the project/global directories too) — this is what
-  // lets "New canvas…" offer kanban without a free-text definition name.
-  const { data: definitions } = useIpcQuery<CanvasDefinition[]>(
-    "canvas-definitions",
-    () => ipc.canvasListDefinitions(),
+  // Discovered across all three tiers (project/global/built-in, #226) — this
+  // is what lets "New canvas…" offer a picker instead of a free-text
+  // definition name. Manifest errors are surfaced in the Settings hub's
+  // Canvases section, not here.
+  const definitionsKey = `canvas-definitions:${activeProjectId ?? ""}`;
+  const { data: discovery } = useIpcQuery<CanvasDiscoveryResult>(
+    definitionsKey,
+    () => ipc.canvasListDefinitions({ projectId: activeProjectId ?? undefined }),
     { ttl: 60_000 }
   );
+  const definitions: CanvasDefinitionEntry[] | undefined = discovery?.definitions;
 
   useEffect(() => {
     if (createDefinition || !definitions?.length) return;
-    setCreateDefinition(definitions[0].name);
+    const firstRunnable = definitions.find((d) => d.tier !== "project") ?? definitions[0];
+    setCreateDefinition(definitionKey(firstRunnable));
   }, [definitions, createDefinition]);
 
   // Reset the selection when the project changes; default to the first
@@ -115,10 +134,18 @@ export function CanvasPanel() {
     [canvases, selectedCanvasId]
   );
 
+  // A definition deleted from disk while an instance still exists (#226) —
+  // `definitions` not having loaded yet is treated as "not missing" so this
+  // never flashes true before discovery resolves.
+  const definitionMissing =
+    !!selected && definitions !== undefined && !definitions.some((d) => d.id === selected.definition);
+
   // Panel lifecycle: open the selected canvas's host, hydrate the store from
-  // the response, and close it again on switch/unmount.
+  // the response, and close it again on switch/unmount. Skipped entirely
+  // when the definition is missing — there's no host to start, and the
+  // "Definition missing" state below is all the panel shows.
   useEffect(() => {
-    if (!selectedCanvasId) return;
+    if (!selectedCanvasId || definitionMissing) return;
     let cancelled = false;
     ipc
       .canvasOpen(selectedCanvasId)
@@ -133,16 +160,17 @@ export function CanvasPanel() {
       void ipc.canvasClose(selectedCanvasId).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCanvasId]);
+  }, [selectedCanvasId, definitionMissing]);
 
   async function handleCreate() {
-    if (!activeProjectId || !createTitle.trim() || !createDefinition.trim()) return;
+    const selectedDefinition = definitions?.find((d) => definitionKey(d) === createDefinition);
+    if (!activeProjectId || !createTitle.trim() || !selectedDefinition) return;
     setCreating(true);
     setCreateError(null);
     try {
       const created = await ipc.canvasCreate({
         projectId: activeProjectId,
-        definition: createDefinition.trim(),
+        definition: selectedDefinition.id,
         title: createTitle.trim(),
       });
       setCreateTitle("");
@@ -249,8 +277,18 @@ export function CanvasPanel() {
             >
               {!definitions?.length && <option value="">No definitions available</option>}
               {definitions?.map((d) => (
-                <option key={d.name} value={d.name} title={d.description}>
-                  {d.name}
+                <option
+                  key={definitionKey(d)}
+                  value={definitionKey(d)}
+                  disabled={d.tier === "project"}
+                  title={
+                    d.tier === "project"
+                      ? "Project canvases can't run yet — awaiting the trust prompt"
+                      : d.manifest.description
+                  }
+                >
+                  {d.manifest.name} ({d.tier}
+                  {d.tier === "project" ? " — not runnable yet" : ""})
                 </option>
               ))}
             </select>
@@ -333,6 +371,20 @@ export function CanvasPanel() {
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm p-4 text-center">
             No canvases yet. Use <Plus className="inline h-3 w-3" /> to create one.
           </div>
+        ) : definitionMissing ? (
+          <div className="h-full flex flex-col items-center justify-center gap-3 text-sm p-4 text-center">
+            <div>
+              <p className="font-medium">Definition missing</p>
+              <p className="text-muted-foreground mt-1 max-w-xs">
+                The <code className="text-xs">{selected.definition}</code> canvas definition was not found on
+                disk (project, global, or built-in). Its data still exists, but it can no longer run.
+              </p>
+            </div>
+            <Button size="sm" variant="destructive" onClick={() => void handleDelete(selected.id)} className="gap-1.5">
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete this instance
+            </Button>
+          </div>
         ) : (
           <CanvasFrame
             canvasId={selected.id}
@@ -340,6 +392,7 @@ export function CanvasPanel() {
             state={stateByCanvas[selected.id] ?? selected.state}
             revision={revisionByCanvas[selected.id] ?? selected.revision}
             message={lastMessageByCanvas[selected.id]}
+            reloadNonce={reloadNonceByCanvas[selected.id]}
           />
         )}
       </div>

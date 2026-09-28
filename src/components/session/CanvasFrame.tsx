@@ -37,12 +37,15 @@ export function CanvasFrame({
   state,
   revision,
   message,
+  reloadNonce,
 }: {
   canvasId: string;
   definition: string;
   state: unknown;
   revision: number;
   message?: CanvasRelayedMessage;
+  /** Bumped on a dev-reload notice (#226) — included in the iframe's `key` to force a fresh `src` load, picking up an edited `ui/` file. */
+  reloadNonce?: number;
 }) {
   const ipc = useIpc();
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -50,9 +53,11 @@ export function CanvasFrame({
 
   // A fresh canvasId (switching instances) means a fresh iframe, so wait for
   // its own "ready" handshake again rather than posting into a stale one.
+  // A bumped reloadNonce remounts the iframe (via its key below) for the same
+  // reason — dev reload, not an instance switch.
   useEffect(() => {
     setReady(false);
-  }, [canvasId]);
+  }, [canvasId, reloadNonce]);
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -108,6 +113,7 @@ export function CanvasFrame({
 
   return (
     <iframe
+      key={reloadNonce ?? 0}
       ref={iframeRef}
       src={`aichemist-canvas://${canvasId}/`}
       sandbox="allow-scripts"
