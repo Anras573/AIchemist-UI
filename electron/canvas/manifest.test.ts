@@ -84,6 +84,23 @@ describe("parseCanvasManifest", () => {
     expect(parseCanvasManifest(rest).success).toBe(false);
   });
 
+  it("rejects a server path other than the one the runtime resolves", () => {
+    const result = parseCanvasManifest({ ...VALID_MANIFEST, server: "main.mjs" });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.reason).toContain("server.mjs");
+  });
+
+  it("rejects a path-traversal or absolute server value", () => {
+    expect(parseCanvasManifest({ ...VALID_MANIFEST, server: "../../etc/server.mjs" }).success).toBe(false);
+    expect(parseCanvasManifest({ ...VALID_MANIFEST, server: "/etc/server.mjs" }).success).toBe(false);
+  });
+
+  it("rejects a ui path other than the one the runtime resolves", () => {
+    const result = parseCanvasManifest({ ...VALID_MANIFEST, ui: "ui/main.html" });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.reason).toContain("ui/index.html");
+  });
+
   it("rejects permissions with a non-array value", () => {
     const result = parseCanvasManifest({ ...VALID_MANIFEST, permissions: { fs: "everything" } });
     expect(result.success).toBe(false);

@@ -49,6 +49,31 @@ export type CanvasFileWatchFactory = (
   listener: CanvasFileWatchListener
 ) => fs.FSWatcher;
 
+/**
+ * Dev reload only cares about source changes — the files an editor would
+ * touch (`server.mjs`, `canvas.json`, anything under `ui/`) — not data a
+ * canvas's own server writes into its folder at runtime (a SQLite file for a
+ * DB-browser canvas, a cache, a log, or a `node_modules/` from a future
+ * `bun install`). The whole folder is watched recursively, so every write is
+ * an `fs.watch` event; without this filter, a canvas that writes next to
+ * itself on startup restarts itself forever (found in review on #237: 20
+ * spawns / 19 reloads in 3s from a canvas writing a cache file on boot).
+ * This is the first line of defense; `reloadForDevChange`'s restart-loop
+ * budget is the second, for whatever a filename-based filter can't catch.
+ */
+const DEV_RELOAD_IGNORED_PATH_SEGMENTS = new Set(["node_modules", ".git"]);
+const DEV_RELOAD_SOURCE_EXTENSIONS = new Set([".mjs", ".js", ".cjs", ".ts", ".json", ".html", ".css"]);
+
+export function isDevReloadSourceChange(filename: string | Buffer | null): boolean {
+  // Some platforms don't report a filename for a recursive watch — err
+  // toward reloading rather than silently going deaf to real edits.
+  if (filename == null) return true;
+  const name = typeof filename === "string" ? filename : filename.toString("utf8");
+  const segments = name.split(nodePath.sep);
+  if (segments.some((seg) => seg.startsWith(".") || DEV_RELOAD_IGNORED_PATH_SEGMENTS.has(seg))) return false;
+  return DEV_RELOAD_SOURCE_EXTENSIONS.has(nodePath.extname(name).toLowerCase());
+}
+
 // ─── Process abstraction (test seam) ────────────────────────────────────────
 
 /** The subset of Electron's `UtilityProcess` this manager depends on. */
@@ -663,11 +688,25 @@ export class CanvasHostManager {
     return stopped;
   }
 
-  /** Stops and restarts a host, resetting its crash-backoff counter. */
+  /** Stops and restarts a host, resetting its crash-backoff counter — an explicit user "Restart" deserves a clean slate. */
   async restart(canvasId: string, opts: StartCanvasHostOptions): Promise<void> {
+    await this.restartInternal(canvasId, opts, { resetBackoff: true });
+  }
+
+  /**
+   * Shared by the public `restart()` (resets the backoff budget) and
+   * `reloadForDevChange` (doesn't — a dev-reload restart shares the same
+   * crash budget so a runaway loop still ends in `"errored"`, see
+   * `reloadForDevChange`).
+   */
+  private async restartInternal(
+    canvasId: string,
+    opts: StartCanvasHostOptions,
+    options: { resetBackoff: boolean }
+  ): Promise<void> {
     await this.stop(canvasId);
     const record = this.hosts.get(canvasId);
-    if (record) record.restartTimestamps = [];
+    if (record && options.resetBackoff) record.restartTimestamps = [];
     await this.start(canvasId, opts);
   }
 
@@ -718,7 +757,8 @@ export class CanvasHostManager {
   private armDevReload(record: HostRecord): void {
     const dir = nodePath.dirname(record.startOpts.serverPath);
     try {
-      const watcher = this.watchDefinitionDir(dir, { recursive: true }, () => {
+      const watcher = this.watchDefinitionDir(dir, { recursive: true }, (_eventType, filename) => {
+        if (!isDevReloadSourceChange(filename)) return;
         this.scheduleDevReload(record);
       });
       watcher.on("error", (err) => {
@@ -767,15 +807,58 @@ export class CanvasHostManager {
    * doesn't affect the already-loaded UI on its own (a `server.mjs`-only
    * change wouldn't need it, but a `ui/` change does, and debouncing folds
    * both into the same folder watch, so every dev-reload restart reports it).
-   * Uses `canvasId`/`opts` rather than the stale `HostRecord` this was
-   * scheduled against, since `restart()` replaces it with a fresh one.
+   *
+   * Shares `record.restartTimestamps` (the crash-backoff budget) with the
+   * ordinary crash path: `isDevReloadSourceChange` filters out most
+   * self-writes, but it can't catch everything a canvas might do (writing a
+   * `.mjs` cache file, say), so this is the second line of defense — a
+   * canvas that keeps triggering reloads faster than `maxRestarts` allows
+   * within `restartWindowMs` gets stopped outright and marked `"errored"`
+   * (found in review on #237) rather than restarting forever. Unlike the
+   * crash path, there's no backoff delay here — a dev-reload restart is
+   * supposed to be immediate — just a hard cap on how many can happen.
    */
   private async reloadForDevChange(canvasId: string, opts: StartCanvasHostOptions): Promise<void> {
+    const record = this.hosts.get(canvasId);
+    if (!record) return; // host was stopped/removed between the debounce firing and now
+
+    const now = Date.now();
+    record.restartTimestamps = record.restartTimestamps.filter((t) => now - t < this.restartWindowMs);
+    record.restartTimestamps.push(now);
+    if (record.restartTimestamps.length > this.maxRestarts) {
+      this.stopDevReloadLoop(record, canvasId);
+      return;
+    }
+
     try {
-      await this.restart(canvasId, opts);
+      await this.restartInternal(canvasId, opts, { resetBackoff: false });
       this.callHook("onDevReload", canvasId);
     } catch (err) {
       console.error(`[canvas-host-manager] dev-reload restart failed for ${canvasId}:`, err);
+    }
+  }
+
+  /**
+   * Terminal state for a dev-reload restart loop that exceeded the crash
+   * budget: disarms the watcher (a hands-off host has no reason to keep
+   * watching) and kills the process, setting `"errored"` before the kill so
+   * `handleExit` — which still fires — doesn't downgrade it back to
+   * `"stopped"` (same ordering `failStart` uses for the same reason). A
+   * manual `restart()` is the only way out, and it resets the budget.
+   */
+  private stopDevReloadLoop(record: HostRecord, canvasId: string): void {
+    console.error(
+      `[canvas-host-manager] dev-reload restart loop detected for ${canvasId} ` +
+        `(more than ${this.maxRestarts} reload-triggered restarts within ${this.restartWindowMs}ms) — ` +
+        `stopping instead of restarting forever. Check whether the canvas's server writes files into its own definition folder.`
+    );
+    this.disarmDevReload(record);
+    record.stopping = true;
+    this.setStatus(record, "errored");
+    try {
+      record.process.kill();
+    } catch (killErr) {
+      console.error(`[canvas-host-manager] failed to kill looping host ${canvasId}:`, killErr);
     }
   }
 }

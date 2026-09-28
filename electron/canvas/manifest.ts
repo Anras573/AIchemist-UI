@@ -15,10 +15,24 @@ export const CanvasManifestSchema = z.object({
   name: z.string().min(1, "name must not be empty"),
   description: z.string().default(""),
   version: z.number().int().positive("version must be a positive integer"),
-  /** Path to the server module, relative to the definition folder. */
-  server: z.string().min(1, "server must not be empty"),
-  /** Path to the UI entry file, relative to the definition folder. */
-  ui: z.string().min(1, "ui must not be empty"),
+  /**
+   * Path to the server module, relative to the definition folder. Runtime
+   * resolution (`resolveCanvasServerPath` in `definitions.ts`) hardcodes
+   * `server.mjs` rather than reading this field, so it's constrained to that
+   * exact value — otherwise a manifest could validate and list as runnable
+   * while pointing at a file the runtime will never actually look for,
+   * failing later with an unexplained "canvas unavailable" (found in review
+   * on #237). Revisit together if/when `definitions.ts` starts honoring a
+   * custom path.
+   */
+  server: z.literal("server.mjs", { message: 'server must be "server.mjs" (the only path the runtime resolves)' }),
+  /**
+   * Path to the UI entry file, relative to the definition folder. Same
+   * rationale as `server` above — `resolveCanvasUiDir` hardcodes the `ui/`
+   * folder and the protocol always serves `index.html` from it, so this is
+   * constrained to the one value that actually matches.
+   */
+  ui: z.literal("ui/index.html", { message: 'ui must be "ui/index.html" (the only path the runtime resolves)' }),
   attachByDefault: z.boolean().optional(),
   permissions: z
     .object({

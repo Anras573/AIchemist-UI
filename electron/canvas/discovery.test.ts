@@ -70,16 +70,40 @@ describe("discoverCanvasDefinitions", () => {
     expect(result.definitions).toEqual([]);
   });
 
-  it("a project-tier definition suppresses a same-named global one, which suppresses a same-named built-in one", () => {
+  it("a project-tier definition never suppresses a same-named global one — an untrusted manifest can't hide a runnable one", () => {
+    writeManifest(globalRoot, "kanban", manifestFor("kanban", { description: "global" }));
+    writeManifest(nodePath.join(projectRoot, ".agents", "canvases"), "kanban", manifestFor("kanban", { description: "project" }));
+
+    const result = discoverCanvasDefinitions(projectRoot);
+
+    // Both are listed: the runnable global one stays selectable, and the
+    // untrusted project one is still surfaced (as "not runnable yet").
+    expect(result.definitions).toHaveLength(2);
+    const byTier = Object.fromEntries(result.definitions.map((d) => [d.tier, d.manifest.description]));
+    expect(byTier).toEqual({ project: "project", global: "global" });
+  });
+
+  it("a project-tier definition never suppresses a same-named built-in one either", () => {
+    writeManifest(builtinRoot, "kanban", manifestFor("kanban", { description: "builtin" }));
+    writeManifest(nodePath.join(projectRoot, ".agents", "canvases"), "kanban", manifestFor("kanban", { description: "project" }));
+
+    const result = discoverCanvasDefinitions(projectRoot);
+
+    expect(result.definitions).toHaveLength(2);
+    const byTier = Object.fromEntries(result.definitions.map((d) => [d.tier, d.manifest.description]));
+    expect(byTier).toEqual({ project: "project", builtin: "builtin" });
+  });
+
+  it("global still suppresses built-in even when a same-named untrusted project entry also exists", () => {
     writeManifest(builtinRoot, "kanban", manifestFor("kanban", { description: "builtin" }));
     writeManifest(globalRoot, "kanban", manifestFor("kanban", { description: "global" }));
     writeManifest(nodePath.join(projectRoot, ".agents", "canvases"), "kanban", manifestFor("kanban", { description: "project" }));
 
     const result = discoverCanvasDefinitions(projectRoot);
 
-    expect(result.definitions).toHaveLength(1);
-    expect(result.definitions[0].tier).toBe("project");
-    expect(result.definitions[0].manifest.description).toBe("project");
+    expect(result.definitions).toHaveLength(2);
+    const byTier = Object.fromEntries(result.definitions.map((d) => [d.tier, d.manifest.description]));
+    expect(byTier).toEqual({ project: "project", global: "global" }); // built-in is still suppressed by global
   });
 
   it("global suppresses built-in when there is no project override", () => {

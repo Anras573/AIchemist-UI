@@ -120,10 +120,18 @@ export function CanvasPanel() {
     [canvases, selectedCanvasId]
   );
 
+  // A definition deleted from disk while an instance still exists (#226) —
+  // `definitions` not having loaded yet is treated as "not missing" so this
+  // never flashes true before discovery resolves.
+  const definitionMissing =
+    !!selected && definitions !== undefined && !definitions.some((d) => d.id === selected.definition);
+
   // Panel lifecycle: open the selected canvas's host, hydrate the store from
-  // the response, and close it again on switch/unmount.
+  // the response, and close it again on switch/unmount. Skipped entirely
+  // when the definition is missing — there's no host to start, and the
+  // "Definition missing" state below is all the panel shows.
   useEffect(() => {
-    if (!selectedCanvasId) return;
+    if (!selectedCanvasId || definitionMissing) return;
     let cancelled = false;
     ipc
       .canvasOpen(selectedCanvasId)
@@ -138,7 +146,7 @@ export function CanvasPanel() {
       void ipc.canvasClose(selectedCanvasId).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCanvasId]);
+  }, [selectedCanvasId, definitionMissing]);
 
   async function handleCreate() {
     if (!activeProjectId || !createTitle.trim() || !createDefinition.trim()) return;
@@ -347,6 +355,20 @@ export function CanvasPanel() {
         {!selected ? (
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm p-4 text-center">
             No canvases yet. Use <Plus className="inline h-3 w-3" /> to create one.
+          </div>
+        ) : definitionMissing ? (
+          <div className="h-full flex flex-col items-center justify-center gap-3 text-sm p-4 text-center">
+            <div>
+              <p className="font-medium">Definition missing</p>
+              <p className="text-muted-foreground mt-1 max-w-xs">
+                The <code className="text-xs">{selected.definition}</code> canvas definition was not found on
+                disk (project, global, or built-in). Its data still exists, but it can no longer run.
+              </p>
+            </div>
+            <Button size="sm" variant="destructive" onClick={() => void handleDelete(selected.id)} className="gap-1.5">
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete this instance
+            </Button>
           </div>
         ) : (
           <CanvasFrame

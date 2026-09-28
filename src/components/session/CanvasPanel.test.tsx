@@ -122,6 +122,24 @@ describe("CanvasPanel", () => {
     expect(screen.getByRole("button", { name: /restart/i })).toBeInTheDocument();
   });
 
+  it("shows a \"Definition missing\" state and a Delete button when the instance's definition isn't discovered anywhere", async () => {
+    // The default canvasListDefinitions mock only lists "kanban" — an
+    // instance referencing a since-deleted definition has nothing to match.
+    vi.mocked(window.electronAPI.canvasList).mockResolvedValue([makeCanvas({ definition: "deleted-canvas" })]);
+    vi.mocked(window.electronAPI.canvasDelete).mockResolvedValue({ ok: true });
+
+    renderWithProviders(<CanvasPanel />);
+
+    await screen.findByText("Definition missing");
+    expect(screen.getByText(/deleted-canvas/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /delete this instance/i }));
+
+    await waitFor(() => {
+      expect(window.electronAPI.canvasDelete).toHaveBeenCalledWith("canvas-1");
+    });
+  });
+
   it("shows the attach toggle only when a session is active, and calls CANVAS_ATTACH", async () => {
     vi.mocked(window.electronAPI.canvasList).mockResolvedValue([makeCanvas({ attached: false })]);
     vi.mocked(window.electronAPI.canvasOpen).mockResolvedValue({

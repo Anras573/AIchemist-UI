@@ -422,6 +422,18 @@ describe("canvasMcpServersForSession", () => {
     const map = canvasMcpServersForSession(db, sessionId, endpoint);
     expect(Object.keys(map)).toHaveLength(1);
   });
+
+  it("excludes a canvas whose definition no longer resolves (\"definition missing\", #226 follow-up)", () => {
+    const missing = createCanvas(db, { projectId, definition: "does-not-exist-on-disk", title: "Orphaned" });
+    setCanvasAttached(db, sessionId, missing.id, true);
+
+    const map = canvasMcpServersForSession(db, sessionId, endpoint);
+
+    const missingName = canvasServerName({ id: missing.id, title: "Orphaned" });
+    expect(map[missingName]).toBeUndefined();
+    // The still-resolvable "kanban" canvas from beforeEach is unaffected.
+    expect(Object.keys(map)).toHaveLength(1);
+  });
 });
 
 describe("canvasServerName", () => {
@@ -442,6 +454,14 @@ describe("buildCanvasSystemPromptAddendum", () => {
     const addendum = buildCanvasSystemPromptAddendum(db, sessionId);
     expect(addendum).toContain("Release board");
     expect(addendum).toContain("kanban");
+  });
+
+  it("excludes a canvas whose definition no longer resolves", () => {
+    const missing = createCanvas(db, { projectId, definition: "does-not-exist-on-disk", title: "Orphaned" });
+    setCanvasAttached(db, sessionId, missing.id, true);
+    setCanvasAttached(db, sessionId, canvasId, false); // isolate to just the orphaned one
+
+    expect(buildCanvasSystemPromptAddendum(db, sessionId)).toBe("");
   });
 
   it("is empty when nothing is attached", () => {

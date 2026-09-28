@@ -91,24 +91,40 @@ function scanTier(root: string, tier: CanvasDefinitionTier): TierScanResult {
  * Discovers canvas definitions across all three tiers. `projectPath` is
  * optional — omitted (e.g. no active project, or a headless caller) simply
  * skips the project tier rather than erroring.
+ *
+ * The project tier is deliberately excluded from suppression (found in
+ * review on #237): a project definition is untrusted and never actually
+ * runs (`resolveCanvasServerPath`/`resolveCanvasUiDir` never resolve it), so
+ * it must never hide a same-named global/built-in one that *would* run — a
+ * cloned repo shipping a bare `.agents/canvases/kanban/canvas.json` must not
+ * be able to make the real, runnable `kanban` disappear from the picker.
+ * Project entries are always included as-is; suppression (higher tier wins)
+ * only applies among global/built-in, same as before.
  */
 export function discoverCanvasDefinitions(projectPath?: string): CanvasDiscoveryResult {
-  const tiers: Array<{ root: string; tier: CanvasDefinitionTier }> = [];
-  if (projectPath) {
-    tiers.push({ root: nodePath.join(projectPath, ".agents", "canvases"), tier: "project" });
-  }
-  tiers.push({ root: canvasesRoot(), tier: "global" });
-  tiers.push({ root: builtinCanvasesRoot(), tier: "builtin" });
-
-  const seen = new Set<string>();
   const definitions: CanvasDefinitionEntry[] = [];
   const errors: CanvasManifestError[] = [];
 
-  for (const { root, tier } of tiers) {
+  if (projectPath) {
+    const { entries, errors: tierErrors } = scanTier(
+      nodePath.join(projectPath, ".agents", "canvases"),
+      "project"
+    );
+    definitions.push(...entries);
+    errors.push(...tierErrors);
+  }
+
+  const runnableTiers: Array<{ root: string; tier: CanvasDefinitionTier }> = [
+    { root: canvasesRoot(), tier: "global" },
+    { root: builtinCanvasesRoot(), tier: "builtin" },
+  ];
+
+  const seen = new Set<string>();
+  for (const { root, tier } of runnableTiers) {
     const { entries, errors: tierErrors } = scanTier(root, tier);
     errors.push(...tierErrors);
     for (const entry of entries) {
-      if (seen.has(entry.id)) continue; // suppressed by a higher tier
+      if (seen.has(entry.id)) continue; // suppressed by a higher (runnable) tier
       seen.add(entry.id);
       definitions.push(entry);
     }
