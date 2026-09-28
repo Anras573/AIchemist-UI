@@ -14,6 +14,7 @@ import {
   CanvasTrustError,
   _setCanvasInstallSpawnForTests,
   computeCanvasContentHash,
+  computeCanvasDepsHash,
   getProjectCanvasTrustStatus,
   hasSymlinksInDefinition,
   installCanvasDependencies,
@@ -194,6 +195,62 @@ describe("computeCanvasContentHash", () => {
   });
 });
 
+// #227 review round 3: computeCanvasContentHash deliberately never hashes
+// node_modules (see its docstring), which left nothing re-verifying that
+// folder's contents after bun install populated it. computeCanvasDepsHash
+// closes that gap; these prove it independently of the trust-record
+// integration tests below.
+describe("computeCanvasDepsHash", () => {
+  it("is null when there is no node_modules at all", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    expect(computeCanvasDepsHash(dir)).toBeNull();
+  });
+
+  it("is null when node_modules exists but is empty", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    fs.mkdirSync(nodePath.join(dir, "node_modules"), { recursive: true });
+    expect(computeCanvasDepsHash(dir)).toBeNull();
+  });
+
+  it("is stable for identical content", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    fs.mkdirSync(nodePath.join(dir, "node_modules", "left-pad"), { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, "node_modules", "left-pad", "index.js"), "module.exports = {};");
+    expect(computeCanvasDepsHash(dir)).toBe(computeCanvasDepsHash(dir));
+  });
+
+  it("changes when a file inside node_modules is edited", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    const pkgFile = nodePath.join(dir, "node_modules", "left-pad", "index.js");
+    fs.mkdirSync(nodePath.dirname(pkgFile), { recursive: true });
+    fs.writeFileSync(pkgFile, "module.exports = {};");
+    const before = computeCanvasDepsHash(dir);
+
+    fs.writeFileSync(pkgFile, "module.exports = { edited: true };");
+    expect(computeCanvasDepsHash(dir)).not.toBe(before);
+  });
+
+  it("changes when a file is added to node_modules", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    fs.mkdirSync(nodePath.join(dir, "node_modules", "left-pad"), { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, "node_modules", "left-pad", "index.js"), "module.exports = {};");
+    const before = computeCanvasDepsHash(dir);
+
+    fs.writeFileSync(nodePath.join(dir, "node_modules", "left-pad", "package.json"), JSON.stringify({}));
+    expect(computeCanvasDepsHash(dir)).not.toBe(before);
+  });
+
+  it("is unaffected by content_hash's own hashed scope (server.mjs, canvas.json)", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    fs.mkdirSync(nodePath.join(dir, "node_modules", "left-pad"), { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, "node_modules", "left-pad", "index.js"), "module.exports = {};");
+    const before = computeCanvasDepsHash(dir);
+
+    fs.writeFileSync(nodePath.join(dir, "server.mjs"), "export default { edited: true };");
+    expect(computeCanvasDepsHash(dir)).toBe(before);
+  });
+});
+
 describe("hasSymlinksInDefinition", () => {
   it("is false for a definition with no symlinks", () => {
     const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
@@ -317,6 +374,40 @@ describe("isProjectCanvasTrusted", () => {
     }));
     expect(isProjectCanvasTrusted(db, projectId, projectPath, "widgets")).toBe(false);
   });
+
+  // #227 review round 3: before this, only getProjectCanvasTrustStatus
+  // checked for a symlink — isProjectCanvasTrusted (the function that
+  // actually gates whether a host is allowed to spawn) didn't, so the two
+  // could disagree: the UI would show "blocked" while a host still happily
+  // started. This proves they're folded into the same check now.
+  it("goes false once a symlink appears in an already-trusted definition", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    trustProjectCanvas(db, projectId, projectPath, "widgets");
+    expect(isProjectCanvasTrusted(db, projectId, projectPath, "widgets")).toBe(true);
+
+    fs.writeFileSync(nodePath.join(dir, "real.mjs"), "export const x = 1;");
+    fs.symlinkSync(nodePath.join(dir, "real.mjs"), nodePath.join(dir, "lib.mjs"));
+    expect(isProjectCanvasTrusted(db, projectId, projectPath, "widgets")).toBe(false);
+  });
+
+  // #227 review round 3: content_hash never covers node_modules (by design —
+  // see computeCanvasContentHash's docstring), so nothing previously
+  // re-verified it after bun install populated it. A write into it afterward
+  // (a git pull adding files, a manual edit) kept resolving as trusted
+  // forever even though the import-scope confinement treats it as in-scope
+  // code. deps_hash re-verification closes that.
+  it("goes false once a file changes inside the definition's own node_modules after trusting", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    const pkgFile = nodePath.join(dir, "node_modules", "left-pad", "index.js");
+    fs.mkdirSync(nodePath.dirname(pkgFile), { recursive: true });
+    fs.writeFileSync(pkgFile, "module.exports = {};");
+
+    trustProjectCanvas(db, projectId, projectPath, "widgets");
+    expect(isProjectCanvasTrusted(db, projectId, projectPath, "widgets")).toBe(true);
+
+    fs.writeFileSync(pkgFile, "module.exports = { compromised: true };");
+    expect(isProjectCanvasTrusted(db, projectId, projectPath, "widgets")).toBe(false);
+  });
 });
 
 // ─── Grant / revoke ──────────────────────────────────────────────────────────
@@ -324,6 +415,22 @@ describe("isProjectCanvasTrusted", () => {
 describe("trustProjectCanvas / revokeProjectCanvasTrust", () => {
   it("throws CanvasTrustError for a definition that isn't a real project folder", () => {
     expect(() => trustProjectCanvas(db, projectId, projectPath, "does-not-exist")).toThrow(CanvasTrustError);
+  });
+
+  it("records a null deps_hash for a definition with no node_modules", () => {
+    writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    const trust = trustProjectCanvas(db, projectId, projectPath, "widgets");
+    expect(trust.deps_hash).toBeNull();
+  });
+
+  it("records the current deps_hash for a definition whose node_modules is already populated (post-install)", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    fs.mkdirSync(nodePath.join(dir, "node_modules", "left-pad"), { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, "node_modules", "left-pad", "index.js"), "module.exports = {};");
+
+    const trust = trustProjectCanvas(db, projectId, projectPath, "widgets");
+    expect(trust.deps_hash).toBe(computeCanvasDepsHash(dir));
+    expect(trust.deps_hash).not.toBeNull();
   });
 
   it("revoke is idempotent and un-trusts a previously trusted definition", () => {

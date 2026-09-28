@@ -10,26 +10,31 @@
  * path to the definition's `server.mjs`, `argv[3]` is `{ id, path }` for the
  * owning project as JSON.
  */
-import { register } from "node:module";
+import { registerHooks } from "node:module";
 import * as nodePath from "node:path";
-import { pathToFileURL } from "node:url";
 import type { HostToMainMessage } from "../host-protocol";
 import { MainToHostMessageSchema } from "../host-protocol";
 import { loadServerModule } from "./loader";
+import { resolve as canvasResolveHook, setDefinitionDirForHooks } from "./loader-hook";
 import { createCanvasHostRuntime, type HostTransport } from "./runtime";
 import type { CanvasServerDefinition } from "./sdk";
 
 // Makes `import { defineCanvas, z } from "@aichemist/canvas"` resolvable from
-// a canvas's `server.mjs`, with no install step, and confines every other
-// import to the definition folder (#227 review on PR #238) — see
-// `loader-hook.ts`. Must run before the first dynamic `import()` of a server
-// module below. `process.argv` is available synchronously, so the definition
-// folder is derived here even though `main()` below re-reads the same argv
-// for its own (already-existing) validation.
+// a canvas's `server.mjs` with no install step, pins `"zod"` to the app's own
+// copy, and confines every other import — AND, since `registerHooks()` (round
+// 3 of review on PR #238) covers CommonJS too, every `require()` /
+// `createRequire()` load — to the definition folder (see `loader-hook.ts`).
+// `registerHooks()` runs synchronously in this same thread (unlike the old
+// `register()`, which ran in a dedicated loader thread and never saw
+// `require()` at all), so the definition dir can just be set directly rather
+// than passed through a `data` option. Must happen before the first
+// `import()`/`require()` of a server module below. `process.argv` is
+// available synchronously, so the definition folder is derived here even
+// though `main()` below re-reads the same argv for its own (already-existing)
+// validation.
 const definitionDir = process.argv[2] ? nodePath.dirname(process.argv[2]) : null;
-register(pathToFileURL(nodePath.join(__dirname, "loader-hook.js")).href, {
-  data: { definitionDir },
-});
+setDefinitionDirForHooks(definitionDir);
+registerHooks({ resolve: canvasResolveHook });
 
 function send(message: HostToMainMessage): void {
   process.parentPort.postMessage(message);

@@ -362,6 +362,14 @@ export interface CanvasTrust {
   definition: string;
   /** Hash of the definition's server + manifest + package.json, to detect edits. */
   content_hash: string;
+  /**
+   * Hash of the definition's own `node_modules/` taken right after `bun
+   * install` (#227 review round 3) — `content_hash` deliberately excludes
+   * that folder (see `electron/canvas/trust.ts`), so this is what catches a
+   * later write into it (e.g. a `git pull` adding files there). Null for a
+   * definition with no dependencies to hash.
+   */
+  deps_hash: string | null;
   trusted_at: string;
 }
 

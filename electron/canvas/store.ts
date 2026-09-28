@@ -238,7 +238,7 @@ export function setCanvasState(db: Database, id: string, state: unknown): Canvas
 export function getCanvasTrust(db: Database, projectId: string, definition: string): CanvasTrust | null {
   const row = db
     .prepare(
-      "SELECT project_id, definition, content_hash, trusted_at FROM canvas_trust WHERE project_id = ? AND definition = ?"
+      "SELECT project_id, definition, content_hash, deps_hash, trusted_at FROM canvas_trust WHERE project_id = ? AND definition = ?"
     )
     .get(projectId, definition) as CanvasTrust | undefined;
   return row ?? null;
@@ -247,22 +247,25 @@ export function getCanvasTrust(db: Database, projectId: string, definition: stri
 /**
  * Record (or refresh) consent to run a definition's server code in a project.
  * Upserts on the `(project_id, definition)` primary key — trusting again after
- * an edit (a new `contentHash`) simply overwrites the prior record.
+ * an edit (a new `contentHash`) simply overwrites the prior record. `depsHash`
+ * (#227 review round 3) is `null` for a definition with no `node_modules` to
+ * hash (no `package.json`, or install produced nothing).
  */
 export function setCanvasTrust(
   db: Database,
   projectId: string,
   definition: string,
-  contentHash: string
+  contentHash: string,
+  depsHash: string | null
 ): CanvasTrust {
   const trustedAt = nowIso();
   db.prepare(
-    `INSERT INTO canvas_trust (project_id, definition, content_hash, trusted_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT (project_id, definition) DO UPDATE SET content_hash = excluded.content_hash, trusted_at = excluded.trusted_at`
-  ).run(projectId, definition, contentHash, trustedAt);
+    `INSERT INTO canvas_trust (project_id, definition, content_hash, deps_hash, trusted_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (project_id, definition) DO UPDATE SET content_hash = excluded.content_hash, deps_hash = excluded.deps_hash, trusted_at = excluded.trusted_at`
+  ).run(projectId, definition, contentHash, depsHash, trustedAt);
 
-  return { project_id: projectId, definition, content_hash: contentHash, trusted_at: trustedAt };
+  return { project_id: projectId, definition, content_hash: contentHash, deps_hash: depsHash, trusted_at: trustedAt };
 }
 
 /** Revokes a project's consent to run a definition's server code. A no-op if it was never trusted. */

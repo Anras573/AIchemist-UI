@@ -160,6 +160,101 @@ export function computeCanvasContentHash(defDir: string): string {
   return hash.digest("hex");
 }
 
+/**
+ * Recursively lists every regular file under `rootDir`, following symlinks
+ * (via `statSync`, not `lstatSync`) rather than refusing them — unlike
+ * `scanDefinition`, this walks `node_modules` itself, where a package
+ * manager's own linking strategy may use symlinks as an implementation
+ * detail. A broken symlink or a permission error is skipped, not thrown,
+ * matching `scanDefinition`'s fail-open stance.
+ */
+function walkAllFiles(rootDir: string): string[] {
+  const files: string[] = [];
+  function walk(relDir: string): void {
+    let names: string[];
+    try {
+      names = fs.readdirSync(nodePath.join(rootDir, relDir));
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const relPath = relDir ? `${relDir}/${name}` : name;
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(nodePath.join(rootDir, relPath));
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        walk(relPath);
+      } else if (stat.isFile()) {
+        files.push(relPath);
+      }
+    }
+  }
+  walk("");
+  files.sort();
+  return files;
+}
+
+/**
+ * Hashes a project definition's own `node_modules/` folder — deliberately
+ * excluded from {@link computeCanvasContentHash} (see its docstring), which
+ * left a gap the #227 review round 3 flagged: nothing re-verified that folder
+ * after `bun install` populated it, so a later write into it (a `git pull`
+ * adding files there, or a manual edit) kept resolving as trusted forever,
+ * even though the import-scope confinement (`host/import-scope.ts`) treats
+ * anything under the definition folder — `node_modules` included — as code
+ * the canvas is allowed to load. Returns `null` when there's no
+ * `node_modules` to hash (no dependencies) or it's empty, so a definition with
+ * no `package.json` never needs a `deps_hash` at all.
+ *
+ * Called on effectively every canvas-bearing turn via
+ * {@link isProjectCanvasTrusted} → {@link resolveTrustedCanvasServerPath}, so
+ * this does cost a full read of the dependency tree's contents each time —
+ * accepted as the price of actually catching a post-install change, rather
+ * than architecting a separate, cheaper "has anything changed" check (e.g. an
+ * mtime/size-based signal) that would need its own correctness argument
+ * against a crafted mtime.
+ */
+export function computeCanvasDepsHash(defDir: string): string | null {
+  const nodeModulesDir = nodePath.join(defDir, "node_modules");
+  if (!fs.existsSync(nodeModulesDir)) return null;
+  const files = walkAllFiles(nodeModulesDir);
+  if (files.length === 0) return null;
+
+  const hash = crypto.createHash("sha256");
+  for (const relPath of files) {
+    let content: Buffer;
+    try {
+      content = fs.readFileSync(nodePath.join(nodeModulesDir, relPath));
+    } catch {
+      continue;
+    }
+    hash.update(relPath);
+    hash.update("\0");
+    hash.update(content);
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+/**
+ * Whether a stored trust `record` still matches `dir`'s current on-disk
+ * state — content hash, dependency hash, AND no symlink in the hashed scope
+ * (#227 review round 3 folded the symlink refusal in here too: before this,
+ * only {@link getProjectCanvasTrustStatus} checked it, so the trust status
+ * shown to the user and {@link isProjectCanvasTrusted}'s actual spawn-gating
+ * decision could disagree — a symlink added after trusting left the status
+ * reading "blocked" while the gate still happily returned `true`).
+ */
+function trustRecordMatchesDisk(record: CanvasTrust, dir: string): boolean {
+  if (hasSymlinksInDefinition(dir)) return false;
+  if (record.content_hash !== computeCanvasContentHash(dir)) return false;
+  if (record.deps_hash !== computeCanvasDepsHash(dir)) return false;
+  return true;
+}
+
 // ─── Status ──────────────────────────────────────────────────────────────────
 
 function readDependencyInfo(defDir: string): CanvasDependencyInfo {
@@ -225,7 +320,7 @@ export function getProjectCanvasTrustStatus(
   const blockedReason = hasSymlinksInDefinition(dir)
     ? "This canvas contains a symlink, which isn't supported — AIchemist can't verify what code a symlink actually points to. Remove it (or replace it with a real file/folder) to trust this canvas."
     : null;
-  const trusted = blockedReason === null && record !== null && record.content_hash === contentHash;
+  const trusted = blockedReason === null && record !== null && trustRecordMatchesDisk(record, dir);
 
   return {
     definition,
@@ -240,11 +335,17 @@ export function getProjectCanvasTrustStatus(
 }
 
 /**
- * Cheap trust check used by the resolvers below — recomputes the content
- * hash and compares it to the stored record, without re-reading or
- * validating the manifest (unlike `getProjectCanvasTrustStatus`, which the
- * trust prompt needs the manifest for anyway). False for anything that isn't
- * a currently-trusted, unmodified project definition.
+ * Trust check used by the resolvers below — recomputes the content hash, the
+ * dependency hash, and the symlink check (`trustRecordMatchesDisk`) and
+ * compares against the stored record, without re-reading or validating the
+ * manifest (unlike `getProjectCanvasTrustStatus`, which the trust prompt
+ * needs the manifest for anyway). False for anything that isn't a
+ * currently-trusted, unmodified project definition — including a definition
+ * that was trusted before a symlink was added to it, or before something
+ * wrote into its `node_modules` (#227 review round 3: this function and
+ * `getProjectCanvasTrustStatus` must never disagree on this, since one drives
+ * the UI's badge and the other drives whether a host is actually allowed to
+ * spawn).
  */
 export function isProjectCanvasTrusted(
   db: Database,
@@ -256,7 +357,7 @@ export function isProjectCanvasTrusted(
   if (!record) return false;
   const dir = resolveProjectDefinitionDir(projectPath, definition);
   if (!dir) return false;
-  return record.content_hash === computeCanvasContentHash(dir);
+  return trustRecordMatchesDisk(record, dir);
 }
 
 // ─── Grant / revoke ──────────────────────────────────────────────────────────
@@ -270,11 +371,13 @@ export class CanvasTrustError extends Error {
 
 /**
  * Records consent to run a project definition's server code, bound to its
- * *current* on-disk content hash. Throws `CanvasTrustError` if `definition`
- * doesn't resolve to a real project-tier folder — the caller (the
- * `CANVAS_TRUST_GRANT` handler) is expected to have already shown the user
- * the manifest via `getProjectCanvasTrustStatus`, so this should only fail if
- * the folder was removed between that read and the grant.
+ * *current* on-disk content hash AND dependency hash (the caller —
+ * `CANVAS_TRUST_GRANT` — always calls this after `installCanvasDependencies`
+ * has already run, so `node_modules` reflects the install this grant is
+ * approving). Throws `CanvasTrustError` if `definition` doesn't resolve to a
+ * real project-tier folder — the caller is expected to have already shown the
+ * user the manifest via `getProjectCanvasTrustStatus`, so this should only
+ * fail if the folder was removed between that read and the grant.
  */
 export function trustProjectCanvas(
   db: Database,
@@ -284,7 +387,7 @@ export function trustProjectCanvas(
 ): CanvasTrust {
   const dir = resolveProjectDefinitionDir(projectPath, definition);
   if (!dir) throw new CanvasTrustError(`Project canvas definition not found: ${definition}`);
-  return setCanvasTrust(db, projectId, definition, computeCanvasContentHash(dir));
+  return setCanvasTrust(db, projectId, definition, computeCanvasContentHash(dir), computeCanvasDepsHash(dir));
 }
 
 /** Revokes a project definition's trust record. A no-op if it was never trusted. */

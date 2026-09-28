@@ -2,15 +2,17 @@
 // review, https://github.com/Anras573/AIchemist-UI/pull/234). Unlike the
 // vitest suite — which imports host/loader.ts and host/sdk.ts directly as TS
 // source and so never exercises the compiled `dist/main/host/*` files or the
-// real registered loader hook — this script does exactly what a real canvas
-// `server.mjs` does: register the built loader hook, then import
-// `@aichemist/canvas` by its documented named import.
+// real registered loader hook — this script does exactly what `entry.ts`
+// does: import the built loader hook's `resolve` and register it with
+// `module.registerHooks()` (round 3 of review on PR #238 switched away from
+// `module.register()`'s by-URL registration — see `loader-hook.ts`'s
+// docstring), then import `@aichemist/canvas` by its documented named import.
 //
 // Run after `bun run build` (see package.json's "smoke:canvas-sdk" script
 // and the CI workflow) — `dist/main/host/loader-hook.js` and
 // `dist/canvas-sdk/sdk.mjs` must exist.
 import { execFileSync } from "node:child_process";
-import { register } from "node:module";
+import { registerHooks } from "node:module";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -47,11 +49,13 @@ async function main() {
   await assertExists(loaderHookPath);
   await assertExists(sdkPath);
 
-  register(pathToFileURL(loaderHookPath).href);
-
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "canvas-sdk-smoke-"));
   const serverPath = path.join(tempDir, "server.mjs");
   try {
+    const { resolve, setDefinitionDirForHooks } = await import(pathToFileURL(loaderHookPath).href);
+    setDefinitionDirForHooks(tempDir);
+    registerHooks({ resolve });
+
     // The exact import shape entry.ts documents and every real canvas
     // server.mjs will use.
     await fs.writeFile(

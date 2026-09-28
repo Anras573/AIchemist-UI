@@ -29,7 +29,13 @@ describe("CanvasTrustPrompt (#227)", () => {
 
   it("sends the displayed contentHash as expectedContentHash and calls onTrusted on success", async () => {
     vi.mocked(window.electronAPI.canvasTrustGrant).mockResolvedValue({
-      trust: { project_id: "p1", definition: "widgets", content_hash: "hash-at-display-time", trusted_at: "now" },
+      trust: {
+        project_id: "p1",
+        definition: "widgets",
+        content_hash: "hash-at-display-time",
+        deps_hash: null,
+        trusted_at: "now",
+      },
       install: { ok: true, output: "" },
     });
     const onTrusted = vi.fn();

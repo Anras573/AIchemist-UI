@@ -22,11 +22,16 @@ export default defineConfig({
         // right next to `dist/main/main.js`. Before this (#223), nothing built
         // `host/*.ts`, so a packaged app had no host to spawn.
         //
-        // `loader-hook.ts` must ALSO be a separate entry, not just a module
-        // `entry.ts` bundles in: `entry.ts` registers `host/loader-hook.js`
-        // with Node's `module.register()` by file URL (a loader hook runs as
-        // its own module in a separate loader thread, so it can't be inlined
-        // into `entry.js`'s bundle).
+        // `loader-hook.ts` stays a separate entry even after round 3 of
+        // review on PR #238 switched `entry.ts` from `module.register()`'s
+        // by-URL registration (which required a standalone module file to
+        // point a URL at) to `module.registerHooks()`, called as a plain
+        // in-process function — `entry.ts` now just imports it like any other
+        // dependency (`loader.ts`/`runtime.ts`), and Rollup's shared-chunking
+        // keeps that a single module instance. It remains its own entry so
+        // `scripts/smoke-test-canvas-sdk.mjs` can still exercise the exact
+        // BUILT `dist/main/host/loader-hook.js`, not just the TS source the
+        // vitest suite imports.
         //
         // `host/sdk.ts` is deliberately NOT built here — this "main" build
         // emits CommonJS, and a CJS build of `sdk.ts` can't satisfy a canvas

@@ -218,23 +218,27 @@ describe("canvas trust", () => {
   });
 
   it("records and updates a trust record for a project + definition pair", () => {
-    const trusted = setCanvasTrust(db, "p1", "kanban", "hash-1");
+    const trusted = setCanvasTrust(db, "p1", "kanban", "hash-1", "deps-hash-1");
     expect(trusted.content_hash).toBe("hash-1");
+    expect(trusted.deps_hash).toBe("deps-hash-1");
 
     const fetched = getCanvasTrust(db, "p1", "kanban");
     expect(fetched?.content_hash).toBe("hash-1");
+    expect(fetched?.deps_hash).toBe("deps-hash-1");
 
     // Re-trusting after an edit (new content hash) upserts rather than duplicating.
-    const retrusted = setCanvasTrust(db, "p1", "kanban", "hash-2");
+    const retrusted = setCanvasTrust(db, "p1", "kanban", "hash-2", null);
     expect(retrusted.content_hash).toBe("hash-2");
+    expect(retrusted.deps_hash).toBeNull();
     expect(getCanvasTrust(db, "p1", "kanban")?.content_hash).toBe("hash-2");
+    expect(getCanvasTrust(db, "p1", "kanban")?.deps_hash).toBeNull();
     expect(
       db.prepare("SELECT COUNT(*) as n FROM canvas_trust WHERE project_id = 'p1' AND definition = 'kanban'").get()
     ).toEqual({ n: 1 });
   });
 
   it("cascades when the owning project is deleted", () => {
-    setCanvasTrust(db, "p1", "kanban", "hash-1");
+    setCanvasTrust(db, "p1", "kanban", "hash-1", null);
     db.prepare("DELETE FROM projects WHERE id = 'p1'").run();
     expect(getCanvasTrust(db, "p1", "kanban")).toBeNull();
   });
