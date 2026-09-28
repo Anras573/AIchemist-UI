@@ -7,7 +7,9 @@
 // `@aichemist/canvas` by its documented named import.
 //
 // Run after `bun run build` (see package.json's "smoke:canvas-sdk" script
-// and the CI workflow) — `dist/main/host/{loader-hook.js,sdk.mjs}` must exist.
+// and the CI workflow) — `dist/main/host/loader-hook.js` and
+// `dist/canvas-sdk/sdk.mjs` must exist.
+import { execFileSync } from "node:child_process";
 import { register } from "node:module";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -16,7 +18,7 @@ import { pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const loaderHookPath = path.join(root, "dist/main/host/loader-hook.js");
-const sdkPath = path.join(root, "dist/main/host/sdk.mjs");
+const sdkPath = path.join(root, "dist/canvas-sdk/sdk.mjs");
 
 async function assertExists(filePath) {
   try {
@@ -27,6 +29,21 @@ async function assertExists(filePath) {
 }
 
 async function main() {
+  await assertExists(loaderHookPath);
+  await assertExists(sdkPath);
+
+  // Regression check for #225's review on PR #236: `electron-vite preview`
+  // (package.json's "start" script) runs a second, full `electron-vite
+  // build` internally before launching Electron, which empties `dist/main`
+  // — the exact thing that used to delete a `host/sdk.mjs` written inside it
+  // by a step that ran only once, right after the FIRST build. Simulate that
+  // second invocation directly and prove `sdk.mjs` — now built to
+  // `dist/canvas-sdk/`, a sibling of `dist/main` rather than a subdirectory
+  // of it — survives it untouched.
+  execFileSync(path.join(root, "node_modules/.bin/electron-vite"), ["build"], {
+    cwd: root,
+    stdio: "inherit",
+  });
   await assertExists(loaderHookPath);
   await assertExists(sdkPath);
 

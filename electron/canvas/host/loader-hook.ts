@@ -4,10 +4,12 @@
  * a bare specifier — `import { defineCanvas, z } from "@aichemist/canvas"` —
  * with no install step, since it's just this host's own `sdk.ts`.
  *
- * Resolves to `sdk.mjs`, built as real ESM by
+ * Resolves to `dist/canvas-sdk/sdk.mjs`, built as real ESM by
  * `scripts/build-canvas-sdk-esm.mjs` (NOT `sdk.js` alongside this file —
  * this file's own CommonJS build has no output for `sdk.ts` at all; see that
- * script's header for why a CJS build can't satisfy this named import).
+ * script's header for why a CJS build can't satisfy this named import, and
+ * for why the output lives outside `dist/main` — a sibling of it, not a
+ * subdirectory — rather than next to this file).
  *
  * Not unit-tested: exercising a registered loader hook needs a real ESM loader
  * thread, which only exists once this runs inside an actual host process. The
@@ -29,7 +31,13 @@ export async function resolve(
   nextResolve: NextResolve
 ): Promise<{ url: string; shortCircuit?: boolean }> {
   if (specifier === CANVAS_SDK_SPECIFIER) {
-    return { url: pathToFileURL(nodePath.join(__dirname, "sdk.mjs")).href, shortCircuit: true };
+    // __dirname here is dist/main/host (this file's own compiled location) —
+    // ../../canvas-sdk/sdk.mjs is dist/canvas-sdk/sdk.mjs, a sibling of
+    // dist/main rather than something inside it (see build-canvas-sdk-esm.mjs
+    // for why: dist/main gets emptied on every electron-vite build/dev/preview
+    // invocation, dist/canvas-sdk never does).
+    const sdkPath = nodePath.join(__dirname, "..", "..", "canvas-sdk", "sdk.mjs");
+    return { url: pathToFileURL(sdkPath).href, shortCircuit: true };
   }
   return nextResolve(specifier, context);
 }
