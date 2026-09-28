@@ -301,10 +301,8 @@ export interface CanvasListItem extends Canvas {
 }
 
 /**
- * Shape of a canvas definition's manifest (`canvas.json`). Discovery of these
- * from disk (project / global / built-in tiers) lands in a later issue
- * (#226) — this type exists now so the store and its callers can reference
- * the shape without a circular dependency once discovery is added.
+ * Shape of a canvas definition's manifest (`canvas.json`), validated by
+ * `electron/canvas/manifest.ts`.
  */
 export interface CanvasDefinition {
   name: string;
@@ -322,6 +320,40 @@ export interface CanvasDefinition {
     network?: string[];
     exec?: string[];
   };
+}
+
+/**
+ * Discovery tiers, in priority order (a higher tier suppresses a same-named
+ * definition from a lower one) — same convention as `SkillInfo.source`.
+ * `"project"` definitions are discovered but not yet runnable: they're
+ * gated behind the trust model (a later issue), so `resolveCanvasServerPath`
+ * deliberately never resolves them.
+ */
+export type CanvasDefinitionTier = "project" | "global" | "builtin";
+
+/** A discovered, validated canvas definition. */
+export interface CanvasDefinitionEntry {
+  /** The definition's folder name — what `CANVAS_CREATE`'s `definition` field and `resolveCanvasServerPath` expect, not necessarily equal to `manifest.name`. */
+  id: string;
+  tier: CanvasDefinitionTier;
+  manifest: CanvasDefinition;
+  /** Absolute path to the definition's folder. */
+  path: string;
+}
+
+/** A `canvas.json` that failed to read or validate — skipped, never breaks discovery. */
+export interface CanvasManifestError {
+  /** The folder name the manifest was found (or expected) in. */
+  id: string;
+  tier: CanvasDefinitionTier;
+  path: string;
+  reason: string;
+}
+
+/** `CANVAS_LIST_DEFINITIONS` result: valid definitions plus any manifest errors, surfaced in the Settings hub. */
+export interface CanvasDiscoveryResult {
+  definitions: CanvasDefinitionEntry[];
+  errors: CanvasManifestError[];
 }
 
 /** Consent record for running a definition's server code within a project. */
@@ -344,13 +376,15 @@ export type CanvasHostStatus = "starting" | "running" | "stopped" | "crashed" | 
 
 /**
  * Push payload for `CANVAS_EVENT` (main → renderer): a host status change, a
- * persisted state write, a UI message relayed from the host, or a debug log
- * line. Exactly one of `state`/`revision`, `message`, `status`, or
- * `level`/`args` is populated, matching `kind`.
+ * persisted state write, a UI message relayed from the host, a debug log
+ * line, or a dev-reload notice (#226 — a running host's definition folder
+ * changed and was restarted; the UI should re-navigate its iframe). Exactly
+ * one of `state`/`revision`, `message`, `status`, or `level`/`args` is
+ * populated, matching `kind`; `"reload"` carries no extra payload.
  */
 export interface CanvasEvent {
   canvasId: string;
-  kind: "state" | "message" | "status" | "log";
+  kind: "state" | "message" | "status" | "log" | "reload";
   state?: unknown;
   revision?: number;
   message?: unknown;

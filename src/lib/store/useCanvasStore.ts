@@ -37,12 +37,15 @@ interface CanvasStore {
   lastMessageByCanvas: Record<string, CanvasRelayedMessage | undefined>;
   /** Debug-drawer log lines per canvas, oldest first, capped at MAX_LOG_ENTRIES. */
   logsByCanvas: Record<string, CanvasLogEntry[]>;
+  /** Bumped on every dev-reload notice (#226) — `CanvasFrame` keys its iframe off this to force a re-navigation, picking up an edited `ui/` file that a plain state/status push wouldn't. */
+  reloadNonceByCanvas: Record<string, number>;
 
   setCanvasState: (canvasId: string, state: unknown, revision: number) => void;
   setCanvasStatus: (canvasId: string, status: CanvasHostStatus) => void;
   pushCanvasMessage: (canvasId: string, message: unknown) => void;
   pushCanvasLog: (canvasId: string, level: CanvasLogEntry["level"], args: unknown[]) => void;
   clearCanvasLogs: (canvasId: string) => void;
+  bumpCanvasReload: (canvasId: string) => void;
 }
 
 export const useCanvasStore = create<CanvasStore>((set) => ({
@@ -51,6 +54,7 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
   statusByCanvas: {},
   lastMessageByCanvas: {},
   logsByCanvas: {},
+  reloadNonceByCanvas: {},
 
   setCanvasState: (canvasId, state, revision) =>
     set((s) => {
@@ -92,4 +96,9 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
       delete logsByCanvas[canvasId];
       return { logsByCanvas };
     }),
+
+  bumpCanvasReload: (canvasId) =>
+    set((s) => ({
+      reloadNonceByCanvas: { ...s.reloadNonceByCanvas, [canvasId]: (s.reloadNonceByCanvas[canvasId] ?? 0) + 1 },
+    })),
 }));

@@ -111,4 +111,28 @@ describe("CanvasFrame", () => {
       expect(postSpy).toHaveBeenCalledWith({ type: "message", message: { ping: 1 } }, "*");
     });
   });
+
+  it("remounts the iframe when reloadNonce changes (dev reload, #226)", async () => {
+    const { container, rerender } = render(
+      <CanvasFrame canvasId="c1" definition="kanban" state={null} revision={0} reloadNonce={1} />
+    );
+    const firstIframe = getIframe(container);
+
+    rerender(<CanvasFrame canvasId="c1" definition="kanban" state={null} revision={0} reloadNonce={2} />);
+
+    const secondIframe = getIframe(container);
+    expect(secondIframe).not.toBe(firstIframe);
+    expect(secondIframe.src).toBe("aichemist-canvas://c1/");
+  });
+
+  it("does not remount the iframe on an unrelated re-render (reloadNonce unchanged)", () => {
+    const { container, rerender } = render(
+      <CanvasFrame canvasId="c1" definition="kanban" state={null} revision={0} reloadNonce={1} />
+    );
+    const firstIframe = getIframe(container);
+
+    rerender(<CanvasFrame canvasId="c1" definition="kanban" state={{ a: 1 }} revision={2} reloadNonce={1} />);
+
+    expect(getIframe(container)).toBe(firstIframe);
+  });
 });

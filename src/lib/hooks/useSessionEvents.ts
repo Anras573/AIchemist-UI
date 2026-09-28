@@ -126,12 +126,13 @@ export function useSessionEvents() {
     }))
   );
 
-  const { setCanvasState, setCanvasStatus, pushCanvasMessage, pushCanvasLog } = useCanvasStore(
+  const { setCanvasState, setCanvasStatus, pushCanvasMessage, pushCanvasLog, bumpCanvasReload } = useCanvasStore(
     useShallow((s) => ({
       setCanvasState: s.setCanvasState,
       setCanvasStatus: s.setCanvasStatus,
       pushCanvasMessage: s.pushCanvasMessage,
       pushCanvasLog: s.pushCanvasLog,
+      bumpCanvasReload: s.bumpCanvasReload,
     }))
   );
 
@@ -280,6 +281,9 @@ export function useSessionEvents() {
           case "log":
             if (payload.level) pushCanvasLog(payload.canvasId, payload.level, payload.args ?? []);
             break;
+          case "reload":
+            bumpCanvasReload(payload.canvasId);
+            break;
         }
       }),
     ];
@@ -311,5 +315,6 @@ export function useSessionEvents() {
     setCanvasStatus,
     pushCanvasMessage,
     pushCanvasLog,
+    bumpCanvasReload,
   ]);
 }

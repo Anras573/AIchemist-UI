@@ -196,6 +196,8 @@ app.whenReady().then(() => {
         getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "status", status }),
       onLog: (canvasId, level, args) =>
         getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "log", level, args }),
+      onDevReload: (canvasId) =>
+        getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "reload" }),
     },
   });
   registerAllHandlers(workflowScheduler, canvasHostManager);

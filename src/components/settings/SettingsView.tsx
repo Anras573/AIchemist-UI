@@ -18,6 +18,7 @@ import { ProvidersAndKeysSection } from "@/components/settings/sections/Provider
 import { McpServersSection } from "@/components/settings/sections/McpServersSection";
 import { SkillsSection } from "@/components/settings/sections/SkillsSection";
 import { AgentsSection } from "@/components/settings/sections/AgentsSection";
+import { CanvasesSection } from "@/components/settings/sections/CanvasesSection";
 import { SpendingSection } from "@/components/settings/sections/SpendingSection";
 import { UpdatesSection } from "@/components/settings/sections/UpdatesSection";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
@@ -27,7 +28,7 @@ interface SettingsViewProps {
   onClose: () => void;
 }
 
-type Section = "providers" | "mcp" | "skills" | "agents" | "spending" | "advanced" | "appearance";
+type Section = "providers" | "mcp" | "skills" | "agents" | "canvases" | "spending" | "advanced" | "appearance";
 
 // Application-tier nav rows. Project-tier rows are derived from the active
 // project at render time (see PROJECT_NAV). The old "API Keys" / "Model
@@ -38,6 +39,7 @@ const APP_NAV: { id: Section; label: string }[] = [
   { id: "mcp", label: "MCP Servers" },
   { id: "skills", label: "Skills" },
   { id: "agents", label: "Agents" },
+  { id: "canvases", label: "Canvases" },
   { id: "spending", label: "Spending" },
   { id: "appearance", label: "Appearance" },
   { id: "advanced", label: "Advanced" },
@@ -64,6 +66,7 @@ const SECTION_KEYWORDS: Record<string, string[]> = {
   mcp: ["mcp", "server", "model context protocol", "command", "stdio", "http", "sse"],
   skills: ["skill", "plugin"],
   agents: ["agent", "frontmatter"],
+  canvases: ["canvas", "canvases", "definition", "manifest", "kanban"],
   spending: [
     "budget", "spend", "spending", "cost", "credits", "remaining balance", "burn rate",
     "period", "monthly", "weekly", "daily", "usd",
@@ -378,6 +381,16 @@ export function SettingsView({ onClose }: SettingsViewProps) {
                 description="Create and edit agent files. Per-session selection lives in the agent picker."
               >
                 <AgentsSection provider={hubProvider} projectPath={hubProjectPath} />
+              </SettingsSection>
+            )}
+
+            {/* ── Canvases ── */}
+            {activeSection === "canvases" && (
+              <SettingsSection
+                title="Canvases"
+                description="Canvas definitions discovered from disk (project, global, and built-in). Creating an instance and attaching it to a session lives in the Canvas panel."
+              >
+                <CanvasesSection projectId={activeProject?.id ?? ""} />
               </SettingsSection>
             )}
 

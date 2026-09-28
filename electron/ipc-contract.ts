@@ -49,7 +49,7 @@ import type {
   WorkflowSessionStrategy,
   Canvas,
   CanvasListItem,
-  CanvasDefinition,
+  CanvasDiscoveryResult,
   CanvasHostStatus,
   BudgetConfig,
   BudgetStatus,
@@ -260,7 +260,10 @@ export type IpcContract = {
   [CH.GET_GIT_BRANCH]: { args: [projectPath: string]; result: string | null };
 
   // ── Canvases ──────────────────────────────────────────────────────────────────
-  [CH.CANVAS_LIST_DEFINITIONS]: { args: []; result: CanvasDefinition[] };
+  [CH.CANVAS_LIST_DEFINITIONS]: {
+    args: [args: { projectId?: string }];
+    result: CanvasDiscoveryResult;
+  };
   [CH.CANVAS_LIST]: {
     args: [args: { projectId: string; sessionId?: string }];
     result: CanvasListItem[];

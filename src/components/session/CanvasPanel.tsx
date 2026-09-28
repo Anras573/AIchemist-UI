@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CanvasFrame } from "./CanvasFrame";
-import type { CanvasDefinition, CanvasHostStatus, CanvasListItem } from "@/types";
+import type { CanvasDefinitionEntry, CanvasDiscoveryResult, CanvasHostStatus, CanvasListItem } from "@/types";
 
 const STATUS_STYLES: Record<CanvasHostStatus, string> = {
   starting: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
@@ -64,6 +64,7 @@ export function CanvasPanel() {
   const statusByCanvas = useCanvasStore((s) => s.statusByCanvas);
   const lastMessageByCanvas = useCanvasStore((s) => s.lastMessageByCanvas);
   const logsByCanvas = useCanvasStore((s) => s.logsByCanvas);
+  const reloadNonceByCanvas = useCanvasStore((s) => s.reloadNonceByCanvas);
   const setCanvasState = useCanvasStore((s) => s.setCanvasState);
   const setCanvasStatus = useCanvasStore((s) => s.setCanvasStatus);
   const clearCanvasLogs = useCanvasStore((s) => s.clearCanvasLogs);
@@ -84,18 +85,22 @@ export function CanvasPanel() {
     { ttl: 5_000 }
   );
 
-  // CANVAS_LIST_DEFINITIONS only lists the built-in tier so far (#226 will
-  // extend it to scan the project/global directories too) — this is what
-  // lets "New canvas…" offer kanban without a free-text definition name.
-  const { data: definitions } = useIpcQuery<CanvasDefinition[]>(
-    "canvas-definitions",
-    () => ipc.canvasListDefinitions(),
+  // Discovered across all three tiers (project/global/built-in, #226) — this
+  // is what lets "New canvas…" offer a picker instead of a free-text
+  // definition name. Manifest errors are surfaced in the Settings hub's
+  // Canvases section, not here.
+  const definitionsKey = `canvas-definitions:${activeProjectId ?? ""}`;
+  const { data: discovery } = useIpcQuery<CanvasDiscoveryResult>(
+    definitionsKey,
+    () => ipc.canvasListDefinitions({ projectId: activeProjectId ?? undefined }),
     { ttl: 60_000 }
   );
+  const definitions: CanvasDefinitionEntry[] | undefined = discovery?.definitions;
 
   useEffect(() => {
     if (createDefinition || !definitions?.length) return;
-    setCreateDefinition(definitions[0].name);
+    const firstRunnable = definitions.find((d) => d.tier !== "project") ?? definitions[0];
+    setCreateDefinition(firstRunnable.id);
   }, [definitions, createDefinition]);
 
   // Reset the selection when the project changes; default to the first
@@ -249,8 +254,18 @@ export function CanvasPanel() {
             >
               {!definitions?.length && <option value="">No definitions available</option>}
               {definitions?.map((d) => (
-                <option key={d.name} value={d.name} title={d.description}>
-                  {d.name}
+                <option
+                  key={d.id}
+                  value={d.id}
+                  disabled={d.tier === "project"}
+                  title={
+                    d.tier === "project"
+                      ? "Project canvases can't run yet — awaiting the trust prompt"
+                      : d.manifest.description
+                  }
+                >
+                  {d.manifest.name} ({d.tier}
+                  {d.tier === "project" ? " — not runnable yet" : ""})
                 </option>
               ))}
             </select>
@@ -340,6 +355,7 @@ export function CanvasPanel() {
             state={stateByCanvas[selected.id] ?? selected.state}
             revision={revisionByCanvas[selected.id] ?? selected.revision}
             message={lastMessageByCanvas[selected.id]}
+            reloadNonce={reloadNonceByCanvas[selected.id]}
           />
         )}
       </div>
