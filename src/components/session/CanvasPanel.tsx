@@ -24,6 +24,11 @@ const STATUS_STYLES: Record<CanvasHostStatus, string> = {
   stopped: "bg-muted text-muted-foreground",
   crashed: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
   errored: "bg-destructive/15 text-destructive",
+  // #227: a respawn (dev-reload/crash) the manager itself refused because
+  // the project-tier definition is no longer trusted — distinct from
+  // "stopped" so this isn't mistaken for an idle-timeout, and distinct from
+  // "crashed"/"errored" since nothing actually crashed.
+  untrusted: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
 };
 
 const STATUS_LABELS: Record<CanvasHostStatus, string> = {
@@ -32,6 +37,7 @@ const STATUS_LABELS: Record<CanvasHostStatus, string> = {
   stopped: "Stopped",
   crashed: "Crashed",
   errored: "Error",
+  untrusted: "Untrusted",
 };
 
 /**
@@ -257,7 +263,7 @@ export function CanvasPanel() {
   }
 
   const status = selectedCanvasId ? statusByCanvas[selectedCanvasId] : undefined;
-  const canRestart = status === "crashed" || status === "errored" || status === "stopped";
+  const canRestart = status === "crashed" || status === "errored" || status === "stopped" || status === "untrusted";
   const logs = selectedCanvasId ? logsByCanvas[selectedCanvasId] ?? [] : [];
 
   if (!activeProjectId) {
@@ -439,6 +445,7 @@ export function CanvasPanel() {
                 projectId={activeProjectId}
                 status={trustStatus}
                 onTrusted={() => void handleTrusted()}
+                onStale={() => void refetchTrust()}
               />
             )}
             <div className="flex-1 overflow-hidden">

@@ -803,6 +803,116 @@ describe("CanvasHostManager — crash restart with backoff", () => {
   });
 });
 
+// ─── Trust-gated respawn (#227 review on PR #238) ────────────────────────────
+//
+// `resolveServerPath` is re-invoked before every spawn attempt, not just the
+// caller's initial one — closing the gap where a dev-reload restart or a
+// crash auto-restart (neither of which any caller gates) would keep
+// respawning a project-tier canvas whose trust had been revoked, or whose
+// content had changed, since it was first approved.
+
+describe("CanvasHostManager — trust-gated respawn (#227 review)", () => {
+  it("a dev-reload restart refuses to spawn once resolveServerPath returns null, and marks the host untrusted", async () => {
+    vi.useFakeTimers();
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+
+    let trusted = true;
+    const fakeWatches: Array<{ dir: string; listener: Parameters<CanvasFileWatchFactory>[2] }> = [];
+    const watchDefinitionDir: CanvasFileWatchFactory = (dir, _options, listener) => {
+      fakeWatches.push({ dir, listener });
+      return { close: vi.fn(), on: vi.fn() } as unknown as fs.FSWatcher;
+    };
+
+    const manager = new CanvasHostManager(db, {
+      spawn: factory,
+      watchDefinitionDir,
+      devReloadDebounceMs: 10,
+    });
+
+    await manager.start(canvas.id, {
+      serverPath: "/defs/kanban/server.mjs",
+      projectId: "p1",
+      projectPath: "/tmp/p1",
+      resolveServerPath: () => (trusted ? "/defs/kanban/server.mjs" : null),
+    });
+    expect(processes).toHaveLength(1);
+    expect(manager.getStatus(canvas.id)).toBe("running");
+
+    // Simulate a revoke (or an edit that un-trusts the content) landing
+    // between the last spawn and the next file-change event — the reviewer's
+    // exact reproduction ("git pull" overwriting server.mjs while the host
+    // is still up).
+    trusted = false;
+    fakeWatches[0].listener("change", "server.mjs");
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processes).toHaveLength(1); // no second spawn
+    expect(manager.getStatus(canvas.id)).toBe("untrusted");
+  });
+
+  it("a crash auto-restart refuses to spawn once resolveServerPath returns null", async () => {
+    vi.useFakeTimers();
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+
+    let trusted = true;
+    const manager = new CanvasHostManager(db, { spawn: factory, restartBaseDelayMs: 100 });
+
+    await manager.start(canvas.id, {
+      serverPath: "/defs/kanban/server.mjs",
+      projectId: "p1",
+      projectPath: "/tmp/p1",
+      resolveServerPath: () => (trusted ? "/defs/kanban/server.mjs" : null),
+    });
+    expect(processes).toHaveLength(1);
+
+    trusted = false;
+    processes[0].crash();
+    expect(manager.getStatus(canvas.id)).toBe("crashed"); // the crash itself is unaffected by trust
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(processes).toHaveLength(1); // the scheduled restart never spawned
+    expect(manager.getStatus(canvas.id)).toBe("untrusted");
+  });
+
+  it("stop() resolves immediately for an untrusted host (no live process to kill)", async () => {
+    vi.useFakeTimers();
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    let trusted = true;
+    const manager = new CanvasHostManager(db, { spawn: factory, restartBaseDelayMs: 100 });
+
+    await manager.start(canvas.id, {
+      serverPath: "/defs/kanban/server.mjs",
+      projectId: "p1",
+      projectPath: "/tmp/p1",
+      resolveServerPath: () => (trusted ? "/defs/kanban/server.mjs" : null),
+    });
+    trusted = false;
+    processes[0].crash();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(manager.getStatus(canvas.id)).toBe("untrusted");
+
+    await expect(manager.stop(canvas.id)).resolves.toBeUndefined();
+    expect(manager.getStatus(canvas.id)).toBe("stopped");
+  });
+
+  it("omitting resolveServerPath keeps the pre-#227 behavior — respawns keep reusing the static serverPath", async () => {
+    vi.useFakeTimers();
+    const canvas = createCanvas(db, { projectId: "p1", definition: "kanban", title: "Board" });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const manager = new CanvasHostManager(db, { spawn: factory, restartBaseDelayMs: 100 });
+
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+    processes[0].crash();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(processes).toHaveLength(2);
+    await vi.waitFor(() => expect(manager.getStatus(canvas.id)).toBe("running"));
+  });
+});
+
 // ─── stop / stopAll ──────────────────────────────────────────────────────────
 
 describe("CanvasHostManager — stop / stopAll", () => {

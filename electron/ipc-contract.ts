@@ -301,7 +301,7 @@ export type IpcContract = {
     result: CanvasTrustStatus | null;
   };
   [CH.CANVAS_TRUST_GRANT]: {
-    args: [args: { projectId: string; definition: string }];
+    args: [args: { projectId: string; definition: string; expectedContentHash: string }];
     result: CanvasTrustGrantResult;
   };
   [CH.CANVAS_TRUST_REVOKE]: {

@@ -415,7 +415,7 @@ export interface CanvasTrustGrantResult {
  * `electron/` for Node-only modules — same rule as the tool-round-cap bounds
  * in `SettingsView.tsx`.
  */
-export type CanvasHostStatus = "starting" | "running" | "stopped" | "crashed" | "errored";
+export type CanvasHostStatus = "starting" | "running" | "stopped" | "crashed" | "errored" | "untrusted";
 
 /**
  * Push payload for `CANVAS_EVENT` (main → renderer): a host status change, a

@@ -181,7 +181,11 @@ export interface ElectronAPI {
   canvasUiMessage: (canvasId: string, message: unknown) => Promise<Res<typeof CH.CANVAS_UI_MESSAGE>>;
   canvasRestart: (canvasId: string) => Promise<Res<typeof CH.CANVAS_RESTART>>;
   canvasTrustStatus: (args: { projectId: string; definition: string }) => Promise<Res<typeof CH.CANVAS_TRUST_STATUS>>;
-  canvasTrustGrant: (args: { projectId: string; definition: string }) => Promise<Res<typeof CH.CANVAS_TRUST_GRANT>>;
+  canvasTrustGrant: (args: {
+    projectId: string;
+    definition: string;
+    expectedContentHash: string;
+  }) => Promise<Res<typeof CH.CANVAS_TRUST_GRANT>>;
   canvasTrustRevoke: (args: { projectId: string; definition: string }) => Promise<Res<typeof CH.CANVAS_TRUST_REVOKE>>;
 
   // ── Workflows ─────────────────────────────────────────────────────────────

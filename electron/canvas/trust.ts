@@ -7,12 +7,19 @@
  * expose tools until the user explicitly consents, and a later edit (e.g.
  * `git pull`, or the agent editing the canvas again) must re-prompt.
  *
- * Consent is bound to a content hash over the files that determine "what
- * code would run": the manifest, the server entry, and the dependency
- * manifest(s) — never the `ui/` folder, which doesn't execute (it's served
- * read-only into an already-sandboxed, networkless iframe regardless of
- * trust; see `resolveCanvasUiDir`'s preview fallback in `definitions.ts`).
- * The hash is persisted in `canvas_trust` (#221) keyed by
+ * Consent is bound to a content hash over the **entire** definition folder —
+ * not just `canvas.json`/`server.mjs`/`package.json` — because `server.mjs`
+ * routinely imports sibling modules (the built-in kanban itself splits into
+ * `server.mjs` + `definition.mjs` + `board.mjs`), and any of those files is
+ * just as much "code that would run" as `server.mjs` itself (#227 review on
+ * PR #238: a hash limited to the top-level trio let an imported module change
+ * with no re-prompt). Excluded: the `ui/` folder at the definition's root,
+ * which never executes — it's served read-only into an already-sandboxed,
+ * networkless iframe regardless of trust (see `resolveCanvasUiDir`'s preview
+ * fallback in `definitions.ts`) — and any `node_modules` directory at any
+ * depth, which is dependency-managed content, not authored code (see
+ * `computeCanvasContentHash`'s docstring for how a *pre-existing* one is
+ * handled instead). The hash is persisted in `canvas_trust` (#221) keyed by
  * `(project_id, definition)` via `setCanvasTrust`/`getCanvasTrust`/
  * `deleteCanvasTrust` (`store.ts`) — this module owns hashing, the
  * grant/revoke/status operations built on top of that storage, dependency
@@ -37,42 +44,81 @@ import { deleteCanvasTrust, getCanvasTrust, setCanvasTrust } from "./store";
 
 // ─── Hashing ─────────────────────────────────────────────────────────────────
 
-/** Always hashed when present. `server.mjs` is the only server path the runtime resolves (see `manifest.ts`), so this doesn't need to read the manifest first. */
-const HASHED_ENTRY_FILENAMES = ["canvas.json", "server.mjs", "package.json"] as const;
-
-/** At most one lockfile is hashed — whichever of these exists first. A project only ever has one active package manager's lockfile. */
-const LOCKFILE_CANDIDATES = ["bun.lock", "bun.lockb", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"] as const;
-
-function filesToHash(defDir: string): string[] {
-  const files: string[] = [...HASHED_ENTRY_FILENAMES];
-  for (const name of LOCKFILE_CANDIDATES) {
-    if (fs.existsSync(nodePath.join(defDir, name))) {
-      files.push(name);
-      break;
-    }
-  }
-  return files;
+/**
+ * Directory names excluded from the recursive walk. `ui/` only at the
+ * definition's root (a coincidentally-named `lib/ui/` deeper in authored code
+ * is real code and stays hashed); `node_modules` at *any* depth (bun/npm can
+ * nest it), since it's dependency-managed content rather than authored code —
+ * see this function's docstring for how a pre-existing one is handled.
+ */
+function isExcludedDir(name: string, isRoot: boolean): boolean {
+  if (name === "node_modules") return true;
+  if (isRoot && name === "ui") return true;
+  return false;
 }
 
 /**
- * Hashes a definition folder's "what code would run" surface. Each
- * present-or-absent filename is folded into the digest alongside its content
- * (sorted, so hashing order never depends on filesystem iteration order) —
- * adding or removing one of these files (e.g. a `package.json` appearing
- * after `git pull`) changes the hash just as much as editing an existing
- * one's content does. A file that doesn't exist is skipped, not hashed as
- * empty, so "no package.json" and "empty package.json" hash differently.
+ * Recursively lists every regular file under `defDir` (relative, POSIX-style
+ * paths, sorted), skipping excluded directories and symlinks — a symlink
+ * Dirent reports `isFile()`/`isDirectory()` as both false, so it's silently
+ * skipped rather than followed, closing off a canvas pointing a hashed path
+ * outside its own folder. Fail-open per file/dir (an unreadable subtree is
+ * skipped, not thrown) — same stance as `discoverCanvasDefinitions`.
+ */
+function collectHashableFiles(defDir: string): string[] {
+  const results: string[] = [];
+  function walk(relDir: string): void {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(nodePath.join(defDir, relDir), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (isExcludedDir(entry.name, relDir === "")) continue;
+        walk(relPath);
+      } else if (entry.isFile()) {
+        results.push(relPath);
+      }
+    }
+  }
+  walk("");
+  return results.sort();
+}
+
+/**
+ * Hashes a definition folder's "what code would run" surface: every file
+ * under it except `ui/` (root only) and `node_modules` (any depth) — see the
+ * module docstring for why. Each file's relative path is folded into the
+ * digest alongside its content (sorted, so hashing order never depends on
+ * filesystem iteration order) — a file appearing/disappearing (e.g. a
+ * `package.json` added by a `git pull`, or a new imported module) changes the
+ * hash just as much as editing an existing one's content does.
+ *
+ * **`node_modules` is deliberately never hashed**, at any depth: hashing a
+ * whole dependency tree on every trust check (this runs on effectively every
+ * canvas-bearing turn via `resolveTrustedCanvasServerPath`) would be slow and
+ * would churn on routine `bun install` output, and it's *dependency*-managed
+ * content the lockfile already pins, not authored code. That leaves a real
+ * gap the #227 review flagged: a `node_modules` folder *committed to the
+ * repo* would let a bare import (`import "some-pkg"`) resolve to
+ * attacker-controlled code that this hash can never see. The gap is closed
+ * one layer up, not here: `CANVAS_TRUST_GRANT`'s handler refuses to grant
+ * trust at all while a `node_modules` already exists in the definition folder
+ * *before* AIchemist's own `bun install` runs — see that handler's comment.
  */
 export function computeCanvasContentHash(defDir: string): string {
   const hash = crypto.createHash("sha256");
-  for (const name of filesToHash(defDir).sort()) {
+  for (const relPath of collectHashableFiles(defDir)) {
     let content: Buffer;
     try {
-      content = fs.readFileSync(nodePath.join(defDir, name));
+      content = fs.readFileSync(nodePath.join(defDir, relPath));
     } catch {
-      continue;
+      continue; // removed between listing and reading — treat as absent
     }
-    hash.update(name);
+    hash.update(relPath);
     hash.update("\0");
     hash.update(content);
     hash.update("\0");
@@ -249,10 +295,21 @@ export function _setCanvasInstallSpawnForTests(fn: CanvasInstallSpawnFn | null):
   installSpawnOverride = fn;
 }
 
+/** A missing `bun` binary surfaces from `spawn` as an `ENOENT`-coded error — translate that into copy that tells the user what to do instead of a raw OS error. */
+function describeInstallError(err: NodeJS.ErrnoException, verb: "spawn" | "run"): string {
+  if (err.code === "ENOENT") {
+    return '"bun" is required to install this canvas\'s dependencies, but it could not be found on PATH.';
+  }
+  return `Failed to ${verb} "bun install": ${err.message}`;
+}
+
 /**
  * Runs `bun install` in a project definition's folder — only ever called
- * after trust is granted (the `CANVAS_TRUST_GRANT` handler calls this right
- * after `trustProjectCanvas` succeeds), never before. A no-op
+ * after the `CANVAS_TRUST_GRANT` handler's pre-install checks pass (the
+ * content-hash match and the "no pre-existing `node_modules`" check), and
+ * *before* it records trust (see that handler's comment on why install comes
+ * first: hashing after install means the lockfile `bun install` may create
+ * doesn't immediately invalidate the trust the user just granted). A no-op
  * (`{ ok: true, output: "" }`) when the folder declares no `package.json` —
  * most canvases, the built-in kanban included, have no dependencies at all.
  * `onOutput` streams stdout/stderr chunks as they arrive (for a live install
@@ -281,7 +338,7 @@ export function installCanvasDependencies(
     try {
       child = spawnFn("bun", ["install"], { cwd: defDir });
     } catch (err) {
-      const message = `Failed to spawn "bun install": ${err instanceof Error ? err.message : String(err)}`;
+      const message = describeInstallError(err as NodeJS.ErrnoException, "spawn");
       finish({ ok: false, output: message });
       return;
     }
@@ -293,8 +350,8 @@ export function installCanvasDependencies(
     };
     child.stdout?.on("data", onChunk);
     child.stderr?.on("data", onChunk);
-    child.on("error", (err) => {
-      const message = `Failed to run "bun install": ${err.message}`;
+    child.on("error", (err: NodeJS.ErrnoException) => {
+      const message = describeInstallError(err, "run");
       output += (output ? "\n" : "") + message;
       opts?.onOutput?.(message);
       finish({ ok: false, output });

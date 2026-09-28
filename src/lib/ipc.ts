@@ -146,7 +146,8 @@ export const ipc = {
   canvasUiMessage: (canvasId: string, message: unknown) => window.electronAPI.canvasUiMessage(canvasId, message),
   canvasRestart: (canvasId: string) => window.electronAPI.canvasRestart(canvasId),
   canvasTrustStatus: (args: { projectId: string; definition: string }) => window.electronAPI.canvasTrustStatus(args),
-  canvasTrustGrant: (args: { projectId: string; definition: string }) => window.electronAPI.canvasTrustGrant(args),
+  canvasTrustGrant: (args: { projectId: string; definition: string; expectedContentHash: string }) =>
+    window.electronAPI.canvasTrustGrant(args),
   canvasTrustRevoke: (args: { projectId: string; definition: string }) => window.electronAPI.canvasTrustRevoke(args),
 
   // Workflows

@@ -518,6 +518,9 @@ export class CanvasMcpEndpoint {
       serverPath,
       projectId: project.id,
       projectPath,
+      // Re-checked on every respawn the manager triggers on its own (#227
+      // review on PR #238) — see `resolveServerPath`'s own docstring.
+      resolveServerPath: () => resolveTrustedCanvasServerPath(this.db, canvas, projectPath),
     };
     await this.hostManager.start(canvasId, startOpts);
     // A host that had no record yet (the common case — a session's first

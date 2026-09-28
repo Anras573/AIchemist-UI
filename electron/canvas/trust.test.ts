@@ -113,6 +113,60 @@ describe("computeCanvasContentHash", () => {
     fs.writeFileSync(nodePath.join(dir, "ui", "index.html"), "<html></html>");
     expect(computeCanvasContentHash(dir)).toBe(before);
   });
+
+  // #227 review on PR #238: the original hash only covered canvas.json/
+  // server.mjs/package.json, so editing a module server.mjs imports (the
+  // normal shape — the built-in kanban itself splits into server.mjs +
+  // definition.mjs + board.mjs) never re-prompted. These prove the fix.
+
+  it("changes when a module server.mjs imports is edited, at any depth", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    fs.writeFileSync(nodePath.join(dir, "lib.mjs"), "export const x = 1;");
+    fs.mkdirSync(nodePath.join(dir, "tools"), { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, "tools", "helper.mjs"), "export const y = 1;");
+    const before = computeCanvasContentHash(dir);
+
+    fs.writeFileSync(nodePath.join(dir, "lib.mjs"), "export const x = 2;");
+    expect(computeCanvasContentHash(dir)).not.toBe(before);
+
+    const afterLib = computeCanvasContentHash(dir);
+    fs.writeFileSync(nodePath.join(dir, "tools", "helper.mjs"), "export const y = 2;");
+    expect(computeCanvasContentHash(dir)).not.toBe(afterLib);
+  });
+
+  it("changes when a new file is added anywhere outside ui/", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    const before = computeCanvasContentHash(dir);
+    fs.writeFileSync(nodePath.join(dir, "new-module.mjs"), "export default {};");
+    expect(computeCanvasContentHash(dir)).not.toBe(before);
+  });
+
+  it("only excludes ui/ at the definition root, not a coincidentally-named nested folder", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    fs.mkdirSync(nodePath.join(dir, "lib", "ui"), { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, "lib", "ui", "widget.mjs"), "export default 1;");
+    const before = computeCanvasContentHash(dir);
+    fs.writeFileSync(nodePath.join(dir, "lib", "ui", "widget.mjs"), "export default 2;");
+    expect(computeCanvasContentHash(dir)).not.toBe(before);
+  });
+
+  it("never hashes node_modules, at any depth", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets", {
+      extraFiles: { "package.json": JSON.stringify({ dependencies: { "is-number": "^7" } }) },
+    });
+    const before = computeCanvasContentHash(dir);
+
+    fs.mkdirSync(nodePath.join(dir, "node_modules", "is-number"), { recursive: true });
+    fs.writeFileSync(nodePath.join(dir, "node_modules", "is-number", "index.js"), "module.exports = () => true;");
+    // Adding node_modules itself doesn't change the hash...
+    expect(computeCanvasContentHash(dir)).toBe(before);
+
+    // ...and neither does editing a file inside it (the #227 review's
+    // "committed node_modules" scenario — closed instead by CANVAS_TRUST_GRANT
+    // refusing to grant while one pre-exists, not by hashing it).
+    fs.writeFileSync(nodePath.join(dir, "node_modules", "is-number", "index.js"), "module.exports = () => false;");
+    expect(computeCanvasContentHash(dir)).toBe(before);
+  });
 });
 
 // ─── Status ──────────────────────────────────────────────────────────────────

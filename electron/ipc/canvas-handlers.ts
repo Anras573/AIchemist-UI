@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as nodePath from "node:path";
 import type { Database } from "better-sqlite3";
 import * as CH from "../ipc-channels";
 import type {
@@ -20,6 +22,7 @@ import { discoverCanvasDefinitions } from "../canvas/discovery";
 import type { CanvasHostStatus as HostManagerStatus, StartCanvasHostOptions } from "../canvas/host-manager";
 import {
   CanvasTrustError,
+  computeCanvasContentHash,
   getProjectCanvasTrustStatus,
   installCanvasDependencies,
   resolveTrustedCanvasServerPath,
@@ -55,13 +58,27 @@ function findProject(db: Database, projectId: string) {
  * is unavailable — the caller treats that as "canvas unavailable" rather than
  * throwing, matching that resolver's own contract (which itself matches
  * `resolveCanvasServerPath`'s for global/built-in).
+ *
+ * Also attaches `resolveServerPath` — a closure `CanvasHostManager` calls
+ * again before every respawn it triggers on its own (a dev-reload restart, a
+ * crash auto-restart), not just this initial one. Without it, the manager
+ * would keep reusing today's already-resolved `serverPath` forever, so a
+ * project-tier canvas whose trust was revoked (or whose content changed)
+ * after this call would still get respawned with code nobody re-approved
+ * (#227 review on PR #238) — the one-time check here only ever covers the
+ * moment `CANVAS_OPEN`/`CANVAS_RESTART` happened to run.
  */
 function resolveStartOptions(db: Database, canvas: Canvas): StartCanvasHostOptions | null {
   const project = findProject(db, canvas.project_id);
   if (!project) return null;
   const serverPath = resolveTrustedCanvasServerPath(db, canvas, project.path);
   if (!serverPath) return null;
-  return { serverPath, projectId: project.id, projectPath: project.path };
+  return {
+    serverPath,
+    projectId: project.id,
+    projectPath: project.path,
+    resolveServerPath: () => resolveTrustedCanvasServerPath(db, canvas, project.path),
+  };
 }
 
 /**
@@ -217,9 +234,54 @@ export function registerCanvasHandlers(db: Database, hostManager: CanvasHostMana
 
   handle(
     CH.CANVAS_TRUST_GRANT,
-    async (_event, args: { projectId: string; definition: string }): Promise<CanvasTrustGrantResult> => {
+    async (
+      _event,
+      args: { projectId: string; definition: string; expectedContentHash: string }
+    ): Promise<CanvasTrustGrantResult> => {
       const project = findProject(db, args.projectId);
       if (!project) throw new IpcError("not_found", `Project not found: ${args.projectId}`);
+
+      const dir = resolveProjectDefinitionDir(project.path, args.definition);
+      if (!dir) throw new IpcError("not_found", `Project canvas definition not found: ${args.definition}`);
+
+      // TOCTOU guard (#227 review on PR #238): the renderer sends back the
+      // hash it displayed in the prompt (from an earlier CANVAS_TRUST_STATUS
+      // call). If the definition changed since then — someone edited it, or
+      // a `git pull` landed, between the prompt rendering and the click —
+      // this must refuse rather than trust whatever happens to be on disk
+      // *now*, which the user never actually saw.
+      if (computeCanvasContentHash(dir) !== args.expectedContentHash) {
+        throw new IpcError(
+          "conflict",
+          "This canvas definition changed since it was reviewed. Re-open the trust prompt to review the current content before trusting it."
+        );
+      }
+
+      // A `node_modules` already sitting in the definition folder — e.g.
+      // committed to the repo — resolves bare imports (`import "some-pkg"`)
+      // before AIchemist's own `bun install` ever runs, and its contents
+      // aren't part of the content hash at all (see computeCanvasContentHash's
+      // docstring for why `node_modules` is excluded from hashing). Refuse
+      // outright rather than silently trusting whatever's already there;
+      // AIchemist's own install (below) is always free to populate a fresh
+      // one from the hashed `package.json`/lockfile.
+      if (fs.existsSync(nodePath.join(dir, "node_modules"))) {
+        throw new IpcError(
+          "invalid_input",
+          "This canvas ships its own node_modules folder, which AIchemist won't run automatically. Remove it from the definition and let AIchemist install dependencies via bun install."
+        );
+      }
+
+      // Dependencies (if any) install BEFORE trust is recorded, and the trust
+      // hash is computed AFTER — the reverse of the original order. Hashing
+      // first meant a repo with no lockfile got a hash the `bun install`
+      // below immediately invalidated (it creates one), so the user's fresh
+      // "Trust and run" click would refuse to start and force approving the
+      // same content twice (#227 review). Installing is itself the action
+      // the user just consented to, so running it in the still-untrusted
+      // state (no host can start regardless) is safe, and hashing what's on
+      // disk afterward makes the recorded trust match what will actually run.
+      const install = await installCanvasDependencies(dir);
 
       let trust;
       try {
@@ -229,11 +291,6 @@ export function registerCanvasHandlers(db: Database, hostManager: CanvasHostMana
         throw err;
       }
 
-      // Dependencies (if any) install only now, after consent is recorded —
-      // never before, and never for a definition that turns out not to
-      // resolve (trustProjectCanvas would have thrown above).
-      const dir = resolveProjectDefinitionDir(project.path, args.definition);
-      const install = dir ? await installCanvasDependencies(dir) : { ok: true, output: "" };
       return { trust, install };
     }
   );

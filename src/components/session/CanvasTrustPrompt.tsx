@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Loader2, ShieldAlert } from "lucide-react";
-import { useIpc } from "@/lib/ipc";
+import { IpcError, useIpc } from "@/lib/ipc";
 import { Button } from "@/components/ui/button";
 import type { CanvasTrustStatus } from "@/types";
 
@@ -9,6 +9,13 @@ interface CanvasTrustPromptProps {
   status: CanvasTrustStatus;
   /** Fired after a successful `CANVAS_TRUST_GRANT` — the caller re-fetches trust status and opens the host. */
   onTrusted: () => void;
+  /**
+   * Fired when the grant was refused because the definition changed since
+   * `status` was fetched (the handler's TOCTOU guard, #227 review) — the
+   * caller re-fetches trust status so this prompt re-renders with the
+   * current manifest/dependencies/hash instead of staying stale.
+   */
+  onStale: () => void;
 }
 
 /**
@@ -17,7 +24,7 @@ interface CanvasTrustPromptProps {
  * blocks the UI preview — `CanvasPanel` renders this banner *alongside* the
  * (already inert, host-stopped) `CanvasFrame`, not instead of it.
  */
-export function CanvasTrustPrompt({ projectId, status, onTrusted }: CanvasTrustPromptProps) {
+export function CanvasTrustPrompt({ projectId, status, onTrusted, onStale }: CanvasTrustPromptProps) {
   const ipc = useIpc();
   const [trusting, setTrusting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +34,11 @@ export function CanvasTrustPrompt({ projectId, status, onTrusted }: CanvasTrustP
     setTrusting(true);
     setError(null);
     try {
-      const result = await ipc.canvasTrustGrant({ projectId, definition: status.definition });
+      const result = await ipc.canvasTrustGrant({
+        projectId,
+        definition: status.definition,
+        expectedContentHash: status.contentHash,
+      });
       if (result.install.output) setInstallOutput(result.install.output);
       if (!result.install.ok) {
         setError('Trusted, but "bun install" failed — see the output below. You can retry from the settings hub.');
@@ -35,6 +46,10 @@ export function CanvasTrustPrompt({ projectId, status, onTrusted }: CanvasTrustP
       onTrusted();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      // A "conflict" means the definition changed since `status` (and its
+      // displayed contentHash) was fetched — refresh so the prompt reflects
+      // what's actually on disk now instead of staying stale.
+      if (err instanceof IpcError && err.code === "conflict") onStale();
     } finally {
       setTrusting(false);
     }

@@ -220,6 +220,13 @@ const canvasTrustArgsSchema = z.object({
   definition: z.string().trim().min(1),
 });
 
+const canvasTrustGrantSchema = canvasTrustArgsSchema.extend({
+  // The hash the renderer displayed in the prompt — the handler's TOCTOU
+  // guard (#227 review) rejects the grant if the definition no longer
+  // matches it.
+  expectedContentHash: z.string().trim().min(1),
+});
+
 /**
  * Per-channel argument validators. Keyed by channel constant so a new mutation
  * channel can opt in with one entry.
@@ -250,6 +257,6 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.CANVAS_UI_MESSAGE]: unary(canvasUiMessageSchema, CH.CANVAS_UI_MESSAGE),
   [CH.CANVAS_RESTART]: unary(canvasIdSchema, CH.CANVAS_RESTART),
   [CH.CANVAS_TRUST_STATUS]: unary(canvasTrustArgsSchema, CH.CANVAS_TRUST_STATUS),
-  [CH.CANVAS_TRUST_GRANT]: unary(canvasTrustArgsSchema, CH.CANVAS_TRUST_GRANT),
+  [CH.CANVAS_TRUST_GRANT]: unary(canvasTrustGrantSchema, CH.CANVAS_TRUST_GRANT),
   [CH.CANVAS_TRUST_REVOKE]: unary(canvasTrustArgsSchema, CH.CANVAS_TRUST_REVOKE),
 };

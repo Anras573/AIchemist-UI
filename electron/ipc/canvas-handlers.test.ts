@@ -492,13 +492,17 @@ describe("CANVAS_TRUST_STATUS / CANVAS_TRUST_GRANT / CANVAS_TRUST_REVOKE", () =>
     });
   });
 
+  /** Fetches the current CANVAS_TRUST_STATUS hash and grants with it, mirroring what the renderer does. */
+  async function grantTrust(definition: string): Promise<IpcEnvelope<{ trust: { content_hash: string }; install: { ok: boolean; output: string } }>> {
+    const status = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, { projectId: "p3", definition });
+    if (!status.ok || !status.data) throw new Error(`No trust status for ${definition}`);
+    return call(CH.CANVAS_TRUST_GRANT, { projectId: "p3", definition, expectedContentHash: status.data.contentHash });
+  }
+
   describe("CANVAS_TRUST_GRANT", () => {
     it("records trust and reports it back via CANVAS_TRUST_STATUS", async () => {
       writeDefinition("widgets");
-      const grant = await call<{ trust: { content_hash: string }; install: { ok: boolean; output: string } }>(
-        CH.CANVAS_TRUST_GRANT,
-        { projectId: "p3", definition: "widgets" }
-      );
+      const grant = await grantTrust("widgets");
       expect(grant.ok).toBe(true);
       if (!grant.ok) return;
       // No package.json — install is a no-op rather than actually spawning bun.
@@ -523,7 +527,7 @@ describe("CANVAS_TRUST_STATUS / CANVAS_TRUST_GRANT / CANVAS_TRUST_REVOKE", () =>
       if (beforeOpen.ok) expect(beforeOpen.data.status).toBe("unknown");
       expect(hostManager.startCalls).toHaveLength(0);
 
-      await call(CH.CANVAS_TRUST_GRANT, { projectId: "p3", definition: "widgets" });
+      await grantTrust("widgets");
 
       const afterOpen = await call<{ status: string }>(CH.CANVAS_OPEN, { canvasId: canvas.id });
       expect(afterOpen.ok).toBe(true);
@@ -550,10 +554,7 @@ describe("CANVAS_TRUST_STATUS / CANVAS_TRUST_GRANT / CANVAS_TRUST_REVOKE", () =>
         return fake;
       });
 
-      const grant = await call<{ install: { ok: boolean; output: string } }>(CH.CANVAS_TRUST_GRANT, {
-        projectId: "p3",
-        definition: "widgets",
-      });
+      const grant = await grantTrust("widgets");
       expect(grant.ok).toBe(true);
       if (!grant.ok) return;
       expect(grant.data.install.ok).toBe(true);
@@ -562,10 +563,61 @@ describe("CANVAS_TRUST_STATUS / CANVAS_TRUST_GRANT / CANVAS_TRUST_REVOKE", () =>
     });
 
     it("returns not_found when the definition doesn't exist", async () => {
-      const env = await call(CH.CANVAS_TRUST_GRANT, { projectId: "p3", definition: "does-not-exist" });
+      const env = await call(CH.CANVAS_TRUST_GRANT, {
+        projectId: "p3",
+        definition: "does-not-exist",
+        expectedContentHash: "irrelevant",
+      });
       expect(env.ok).toBe(false);
       if (env.ok) return;
       expect(env.error.code).toBe("not_found");
+    });
+
+    it("rejects with conflict when the definition changed since the displayed hash", async () => {
+      writeDefinition("widgets");
+      const status = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, { projectId: "p3", definition: "widgets" });
+      expect(status.ok).toBe(true);
+      if (!status.ok || !status.data) return;
+
+      // Edit after the hash was displayed but before the user clicks "Trust".
+      writeDefinition("widgets", "export default { edited: true };");
+
+      const env = await call(CH.CANVAS_TRUST_GRANT, {
+        projectId: "p3",
+        definition: "widgets",
+        expectedContentHash: status.data.contentHash,
+      });
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe("conflict");
+      // Never grants trust for content the user didn't actually review.
+      const after = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, { projectId: "p3", definition: "widgets" });
+      expect(after.ok && after.data?.trusted).toBe(false);
+    });
+
+    it("refuses to grant while a pre-existing node_modules sits in the definition folder", async () => {
+      writeDefinition("widgets");
+      fs.mkdirSync(nodePath.join(projectDir, ".agents", "canvases", "widgets", "node_modules", "evil-pkg"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        nodePath.join(projectDir, ".agents", "canvases", "widgets", "node_modules", "evil-pkg", "index.js"),
+        "module.exports = {};"
+      );
+
+      const status = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, { projectId: "p3", definition: "widgets" });
+      expect(status.ok).toBe(true);
+      if (!status.ok || !status.data) return;
+
+      const env = await call(CH.CANVAS_TRUST_GRANT, {
+        projectId: "p3",
+        definition: "widgets",
+        expectedContentHash: status.data.contentHash,
+      });
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe("invalid_input");
+      expect(env.error.message).toMatch(/node_modules/);
     });
   });
 
@@ -573,7 +625,7 @@ describe("CANVAS_TRUST_STATUS / CANVAS_TRUST_GRANT / CANVAS_TRUST_REVOKE", () =>
     it("un-trusts the definition and stops any running host using it", async () => {
       writeDefinition("widgets");
       const canvas = createCanvas(db, { projectId: "p3", definition: "widgets", title: "Widgets" });
-      await call(CH.CANVAS_TRUST_GRANT, { projectId: "p3", definition: "widgets" });
+      await grantTrust("widgets");
       await call(CH.CANVAS_OPEN, { canvasId: canvas.id });
       expect(hostManager.getStatus(canvas.id)).toBe("running");
 
