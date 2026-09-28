@@ -366,6 +366,49 @@ export interface CanvasTrust {
 }
 
 /**
+ * `package.json` dependency names declared by a project-tier definition, for
+ * the trust prompt (#227) — `hasPackageJson` distinguishes "no dependencies
+ * declared" (empty `names`, no install needed) from "no `package.json` at
+ * all" (same `names: []`, but also nothing to run `bun install` against).
+ */
+export interface CanvasDependencyInfo {
+  names: string[];
+  hasPackageJson: boolean;
+}
+
+/**
+ * `CANVAS_TRUST_STATUS` result for a project-tier definition: its manifest,
+ * declared dependencies, current content hash, and whether a stored
+ * `canvas_trust` record's hash still matches it. Null (at the call site) when
+ * the folder isn't a valid project definition — missing, an unsafe name, or a
+ * `canvas.json` that fails to read or validate.
+ */
+export interface CanvasTrustStatus {
+  definition: string;
+  /** Absolute path to the definition's folder, for display in the prompt. */
+  path: string;
+  manifest: CanvasDefinition;
+  dependencies: CanvasDependencyInfo;
+  contentHash: string;
+  /** True iff a stored trust record's `content_hash` matches `contentHash`. */
+  trusted: boolean;
+  /** The stored record's `trusted_at`, only when `trusted` is true. */
+  trustedAt: string | null;
+}
+
+/** Result of running `bun install` in a just-trusted definition's folder — `{ ok: true, output: "" }` when it declares no `package.json` (most canvases). */
+export interface CanvasInstallResult {
+  ok: boolean;
+  output: string;
+}
+
+/** `CANVAS_TRUST_GRANT` result. */
+export interface CanvasTrustGrantResult {
+  trust: CanvasTrust;
+  install: CanvasInstallResult;
+}
+
+/**
  * A canvas host process's lifecycle state, mirroring
  * `electron/canvas/host-manager.ts`'s `CanvasHostStatus`. Duplicated here
  * (rather than imported) because the renderer can only type-import from

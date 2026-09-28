@@ -37,6 +37,7 @@ import { getSession } from "../sessions";
 import { getAttachedCanvases, getCanvas, isCanvasAttached } from "./store";
 import { CanvasToolError, type CanvasHostManager, type StartCanvasHostOptions } from "./host-manager";
 import { _setCanvasesRootForTests, resolveCanvasServerPath } from "./definitions";
+import { resolveTrustedCanvasServerPath } from "./trust";
 import { requestApproval, requiresApproval } from "../agent/approval";
 import { TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "../agent/tool-gate";
 import type { McpServerEntry, McpServersMap } from "../mcp/config";
@@ -95,6 +96,24 @@ function tryGetAttachedCanvases(db: Database, sessionId: string): Canvas[] {
   }
 }
 
+/**
+ * Resolves the workspace path a session's canvases should be trust-checked
+ * and started against — `session.workspace_path ?? project.path`, same
+ * fallback `ensureHostRunning` already used before this helper existed. Same
+ * fail-safe stance as `tryGetAttachedCanvases`: a DB error here must never
+ * break a turn, it just means this session's project-tier canvases resolve
+ * as unavailable for it.
+ */
+function tryResolveSessionProjectPath(db: Database, sessionId: string): string | null {
+  try {
+    const session = getSession(db, sessionId);
+    const project = listProjects(db).find((p) => p.id === session.project_id);
+    return project ? (session.workspace_path ?? project.path) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Naming / injection helpers ───────────────────────────────────────────────
 
 /**
@@ -139,14 +158,22 @@ export function canvasMcpServersForSession(
   const attached = tryGetAttachedCanvases(db, sessionId);
   if (attached.length === 0) return {};
 
+  const projectPath = tryResolveSessionProjectPath(db, sessionId);
   const out: McpServersMap = {};
   for (const canvas of attached) {
     // A definition deleted from disk while an instance still exists (#226's
-    // "definition missing" state) must not be advertised as a tool server —
+    // "definition missing" state), OR an untrusted/edited-since-trust
+    // project-tier one (#227), must not be advertised as a tool server —
     // its host can never start, so a `tools/list` against it would just
-    // error. `getAttachedCanvases`/tools stay unaffected; this only trims
-    // what's offered to the model this turn.
-    if (!resolveCanvasServerPath(canvas.definition)) continue;
+    // error (or, for trust, must never even get the chance to). Trust-gated:
+    // falls back to `resolveCanvasServerPath` alone (global/built-in only,
+    // always trusted) when the session's project path couldn't be resolved.
+    // `getAttachedCanvases`/tools stay unaffected; this only trims what's
+    // offered to the model this turn.
+    const resolved = projectPath
+      ? resolveTrustedCanvasServerPath(db, canvas, projectPath)
+      : resolveCanvasServerPath(canvas.definition);
+    if (!resolved) continue;
     const entry: McpServerEntry = {
       type: "http",
       url: `${endpoint.baseUrl}/canvas/${canvas.id}/session/${sessionId}/mcp`,
@@ -164,9 +191,13 @@ export function canvasMcpServersForSession(
  * attached.
  */
 export function buildCanvasSystemPromptAddendum(db: Database, sessionId: string): string {
-  // Same "definition missing" exclusion as `canvasMcpServersForSession` —
-  // no point telling the model about a canvas whose tools aren't offered.
-  const attached = tryGetAttachedCanvases(db, sessionId).filter((c) => resolveCanvasServerPath(c.definition));
+  // Same "definition missing" / untrusted-project-tier exclusion as
+  // `canvasMcpServersForSession` — no point telling the model about a canvas
+  // whose tools aren't offered.
+  const projectPath = tryResolveSessionProjectPath(db, sessionId);
+  const attached = tryGetAttachedCanvases(db, sessionId).filter((c) =>
+    projectPath ? resolveTrustedCanvasServerPath(db, c, projectPath) : resolveCanvasServerPath(c.definition)
+  );
   if (attached.length === 0) return "";
   const lines = attached.map((c) => `- ${c.title} (${c.definition})`).join("\n");
   return (
@@ -475,13 +506,18 @@ export class CanvasMcpEndpoint {
     const project = listProjects(this.db).find((p) => p.id === session.project_id);
     if (!project) throw new Error(CANVAS_UNAVAILABLE_MESSAGE);
 
-    const serverPath = resolveCanvasServerPath(canvas.definition);
+    const projectPath = session.workspace_path ?? project.path;
+    // Trust-gated (#227): resolves global/built-in unconditionally, a
+    // project-tier definition only once it's trusted for its current on-disk
+    // content — an untrusted/edited-since-trust one surfaces as
+    // "unavailable" here, same as a definition missing from disk entirely.
+    const serverPath = resolveTrustedCanvasServerPath(this.db, canvas, projectPath);
     if (!serverPath) throw new Error(CANVAS_UNAVAILABLE_MESSAGE);
 
     const startOpts: StartCanvasHostOptions = {
       serverPath,
       projectId: project.id,
-      projectPath: session.workspace_path ?? project.path,
+      projectPath,
     };
     await this.hostManager.start(canvasId, startOpts);
     // A host that had no record yet (the common case — a session's first

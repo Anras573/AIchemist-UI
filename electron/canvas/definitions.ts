@@ -9,13 +9,22 @@
  * **built-in** tier (canvases shipped with the app, under
  * `electron/canvas/builtin/`), so a canvas's host and UI can be resolved
  * end-to-end today without running or serving arbitrary repo-shipped code.
- * Deliberately does NOT resolve the project tier (`<projectPath>/.agents/canvases/`)
- * yet: that tier is untrusted-by-default per the design doc and must not
- * execute/serve before the trust prompt (#227) exists to gate it.
+ * `resolveCanvasServerPath` deliberately never resolves the project tier
+ * (`<projectPath>/.agents/canvases/`) — that tier is untrusted-by-default per
+ * the design doc, and starting a host executes its `server.mjs`, so gating it
+ * needs the project's trust state, which this module has no DB access to
+ * check. `electron/canvas/trust.ts`'s `resolveTrustedCanvasServerPath` (#227)
+ * is the trust-aware wrapper every host-starting caller uses instead; it
+ * falls back to `resolveProjectDefinitionDir` below only once
+ * `isProjectCanvasTrusted` holds for the definition's *current* on-disk
+ * content. `resolveCanvasUiDir`, by contrast, DOES resolve the project tier
+ * unconditionally (see its own docstring) — serving static UI files into the
+ * sandboxed, networkless iframe needs no trust check.
  * Global-tier definitions are "the user put it there", and built-in
  * definitions are app code — both are trusted per the design doc's trust
  * model table. A name present in both tiers resolves to the global one (the
- * same "higher tier suppresses same-named lower" rule #226 will generalize).
+ * same "higher tier suppresses same-named lower" rule #226 generalized in
+ * `discovery.ts`).
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -131,6 +140,29 @@ function isDirectory(path: string): boolean {
   }
 }
 
+// ─── Project tier ────────────────────────────────────────────────────────────
+
+/** The project tier's root within a project: `<projectPath>/.agents/canvases`. */
+export function projectCanvasesRoot(projectPath: string): string {
+  return nodePath.join(projectPath, ".agents", "canvases");
+}
+
+/**
+ * Resolves `<projectPath>/.agents/canvases/<definition>` — the project
+ * tier's definition folder. Same untrusted-input handling as
+ * {@link resolveCanvasServerPath} (rejects an unsafe `definition` and
+ * defends against escaping the root), plus it must actually exist as a
+ * directory. Deliberately does NOT check for a valid `canvas.json` inside —
+ * callers that need "is this a real definition" (trust.ts's status/grant
+ * paths) read and validate the manifest themselves; callers that only need
+ * the folder to build a path (the UI preview fallback, the server-entry path
+ * once trusted) don't need that extra read.
+ */
+export function resolveProjectDefinitionDir(projectPath: string, definition: string): string | null {
+  const dir = resolveWithinRoot(projectCanvasesRoot(projectPath), definition, ".");
+  return dir && isDirectory(dir) ? dir : null;
+}
+
 /**
  * Resolves a canvas definition's `server.mjs` path from disk. `definition` is
  * untrusted input (round-tripped from the `canvases` table, ultimately from
@@ -151,9 +183,25 @@ export function resolveCanvasServerPath(definition: string): string | null {
  * `realpath` + prefix check per requested file (a definition's `ui/` folder
  * can itself contain a symlink pointing outside it), this only resolves the
  * base directory.
+ *
+ * Checks global/built-in first (unconditionally trusted), then — when
+ * `projectPath` is given — falls back to the project tier with **no trust
+ * check**: unlike `resolveCanvasServerPath`/`resolveTrustedCanvasServerPath`,
+ * this never executes anything. It only lets the protocol serve static files
+ * into an already-sandboxed, networkless iframe (`sandbox="allow-scripts"`,
+ * no `allow-same-origin`, `connect-src 'none'`), which is exactly the design
+ * doc's "preview while untrusted" — the UI can render with the host stopped
+ * (read-only, no tools) so the user can see what they're agreeing to run
+ * before trusting it.
  */
-export function resolveCanvasUiDir(definition: string): string | null {
-  return resolveAcrossTiers(definition, "ui", isDirectory);
+export function resolveCanvasUiDir(definition: string, projectPath?: string): string | null {
+  const tiered = resolveAcrossTiers(definition, "ui", isDirectory);
+  if (tiered) return tiered;
+  if (!projectPath) return null;
+  const dir = resolveProjectDefinitionDir(projectPath, definition);
+  if (!dir) return null;
+  const uiDir = nodePath.join(dir, "ui");
+  return isDirectory(uiDir) ? uiDir : null;
 }
 
 /**

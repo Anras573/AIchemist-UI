@@ -9,7 +9,14 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CanvasFrame } from "./CanvasFrame";
-import type { CanvasDefinitionEntry, CanvasDiscoveryResult, CanvasHostStatus, CanvasListItem } from "@/types";
+import { CanvasTrustPrompt } from "./CanvasTrustPrompt";
+import type {
+  CanvasDefinitionEntry,
+  CanvasDiscoveryResult,
+  CanvasHostStatus,
+  CanvasListItem,
+  CanvasTrustStatus,
+} from "@/types";
 
 const STATUS_STYLES: Record<CanvasHostStatus, string> = {
   starting: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
@@ -111,6 +118,25 @@ export function CanvasPanel() {
   );
   const definitions: CanvasDefinitionEntry[] | undefined = discovery?.definitions;
 
+  // Trust status (#227) for the selected instance's definition — null once
+  // loaded means "not a project-tier definition" (or its manifest doesn't
+  // validate), so no prompt is needed; the global/built-in tiers are always
+  // trusted. Re-fetched (not just cache-expired) right after a successful
+  // grant, via `refetchTrust` in `handleTrusted` below.
+  const trustKey =
+    activeProjectId && selectedCanvasId
+      ? `canvas-trust:${activeProjectId}:${selectedCanvasId}`
+      : null;
+  const selectedDefinition = canvases?.find((c) => c.id === selectedCanvasId)?.definition;
+  const { data: trustStatus, refetch: refetchTrust } = useIpcQuery<CanvasTrustStatus | null>(
+    trustKey,
+    () =>
+      activeProjectId && selectedDefinition
+        ? ipc.canvasTrustStatus({ projectId: activeProjectId, definition: selectedDefinition })
+        : Promise.resolve(null),
+    { ttl: 10_000 }
+  );
+
   useEffect(() => {
     if (createDefinition || !definitions?.length) return;
     const firstRunnable = definitions.find((d) => d.tier !== "project") ?? definitions[0];
@@ -211,6 +237,25 @@ export function CanvasPanel() {
     }
   }
 
+  /**
+   * Fired by `CanvasTrustPrompt` right after a successful `CANVAS_TRUST_GRANT`
+   * — refetches trust status (so the banner disappears) and re-runs
+   * `CANVAS_OPEN` to actually start the host now that it's trusted (the
+   * lifecycle effect above only re-runs on `selectedCanvasId`/
+   * `definitionMissing` changes, neither of which trust granting touches).
+   */
+  async function handleTrusted() {
+    await refetchTrust();
+    if (!selectedCanvasId) return;
+    try {
+      const res = await ipc.canvasOpen(selectedCanvasId);
+      setCanvasState(selectedCanvasId, res.state, res.revision);
+      if (res.status !== "unknown") setCanvasStatus(selectedCanvasId, res.status);
+    } catch (err) {
+      console.error(`[canvas] CANVAS_OPEN after trust failed for ${selectedCanvasId}:`, err);
+    }
+  }
+
   const status = selectedCanvasId ? statusByCanvas[selectedCanvasId] : undefined;
   const canRestart = status === "crashed" || status === "errored" || status === "stopped";
   const logs = selectedCanvasId ? logsByCanvas[selectedCanvasId] ?? [] : [];
@@ -280,15 +325,14 @@ export function CanvasPanel() {
                 <option
                   key={definitionKey(d)}
                   value={definitionKey(d)}
-                  disabled={d.tier === "project"}
                   title={
                     d.tier === "project"
-                      ? "Project canvases can't run yet — awaiting the trust prompt"
+                      ? "Project canvases need to be trusted on first open"
                       : d.manifest.description
                   }
                 >
                   {d.manifest.name} ({d.tier}
-                  {d.tier === "project" ? " — not runnable yet" : ""})
+                  {d.tier === "project" ? " — needs trust" : ""})
                 </option>
               ))}
             </select>
@@ -366,7 +410,7 @@ export function CanvasPanel() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden flex flex-col">
         {!selected ? (
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm p-4 text-center">
             No canvases yet. Use <Plus className="inline h-3 w-3" /> to create one.
@@ -386,14 +430,28 @@ export function CanvasPanel() {
             </Button>
           </div>
         ) : (
-          <CanvasFrame
-            canvasId={selected.id}
-            definition={selected.definition}
-            state={stateByCanvas[selected.id] ?? selected.state}
-            revision={revisionByCanvas[selected.id] ?? selected.revision}
-            message={lastMessageByCanvas[selected.id]}
-            reloadNonce={reloadNonceByCanvas[selected.id]}
-          />
+          <>
+            {/* #227: the UI still renders below (read-only, no tools —
+                CANVAS_OPEN never starts a host for an untrusted project
+                definition) so the user can see what they're agreeing to run. */}
+            {trustStatus && !trustStatus.trusted && (
+              <CanvasTrustPrompt
+                projectId={activeProjectId}
+                status={trustStatus}
+                onTrusted={() => void handleTrusted()}
+              />
+            )}
+            <div className="flex-1 overflow-hidden">
+              <CanvasFrame
+                canvasId={selected.id}
+                definition={selected.definition}
+                state={stateByCanvas[selected.id] ?? selected.state}
+                revision={revisionByCanvas[selected.id] ?? selected.revision}
+                message={lastMessageByCanvas[selected.id]}
+                reloadNonce={reloadNonceByCanvas[selected.id]}
+              />
+            </div>
+          </>
         )}
       </div>
     </div>

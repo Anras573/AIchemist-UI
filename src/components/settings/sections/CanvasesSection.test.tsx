@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { CanvasesSection } from "@/components/settings/sections/CanvasesSection";
 import type { CanvasDiscoveryResult } from "@/types";
@@ -48,16 +48,51 @@ describe("CanvasesSection (hub)", () => {
     expect(window.electronAPI.canvasListDefinitions).toHaveBeenCalledWith({ projectId: "proj-1" });
   });
 
-  it("flags a project-tier definition as not runnable yet", async () => {
+  it("flags an untrusted project-tier definition (#227)", async () => {
     vi.mocked(window.electronAPI.canvasListDefinitions).mockResolvedValue({
       definitions: [PROJECT_BOARD],
       errors: [],
+    });
+    vi.mocked(window.electronAPI.canvasTrustStatus).mockResolvedValue({
+      definition: "board",
+      path: "/proj/.agents/canvases/board",
+      manifest: PROJECT_BOARD.manifest,
+      dependencies: { names: [], hasPackageJson: false },
+      contentHash: "hash",
+      trusted: false,
+      trustedAt: null,
     });
 
     renderWithProviders(<CanvasesSection projectId="proj-1" />);
 
     await waitFor(() => expect(screen.getByText("board")).toBeInTheDocument());
-    expect(screen.getByText("not runnable yet")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("not trusted")).toBeInTheDocument());
+  });
+
+  it("shows a Revoke action for a trusted project-tier definition and revokes on click", async () => {
+    vi.mocked(window.electronAPI.canvasListDefinitions).mockResolvedValue({
+      definitions: [PROJECT_BOARD],
+      errors: [],
+    });
+    vi.mocked(window.electronAPI.canvasTrustStatus).mockResolvedValue({
+      definition: "board",
+      path: "/proj/.agents/canvases/board",
+      manifest: PROJECT_BOARD.manifest,
+      dependencies: { names: [], hasPackageJson: false },
+      contentHash: "hash",
+      trusted: true,
+      trustedAt: "2026-01-01T00:00:00.000Z",
+    });
+    vi.mocked(window.electronAPI.canvasTrustRevoke).mockResolvedValue({ ok: true });
+
+    renderWithProviders(<CanvasesSection projectId="proj-1" />);
+
+    await waitFor(() => expect(screen.getByText("trusted")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Revoke"));
+
+    await waitFor(() =>
+      expect(window.electronAPI.canvasTrustRevoke).toHaveBeenCalledWith({ projectId: "proj-1", definition: "board" })
+    );
   });
 
   it("shows manifest errors separately from valid definitions", async () => {

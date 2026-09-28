@@ -160,6 +160,9 @@ export const CANVAS_CLOSE               = "canvas:close";
 export const CANVAS_UI_MESSAGE          = "canvas:ui-message";
 export const CANVAS_RESTART             = "canvas:restart";
 export const CANVAS_EVENT               = "canvas:event"; // push: main → renderer
+export const CANVAS_TRUST_STATUS        = "canvas:trust-status";
+export const CANVAS_TRUST_GRANT         = "canvas:trust-grant";
+export const CANVAS_TRUST_REVOKE        = "canvas:trust-revoke";
 
 // ── Auto-update (electron-updater) ────────────────────────────────────────────
 export const UPDATE_CHECK              = "update:check";

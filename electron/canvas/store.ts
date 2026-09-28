@@ -264,3 +264,8 @@ export function setCanvasTrust(
 
   return { project_id: projectId, definition, content_hash: contentHash, trusted_at: trustedAt };
 }
+
+/** Revokes a project's consent to run a definition's server code. A no-op if it was never trusted. */
+export function deleteCanvasTrust(db: Database, projectId: string, definition: string): void {
+  db.prepare("DELETE FROM canvas_trust WHERE project_id = ? AND definition = ?").run(projectId, definition);
+}
