@@ -362,7 +362,65 @@ export interface CanvasTrust {
   definition: string;
   /** Hash of the definition's server + manifest + package.json, to detect edits. */
   content_hash: string;
+  /**
+   * Hash of the definition's own `node_modules/` taken right after `bun
+   * install` (#227 review round 3) — `content_hash` deliberately excludes
+   * that folder (see `electron/canvas/trust.ts`), so this is what catches a
+   * later write into it (e.g. a `git pull` adding files there). Null for a
+   * definition with no dependencies to hash.
+   */
+  deps_hash: string | null;
   trusted_at: string;
+}
+
+/**
+ * `package.json` dependency names declared by a project-tier definition, for
+ * the trust prompt (#227) — `hasPackageJson` distinguishes "no dependencies
+ * declared" (empty `names`, no install needed) from "no `package.json` at
+ * all" (same `names: []`, but also nothing to run `bun install` against).
+ */
+export interface CanvasDependencyInfo {
+  names: string[];
+  hasPackageJson: boolean;
+}
+
+/**
+ * `CANVAS_TRUST_STATUS` result for a project-tier definition: its manifest,
+ * declared dependencies, current content hash, and whether a stored
+ * `canvas_trust` record's hash still matches it. Null (at the call site) when
+ * the folder isn't a valid project definition — missing, an unsafe name, or a
+ * `canvas.json` that fails to read or validate.
+ */
+export interface CanvasTrustStatus {
+  definition: string;
+  /** Absolute path to the definition's folder, for display in the prompt. */
+  path: string;
+  manifest: CanvasDefinition;
+  dependencies: CanvasDependencyInfo;
+  contentHash: string;
+  /** True iff a stored trust record's `content_hash` matches `contentHash`. Always false when `blockedReason` is set. */
+  trusted: boolean;
+  /** The stored record's `trusted_at`, only when `trusted` is true. */
+  trustedAt: string | null;
+  /**
+   * Set when this definition structurally can't be trusted regardless of
+   * content hash (currently: it contains a symlink, #227 review) — the
+   * prompt shows this instead of offering "Trust and run", since a grant
+   * would just be refused anyway.
+   */
+  blockedReason: string | null;
+}
+
+/** Result of running `bun install` in a just-trusted definition's folder — `{ ok: true, output: "" }` when it declares no `package.json` (most canvases). */
+export interface CanvasInstallResult {
+  ok: boolean;
+  output: string;
+}
+
+/** `CANVAS_TRUST_GRANT` result. */
+export interface CanvasTrustGrantResult {
+  trust: CanvasTrust;
+  install: CanvasInstallResult;
 }
 
 /**
@@ -372,7 +430,7 @@ export interface CanvasTrust {
  * `electron/` for Node-only modules — same rule as the tool-round-cap bounds
  * in `SettingsView.tsx`.
  */
-export type CanvasHostStatus = "starting" | "running" | "stopped" | "crashed" | "errored";
+export type CanvasHostStatus = "starting" | "running" | "stopped" | "crashed" | "errored" | "untrusted";
 
 /**
  * Push payload for `CANVAS_EVENT` (main → renderer): a host status change, a

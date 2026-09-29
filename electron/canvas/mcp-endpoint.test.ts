@@ -25,6 +25,7 @@ import {
   type CanvasHostManagerLike,
 } from "./mcp-endpoint";
 import { CanvasToolError, type CanvasHostStatus } from "./host-manager";
+import { trustProjectCanvas } from "./trust";
 
 // ─── Fake host manager ───────────────────────────────────────────────────────
 
@@ -361,6 +362,91 @@ describe("host unavailable", () => {
     expect(body.result.isError).toBe(true);
     expect(body.result.content[0].text).toBe('Invalid input for tool "move_card": card not found');
     expect(body.result.content[0].text).not.toBe(CANVAS_UNAVAILABLE_MESSAGE);
+  });
+});
+
+// ─── Project-tier trust gating (#227) ────────────────────────────────────────
+
+describe("project-tier trust gating (#227)", () => {
+  function writeProjectDefinition(name: string, serverBody = "export default {};"): string {
+    const dir = nodePath.join(projectPath, ".agents", "canvases", name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      nodePath.join(dir, "canvas.json"),
+      JSON.stringify({ name, description: "", version: 1, server: "server.mjs", ui: "ui/index.html" })
+    );
+    fs.writeFileSync(nodePath.join(dir, "server.mjs"), serverBody);
+    return dir;
+  }
+
+  it("refuses to start a host / expose tools for an untrusted project canvas", async () => {
+    hostManager.status = "stopped"; // FakeHostManager.getStatus() ignores canvasId — start with no host "running"
+    writeProjectDefinition("widgets");
+    const canvas = createCanvas(db, { projectId, definition: "widgets", title: "Widgets" });
+    setCanvasAttached(db, sessionId, canvas.id, true);
+
+    const res = await rpc(routePath(canvas.id, sessionId), { jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const body = (await res.json()) as { error?: { message: string } };
+    expect(body.error?.message).toBe(CANVAS_UNAVAILABLE_MESSAGE);
+    expect(hostManager.start).not.toHaveBeenCalled();
+  });
+
+  it("starts the host and exposes tools once the definition is trusted", async () => {
+    hostManager.status = "stopped";
+    writeProjectDefinition("widgets");
+    const canvas = createCanvas(db, { projectId, definition: "widgets", title: "Widgets" });
+    setCanvasAttached(db, sessionId, canvas.id, true);
+
+    trustProjectCanvas(db, projectId, projectPath, "widgets");
+
+    const res = await rpc(routePath(canvas.id, sessionId), { jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const body = (await res.json()) as { result: { tools: unknown[] } };
+    expect(body.result.tools).toEqual([]);
+    expect(hostManager.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-locks (untrusts) once a hashed file changes after trust", async () => {
+    hostManager.status = "stopped";
+    writeProjectDefinition("widgets");
+    const canvas = createCanvas(db, { projectId, definition: "widgets", title: "Widgets" });
+    setCanvasAttached(db, sessionId, canvas.id, true);
+
+    trustProjectCanvas(db, projectId, projectPath, "widgets");
+
+    // Edit the server entry after trust was granted — the stored content
+    // hash no longer matches, so it must re-prompt (refuse) rather than keep
+    // running the edited code under the old consent.
+    writeProjectDefinition("widgets", "export default { edited: true };");
+
+    const res = await rpc(routePath(canvas.id, sessionId), { jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const body = (await res.json()) as { error?: { message: string } };
+    expect(body.error?.message).toBe(CANVAS_UNAVAILABLE_MESSAGE);
+  });
+
+  it("canvasMcpServersForSession excludes an untrusted project canvas and includes it once trusted", async () => {
+    writeProjectDefinition("widgets");
+    const canvas = createCanvas(db, { projectId, definition: "widgets", title: "Widgets" });
+    setCanvasAttached(db, sessionId, canvas.id, true);
+
+    const before = canvasMcpServersForSession(db, sessionId, { baseUrl: endpoint.baseUrl, token: endpoint.token });
+    expect(Object.keys(before)).toEqual([canvasServerName({ id: canvasId, title: "Release board" })]);
+
+    trustProjectCanvas(db, projectId, projectPath, "widgets");
+
+    const after = canvasMcpServersForSession(db, sessionId, { baseUrl: endpoint.baseUrl, token: endpoint.token });
+    expect(Object.keys(after).sort()).toEqual(
+      [canvasServerName({ id: canvasId, title: "Release board" }), canvasServerName({ id: canvas.id, title: "Widgets" })].sort()
+    );
+  });
+
+  it("buildCanvasSystemPromptAddendum omits an untrusted project canvas", () => {
+    writeProjectDefinition("widgets");
+    const canvas = createCanvas(db, { projectId, definition: "widgets", title: "Widgets" });
+    setCanvasAttached(db, sessionId, canvas.id, true);
+
+    const addendum = buildCanvasSystemPromptAddendum(db, sessionId);
+    expect(addendum).toContain("Release board");
+    expect(addendum).not.toContain("Widgets");
   });
 });
 

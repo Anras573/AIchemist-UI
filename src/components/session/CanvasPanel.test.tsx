@@ -242,12 +242,11 @@ describe("CanvasPanel", () => {
     const definitionSelect = await screen.findByLabelText<HTMLSelectElement>("Canvas definition");
 
     // Two distinct options exist (no silently-collapsed duplicate), and the
-    // picker defaults to the runnable one, not the disabled project entry.
+    // picker defaults to the always-trusted built-in entry rather than the
+    // same-named project one (which still needs a trust prompt, #227).
     const optionValues = Array.from(definitionSelect.options).map((o) => o.value);
     expect(optionValues).toEqual(["project:kanban", "builtin:kanban"]);
     expect(definitionSelect).toHaveValue("builtin:kanban");
-    const projectOption = Array.from(definitionSelect.options).find((o) => o.value === "project:kanban");
-    expect(projectOption?.disabled).toBe(true);
 
     fireEvent.change(screen.getByPlaceholderText(/Title/), { target: { value: "New board" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));

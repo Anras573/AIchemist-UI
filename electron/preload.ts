@@ -180,6 +180,13 @@ export interface ElectronAPI {
   canvasClose: (canvasId: string) => Promise<Res<typeof CH.CANVAS_CLOSE>>;
   canvasUiMessage: (canvasId: string, message: unknown) => Promise<Res<typeof CH.CANVAS_UI_MESSAGE>>;
   canvasRestart: (canvasId: string) => Promise<Res<typeof CH.CANVAS_RESTART>>;
+  canvasTrustStatus: (args: { projectId: string; definition: string }) => Promise<Res<typeof CH.CANVAS_TRUST_STATUS>>;
+  canvasTrustGrant: (args: {
+    projectId: string;
+    definition: string;
+    expectedContentHash: string;
+  }) => Promise<Res<typeof CH.CANVAS_TRUST_GRANT>>;
+  canvasTrustRevoke: (args: { projectId: string; definition: string }) => Promise<Res<typeof CH.CANVAS_TRUST_REVOKE>>;
 
   // ── Workflows ─────────────────────────────────────────────────────────────
   workflowList: (args?: { projectId?: string }) => Promise<Res<typeof CH.WORKFLOW_LIST>>;
@@ -318,6 +325,9 @@ const api: ElectronAPI = {
   canvasClose: (canvasId) => invoke(CH.CANVAS_CLOSE, { canvasId }),
   canvasUiMessage: (canvasId, message) => invoke(CH.CANVAS_UI_MESSAGE, { canvasId, message }),
   canvasRestart: (canvasId) => invoke(CH.CANVAS_RESTART, { canvasId }),
+  canvasTrustStatus: (args) => invoke(CH.CANVAS_TRUST_STATUS, args),
+  canvasTrustGrant: (args) => invoke(CH.CANVAS_TRUST_GRANT, args),
+  canvasTrustRevoke: (args) => invoke(CH.CANVAS_TRUST_REVOKE, args),
 
   workflowList: (args) => invoke(CH.WORKFLOW_LIST, args ?? {}),
   workflowUpsert: (input) => invoke(CH.WORKFLOW_UPSERT, input),

@@ -46,7 +46,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
 
-    expect(userVersion(db)).toBe(8);
+    expect(userVersion(db)).toBe(9);
     const cols = columnNames(db, "sessions");
     for (const c of EXPECTED_SESSION_COLUMNS) {
       expect(cols).toContain(c);
@@ -122,7 +122,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
 
-    expect(userVersion(db)).toBe(8);
+    expect(userVersion(db)).toBe(9);
     const tables = tableNames(db);
     expect(tables).toContain("canvases");
     expect(tables).toContain("session_canvases");
@@ -134,10 +134,28 @@ describe("migrate", () => {
     expect(columnNames(db, "session_canvases")).toEqual(
       expect.arrayContaining(["session_id", "canvas_id"])
     );
-    for (const c of ["project_id", "definition", "content_hash", "trusted_at"]) {
+    for (const c of ["project_id", "definition", "content_hash", "deps_hash", "trusted_at"]) {
       expect(columnNames(db, "canvas_trust")).toContain(c);
     }
     expect(columnNames(db, "messages")).toContain("source");
+  });
+
+  it("adds canvas_trust.deps_hash at v9 (#227 review round 3)", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+
+    expect(userVersion(db)).toBe(9);
+    expect(columnNames(db, "canvas_trust")).toContain("deps_hash");
+
+    db.prepare(
+      "INSERT INTO projects (id, name, path, created_at) VALUES ('p1', 'P', '/tmp/p1', 'now')"
+    ).run();
+    db.prepare(
+      "INSERT INTO canvas_trust (project_id, definition, content_hash, deps_hash, trusted_at) VALUES ('p1', 'kanban', 'hash1', 'deps1', 'now')"
+    ).run();
+    expect(
+      db.prepare("SELECT deps_hash FROM canvas_trust WHERE project_id = 'p1' AND definition = 'kanban'").get()
+    ).toEqual({ deps_hash: "deps1" });
   });
 
   it("cascades project/session deletes onto canvases the same way as other project-scoped tables", () => {
@@ -171,7 +189,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(8);
+    expect(userVersion(db)).toBe(9);
   });
 
   it("does not throw when provider_state already exists below user_version 2", () => {
@@ -180,7 +198,7 @@ describe("migrate", () => {
     // Simulate a dev build / partial migration: column exists but version rewound.
     db.exec("PRAGMA user_version = 1;");
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(8);
+    expect(userVersion(db)).toBe(9);
   });
 
   it("upgrades a legacy database (columns present, user_version 0) without error", () => {
@@ -205,7 +223,7 @@ describe("migrate", () => {
 
     expect(() => migrate(db)).not.toThrow();
 
-    expect(userVersion(db)).toBe(8);
+    expect(userVersion(db)).toBe(9);
     expect(columnNames(db, "sessions")).toContain("provider_state");
     expect(tableNames(db)).toContain("workflows");
     // Existing data is preserved, including the legacy copilot id used as a dead read.

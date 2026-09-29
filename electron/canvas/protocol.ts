@@ -19,6 +19,7 @@ import { protocol } from "electron";
 import type { Database } from "better-sqlite3";
 import { getCanvas } from "./store";
 import { resolveCanvasUiDir } from "./definitions";
+import { listProjects } from "../projects";
 import { CANVAS_CLIENT_SCRIPT_SOURCE } from "./client-script";
 
 /** The scheme every canvas UI is served from. */
@@ -140,7 +141,14 @@ export async function handleCanvasProtocolRequest(db: Database, request: Request
   const canvas = getCanvas(db, canvasId);
   if (!canvas) return notFound();
 
-  const uiDir = resolveCanvasUiDir(canvas.definition);
+  // Passes the owning project's path so an untrusted/never-trusted
+  // project-tier canvas's UI can still be previewed (#227's "preview while
+  // untrusted" — read-only, no tools, since the host never starts for one).
+  // `resolveCanvasUiDir` never trust-checks project-tier lookups: serving
+  // static files into the already-sandboxed, networkless iframe is safe
+  // regardless.
+  const project = listProjects(db).find((p) => p.id === canvas.project_id);
+  const uiDir = resolveCanvasUiDir(canvas.definition, project?.path);
   if (!uiDir) return notFound();
 
   const filePath = await resolveUiFile(uiDir, pathname);

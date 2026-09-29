@@ -145,8 +145,14 @@ export function buildHostEnv(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * `"crashed"` is the transient state between an unexpected exit and the next
  * backoff-scheduled restart attempt; `"errored"` is the terminal state once
  * `maxRestarts` is exhausted (a manual `restart()` is the only way out).
+ * `"untrusted"` (#227) is what a spawn attempt lands on when
+ * `StartCanvasHostOptions.resolveServerPath` returns `null` — a project-tier
+ * definition whose trust was revoked, or whose content changed, since the
+ * host last (re)started; not a crash, so it never touches the crash-backoff
+ * budget, and like `"crashed"`/`"errored"` there is no live process behind it
+ * to kill.
  */
-export type CanvasHostStatus = "starting" | "running" | "stopped" | "crashed" | "errored";
+export type CanvasHostStatus = "starting" | "running" | "stopped" | "crashed" | "errored" | "untrusted";
 
 /**
  * Side-effect hooks fired as a host's state changes. All optional and
@@ -173,10 +179,26 @@ export interface CanvasHostHooks {
 }
 
 export interface StartCanvasHostOptions {
-  /** Absolute path to the definition's `server.mjs`. */
+  /** Absolute path to the definition's `server.mjs`, as resolved (and, for a project-tier definition, trust-checked) at the time `start()`/`restart()` was called. */
   serverPath: string;
   projectId: string;
   projectPath: string;
+  /**
+   * Re-resolves the server path immediately before every spawn this manager
+   * performs on its own — a crash auto-restart, or a dev-reload restart
+   * (#226) — not just the caller's initial `start()`/`restart()` call, which
+   * the caller already gated however it wanted before ever calling this
+   * manager. Returns the current path, or `null` if it should no longer be
+   * spawned (definition missing, or — the reason this exists — a
+   * project-tier definition (#227) that is no longer trusted). Optional and
+   * purely additive: when omitted, `spawnHost` just reuses `serverPath`
+   * as-is on every respawn, exactly as before this option existed — no
+   * caller is required to supply it, but production callers
+   * (`canvas-handlers.ts`, `mcp-endpoint.ts`) always do, since without it a
+   * revoked or edited project canvas would keep respawning with code nobody
+   * re-approved (#227 review on PR #238).
+   */
+  resolveServerPath?: () => string | null;
 }
 
 export interface CanvasHostManagerOptions {
@@ -375,17 +397,31 @@ export class CanvasHostManager {
     spawnOpts?: { isRestartAttempt?: boolean }
   ): Promise<void> {
     const prior = this.hosts.get(canvasId);
+
+    // Re-verify (via the caller-supplied callback, if any) immediately
+    // before actually spawning — the one check that makes this respawn-safe
+    // rather than just start-safe (#227 review on PR #238): a crash
+    // auto-restart or a dev-reload restart calls this method directly, with
+    // no caller in the loop to have gated it. Falls back to the resolved
+    // `opts.serverPath` when no callback was given (existing callers/tests
+    // that never needed trust gating are unaffected).
+    const resolvedServerPath = opts.resolveServerPath ? opts.resolveServerPath() : opts.serverPath;
+    if (!resolvedServerPath) {
+      return this.refuseUntrustedSpawn(canvasId, prior);
+    }
+    const effectiveOpts: StartCanvasHostOptions = { ...opts, serverPath: resolvedServerPath };
+
     const childProcess = this.spawn({
       modulePath: this.entryPath,
-      args: [opts.serverPath, JSON.stringify({ id: opts.projectId, path: opts.projectPath })],
-      cwd: opts.projectPath,
+      args: [effectiveOpts.serverPath, JSON.stringify({ id: effectiveOpts.projectId, path: effectiveOpts.projectPath })],
+      cwd: effectiveOpts.projectPath,
       env: buildHostEnv(process.env),
     });
 
     const record: HostRecord = {
       canvasId,
       process: childProcess,
-      startOpts: opts,
+      startOpts: effectiveOpts,
       status: "starting",
       tools: [],
       pendingCalls: new Map(),
@@ -427,6 +463,39 @@ export class CanvasHostManager {
     childProcess.postMessage({ type: "init", state, revision });
 
     return readyPromise;
+  }
+
+  /**
+   * Handles a spawn attempt `resolveServerPath` refused (#227): no child
+   * process is ever created. When a `prior` record exists (the respawn
+   * cases this exists for — its old process has, by construction, already
+   * fully exited by the time `spawnHost` runs again: `stop()` already
+   * resolved before a dev-reload restart's `start()`, and `handleExit`
+   * already ran before a crash restart's timer fires), it's transitioned in
+   * place to `"untrusted"` rather than left on its last status, and its
+   * timers disarmed since nothing is going to run for it. When there's no
+   * prior record at all (a bare first `start()` call whose caller — unlike
+   * every production caller — didn't already gate this itself), nothing is
+   * added to `this.hosts`; `getStatus()` for it simply reads as `undefined`,
+   * same as a canvas that was never started.
+   */
+  private refuseUntrustedSpawn(canvasId: string, prior: HostRecord | undefined): Promise<void> {
+    const err = new Error("Canvas host cannot start: the definition is unavailable or no longer trusted");
+    console.error(`[canvas-host-manager] refusing to (re)spawn ${canvasId}: ${err.message}`);
+    if (prior) {
+      this.disarmDevReload(prior);
+      if (prior.restartTimer) {
+        clearTimeout(prior.restartTimer);
+        prior.restartTimer = null;
+      }
+      if (prior.idleTimer) {
+        clearTimeout(prior.idleTimer);
+        prior.idleTimer = null;
+      }
+      this.setStatus(prior, "untrusted");
+      this.rejectReadyWaiters(prior, err);
+    }
+    return Promise.reject(err);
   }
 
   private resolveReadyWaiters(record: HostRecord): void {
@@ -702,8 +771,12 @@ export class CanvasHostManager {
     // already ran once and won't run again for it, so kill()ing it again would
     // never produce a second "exit" event to resolve on. Clean up directly
     // instead of waiting on one, or restart() (the only way out of "errored")
-    // and stopAll() at app quit would hang forever.
-    if (record.status === "crashed" || record.status === "errored") {
+    // and stopAll() at app quit would hang forever. Same story for
+    // "untrusted" (#227): `refuseUntrustedSpawn` never spawned a process for
+    // this attempt, and the record's process reference (if any) is whatever
+    // was already fully exited before that refusal — there is nothing left
+    // to kill either way.
+    if (record.status === "crashed" || record.status === "errored" || record.status === "untrusted") {
       record.stopping = true;
       this.setStatus(record, "stopped");
       return Promise.resolve();

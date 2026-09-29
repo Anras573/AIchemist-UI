@@ -213,6 +213,20 @@ const MIGRATIONS: Migration[] = [
     `);
     addColumnIfMissing(db, "messages", "source", "TEXT");
   },
+  // v9 — Canvas trust: dependency hash (#227 review round 3, PR #238). A
+  // project-tier definition's content hash deliberately excludes
+  // `node_modules` (see trust.ts's docstring — hashing a whole dependency tree
+  // on every turn would be slow, and it's lockfile-pinned content already).
+  // That left a gap: nothing re-verified the canvas's own `node_modules` after
+  // `bun install` ran, so a later write into it (a `git pull` adding files
+  // there, or a manual edit) kept resolving as trusted forever. `deps_hash`
+  // stores a hash of that folder's contents taken right after install, so
+  // `isProjectCanvasTrusted` can re-verify it alongside `content_hash` on
+  // every spawn. Nullable — a definition with no `package.json` has no
+  // `node_modules` to hash at all.
+  (db) => {
+    addColumnIfMissing(db, "canvas_trust", "deps_hash", "TEXT");
+  },
 ];
 
 /**

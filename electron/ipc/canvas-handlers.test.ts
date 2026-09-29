@@ -2,6 +2,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
+import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 
@@ -17,10 +18,12 @@ vi.mock("electron", () => ({
 import { migrate } from "../db";
 import { createCanvas, getCanvas, isCanvasAttached } from "../canvas/store";
 import { _setCanvasesRootForTests } from "../canvas/definitions";
+import { _setCanvasInstallSpawnForTests } from "../canvas/trust";
 import { registerCanvasHandlers, type CanvasHostManagerLike } from "./canvas-handlers";
 import type { CanvasHostStatus, StartCanvasHostOptions } from "../canvas/host-manager";
 import * as CH from "../ipc-channels";
 import type { IpcEnvelope } from "./errors";
+import type { CanvasTrustStatus } from "../../src/types/index";
 
 // ─── Fake host manager ───────────────────────────────────────────────────────
 // Mirrors the manager's real observable behavior just enough to exercise the
@@ -35,6 +38,7 @@ class FakeHostManager implements CanvasHostManagerLike {
   uiMessageCalls: Array<{ canvasId: string; message: unknown }> = [];
   startError: Error | null = null;
   restartError: Error | null = null;
+  stopCalls: string[] = [];
 
   async start(canvasId: string, opts: StartCanvasHostOptions): Promise<void> {
     this.startCalls.push({ canvasId, opts });
@@ -46,6 +50,11 @@ class FakeHostManager implements CanvasHostManagerLike {
     this.restartCalls.push({ canvasId, opts });
     if (this.restartError) throw this.restartError;
     this.statuses.set(canvasId, "running");
+  }
+
+  async stop(canvasId: string): Promise<void> {
+    this.stopCalls.push(canvasId);
+    this.statuses.set(canvasId, "stopped");
   }
 
   setPanelOpen(canvasId: string, open: boolean): void {
@@ -421,6 +430,247 @@ describe("CANVAS_OPEN / CANVAS_CLOSE / CANVAS_UI_MESSAGE / CANVAS_RESTART", () =
       expect(env.ok).toBe(false);
       if (env.ok) return;
       expect(env.error.code).toBe("not_found");
+    });
+  });
+});
+
+// ─── Trust (#227) ─────────────────────────────────────────────────────────────
+
+describe("CANVAS_TRUST_STATUS / CANVAS_TRUST_GRANT / CANVAS_TRUST_REVOKE", () => {
+  let projectDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "canvas-trust-project-"));
+    db.prepare("INSERT INTO projects (id, name, path, created_at) VALUES ('p3', 'P3', ?, 'now')").run(projectDir);
+    _setCanvasInstallSpawnForTests(null);
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    _setCanvasInstallSpawnForTests(null);
+  });
+
+  function writeDefinition(name: string, serverBody = "export default {};", extraFiles: Record<string, string> = {}): void {
+    const dir = nodePath.join(projectDir, ".agents", "canvases", name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      nodePath.join(dir, "canvas.json"),
+      JSON.stringify({ name, description: "A widget board", version: 1, server: "server.mjs", ui: "ui/index.html" })
+    );
+    fs.writeFileSync(nodePath.join(dir, "server.mjs"), serverBody);
+    for (const [name_, content] of Object.entries(extraFiles)) {
+      fs.writeFileSync(nodePath.join(dir, name_), content);
+    }
+  }
+
+  describe("CANVAS_TRUST_STATUS", () => {
+    it("reports untrusted for a never-granted project definition", async () => {
+      writeDefinition("widgets");
+      const env = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, { projectId: "p3", definition: "widgets" });
+      expect(env.ok).toBe(true);
+      if (!env.ok) return;
+      expect(env.data?.trusted).toBe(false);
+      expect(env.data?.trustedAt).toBeNull();
+      expect(env.data?.dependencies).toEqual({ names: [], hasPackageJson: false });
+    });
+
+    it("returns null for a folder that isn't a valid project definition", async () => {
+      const env = await call<CanvasTrustStatus | null>(CH.CANVAS_TRUST_STATUS, {
+        projectId: "p3",
+        definition: "does-not-exist",
+      });
+      expect(env.ok).toBe(true);
+      if (!env.ok) return;
+      expect(env.data).toBeNull();
+    });
+
+    it("returns not_found for an unknown project", async () => {
+      const env = await call(CH.CANVAS_TRUST_STATUS, { projectId: "no-such-project", definition: "widgets" });
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe("not_found");
+    });
+  });
+
+  /** Fetches the current CANVAS_TRUST_STATUS hash and grants with it, mirroring what the renderer does. */
+  async function grantTrust(definition: string): Promise<IpcEnvelope<{ trust: { content_hash: string }; install: { ok: boolean; output: string } }>> {
+    const status = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, { projectId: "p3", definition });
+    if (!status.ok || !status.data) throw new Error(`No trust status for ${definition}`);
+    return call(CH.CANVAS_TRUST_GRANT, { projectId: "p3", definition, expectedContentHash: status.data.contentHash });
+  }
+
+  describe("CANVAS_TRUST_GRANT", () => {
+    it("records trust and reports it back via CANVAS_TRUST_STATUS", async () => {
+      writeDefinition("widgets");
+      const grant = await grantTrust("widgets");
+      expect(grant.ok).toBe(true);
+      if (!grant.ok) return;
+      // No package.json — install is a no-op rather than actually spawning bun.
+      expect(grant.data.install).toEqual({ ok: true, output: "" });
+
+      const status = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, {
+        projectId: "p3",
+        definition: "widgets",
+      });
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.data?.trusted).toBe(true);
+      expect(status.data?.contentHash).toBe(grant.data.trust.content_hash);
+    });
+
+    it("lets CANVAS_OPEN start the host once trust is granted, and refuses before", async () => {
+      writeDefinition("widgets");
+      const canvas = createCanvas(db, { projectId: "p3", definition: "widgets", title: "Widgets" });
+
+      const beforeOpen = await call<{ status: string }>(CH.CANVAS_OPEN, { canvasId: canvas.id });
+      expect(beforeOpen.ok).toBe(true);
+      if (beforeOpen.ok) expect(beforeOpen.data.status).toBe("unknown");
+      expect(hostManager.startCalls).toHaveLength(0);
+
+      await grantTrust("widgets");
+
+      const afterOpen = await call<{ status: string }>(CH.CANVAS_OPEN, { canvasId: canvas.id });
+      expect(afterOpen.ok).toBe(true);
+      if (!afterOpen.ok) return;
+      expect(afterOpen.data.status).toBe("running");
+      expect(hostManager.startCalls).toHaveLength(1);
+    });
+
+    it("runs `bun install` when the definition declares a package.json, streaming through the injected spawn", async () => {
+      writeDefinition("widgets", "export default {};", { "package.json": JSON.stringify({ dependencies: { zod: "^3" } }) });
+
+      const spawnCalls: Array<{ command: string; args: string[]; cwd: string }> = [];
+      _setCanvasInstallSpawnForTests((command, args, options) => {
+        spawnCalls.push({ command, args, cwd: options.cwd });
+        const fake = new EventEmitter() as unknown as import("node:child_process").ChildProcess;
+        const stdout = new EventEmitter();
+        const stderr = new EventEmitter();
+        (fake as unknown as { stdout: EventEmitter; stderr: EventEmitter }).stdout = stdout;
+        (fake as unknown as { stdout: EventEmitter; stderr: EventEmitter }).stderr = stderr;
+        queueMicrotask(() => {
+          stdout.emit("data", Buffer.from("installed 1 package\n"));
+          fake.emit("exit", 0);
+        });
+        return fake;
+      });
+
+      const grant = await grantTrust("widgets");
+      expect(grant.ok).toBe(true);
+      if (!grant.ok) return;
+      expect(grant.data.install.ok).toBe(true);
+      expect(grant.data.install.output).toContain("installed 1 package");
+      expect(spawnCalls).toEqual([{ command: "bun", args: ["install"], cwd: nodePath.join(projectDir, ".agents", "canvases", "widgets") }]);
+    });
+
+    it("returns not_found when the definition doesn't exist", async () => {
+      const env = await call(CH.CANVAS_TRUST_GRANT, {
+        projectId: "p3",
+        definition: "does-not-exist",
+        expectedContentHash: "irrelevant",
+      });
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe("not_found");
+    });
+
+    it("rejects with conflict when the definition changed since the displayed hash", async () => {
+      writeDefinition("widgets");
+      const status = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, { projectId: "p3", definition: "widgets" });
+      expect(status.ok).toBe(true);
+      if (!status.ok || !status.data) return;
+
+      // Edit after the hash was displayed but before the user clicks "Trust".
+      writeDefinition("widgets", "export default { edited: true };");
+
+      const env = await call(CH.CANVAS_TRUST_GRANT, {
+        projectId: "p3",
+        definition: "widgets",
+        expectedContentHash: status.data.contentHash,
+      });
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe("conflict");
+      // Never grants trust for content the user didn't actually review.
+      const after = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, { projectId: "p3", definition: "widgets" });
+      expect(after.ok && after.data?.trusted).toBe(false);
+    });
+
+    it("refuses to grant while a pre-existing node_modules sits in the definition folder", async () => {
+      writeDefinition("widgets");
+      fs.mkdirSync(nodePath.join(projectDir, ".agents", "canvases", "widgets", "node_modules", "evil-pkg"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        nodePath.join(projectDir, ".agents", "canvases", "widgets", "node_modules", "evil-pkg", "index.js"),
+        "module.exports = {};"
+      );
+
+      const status = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, { projectId: "p3", definition: "widgets" });
+      expect(status.ok).toBe(true);
+      if (!status.ok || !status.data) return;
+
+      const env = await call(CH.CANVAS_TRUST_GRANT, {
+        projectId: "p3",
+        definition: "widgets",
+        expectedContentHash: status.data.contentHash,
+      });
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe("invalid_input");
+      expect(env.error.message).toMatch(/node_modules/);
+    });
+
+    it("refuses to grant while the definition contains a symlink", async () => {
+      writeDefinition("widgets");
+      const defDir = nodePath.join(projectDir, ".agents", "canvases", "widgets");
+      fs.writeFileSync(nodePath.join(defDir, "real.mjs"), "export const x = 1;");
+      fs.symlinkSync(nodePath.join(defDir, "real.mjs"), nodePath.join(defDir, "lib.mjs"));
+
+      const status = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, { projectId: "p3", definition: "widgets" });
+      expect(status.ok).toBe(true);
+      if (!status.ok || !status.data) return;
+      expect(status.data.blockedReason).toMatch(/symlink/i);
+
+      const env = await call(CH.CANVAS_TRUST_GRANT, {
+        projectId: "p3",
+        definition: "widgets",
+        expectedContentHash: status.data.contentHash,
+      });
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe("invalid_input");
+      expect(env.error.message).toMatch(/symlink/i);
+    });
+  });
+
+  describe("CANVAS_TRUST_REVOKE", () => {
+    it("un-trusts the definition and stops any running host using it", async () => {
+      writeDefinition("widgets");
+      const canvas = createCanvas(db, { projectId: "p3", definition: "widgets", title: "Widgets" });
+      await grantTrust("widgets");
+      await call(CH.CANVAS_OPEN, { canvasId: canvas.id });
+      expect(hostManager.getStatus(canvas.id)).toBe("running");
+
+      const revoke = await call<{ ok: boolean }>(CH.CANVAS_TRUST_REVOKE, { projectId: "p3", definition: "widgets" });
+      expect(revoke.ok).toBe(true);
+      expect(hostManager.stopCalls).toEqual([canvas.id]);
+      expect(hostManager.getStatus(canvas.id)).toBe("stopped");
+
+      const status = await call<CanvasTrustStatus>(CH.CANVAS_TRUST_STATUS, {
+        projectId: "p3",
+        definition: "widgets",
+      });
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.data?.trusted).toBe(false);
+    });
+
+    it("is a no-op when the definition was never trusted", async () => {
+      const env = await call<{ ok: boolean }>(CH.CANVAS_TRUST_REVOKE, { projectId: "p3", definition: "widgets" });
+      expect(env.ok).toBe(true);
+      if (!env.ok) return;
+      expect(env.data.ok).toBe(true);
+      expect(hostManager.stopCalls).toEqual([]);
     });
   });
 });

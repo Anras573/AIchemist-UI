@@ -51,6 +51,8 @@ import type {
   CanvasListItem,
   CanvasDiscoveryResult,
   CanvasHostStatus,
+  CanvasTrustStatus,
+  CanvasTrustGrantResult,
   BudgetConfig,
   BudgetStatus,
   SpendingSummary,
@@ -293,6 +295,18 @@ export type IpcContract = {
   [CH.CANVAS_RESTART]: {
     args: [args: { canvasId: string }];
     result: { state: unknown; revision: number; status: CanvasHostStatus | "unknown" };
+  };
+  [CH.CANVAS_TRUST_STATUS]: {
+    args: [args: { projectId: string; definition: string }];
+    result: CanvasTrustStatus | null;
+  };
+  [CH.CANVAS_TRUST_GRANT]: {
+    args: [args: { projectId: string; definition: string; expectedContentHash: string }];
+    result: CanvasTrustGrantResult;
+  };
+  [CH.CANVAS_TRUST_REVOKE]: {
+    args: [args: { projectId: string; definition: string }];
+    result: { ok: boolean };
   };
 
   // ── Workflows ─────────────────────────────────────────────────────────────────

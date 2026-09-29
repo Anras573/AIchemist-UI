@@ -1,8 +1,10 @@
-import { AlertCircle, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { AlertCircle, Loader2, ShieldCheck } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { CanvasDefinitionTier, CanvasDiscoveryResult } from "@/types";
+import type { CanvasDefinitionTier, CanvasDiscoveryResult, CanvasTrustStatus } from "@/types";
 
 // ── Tier badge ───────────────────────────────────────────────────────────────
 
@@ -15,6 +17,66 @@ const TIER_LABEL: Record<CanvasDefinitionTier, { label: string; className: strin
 function TierBadge({ tier }: { tier: CanvasDefinitionTier }) {
   const meta = TIER_LABEL[tier];
   return <span className={cn("text-[10px] font-medium shrink-0", meta.className)}>{meta.label}</span>;
+}
+
+// ── Trust (#227) ─────────────────────────────────────────────────────────────
+
+/**
+ * Trust status + revoke action for one project-tier definition. A separate
+ * component (rather than inlining the query in the list) so each row's
+ * `CANVAS_TRUST_STATUS` fetch is independently keyed/cached and a revoke only
+ * re-renders its own row.
+ */
+function ProjectCanvasTrust({ projectId, definition }: { projectId: string; definition: string }) {
+  const ipc = useIpc();
+  const [revoking, setRevoking] = useState(false);
+  const key = `hub-canvas-trust:${projectId}:${definition}`;
+  const { data: status, refetch } = useIpcQuery<CanvasTrustStatus | null>(
+    key,
+    () => ipc.canvasTrustStatus({ projectId, definition }),
+    { ttl: 10_000 }
+  );
+
+  if (status === undefined) {
+    return <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />;
+  }
+  // Not a valid project definition (manifest missing/invalid) — the listing
+  // above already surfaces that as a manifest error; nothing to show here.
+  if (status === null) return null;
+
+  if (status.blockedReason) {
+    return (
+      <span className="text-[10px] font-medium shrink-0 text-destructive" title={status.blockedReason}>
+        unsupported
+      </span>
+    );
+  }
+
+  if (!status.trusted) {
+    return <span className="text-[10px] font-medium shrink-0 text-amber-500">not trusted</span>;
+  }
+
+  async function handleRevoke() {
+    setRevoking(true);
+    try {
+      await ipc.canvasTrustRevoke({ projectId, definition });
+      await refetch();
+    } finally {
+      setRevoking(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 shrink-0">
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+        <ShieldCheck className="h-3 w-3" />
+        trusted
+      </span>
+      <Button size="xs" variant="ghost" onClick={() => void handleRevoke()} disabled={revoking}>
+        {revoking ? <Loader2 className="h-3 w-3 animate-spin" /> : "Revoke"}
+      </Button>
+    </div>
+  );
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -72,10 +134,8 @@ export function CanvasesSection({ projectId }: CanvasesSectionProps) {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium truncate">{d.manifest.name}</span>
                       <TierBadge tier={d.tier} />
-                      {d.tier === "project" && (
-                        <span className="text-[10px] font-medium shrink-0 text-amber-500">
-                          not runnable yet
-                        </span>
+                      {d.tier === "project" && projectId && (
+                        <ProjectCanvasTrust projectId={projectId} definition={d.id} />
                       )}
                     </div>
                     {d.manifest.description && (
