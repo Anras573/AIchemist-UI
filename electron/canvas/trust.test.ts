@@ -408,6 +408,42 @@ describe("isProjectCanvasTrusted", () => {
     fs.writeFileSync(pkgFile, "module.exports = { compromised: true };");
     expect(isProjectCanvasTrusted(db, projectId, projectPath, "widgets")).toBe(false);
   });
+
+  // #227 review round 4 (performance): computeCanvasDepsHash reads a
+  // definition's whole node_modules tree, measured at ~240ms of synchronous
+  // main-thread work for a modest install — too costly to run on every
+  // per-turn "is this canvas listable" check. { checkDeps: false } skips only
+  // that check; content hash + symlink-freeness are still verified, since
+  // those stay cheap (proportional to the definition's own small file set).
+  it("{ checkDeps: false } skips the deps-hash check but still catches a content-hash change or a symlink", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    const pkgFile = nodePath.join(dir, "node_modules", "left-pad", "index.js");
+    fs.mkdirSync(nodePath.dirname(pkgFile), { recursive: true });
+    fs.writeFileSync(pkgFile, "module.exports = {};");
+    trustProjectCanvas(db, projectId, projectPath, "widgets");
+
+    // A node_modules edit is caught by the default (full) check...
+    fs.writeFileSync(pkgFile, "module.exports = { compromised: true };");
+    expect(isProjectCanvasTrusted(db, projectId, projectPath, "widgets")).toBe(false);
+    // ...but NOT by the deps-skipping fast path — this is the accepted
+    // tradeoff: the fast path is only safe for callers that don't gate an
+    // actual host spawn (see isProjectCanvasTrusted's docstring).
+    expect(isProjectCanvasTrusted(db, projectId, projectPath, "widgets", { checkDeps: false })).toBe(true);
+
+    // A content-hash change (server.mjs itself) is still caught either way.
+    fs.writeFileSync(nodePath.join(dir, "server.mjs"), "export default { edited: true };");
+    expect(isProjectCanvasTrusted(db, projectId, projectPath, "widgets", { checkDeps: false })).toBe(false);
+  });
+
+  it("{ checkDeps: false } still refuses a definition containing a symlink", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    trustProjectCanvas(db, projectId, projectPath, "widgets");
+    expect(isProjectCanvasTrusted(db, projectId, projectPath, "widgets", { checkDeps: false })).toBe(true);
+
+    fs.writeFileSync(nodePath.join(dir, "real.mjs"), "export const x = 1;");
+    fs.symlinkSync(nodePath.join(dir, "real.mjs"), nodePath.join(dir, "lib.mjs"));
+    expect(isProjectCanvasTrusted(db, projectId, projectPath, "widgets", { checkDeps: false })).toBe(false);
+  });
 });
 
 // ─── Grant / revoke ──────────────────────────────────────────────────────────
@@ -476,6 +512,23 @@ describe("resolveTrustedCanvasServerPath", () => {
     trustProjectCanvas(db, projectId, projectPath, "widgets");
     fs.writeFileSync(nodePath.join(projectDefDir("widgets"), "server.mjs"), "export default { edited: true };");
     expect(resolveTrustedCanvasServerPath(db, canvas, projectPath)).toBeNull();
+  });
+
+  it("{ checkDeps: false } passes through to isProjectCanvasTrusted, still resolving a trusted definition (#227 review round 4)", () => {
+    const dir = writeDefinition(nodePath.join(projectPath, ".agents", "canvases"), "widgets");
+    const pkgFile = nodePath.join(dir, "node_modules", "left-pad", "index.js");
+    fs.mkdirSync(nodePath.dirname(pkgFile), { recursive: true });
+    fs.writeFileSync(pkgFile, "module.exports = {};");
+    const canvas = createCanvas(db, { projectId, definition: "widgets", title: "Widgets" });
+    trustProjectCanvas(db, projectId, projectPath, "widgets");
+
+    fs.writeFileSync(pkgFile, "module.exports = { compromised: true };");
+    // The default (checkDeps: true) refuses — a real spawn must never miss this.
+    expect(resolveTrustedCanvasServerPath(db, canvas, projectPath)).toBeNull();
+    // The perf fast path still resolves it, since it skips only the deps check.
+    expect(resolveTrustedCanvasServerPath(db, canvas, projectPath, { checkDeps: false })).toBe(
+      nodePath.join(projectDefDir("widgets"), "server.mjs")
+    );
   });
 });
 

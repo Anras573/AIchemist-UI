@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { buildSync } from "esbuild";
@@ -14,27 +15,33 @@ import { describe, expect, it } from "vitest";
  * loading that runs afterward in the same worker. So the handful of behaviors
  * that only manifest through Node's *real* require/import machinery — the
  * `createRequire()` / `process.getBuiltinModule("module").createRequire()`
- * escape attempts actually being blocked, and a planted
+ * escape attempts actually being blocked, a planted
  * `<project>/node_modules/zod` actually being ignored in favor of the app's
- * own copy — are exercised here by spawning a throwaway plain `node`
- * subprocess per scenario (not `bun` — this is specifically testing a Node
- * API's real semantics, matching Electron's bundled Node at runtime, and
- * Bun's compatibility with `registerHooks` is unverified), each running a
- * small harness script that registers the hook for real and reports what
- * happened as JSON on stdout.
+ * own copy, and (round 4) the whole thing not recursing itself into a stack
+ * overflow — are exercised here by spawning a throwaway subprocess per
+ * scenario, each running a small harness script that registers the hook for
+ * real and reports what happened as JSON on stdout.
  *
- * `registerHooks()` is only available from Node 22.15 (Electron 44 bundles
- * Node 24.21, well past that), but the `node` binary actually on `PATH` in a
- * given dev/CI environment isn't guaranteed to be that new — this repo's CI
- * only sets up `bun`, and GitHub-hosted runners preinstall whatever Node
- * version happens to ship with the image. Probed once at suite load and the
- * whole suite skips (rather than failing) when it's missing, since that's an
- * environment gap, not a code regression.
+ * **Runs under Electron's own bundled `node`, not system `node`/`bun`**
+ * (`ELECTRON_RUN_AS_NODE=1` against the `electron` binary this repo already
+ * depends on) — round 4 of review found a real regression (every canvas
+ * failing to start with `RangeError: Maximum call stack size exceeded`) that
+ * only reproduced under Electron 44's actual Node (24.21) and was invisible
+ * under this sandbox's system Node (22): `registerHooks()`'s hook chain also
+ * intercepts `require.resolve()` calls made *from inside* a hook on Node 24,
+ * which system Node 22 apparently doesn't. The previous version of this test
+ * spawned plain `node`/`bun` and so passed despite the bug — "the test
+ * runtime differs from the host runtime" is exactly the gap the reviewer
+ * called out, and it's the second canvas bug in a row caused by it. Probed
+ * once at suite load (spawning the Electron binary itself, not assuming it
+ * works) and the whole suite skips — rather than failing — if that binary
+ * can't run `registerHooks()` for some reason, since that's an environment
+ * gap, not a code regression.
  *
  * The harness imports a real, esbuild-bundled copy of `loader-hook.ts` (not
- * the raw `.ts` source, since a plain `node` invocation can't be relied on to
- * type-strip it — Node's built-in TS support is itself version-gated) so it's
- * exercising the actual shipped logic, not a reimplementation of it.
+ * the raw `.ts` source, since running it under Electron's Node can't rely on
+ * type-stripping either) so it's exercising the actual shipped logic, not a
+ * reimplementation of it.
  *
  * `loader-hook.test.ts` covers everything else (the SDK/zod short-circuits,
  * the import-scope check against a fake `nextResolve`) in-process, since none
@@ -43,14 +50,30 @@ import { describe, expect, it } from "vitest";
 
 const LOADER_HOOK_PATH = nodePath.join(__dirname, "loader-hook.ts");
 
-function nodeSupportsRegisterHooks(): boolean {
-  const probe = spawnSync("node", ["-e", "console.log(typeof require('node:module').registerHooks)"], {
+/**
+ * The `electron` package's main export is (unusually) just the absolute path
+ * to its platform binary as a plain string — not the `Electron.CrossProcessExports`
+ * namespace its own `.d.ts` declares for the *runtime* API surface, which
+ * only exists inside a real Electron process. `createRequire` sidesteps that
+ * mismatched ambient type rather than fighting it with an import.
+ */
+const ELECTRON_BINARY_PATH = createRequire(__filename)("electron") as unknown as string;
+
+/** Runs `node` code via Electron's bundled Node, exactly as `entry.ts` runs at app runtime — see this file's module docstring for why that distinction matters. */
+function spawnElectronAsNode(args: string[], opts: { timeout?: number; env?: NodeJS.ProcessEnv } = {}) {
+  return spawnSync(ELECTRON_BINARY_PATH, args, {
     encoding: "utf8",
+    timeout: opts.timeout ?? 15_000,
+    env: { ...process.env, ...opts.env, ELECTRON_RUN_AS_NODE: "1" },
   });
+}
+
+function registerHooksSupported(): boolean {
+  const probe = spawnElectronAsNode(["-e", "console.log(typeof require('node:module').registerHooks)"]);
   return probe.status === 0 && probe.stdout.trim() === "function";
 }
 
-const REGISTER_HOOKS_SUPPORTED = nodeSupportsRegisterHooks();
+const REGISTER_HOOKS_SUPPORTED = registerHooksSupported();
 
 /**
  * Bundles `loader-hook.ts` (and its `import-scope.ts` dependency) into a
@@ -98,11 +121,28 @@ interface HarnessResult {
 const REPO_NODE_MODULES = nodePath.join(process.cwd(), "node_modules");
 
 function runHarness(projectDir: string, defDir: string, scenario: string): HarnessResult {
+  // Nested dist/main/host/ + a sibling dist/canvas-sdk/, mirroring the real
+  // build layout (electron.vite.config.ts) — loader-hook.ts locates the SDK
+  // build via a path relative to its own __dirname, so the sdk-import
+  // regression scenario below needs that same relative shape to mean
+  // anything. Harmless for every other scenario, which doesn't touch the SDK.
   const supportDir = nodePath.join(projectDir, "__support__");
-  fs.mkdirSync(supportDir, { recursive: true });
+  const hostDir = nodePath.join(supportDir, "dist", "main", "host");
+  const sdkDir = nodePath.join(supportDir, "dist", "canvas-sdk");
+  fs.mkdirSync(hostDir, { recursive: true });
+  fs.mkdirSync(sdkDir, { recursive: true });
 
-  const compiledHookPath = nodePath.join(supportDir, "loader-hook.compiled.cjs");
+  const compiledHookPath = nodePath.join(hostDir, "loader-hook.compiled.cjs");
   fs.writeFileSync(compiledHookPath, bundleLoaderHook());
+  // A minimal stand-in for the real dist/canvas-sdk/sdk.mjs — re-exports the
+  // app's real `zod` (via NODE_PATH, same as the rest of this harness) so the
+  // sdk-import scenario exercises the actual "zod resolved twice" shape
+  // (once for the SDK's own import, once for the canvas's) without needing
+  // the real sdk.ts build step.
+  fs.writeFileSync(
+    nodePath.join(sdkDir, "sdk.mjs"),
+    `import { z } from "zod";\nexport { z };\nexport function defineCanvas(def) { return def; }\n`
+  );
 
   const harnessPath = nodePath.join(supportDir, "harness.mjs");
   fs.writeFileSync(
@@ -184,6 +224,21 @@ async function main() {
     return;
   }
 
+  if (scenario === "sdk-import-no-recursion") {
+    // #227 review round 4: importing the real @aichemist/canvas SDK (which
+    // itself imports zod) used to overflow the call stack under Electron's
+    // Node — resolving "zod" from *inside* the hook re-entered the hook,
+    // forever. This is the actual shape of every real canvas's server.mjs,
+    // so it's the most direct regression test for that bug.
+    const mod = await import(defDir + "/server.mjs");
+    const definition = mod.default;
+    const ok = typeof definition === "object" && definition !== null && typeof definition.tools?.ping?.handler === "function";
+    let result;
+    if (ok) result = definition.tools.ping.handler({}, undefined);
+    report(ok && result === "pong", "server.mjs default export: " + JSON.stringify(definition));
+    return;
+  }
+
   report(false, "unknown scenario: " + scenario);
 }
 
@@ -193,13 +248,9 @@ main().catch((err) => {
 `
   );
 
-  const result = spawnSync("node", [harnessPath], {
-    encoding: "utf8",
-    timeout: 15_000,
-    env: { ...process.env, NODE_PATH: REPO_NODE_MODULES },
-  });
+  const result = spawnElectronAsNode([harnessPath], { env: { NODE_PATH: REPO_NODE_MODULES } });
   if (result.error) {
-    throw new Error(`Failed to spawn node harness: ${result.error.message}`);
+    throw new Error(`Failed to spawn Electron-as-node harness: ${result.error.message}`);
   }
   const lastLine = result.stdout.trim().split("\n").filter(Boolean).pop();
   if (!lastLine) {
@@ -222,6 +273,19 @@ function setupProject(): { projectDir: string; defDir: string; cleanup: () => vo
   fs.mkdirSync(outsideDir, { recursive: true });
   fs.writeFileSync(nodePath.join(outsideDir, "evil.cjs"), 'module.exports = { marker: "EVIL" };\n');
 
+  // For the "sdk-import-no-recursion" scenario — the exact shape of a real
+  // canvas's server.mjs.
+  fs.writeFileSync(
+    nodePath.join(defDir, "server.mjs"),
+    `import { defineCanvas, z } from "@aichemist/canvas";
+export default defineCanvas({
+  tools: {
+    ping: { description: "ping", input: z.object({}), handler: () => "pong" },
+  },
+});
+`
+  );
+
   return {
     projectDir,
     defDir,
@@ -230,13 +294,13 @@ function setupProject(): { projectDir: string; defDir: string; cleanup: () => vo
 }
 
 describe.skipIf(!REGISTER_HOOKS_SUPPORTED)(
-  "loader-hook — registerHooks() confinement (real subprocess, #227 review round 3)",
+  "loader-hook — registerHooks() confinement (real subprocess under Electron's Node, #227 review rounds 3-4)",
   () => {
     if (!REGISTER_HOOKS_SUPPORTED) {
       // eslint-disable-next-line no-console
       console.warn(
-        "[loader-hook.subprocess.test.ts] Skipped: this environment's `node` on PATH doesn't support " +
-          "module.registerHooks() (needs Node >= 22.15). This is an environment gap, not a code regression."
+        "[loader-hook.subprocess.test.ts] Skipped: couldn't run module.registerHooks() via the local " +
+          "`electron` package's bundled Node (ELECTRON_RUN_AS_NODE). This is an environment gap, not a code regression."
       );
     }
 
@@ -293,6 +357,19 @@ describe.skipIf(!REGISTER_HOOKS_SUPPORTED)(
         fs.writeFileSync(nodePath.join(defDir, "zod-consumer.cjs"), "module.exports = require('zod');\n");
 
         const result = runHarness(projectDir, defDir, "planted-zod-ignored");
+        expect(result.ok).toBe(true);
+      } finally {
+        cleanup();
+      }
+    });
+
+    // #227 review round 4's actual regression: this exact import shape (a
+    // real canvas's server.mjs importing @aichemist/canvas, which imports
+    // zod) crashed every canvas under Electron's Node with a stack overflow.
+    it("does not recurse into a stack overflow when a canvas imports the real SDK (which imports zod)", () => {
+      const { projectDir, defDir, cleanup } = setupProject();
+      try {
+        const result = runHarness(projectDir, defDir, "sdk-import-no-recursion");
         expect(result.ok).toBe(true);
       } finally {
         cleanup();

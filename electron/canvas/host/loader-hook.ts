@@ -22,7 +22,21 @@
  *    "zod"`. Anchoring the lookup at `dist/main/host/` (this file's own
  *    compiled location, walking up into the *app's* `node_modules`) instead
  *    makes it exactly as safe as the SDK case above, which never delegates to
- *    the importer either.
+ *    the importer either. **The actual resolution happens once, at module
+ *    load** (`RESOLVED_ZOD`, computed before `entry.ts` ever calls
+ *    `registerHooks()`) — round 4 of review found that resolving `"zod"`
+ *    *inside* the `resolve()` hook recurses infinitely under Node 24
+ *    (Electron 44's bundled runtime): `registerHooks()` there also
+ *    intercepts `require.resolve()` itself, so a resolve call made from
+ *    within the hook re-enters the hook, forever. Reproduced with the real
+ *    compiled `entry.js` in a real Electron `utilityProcess` — every canvas
+ *    failed to start with `RangeError: Maximum call stack size exceeded`.
+ *    System Node 22 doesn't reproduce this, which is why the previous
+ *    version looked fine under `smoke:canvas-sdk` and the subprocess test
+ *    (both ran under system `node`) — see `RESOLVED_ZOD`'s own docstring for
+ *    the full account, and `loader-hook.subprocess.test.ts` for why those
+ *    tests now spawn Electron's own `node` (via `ELECTRON_RUN_AS_NODE`)
+ *    instead.
  * 3. Confines every other import (and, since `registerHooks()` — unlike the
  *    old `register()` — intercepts CommonJS `require()` too, every require)
  *    to the same scope the content hash covers (#227 review round 2) — see
@@ -48,10 +62,27 @@
  * outside a full host process — `registerHooks()` has process-wide,
  * unregisterable side effects, so it must never run inside the shared vitest
  * worker (it would corrupt every other test's module loading in the same
- * process), but it's plain synchronous Node code, so `loader-hook.subprocess.test.ts`
- * spawns a throwaway `bun` subprocess per test to call it for real. The
- * import-scope *decision* itself still lives in the pure `import-scope.ts`,
- * with its own in-process unit tests, same reasoning as before.
+ * process), but it's plain synchronous Node code, so
+ * `loader-hook.subprocess.test.ts` spawns a throwaway subprocess per test to
+ * call it for real — under Electron's own bundled `node` (via
+ * `ELECTRON_RUN_AS_NODE=1`), not system `node`/`bun`, since round 4 of review
+ * found a recursion bug that only reproduced under Electron's actual Node
+ * version (24) and not the sandbox's system Node (22). The import-scope
+ * *decision* itself still lives in the pure `import-scope.ts`, with its own
+ * in-process unit tests, same reasoning as before.
+ *
+ * **Scope note (round 4 of review):** everything in this file guards against
+ * the module graph *silently* changing after the user trusted it — an
+ * innocuous-looking `import "zod"` or `require("some-pkg")` quietly loading
+ * code that was never hashed or reviewed. It cannot and does not stop
+ * approved code from deliberately working around it — e.g. a `server.mjs`
+ * that calls `module.registerHooks()` itself (hooks chain, so a later
+ * registration can still see resolutions this one already rewrote, but
+ * nothing stops one from being *added*) or that `eval`s a string it read
+ * from a file or a network response. That class of risk is accepted as
+ * inherent to running a canvas's server code at all, the same as running any
+ * local script — the trust prompt is consent to run the code, not a sandbox
+ * against everything it could choose to do.
  */
 import { createRequire, type ResolveFnOutput, type ResolveHookContext, type ResolveHookSync } from "node:module";
 import * as nodePath from "node:path";
@@ -76,16 +107,41 @@ const requireFromHere = createRequire(__filename);
  */
 const CANVAS_SDK_DIR = nodePath.join(__dirname, "..", "..", "canvas-sdk");
 
+interface ResolvedZod {
+  /** `zod`'s real entry file, as a `file://` URL, ready to hand straight back from the hook. */
+  entryUrl: string;
+  /** The real `zod` package's own directory — see `isTrustedAppRoot`'s use below. */
+  packageDir: string;
+}
+
 /**
- * The real `zod` package's own directory, resolved once via `requireFromHere`
- * the same way the `"zod"` specifier itself is pinned below. `null` if it
- * can't be resolved for some reason (fails open to "not a trusted root",
- * never throws — resolving the confinement check's own trusted-roots list
- * must not be able to crash a resolution that doesn't even touch zod).
+ * Resolves `zod`'s entry file and package directory via `requireFromHere`,
+ * **once, at module load** — i.e. while this file is still being imported by
+ * `entry.ts`, strictly before it calls `registerHooks()`. This timing is not
+ * cosmetic: round 4 of review on PR #238 found that resolving `zod` from
+ * *inside* the `resolve()` hook (as this used to) recurses infinitely under
+ * Node 24 (Electron 44's bundled runtime) — `registerHooks()` there also
+ * intercepts `require.resolve()` itself, so `requireFromHere.resolve("zod")`
+ * called from within `resolve()` re-enters `resolve("zod")`, which calls
+ * `requireFromHere.resolve("zod")` again, forever, until `RangeError: Maximum
+ * call stack size exceeded` — reproduced with the real compiled `entry.js` in
+ * a real Electron `utilityProcess`: every canvas failed to start. System Node
+ * 22 doesn't reproduce this (hooks apparently don't loop back onto
+ * `require.resolve` there), which is why the version under system `node`
+ * previously looked fine. Resolving here means the hook itself only ever
+ * returns this precomputed value — no resolution call happens while hooks are
+ * active, so there's nothing left to recurse through.
+ *
+ * `null` if `zod` can't be resolved for some reason — fails open to
+ * delegating `"zod"` to `nextResolve()` in the hook below (the pre-pin
+ * behavior) rather than crashing every canvas outright; this should not
+ * happen in a real build, since `zod` is a direct dependency.
  */
-const ZOD_PACKAGE_DIR: string | null = (() => {
+const RESOLVED_ZOD: ResolvedZod | null = (() => {
   try {
-    return nodePath.dirname(requireFromHere.resolve(`${ZOD_SPECIFIER}/package.json`));
+    const packageJsonPath = requireFromHere.resolve(`${ZOD_SPECIFIER}/package.json`);
+    const entryPath = requireFromHere.resolve(ZOD_SPECIFIER);
+    return { entryUrl: pathToFileURL(entryPath).href, packageDir: nodePath.dirname(packageJsonPath) };
   } catch {
     return null;
   }
@@ -135,8 +191,13 @@ export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
   }
 
   if (specifier === ZOD_SPECIFIER) {
-    const zodPath = requireFromHere.resolve(ZOD_SPECIFIER);
-    return { url: pathToFileURL(zodPath).href, shortCircuit: true };
+    // Precomputed at module load (see RESOLVED_ZOD's docstring) — resolving
+    // here instead, while the hook is active, is what caused the infinite
+    // recursion under Node 24. A null RESOLVED_ZOD (zod unresolvable at
+    // startup, which shouldn't happen in a real build) falls open to
+    // nextResolve() rather than hard-failing every canvas.
+    if (RESOLVED_ZOD) return { url: RESOLVED_ZOD.entryUrl, shortCircuit: true };
+    return nextResolve(specifier, context);
   }
 
   const result = nextResolve(specifier, context);
@@ -157,7 +218,8 @@ export const resolve: ResolveHookSync = (specifier, context, nextResolve) => {
     // more than one file (discovered when this test suite's own "resolves to
     // the app's own zod" case exercised zod's real multi-file layout).
     const inTrustedAppRoot =
-      isPathWithin(resolvedPath, CANVAS_SDK_DIR) || (ZOD_PACKAGE_DIR !== null && isPathWithin(resolvedPath, ZOD_PACKAGE_DIR));
+      isPathWithin(resolvedPath, CANVAS_SDK_DIR) ||
+      (RESOLVED_ZOD !== null && isPathWithin(resolvedPath, RESOLVED_ZOD.packageDir));
     if (!inDefinitionScope && !inTrustedAppRoot) {
       throw new Error(
         `Canvas import "${specifier}" resolved to "${resolvedPath}", outside its definition folder ` +

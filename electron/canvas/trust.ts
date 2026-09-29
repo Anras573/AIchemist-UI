@@ -241,17 +241,25 @@ export function computeCanvasDepsHash(defDir: string): string | null {
 
 /**
  * Whether a stored trust `record` still matches `dir`'s current on-disk
- * state — content hash, dependency hash, AND no symlink in the hashed scope
- * (#227 review round 3 folded the symlink refusal in here too: before this,
- * only {@link getProjectCanvasTrustStatus} checked it, so the trust status
- * shown to the user and {@link isProjectCanvasTrusted}'s actual spawn-gating
- * decision could disagree — a symlink added after trusting left the status
- * reading "blocked" while the gate still happily returned `true`).
+ * state — content hash, symlink-freeness, AND (when `checkDeps`) dependency
+ * hash (#227 review round 3 folded the symlink refusal in here too: before
+ * this, only {@link getProjectCanvasTrustStatus} checked it, so the trust
+ * status shown to the user and {@link isProjectCanvasTrusted}'s actual
+ * spawn-gating decision could disagree — a symlink added after trusting left
+ * the status reading "blocked" while the gate still happily returned `true`).
+ *
+ * `checkDeps` exists for perf (#227 review round 4): `computeCanvasDepsHash`
+ * reads a definition's entire `node_modules` tree, which review measured at
+ * ~240ms for a modest 3-dependency install (8.7k files) — synchronous, on the
+ * Electron main thread. `content_hash` and the symlink scan stay proportional
+ * to just the definition's own (small) file set regardless, so they're
+ * always checked; only the deps check is skippable, for callers that don't
+ * need it — see `isProjectCanvasTrusted`'s docstring for which callers that is.
  */
-function trustRecordMatchesDisk(record: CanvasTrust, dir: string): boolean {
+function trustRecordMatchesDisk(record: CanvasTrust, dir: string, checkDeps: boolean): boolean {
   if (hasSymlinksInDefinition(dir)) return false;
   if (record.content_hash !== computeCanvasContentHash(dir)) return false;
-  if (record.deps_hash !== computeCanvasDepsHash(dir)) return false;
+  if (checkDeps && record.deps_hash !== computeCanvasDepsHash(dir)) return false;
   return true;
 }
 
@@ -320,7 +328,7 @@ export function getProjectCanvasTrustStatus(
   const blockedReason = hasSymlinksInDefinition(dir)
     ? "This canvas contains a symlink, which isn't supported — AIchemist can't verify what code a symlink actually points to. Remove it (or replace it with a real file/folder) to trust this canvas."
     : null;
-  const trusted = blockedReason === null && record !== null && trustRecordMatchesDisk(record, dir);
+  const trusted = blockedReason === null && record !== null && trustRecordMatchesDisk(record, dir, true);
 
   return {
     definition,
@@ -336,28 +344,42 @@ export function getProjectCanvasTrustStatus(
 
 /**
  * Trust check used by the resolvers below — recomputes the content hash, the
- * dependency hash, and the symlink check (`trustRecordMatchesDisk`) and
- * compares against the stored record, without re-reading or validating the
- * manifest (unlike `getProjectCanvasTrustStatus`, which the trust prompt
- * needs the manifest for anyway). False for anything that isn't a
- * currently-trusted, unmodified project definition — including a definition
- * that was trusted before a symlink was added to it, or before something
- * wrote into its `node_modules` (#227 review round 3: this function and
- * `getProjectCanvasTrustStatus` must never disagree on this, since one drives
- * the UI's badge and the other drives whether a host is actually allowed to
- * spawn).
+ * symlink check, and (unless `opts.checkDeps` is `false`) the dependency hash
+ * (`trustRecordMatchesDisk`) and compares against the stored record, without
+ * re-reading or validating the manifest (unlike `getProjectCanvasTrustStatus`,
+ * which the trust prompt needs the manifest for anyway). False for anything
+ * that isn't a currently-trusted, unmodified project definition — including a
+ * definition that was trusted before a symlink was added to it, or (when
+ * checking deps) before something wrote into its `node_modules` (#227 review
+ * round 3: this function and `getProjectCanvasTrustStatus` must never
+ * disagree on this, since one drives the UI's badge and the other drives
+ * whether a host is actually allowed to spawn).
+ *
+ * `opts.checkDeps` (default `true`) exists for perf (#227 review round 4):
+ * this runs on effectively every canvas-bearing turn, and the deps check
+ * alone measured ~240ms of synchronous main-thread work for a modest
+ * dependency tree. Callers that only need "is this canvas still advertisable
+ * to the model this turn" — `canvasMcpServersForSession` and
+ * `buildCanvasSystemPromptAddendum` in `mcp-endpoint.ts` — pass
+ * `{ checkDeps: false }`: a stale answer there just means a turn briefly
+ * still offers/mentions a canvas whose `node_modules` changed since trusting,
+ * which can't actually run anything, because the real protection boundary —
+ * `resolveServerPath`'s spawn-time re-check in `CanvasHostManager` — always
+ * uses the full check (the default) and would refuse to start it regardless.
+ * Never pass `{ checkDeps: false }` to anything that gates an actual spawn.
  */
 export function isProjectCanvasTrusted(
   db: Database,
   projectId: string,
   projectPath: string,
-  definition: string
+  definition: string,
+  opts?: { checkDeps?: boolean }
 ): boolean {
   const record = getCanvasTrust(db, projectId, definition);
   if (!record) return false;
   const dir = resolveProjectDefinitionDir(projectPath, definition);
   if (!dir) return false;
-  return trustRecordMatchesDisk(record, dir);
+  return trustRecordMatchesDisk(record, dir, opts?.checkDeps ?? true);
 }
 
 // ─── Grant / revoke ──────────────────────────────────────────────────────────
@@ -410,15 +432,21 @@ export function revokeProjectCanvasTrust(db: Database, projectId: string, defini
  * (`CanvasHostManager.start` via the `CANVAS_OPEN`/`CANVAS_RESTART` handlers,
  * the MCP endpoint's `ensureHostRunning`) refuses it for free, with no gating
  * logic of its own to get wrong or forget.
+ *
+ * `opts.checkDeps` (default `true`) passes straight through to
+ * `isProjectCanvasTrusted` — see that function's docstring. Every caller that
+ * actually starts (or re-verifies) a host must use the default; only the two
+ * per-turn "is this canvas listable" call sites in `mcp-endpoint.ts` opt out.
  */
 export function resolveTrustedCanvasServerPath(
   db: Database,
   canvas: Pick<Canvas, "project_id" | "definition">,
-  projectPath: string
+  projectPath: string,
+  opts?: { checkDeps?: boolean }
 ): string | null {
   const tiered = resolveCanvasServerPath(canvas.definition);
   if (tiered) return tiered;
-  if (!isProjectCanvasTrusted(db, canvas.project_id, projectPath, canvas.definition)) return null;
+  if (!isProjectCanvasTrusted(db, canvas.project_id, projectPath, canvas.definition, opts)) return null;
   const dir = resolveProjectDefinitionDir(projectPath, canvas.definition);
   return dir ? nodePath.join(dir, "server.mjs") : null;
 }

@@ -170,8 +170,16 @@ export function canvasMcpServersForSession(
     // always trusted) when the session's project path couldn't be resolved.
     // `getAttachedCanvases`/tools stay unaffected; this only trims what's
     // offered to the model this turn.
+    //
+    // `checkDeps: false` (#227 review round 4): this runs per attached canvas
+    // on every turn, and the full deps check alone measured ~240ms of
+    // synchronous main-thread work. A stale "still advertised" answer here is
+    // safe — the actual spawn (`ensureHostRunning`, below) re-checks with the
+    // full default and would refuse to start a canvas whose `node_modules`
+    // changed since trusting, so this can't let unreviewed code run; it can
+    // only, briefly, offer a tool call that then fails to start its host.
     const resolved = projectPath
-      ? resolveTrustedCanvasServerPath(db, canvas, projectPath)
+      ? resolveTrustedCanvasServerPath(db, canvas, projectPath, { checkDeps: false })
       : resolveCanvasServerPath(canvas.definition);
     if (!resolved) continue;
     const entry: McpServerEntry = {
@@ -193,10 +201,14 @@ export function canvasMcpServersForSession(
 export function buildCanvasSystemPromptAddendum(db: Database, sessionId: string): string {
   // Same "definition missing" / untrusted-project-tier exclusion as
   // `canvasMcpServersForSession` — no point telling the model about a canvas
-  // whose tools aren't offered.
+  // whose tools aren't offered. Same `checkDeps: false` perf reasoning too
+  // (#227 review round 4) — this is purely informational, and the real spawn
+  // gate always re-checks with the full default.
   const projectPath = tryResolveSessionProjectPath(db, sessionId);
   const attached = tryGetAttachedCanvases(db, sessionId).filter((c) =>
-    projectPath ? resolveTrustedCanvasServerPath(db, c, projectPath) : resolveCanvasServerPath(c.definition)
+    projectPath
+      ? resolveTrustedCanvasServerPath(db, c, projectPath, { checkDeps: false })
+      : resolveCanvasServerPath(c.definition)
   );
   if (attached.length === 0) return "";
   const lines = attached.map((c) => `- ${c.title} (${c.definition})`).join("\n");
