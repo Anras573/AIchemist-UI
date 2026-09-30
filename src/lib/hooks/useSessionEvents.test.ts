@@ -424,6 +424,18 @@ describe("SESSION_FILE_CHANGE", () => {
     expect(useSessionStore.getState().tabSwitchRequest).toBe("canvas");
   });
 
+  it("requests canvas selection on a focus event for the active session only (#245)", () => {
+    renderHook(() => useSessionEvents());
+    useSessionStore.setState({ activeSessionId: "sess-1" });
+    useCanvasStore.setState({ focusedCanvasId: null });
+
+    getCb(IPC_CHANNELS.CANVAS_EVENT)({ canvasId: "c1", kind: "focus", sessionId: "other" });
+    expect(useCanvasStore.getState().focusedCanvasId).toBeNull();
+
+    getCb(IPC_CHANNELS.CANVAS_EVENT)({ canvasId: "c2", kind: "focus", sessionId: "sess-1" });
+    expect(useCanvasStore.getState().focusedCanvasId).toBe("c2");
+  });
+
   it("bumps the canvas list nonce when the agent creates an instance (list event)", () => {
     renderHook(() => useSessionEvents());
     const before = useCanvasStore.getState().listNonce;

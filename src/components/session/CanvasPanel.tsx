@@ -96,6 +96,8 @@ export function CanvasPanel() {
   const setCanvasState = useCanvasStore((s) => s.setCanvasState);
   const setCanvasStatus = useCanvasStore((s) => s.setCanvasStatus);
   const clearCanvasLogs = useCanvasStore((s) => s.clearCanvasLogs);
+  const focusedCanvasId = useCanvasStore((s) => s.focusedCanvasId);
+  const clearCanvasFocus = useCanvasStore((s) => s.clearCanvasFocus);
 
   const [selectedCanvasId, setSelectedCanvasId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -163,6 +165,16 @@ export function CanvasPanel() {
   useEffect(() => {
     setSelectedCanvasId(null);
   }, [activeProjectId]);
+
+  // An agent tool call targeted a canvas (#245): adopt it. If it isn't in the
+  // list yet (just created), leave the request pending — this re-runs when the
+  // `list`-triggered refetch lands.
+  useEffect(() => {
+    if (!focusedCanvasId || !canvases) return;
+    if (!canvases.some((c) => c.id === focusedCanvasId)) return;
+    setSelectedCanvasId(focusedCanvasId);
+    clearCanvasFocus();
+  }, [focusedCanvasId, canvases, clearCanvasFocus]);
 
   useEffect(() => {
     if (selectedCanvasId !== null) return;

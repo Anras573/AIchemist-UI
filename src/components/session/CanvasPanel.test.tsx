@@ -5,6 +5,8 @@ import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { CanvasPanel } from "./CanvasPanel";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
+import { useCanvasStore } from "@/lib/store/useCanvasStore";
+import { act } from "@testing-library/react";
 import type { CanvasListItem, Project } from "@/types";
 
 function makeProject(overrides: Partial<Project> = {}): Project {
@@ -48,6 +50,7 @@ function makeCanvas(overrides: Partial<CanvasListItem> = {}): CanvasListItem {
 
 describe("CanvasPanel", () => {
   beforeEach(() => {
+    useCanvasStore.setState({ focusedCanvasId: null });
     activateProject();
   });
 
@@ -138,6 +141,39 @@ describe("CanvasPanel", () => {
     await waitFor(() => {
       expect(window.electronAPI.canvasDelete).toHaveBeenCalledWith("canvas-1");
     });
+  });
+
+  it("switches to the canvas the agent called when another is showing (#245)", async () => {
+    vi.mocked(window.electronAPI.canvasList).mockResolvedValue([
+      makeCanvas({ id: "canvas-a", title: "A" }),
+      makeCanvas({ id: "canvas-b", title: "B" }),
+    ]);
+    vi.mocked(window.electronAPI.canvasOpen).mockResolvedValue({ state: null, revision: 0, status: "running" });
+    renderWithProviders(<CanvasPanel />);
+    await waitFor(() => expect(window.electronAPI.canvasOpen).toHaveBeenCalledWith("canvas-a"));
+
+    act(() => useCanvasStore.getState().requestCanvasSelection("canvas-b"));
+
+    await waitFor(() => expect(window.electronAPI.canvasOpen).toHaveBeenCalledWith("canvas-b"));
+    expect(useCanvasStore.getState().focusedCanvasId).toBeNull();
+  });
+
+  it("selects a just-created instance once the list refetch lands (#245)", async () => {
+    vi.mocked(window.electronAPI.canvasList).mockResolvedValue([makeCanvas({ id: "canvas-a", title: "A" })]);
+    vi.mocked(window.electronAPI.canvasOpen).mockResolvedValue({ state: null, revision: 0, status: "running" });
+    renderWithProviders(<CanvasPanel />);
+    await waitFor(() => expect(window.electronAPI.canvasOpen).toHaveBeenCalledWith("canvas-a"));
+
+    vi.mocked(window.electronAPI.canvasList).mockResolvedValue([
+      makeCanvas({ id: "canvas-a", title: "A" }),
+      makeCanvas({ id: "canvas-new", title: "New" }),
+    ]);
+    act(() => {
+      useCanvasStore.getState().bumpCanvasList();
+      useCanvasStore.getState().requestCanvasSelection("canvas-new");
+    });
+
+    await waitFor(() => expect(window.electronAPI.canvasOpen).toHaveBeenCalledWith("canvas-new"));
   });
 
   it("shows the attach toggle only when a session is active, and calls CANVAS_ATTACH", async () => {
