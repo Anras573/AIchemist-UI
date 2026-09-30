@@ -41,6 +41,15 @@ interface CanvasStore {
   reloadNonceByCanvas: Record<string, number>;
   /** Bumped when the instance list changed outside the panel (the agent created + attached one, #229) so `CanvasPanel` refetches it. */
   listNonce: number;
+  /**
+   * The canvas an agent tool call just targeted (#245), pending adoption by `CanvasPanel`.
+   * Set once per focus event (which the endpoint sends once per tool call) for the active
+   * session only; the panel selects it and clears it. Kept in the store rather than panel
+   * state because the panel may not be mounted yet when the event arrives (the tab switch
+   * that mounts it is triggered by the same event), and it may name an instance that isn't
+   * in the fetched list yet (just created) — the panel holds it until the list catches up.
+   */
+  focusedCanvasId: string | null;
 
   setCanvasState: (canvasId: string, state: unknown, revision: number) => void;
   setCanvasStatus: (canvasId: string, status: CanvasHostStatus) => void;
@@ -49,6 +58,8 @@ interface CanvasStore {
   clearCanvasLogs: (canvasId: string) => void;
   bumpCanvasReload: (canvasId: string) => void;
   bumpCanvasList: () => void;
+  requestCanvasSelection: (canvasId: string) => void;
+  clearCanvasFocus: () => void;
 }
 
 export const useCanvasStore = create<CanvasStore>((set) => ({
@@ -59,6 +70,7 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
   logsByCanvas: {},
   reloadNonceByCanvas: {},
   listNonce: 0,
+  focusedCanvasId: null,
 
   setCanvasState: (canvasId, state, revision) =>
     set((s) => {
@@ -107,4 +119,8 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
     })),
 
   bumpCanvasList: () => set((s) => ({ listNonce: s.listNonce + 1 })),
+
+  requestCanvasSelection: (canvasId) => set({ focusedCanvasId: canvasId }),
+
+  clearCanvasFocus: () => set({ focusedCanvasId: null }),
 }));

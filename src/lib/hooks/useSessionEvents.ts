@@ -128,7 +128,7 @@ export function useSessionEvents() {
     }))
   );
 
-  const { setCanvasState, setCanvasStatus, pushCanvasMessage, pushCanvasLog, bumpCanvasReload, bumpCanvasList } = useCanvasStore(
+  const { setCanvasState, setCanvasStatus, pushCanvasMessage, pushCanvasLog, bumpCanvasReload, bumpCanvasList, requestCanvasSelection } = useCanvasStore(
     useShallow((s) => ({
       setCanvasState: s.setCanvasState,
       setCanvasStatus: s.setCanvasStatus,
@@ -136,6 +136,7 @@ export function useSessionEvents() {
       pushCanvasLog: s.pushCanvasLog,
       bumpCanvasReload: s.bumpCanvasReload,
       bumpCanvasList: s.bumpCanvasList,
+      requestCanvasSelection: s.requestCanvasSelection,
     }))
   );
 
@@ -293,10 +294,12 @@ export function useSessionEvents() {
             bumpCanvasList();
             break;
           case "focus":
-            // An agent tool call targeted a canvas — surface the Canvas tab,
-            // but only for the session the user is looking at.
+            // An agent tool call targeted a canvas — surface the Canvas tab and
+            // select that instance, but only for the session the user is looking
+            // at. Switches on every focus event (one per tool call, #245).
             if (payload.sessionId && payload.sessionId === useSessionStore.getState().activeSessionId) {
               requestTabSwitch("canvas");
+              requestCanvasSelection(payload.canvasId);
             }
             break;
         }
@@ -333,5 +336,6 @@ export function useSessionEvents() {
     pushCanvasLog,
     bumpCanvasReload,
     bumpCanvasList,
+    requestCanvasSelection,
   ]);
 }
