@@ -103,6 +103,23 @@ describe("enqueueTurn (headless / programmatic)", () => {
     cleanupSessionQueueState(sessionId);
   });
 
+  it("fires onSettled once when the turn succeeds and once when it fails", async () => {
+    const sessionId = seedSession("sess-settled");
+    const ctx: TurnQueueContext = { db, activeTurns: new Set<string>(), getMainWindow: () => null };
+
+    const ok = vi.fn();
+    enqueueTurn(ctx, sessionId, { prompt: "ok", onSettled: ok });
+    await vi.waitFor(() => expect(ok).toHaveBeenCalledTimes(1));
+
+    runAgentTurnMock.mockRejectedValueOnce(new Error("boom"));
+    const failed = vi.fn();
+    enqueueTurn(ctx, sessionId, { prompt: "bad", onSettled: failed });
+    await vi.waitFor(() => expect(failed).toHaveBeenCalledTimes(1));
+    expect(ok).toHaveBeenCalledTimes(1);
+
+    cleanupSessionQueueState(sessionId);
+  });
+
   it("forwards a window's webContents when one is attached", async () => {
     const sessionId = seedSession("sess-windowed");
     const { win, send } = fakeWindow();

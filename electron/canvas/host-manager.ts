@@ -202,6 +202,11 @@ export interface StartCanvasHostOptions {
 }
 
 export interface CanvasHostManagerOptions {
+  /**
+   * Handles a host's `ctx.agent.send`. Throw to refuse: the message is relayed
+   * back to the canvas as a rejection. Absent → every send is refused.
+   */
+  agentSend?: (canvasId: string, text: string, sessionId: string | undefined) => void;
   spawn?: CanvasHostProcessFactory;
   entryPath?: string;
   hooks?: CanvasHostHooks;
@@ -305,6 +310,7 @@ export class CanvasHostManager {
   private readonly spawn: CanvasHostProcessFactory;
   private readonly entryPath: string;
   private readonly hooks: CanvasHostHooks;
+  private readonly agentSend: CanvasHostManagerOptions["agentSend"];
   private readonly idleStopMs: number;
   private readonly maxRestarts: number;
   private readonly restartWindowMs: number;
@@ -323,6 +329,7 @@ export class CanvasHostManager {
     this.spawn = options?.spawn ?? spawnCanvasHost;
     this.entryPath = options?.entryPath ?? resolveCanvasHostEntryPath();
     this.hooks = options?.hooks ?? {};
+    this.agentSend = options?.agentSend;
     this.idleStopMs = options?.idleStopMs ?? 10 * 60 * 1000;
     this.maxRestarts = options?.maxRestarts ?? 3;
     this.restartWindowMs = options?.restartWindowMs ?? 60_000;
@@ -600,9 +607,22 @@ export class CanvasHostManager {
       case "ui.message":
         this.callHook("onUiMessage", record.canvasId, msg.message);
         break;
-      case "agent.send":
+      case "agent.send": {
         this.callHook("onAgentSend", record.canvasId, msg.text, msg.sessionId);
+        let error: string | undefined;
+        try {
+          if (!this.agentSend) throw new Error("ctx.agent.send is not available");
+          this.agentSend(record.canvasId, msg.text, msg.sessionId);
+        } catch (err) {
+          error = err instanceof Error ? err.message : String(err);
+        }
+        try {
+          record.process.postMessage({ type: "agent.send.result", requestId: msg.requestId, ok: error === undefined, error });
+        } catch (err) {
+          console.error(`[canvas-host-manager] failed to reply to agent.send for ${record.canvasId}:`, err);
+        }
         break;
+      }
       case "log":
         this.callHook("onLog", record.canvasId, msg.level, msg.args);
         break;

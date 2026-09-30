@@ -117,6 +117,7 @@ type MessageRow = {
   content: string;
   created_at: string;
   agent: string | null;
+  source: string | null;
 };
 
 /**
@@ -148,13 +149,13 @@ function loadMessagePage(
     cursorRowid !== undefined
       ? stmt(
           db,
-          `SELECT rowid, id, session_id, role, content, created_at, agent
+          `SELECT rowid, id, session_id, role, content, created_at, agent, source
              FROM messages WHERE session_id = ? AND rowid < ?
              ORDER BY rowid DESC LIMIT ?`
         ).all(sessionId, cursorRowid, pageSize + 1)
       : stmt(
           db,
-          `SELECT rowid, id, session_id, role, content, created_at, agent
+          `SELECT rowid, id, session_id, role, content, created_at, agent, source
              FROM messages WHERE session_id = ?
              ORDER BY rowid DESC LIMIT ?`
         ).all(sessionId, pageSize + 1)
@@ -209,7 +210,7 @@ export function getSession(db: Database, sessionId: string, options: GetSessionO
   } else {
     messageRows = stmt(
       db,
-      `SELECT rowid, id, session_id, role, content, created_at, agent
+      `SELECT rowid, id, session_id, role, content, created_at, agent, source
          FROM messages
          WHERE session_id = ?
          ORDER BY created_at ASC`
@@ -264,6 +265,7 @@ export function getSession(db: Database, sessionId: string, options: GetSessionO
     tool_calls: toolCallsByMessageId.get(m.id) ?? [],
     created_at: m.created_at,
     agent: m.agent,
+    source: m.source,
   }));
 
   return {
@@ -321,15 +323,15 @@ export function recoverStaleSessionStatuses(db: Database): number {
  */
 export function saveMessage(
   db: Database,
-  args: { sessionId: string; role: string; content: string; agent?: string | null }
+  args: { sessionId: string; role: string; content: string; agent?: string | null; source?: string | null }
 ): Message {
   const id = crypto.randomUUID();
   const createdAt = nowIso();
 
   stmt(
     db,
-    "INSERT INTO messages (id, session_id, role, content, created_at, agent) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(id, args.sessionId, args.role, args.content, createdAt, args.agent ?? null);
+    "INSERT INTO messages (id, session_id, role, content, created_at, agent, source) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(id, args.sessionId, args.role, args.content, createdAt, args.agent ?? null, args.source ?? null);
 
   return {
     id,
@@ -339,6 +341,7 @@ export function saveMessage(
     tool_calls: [],
     created_at: createdAt,
     agent: args.agent ?? null,
+    source: args.source ?? null,
   };
 }
 

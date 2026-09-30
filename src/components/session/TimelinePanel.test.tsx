@@ -115,6 +115,23 @@ describe("TimelinePanel messages", () => {
     expect(screen.getByText("code-reviewer")).toBeInTheDocument();
   });
 
+  it("badges canvas-originated user messages with the canvas name", () => {
+    useSessionStore.getState().addSession(
+      makeSession("sess-1", {
+        messages: [
+          makeMessage("m-1", { role: "user", content: "your move", source: "canvas:connect4" }),
+          makeMessage("m-2", { role: "user", content: "typed by me", created_at: "2024-01-01T00:00:02Z" }),
+        ],
+      })
+    );
+    useSessionStore.getState().setActiveSession("sess-1");
+
+    renderWithProviders(<TimelinePanel />);
+    const badges = screen.getAllByTestId("canvas-source-badge");
+    expect(badges).toHaveLength(1);
+    expect(badges[0]).toHaveTextContent("connect4");
+  });
+
   it("marks queued messages with a badge", () => {
     useSessionStore.getState().addSession(
       makeSession("sess-1", { messages: [makeMessage("m-1", { content: "queued msg" })] })

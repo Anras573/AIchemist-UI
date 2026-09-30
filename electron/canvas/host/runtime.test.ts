@@ -391,7 +391,50 @@ describe("createCanvasHostRuntime — ctx.agent.send", () => {
     transport.emit({ type: "tool.call", callId: "1", tool: "ask", args: {} });
 
     await vi.waitFor(() =>
-      expect(transport.sent).toContainEqual({ type: "agent.send", text: "please triage this", sessionId: "s1" })
+      expect(transport.sent).toContainEqual({
+        type: "agent.send",
+        requestId: expect.any(String),
+        text: "please triage this",
+        sessionId: "s1",
+      })
+    );
+  });
+
+  it("rejects the canvas's send when main refuses it, resolves when accepted", async () => {
+    const transport = createFakeTransport();
+    const definition = defineCanvas({
+      tools: {
+        ask: {
+          description: "Ask",
+          input: z.object({}),
+          handler: async (_args, ctx) => {
+            try {
+              await ctx.agent.send("hi");
+              return "sent";
+            } catch (err) {
+              return `refused: ${(err as Error).message}`;
+            }
+          },
+        },
+      },
+    });
+    createCanvasHostRuntime({ definition, transport, project: PROJECT });
+    transport.emit({ type: "init", state: null, revision: 0 });
+
+    transport.emit({ type: "tool.call", callId: "1", tool: "ask", args: {} });
+    await vi.waitFor(() => expect(transport.sent.some((m) => m.type === "agent.send")).toBe(true));
+    const first = transport.sent.find((m) => m.type === "agent.send") as { requestId: string };
+    transport.emit({ type: "agent.send.result", requestId: first.requestId, ok: false, error: "rate limited" });
+    await vi.waitFor(() =>
+      expect(transport.sent).toContainEqual({ type: "tool.result", callId: "1", ok: true, result: "refused: rate limited" })
+    );
+
+    transport.emit({ type: "tool.call", callId: "2", tool: "ask", args: {} });
+    await vi.waitFor(() => expect(transport.sent.filter((m) => m.type === "agent.send")).toHaveLength(2));
+    const second = transport.sent.filter((m) => m.type === "agent.send")[1] as { requestId: string };
+    transport.emit({ type: "agent.send.result", requestId: second.requestId, ok: true });
+    await vi.waitFor(() =>
+      expect(transport.sent).toContainEqual({ type: "tool.result", callId: "2", ok: true, result: "sent" })
     );
   });
 });

@@ -97,6 +97,7 @@ export function useSessionEvents() {
     clearThinking,
     addPendingQuestion,
     clearPendingQuestions,
+    addQueuedMessage,
     dequeueMessage,
     setQueuePaused,
     clearQueuePaused,
@@ -120,6 +121,7 @@ export function useSessionEvents() {
       clearThinking: s.clearThinking,
       addPendingQuestion: s.addPendingQuestion,
       clearPendingQuestions: s.clearPendingQuestions,
+      addQueuedMessage: s.addQueuedMessage,
       dequeueMessage: s.dequeueMessage,
       setQueuePaused: s.setQueuePaused,
       clearQueuePaused: s.clearQueuePaused,
@@ -155,6 +157,7 @@ export function useSessionEvents() {
 
       onSessionEvent<SessionMessageEvent>(IPC_CHANNELS.SESSION_MESSAGE, (payload) => {
         commitMessage(payload.session_id, payload.message);
+        if (payload.queued) addQueuedMessage(payload.session_id, payload.message.id);
       }),
 
       onSessionEvent<ToolCallEvent>(IPC_CHANNELS.SESSION_TOOL_CALL, (payload) => {
@@ -307,6 +310,7 @@ export function useSessionEvents() {
     clearThinking,
     addPendingQuestion,
     clearPendingQuestions,
+    addQueuedMessage,
     dequeueMessage,
     setQueuePaused,
     clearQueuePaused,

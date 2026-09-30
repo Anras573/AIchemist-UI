@@ -109,6 +109,15 @@ describe("commitMessage", () => {
     expect(get().streamingText["sess-1"]).toBeUndefined();
   });
 
+  it("keeps streaming text when a user message is committed mid-stream", () => {
+    get().addSession(makeSession());
+    get().appendStreamingDelta("sess-1", "Half of the reply ");
+    get().commitMessage("sess-1", makeMessage({ id: "u1", role: "user", source: "canvas:c4" }));
+    get().appendStreamingDelta("sess-1", "second half");
+    expect(get().streamingText["sess-1"]).toBe("Half of the reply second half");
+    expect(get().sessions["sess-1"].messages).toHaveLength(1);
+  });
+
   it("deduplicates — calling with the same message ID twice is a no-op", () => {
     get().addSession(makeSession());
     const msg = makeMessage();

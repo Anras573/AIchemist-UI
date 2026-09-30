@@ -56,10 +56,19 @@ const UiMessageToHostSchema = z.object({
   message: z.unknown(),
 });
 
+/** Main's reply to a host's `agent.send` — the ack/refusal `ctx.agent.send` awaits. */
+const AgentSendResultSchema = z.object({
+  type: z.literal("agent.send.result"),
+  requestId: z.string(),
+  ok: z.boolean(),
+  error: z.string().optional(),
+});
+
 export const MainToHostMessageSchema = z.discriminatedUnion("type", [
   InitMessageSchema,
   ToolCallMessageSchema,
   UiMessageToHostSchema,
+  AgentSendResultSchema,
 ]);
 export type MainToHostMessage = z.infer<typeof MainToHostMessageSchema>;
 
@@ -102,6 +111,7 @@ const UiMessageFromHostSchema = z.object({
 
 const AgentSendMessageSchema = z.object({
   type: z.literal("agent.send"),
+  requestId: z.string(),
   text: z.string(),
   sessionId: z.string().optional(),
 });
