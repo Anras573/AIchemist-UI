@@ -39,6 +39,8 @@ interface CanvasStore {
   logsByCanvas: Record<string, CanvasLogEntry[]>;
   /** Bumped on every dev-reload notice (#226) — `CanvasFrame` keys its iframe off this to force a re-navigation, picking up an edited `ui/` file that a plain state/status push wouldn't. */
   reloadNonceByCanvas: Record<string, number>;
+  /** Bumped when the instance list changed outside the panel (the agent created + attached one, #229) so `CanvasPanel` refetches it. */
+  listNonce: number;
 
   setCanvasState: (canvasId: string, state: unknown, revision: number) => void;
   setCanvasStatus: (canvasId: string, status: CanvasHostStatus) => void;
@@ -46,6 +48,7 @@ interface CanvasStore {
   pushCanvasLog: (canvasId: string, level: CanvasLogEntry["level"], args: unknown[]) => void;
   clearCanvasLogs: (canvasId: string) => void;
   bumpCanvasReload: (canvasId: string) => void;
+  bumpCanvasList: () => void;
 }
 
 export const useCanvasStore = create<CanvasStore>((set) => ({
@@ -55,6 +58,7 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
   lastMessageByCanvas: {},
   logsByCanvas: {},
   reloadNonceByCanvas: {},
+  listNonce: 0,
 
   setCanvasState: (canvasId, state, revision) =>
     set((s) => {
@@ -101,4 +105,6 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
     set((s) => ({
       reloadNonceByCanvas: { ...s.reloadNonceByCanvas, [canvasId]: (s.reloadNonceByCanvas[canvasId] ?? 0) + 1 },
     })),
+
+  bumpCanvasList: () => set((s) => ({ listNonce: s.listNonce + 1 })),
 }));

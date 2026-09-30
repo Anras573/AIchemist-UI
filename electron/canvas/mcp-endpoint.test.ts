@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { migrate } from "../db";
 import { addProject } from "../projects";
 import { createSession } from "../sessions";
-import { createCanvas, setCanvasAttached } from "./store";
+import { createCanvas, isCanvasAttached, setCanvasAttached } from "./store";
 import { fingerprintManaged } from "../mcp/managed";
 import { TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "../agent/tool-gate";
 import { resolveApproval } from "../agent/approval";
@@ -17,6 +17,7 @@ import {
   CANVAS_UNAVAILABLE_MESSAGE,
   CanvasMcpEndpoint,
   canvasMcpServersForSession,
+  CANVAS_MANAGER_SERVER_NAME,
   canvasServerName,
   markSessionNonInteractive,
   resolveCanvasServerPath,
@@ -59,9 +60,9 @@ let canvasId: string;
 let hostManager: FakeHostManager;
 let endpoint: CanvasMcpEndpoint;
 let webContentsSend: ReturnType<typeof vi.fn>;
-/** webContents.send calls other than the Canvas-tab `focus` push (#229). */
+/** webContents.send calls other than the Canvas-tab `focus` / `list` pushes (#229). */
 const nonFocusSends = () =>
-  webContentsSend.mock.calls.filter(([channel, payload]) => !(channel === "canvas:event" && (payload as { kind?: string })?.kind === "focus"));
+  webContentsSend.mock.calls.filter(([channel, payload]) => !(channel === "canvas:event" && ["focus", "list"].includes((payload as { kind?: string })?.kind ?? "")));
 let getMainWindow: () => { webContents: { send: ReturnType<typeof vi.fn> } } | null;
 let canvasesRoot: string;
 
@@ -102,6 +103,10 @@ afterEach(async () => {
   _setCanvasesRootForTests(null);
   markSessionNonInteractive(sessionId, false);
 });
+
+/** Drops the always-present canvas manager entry so assertions can focus on per-canvas servers. */
+const canvasOnly = (map: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(map).filter(([name]) => name !== CANVAS_MANAGER_SERVER_NAME));
 
 function url(path: string): string {
   return `${endpoint.baseUrl}${path}`;
@@ -444,12 +449,12 @@ describe("project-tier trust gating (#227)", () => {
     setCanvasAttached(db, sessionId, canvas.id, true);
 
     const before = canvasMcpServersForSession(db, sessionId, { baseUrl: endpoint.baseUrl, token: endpoint.token });
-    expect(Object.keys(before)).toEqual([canvasServerName({ id: canvasId, title: "Release board" })]);
+    expect(Object.keys(canvasOnly(before))).toEqual([canvasServerName({ id: canvasId, title: "Release board" })]);
 
     trustProjectCanvas(db, projectId, projectPath, "widgets");
 
     const after = canvasMcpServersForSession(db, sessionId, { baseUrl: endpoint.baseUrl, token: endpoint.token });
-    expect(Object.keys(after).sort()).toEqual(
+    expect(Object.keys(canvasOnly(after)).sort()).toEqual(
       [canvasServerName({ id: canvasId, title: "Release board" }), canvasServerName({ id: canvas.id, title: "Widgets" })].sort()
     );
   });
@@ -501,16 +506,20 @@ describe("canvasMcpServersForSession", () => {
     expect(map).toEqual({});
   });
 
-  it("returns an empty map when the session has no attached canvases", () => {
+  it("returns only the manager entry when the session has no attached canvases", () => {
     setCanvasAttached(db, sessionId, canvasId, false);
     const map = canvasMcpServersForSession(db, sessionId, endpoint);
-    expect(map).toEqual({});
+    expect(Object.keys(map)).toEqual([CANVAS_MANAGER_SERVER_NAME]);
+    expect(map[CANVAS_MANAGER_SERVER_NAME]).toMatchObject({
+      type: "http",
+      url: `${endpoint.baseUrl}/session/${sessionId}/canvas-manager/mcp`,
+    });
   });
 
   it("builds an HTTP entry per attached canvas, scoped to canvas + session", () => {
     const map = canvasMcpServersForSession(db, sessionId, endpoint);
     const name = canvasServerName({ id: canvasId, title: "Release board" });
-    expect(Object.keys(map)).toEqual([name]);
+    expect(Object.keys(canvasOnly(map))).toEqual([name]);
     expect(map[name]).toMatchObject({
       type: "http",
       url: `${endpoint.baseUrl}/canvas/${canvasId}/session/${sessionId}/mcp`,
@@ -521,7 +530,7 @@ describe("canvasMcpServersForSession", () => {
   it("only includes canvases attached to the given session, not every canvas in the project", () => {
     createCanvas(db, { projectId, definition: "kanban", title: "Unattached board" });
     const map = canvasMcpServersForSession(db, sessionId, endpoint);
-    expect(Object.keys(map)).toHaveLength(1);
+    expect(Object.keys(canvasOnly(map))).toHaveLength(1);
   });
 
   it("excludes a canvas whose definition no longer resolves (\"definition missing\", #226 follow-up)", () => {
@@ -533,7 +542,7 @@ describe("canvasMcpServersForSession", () => {
     const missingName = canvasServerName({ id: missing.id, title: "Orphaned" });
     expect(map[missingName]).toBeUndefined();
     // The still-resolvable "kanban" canvas from beforeEach is unaffected.
-    expect(Object.keys(map)).toHaveLength(1);
+    expect(Object.keys(canvasOnly(map))).toHaveLength(1);
   });
 });
 
@@ -634,18 +643,18 @@ describe("Copilot mcpFp invalidation on attach/detach (#223)", () => {
   // canvas-specific fingerprint logic needed (see copilot.ts's comment at the
   // managedMcpRaw computation).
   it("changes the fingerprint when a canvas is attached, and reverts when detached", () => {
-    const baseline = fingerprintManaged(canvasMcpServersForSession(db, sessionId, { baseUrl: null, token: "x" }));
+    const baseline = fingerprintManaged(canvasOnly(canvasMcpServersForSession(db, sessionId, { baseUrl: null, token: "x" })) as never);
 
     setCanvasAttached(db, sessionId, canvasId, false);
-    const detachedFp = fingerprintManaged(canvasMcpServersForSession(db, sessionId, endpoint));
+    const detachedFp = fingerprintManaged(canvasOnly(canvasMcpServersForSession(db, sessionId, endpoint)) as never);
     expect(detachedFp).toBe(baseline);
 
     setCanvasAttached(db, sessionId, canvasId, true);
-    const attachedFp = fingerprintManaged(canvasMcpServersForSession(db, sessionId, endpoint));
+    const attachedFp = fingerprintManaged(canvasOnly(canvasMcpServersForSession(db, sessionId, endpoint)) as never);
     expect(attachedFp).not.toBe(baseline);
 
     setCanvasAttached(db, sessionId, canvasId, false);
-    const redetachedFp = fingerprintManaged(canvasMcpServersForSession(db, sessionId, endpoint));
+    const redetachedFp = fingerprintManaged(canvasOnly(canvasMcpServersForSession(db, sessionId, endpoint)) as never);
     expect(redetachedFp).toBe(baseline);
   });
 });
@@ -700,5 +709,89 @@ describe("resolveCanvasServerPath", () => {
     } finally {
       fs.rmSync(outside, { recursive: true, force: true });
     }
+  });
+});
+
+// ─── create_canvas_instance (agent-callable, approval-gated, #229) ───────────
+
+describe("canvas manager server — create_canvas_instance", () => {
+  const managerPath = () => `/session/${sessionId}/canvas-manager/mcp`;
+  const callCreate = (args: Record<string, unknown>) =>
+    rpc(managerPath(), { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "create_canvas_instance", arguments: args } });
+  const instances = () => db.prepare("SELECT * FROM canvases WHERE title = ?");
+
+  it("rejects a request without the bearer token", async () => {
+    const res = await fetch(url(managerPath()), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("lists exactly the create_canvas_instance tool", async () => {
+    const res = await rpc(managerPath(), { jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const body = (await res.json()) as { result: { tools: Array<{ name: string }> } };
+    expect(body.result.tools.map((t) => t.name)).toEqual(["create_canvas_instance"]);
+  });
+
+  it("on approval, creates the instance, attaches it to the session, and pushes list + focus events", async () => {
+    const pending = callCreate({ definition: "checklist", title: "Launch list" });
+
+    await vi.waitFor(() => expect(nonFocusSends()).toHaveLength(1));
+    const [channel, payload] = nonFocusSends()[0] as [string, { approval_id: string }];
+    expect(channel).toBe("session:approval_required");
+    resolveApproval(payload.approval_id, true);
+
+    const body = (await (await pending).json()) as { result: { content: Array<{ text: string }>; isError?: boolean } };
+    expect(body.result.isError).toBeFalsy();
+    expect(body.result.content[0].text).toMatch(/next turn/);
+
+    const created = instances().get("Launch list") as { id: string; definition: string; project_id: string };
+    expect(created).toMatchObject({ definition: "checklist", project_id: projectId });
+    expect(isCanvasAttached(db, sessionId, created.id)).toBe(true);
+    expect(webContentsSend).toHaveBeenCalledWith("canvas:event", { canvasId: created.id, kind: "list", sessionId });
+    expect(webContentsSend).toHaveBeenCalledWith("canvas:event", { canvasId: created.id, kind: "focus", sessionId });
+  });
+
+  it("creates nothing when the user denies", async () => {
+    const pending = callCreate({ definition: "checklist", title: "Denied list" });
+    await vi.waitFor(() => expect(nonFocusSends()).toHaveLength(1));
+    resolveApproval((nonFocusSends()[0][1] as { approval_id: string }).approval_id, false);
+
+    const body = (await (await pending).json()) as { result: { content: Array<{ text: string }>; isError?: boolean } };
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toBe(TOOL_DENIED_MESSAGE);
+    expect(instances().get("Denied list")).toBeUndefined();
+  });
+
+  it("errors (without prompting) for an unknown definition, listing what exists", async () => {
+    const body = (await (await callCreate({ definition: "nope", title: "X" })).json()) as {
+      result: { content: Array<{ text: string }>; isError?: boolean };
+    };
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toMatch(/No canvas definition named "nope"[\s\S]*kanban/);
+    expect(nonFocusSends()).toEqual([]);
+  });
+
+  it("requires both definition and title", async () => {
+    const body = (await (await callCreate({ definition: "kanban" })).json()) as { result: { isError?: boolean } };
+    expect(body.result.isError).toBe(true);
+  });
+
+  it("can instantiate a project-tier definition and warns that it needs the trust prompt", async () => {
+    const dir = nodePath.join(projectPath, ".agents", "canvases", "widgets");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      nodePath.join(dir, "canvas.json"),
+      JSON.stringify({ name: "widgets", description: "", version: 1, server: "server.mjs", ui: "ui/index.html" })
+    );
+    fs.writeFileSync(nodePath.join(dir, "server.mjs"), "export default {};");
+    const pending = callCreate({ definition: "widgets", title: "Widgets" });
+    await vi.waitFor(() => expect(nonFocusSends()).toHaveLength(1));
+    resolveApproval((nonFocusSends()[0][1] as { approval_id: string }).approval_id, true);
+
+    const body = (await (await pending).json()) as { result: { content: Array<{ text: string }> } };
+    expect(body.result.content[0].text).toMatch(/Trust and run/);
   });
 });

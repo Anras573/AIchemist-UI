@@ -98,7 +98,7 @@ Notes: never use `<form>` (submit is blocked in the sandbox) — use buttons + `
 
 1. After writing the files the definition appears in the Canvas tab's "New canvas…" picker (dev reload picks up edits without a restart).
 2. **Project-tier canvases are untrusted until the user approves.** The panel previews the UI and shows a trust prompt (manifest, dependencies, hash). Tell the user to review and click "Trust and run". Any later edit to the server code re-prompts.
-3. **You cannot create or attach an instance yourself** — that is deliberate (an agent must not grant itself new tools). Tell the user to click "New canvas…" in the Canvas tab, pick your definition, and attach it to the session. Its tools then appear as `canvas-*` MCP tools on your *next* turn, so don't promise to use them right away. (For Copilot, attaching also starts a fresh SDK session, so its in-SDK context resets.)
+3. Call the `create_canvas_instance` tool (`definition` = your folder name, `title`) — the user is asked to approve, then the instance is created and attached to this session. Its tools appear as `canvas-*` MCP tools on your *next* turn, so don't call them right away. (For Copilot, attaching also starts a fresh SDK session, so its in-SDK context resets.) Project-tier definitions still need the user to click "Trust and run" before they run.
 4. When you call a canvas tool the Canvas tab is brought to the front automatically.
 
 ## Worked example

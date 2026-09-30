@@ -35,6 +35,9 @@ export const RESERVED_MCP_NAME = "aichemist-tools";
  */
 export const CANVAS_MCP_SERVER_PREFIX = "canvas-";
 
+/** The always-injected canvas manager server (`create_canvas_instance`, #229). Its url/token change every launch, so Copilot leaves it out of the resume fingerprint. */
+export const CANVAS_MANAGER_SERVER_NAME = `${CANVAS_MCP_SERVER_PREFIX}manager`;
+
 /**
  * Read AIchemist-managed servers from `~/.aichemist/mcp.json`.
  * Returns an empty map if the file is missing or unreadable.

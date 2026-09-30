@@ -1,3 +1,4 @@
+import { CANVAS_MANAGER_SERVER_NAME } from "../mcp/managed";
 import type {
   CopilotClient as CopilotClientType,
   PermissionRequest,
@@ -650,7 +651,13 @@ export async function runCopilotAgentTurn(params: {
         ...loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) }),
         ...canvasServers,
       };
-  const mcpFingerprint = fingerprintManaged(managedMcpRaw);
+  // The always-on canvas manager entry (#229) is left OUT of the fingerprint: it
+  // is injected for every session and its url/token change per launch, so
+  // including it would reset every Copilot session on each relaunch, not just
+  // ones with canvases attached.
+  const { [CANVAS_MANAGER_SERVER_NAME]: _managerEntry, ...fingerprintable } = managedMcpRaw as Record<string, unknown>;
+  void _managerEntry;
+  const mcpFingerprint = fingerprintManaged(fingerprintable as typeof managedMcpRaw);
 
   const sessionConfig = {
     model: agentModelOverride?.trim() || projectConfig.model,

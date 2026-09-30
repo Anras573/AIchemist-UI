@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
@@ -92,6 +92,7 @@ export function CanvasPanel() {
   const lastMessageByCanvas = useCanvasStore((s) => s.lastMessageByCanvas);
   const logsByCanvas = useCanvasStore((s) => s.logsByCanvas);
   const reloadNonceByCanvas = useCanvasStore((s) => s.reloadNonceByCanvas);
+  const listNonce = useCanvasStore((s) => s.listNonce);
   const setCanvasState = useCanvasStore((s) => s.setCanvasState);
   const setCanvasStatus = useCanvasStore((s) => s.setCanvasStatus);
   const clearCanvasLogs = useCanvasStore((s) => s.clearCanvasLogs);
@@ -111,6 +112,14 @@ export function CanvasPanel() {
     () => (activeProjectId ? ipc.canvasList({ projectId: activeProjectId, sessionId: activeSessionId ?? undefined }) : Promise.resolve([])),
     { ttl: 5_000 }
   );
+
+  // The agent created + attached an instance (#229): refresh the picker.
+  const lastListNonce = useRef(listNonce);
+  useEffect(() => {
+    if (lastListNonce.current === listNonce) return;
+    lastListNonce.current = listNonce;
+    void refetch();
+  }, [listNonce, refetch]);
 
   // Discovered across all three tiers (project/global/built-in, #226) — this
   // is what lets "New canvas…" offer a picker instead of a free-text
