@@ -287,6 +287,13 @@ export function useSessionEvents() {
           case "reload":
             bumpCanvasReload(payload.canvasId);
             break;
+          case "focus":
+            // An agent tool call targeted a canvas — surface the Canvas tab,
+            // but only for the session the user is looking at.
+            if (payload.sessionId && payload.sessionId === useSessionStore.getState().activeSessionId) {
+              requestTabSwitch("canvas");
+            }
+            break;
         }
       }),
     ];

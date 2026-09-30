@@ -46,7 +46,7 @@ export function canvasesRoot(): string {
  * manifest validation, but until then this is the app's own registry of
  * what it ships. Adding a new built-in means adding its name here.
  */
-const BUILTIN_DEFINITION_NAMES = ["kanban"] as const;
+const BUILTIN_DEFINITION_NAMES = ["kanban", "checklist", "markdown"] as const;
 
 /**
  * Test seam: override the built-in canvases directory. Pass null to restore
@@ -77,6 +77,18 @@ function computeBuiltinCanvasesRoot(): string {
 
 export function builtinCanvasesRoot(): string {
   return builtinCanvasesRootOverride ?? computeBuiltinCanvasesRoot();
+}
+
+/**
+ * Path to the bundled `create-canvas` skill (#229) — plain markdown shipped
+ * beside the built-in canvases (same `__dirname`-relative resolution, same
+ * `electron-builder.yml` packaging rule), never scanned as a canvas
+ * definition. The agent awareness note points models at this file so any
+ * provider can read it on demand; `readSkillContent` also falls back to it so
+ * activating `create-canvas` by name injects it like any other skill.
+ */
+export function createCanvasSkillPath(): string {
+  return nodePath.join(__dirname, "..", "..", "electron", "canvas", "skills", "create-canvas", "SKILL.md");
 }
 
 /** A definition name may not contain path separators or traverse (`..`). */

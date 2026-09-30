@@ -28,6 +28,8 @@ files:
   # resolves them from (`<app root>/electron/canvas/builtin`, computed relative
   # to dist/main so it also works unpackaged in dev).
   - electron/canvas/builtin/**
+  # Bundled skills (#229) — plain markdown, e.g. the create-canvas guide.
+  - electron/canvas/skills/**
   - package.json
   - "!**/*.map"
 asarUnpack:

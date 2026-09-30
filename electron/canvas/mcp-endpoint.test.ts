@@ -59,6 +59,9 @@ let canvasId: string;
 let hostManager: FakeHostManager;
 let endpoint: CanvasMcpEndpoint;
 let webContentsSend: ReturnType<typeof vi.fn>;
+/** webContents.send calls other than the Canvas-tab `focus` push (#229). */
+const nonFocusSends = () =>
+  webContentsSend.mock.calls.filter(([channel, payload]) => !(channel === "canvas:event" && (payload as { kind?: string })?.kind === "focus"));
 let getMainWindow: () => { webContents: { send: ReturnType<typeof vi.fn> } } | null;
 let canvasesRoot: string;
 
@@ -222,6 +225,18 @@ describe("tools/list", () => {
 // ─── tools/call — approval gate ──────────────────────────────────────────────
 
 describe("tools/call approval gate", () => {
+  it("pushes a focus event so the renderer can surface the Canvas tab", async () => {
+    hostManager.tools = [{ name: "get_board", description: "Return the board", approval: "none" }];
+    hostManager.callToolImpl = () => "the board";
+    await rpc(routePath(canvasId, sessionId), {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "get_board", arguments: {} },
+    });
+    expect(webContentsSend).toHaveBeenCalledWith("canvas:event", { canvasId, kind: "focus", sessionId });
+  });
+
   it('calls a "none"-approval tool immediately, no approval prompt', async () => {
     hostManager.tools = [{ name: "get_board", description: "Return the board", approval: "none" }];
     hostManager.callToolImpl = () => "the board";
@@ -234,7 +249,7 @@ describe("tools/call approval gate", () => {
     });
     const body = (await res.json()) as { result: { content: Array<{ text: string }>; isError?: boolean } };
 
-    expect(webContentsSend).not.toHaveBeenCalled();
+    expect(nonFocusSends()).toEqual([]);
     expect(body.result.isError).toBeFalsy();
     expect(body.result.content[0].text).toBe("the board");
   });
@@ -250,8 +265,8 @@ describe("tools/call approval gate", () => {
       params: { name: "move_card", arguments: { id: "1", to: "done" } },
     });
 
-    await vi.waitFor(() => expect(webContentsSend).toHaveBeenCalledOnce());
-    const [channel, payload] = webContentsSend.mock.calls[0] as [string, { approval_id: string }];
+    await vi.waitFor(() => expect(nonFocusSends()).toHaveLength(1));
+    const [channel, payload] = nonFocusSends()[0] as [string, { approval_id: string }];
     expect(channel).toBe("session:approval_required");
     resolveApproval(payload.approval_id, true);
 
@@ -272,8 +287,8 @@ describe("tools/call approval gate", () => {
       params: { name: "move_card", arguments: {} },
     });
 
-    await vi.waitFor(() => expect(webContentsSend).toHaveBeenCalledOnce());
-    const [, payload] = webContentsSend.mock.calls[0] as [string, { approval_id: string }];
+    await vi.waitFor(() => expect(nonFocusSends()).toHaveLength(1));
+    const [, payload] = nonFocusSends()[0] as [string, { approval_id: string }];
     resolveApproval(payload.approval_id, false);
 
     const res = await resultPromise;
@@ -295,7 +310,7 @@ describe("tools/call approval gate", () => {
     });
     const body = (await res.json()) as { result: { content: Array<{ text: string }>; isError?: boolean } };
 
-    expect(webContentsSend).not.toHaveBeenCalled();
+    expect(nonFocusSends()).toEqual([]);
     expect(body.result.isError).toBe(true);
     expect(body.result.content[0].text).toBe(TOOL_DENIED_UNATTENDED_MESSAGE);
   });
@@ -542,17 +557,26 @@ describe("buildCanvasSystemPromptAddendum", () => {
     expect(addendum).toContain("kanban");
   });
 
+  it("always carries the create-canvas awareness note, pointing at a real guide file", () => {
+    setCanvasAttached(db, sessionId, canvasId, false);
+    const addendum = buildCanvasSystemPromptAddendum(db, sessionId);
+    expect(addendum).toContain("create-canvas");
+    const guidePath = /read the guide at (\S+)/.exec(addendum)?.[1];
+    expect(guidePath && fs.existsSync(guidePath)).toBe(true);
+    expect(addendum).not.toContain("Attached canvases");
+  });
+
   it("excludes a canvas whose definition no longer resolves", () => {
     const missing = createCanvas(db, { projectId, definition: "does-not-exist-on-disk", title: "Orphaned" });
     setCanvasAttached(db, sessionId, missing.id, true);
     setCanvasAttached(db, sessionId, canvasId, false); // isolate to just the orphaned one
 
-    expect(buildCanvasSystemPromptAddendum(db, sessionId)).toBe("");
+    expect(buildCanvasSystemPromptAddendum(db, sessionId)).not.toContain("Attached canvases");
   });
 
   it("is empty when nothing is attached", () => {
     setCanvasAttached(db, sessionId, canvasId, false);
-    expect(buildCanvasSystemPromptAddendum(db, sessionId)).toBe("");
+    expect(buildCanvasSystemPromptAddendum(db, sessionId)).not.toContain("Attached canvases");
   });
 });
 

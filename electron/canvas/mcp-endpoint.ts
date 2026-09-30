@@ -36,12 +36,13 @@ import { listProjects } from "../projects";
 import { getSession } from "../sessions";
 import { getAttachedCanvases, getCanvas, isCanvasAttached } from "./store";
 import { CanvasToolError, type CanvasHostManager, type StartCanvasHostOptions } from "./host-manager";
-import { _setCanvasesRootForTests, resolveCanvasServerPath } from "./definitions";
+import { _setCanvasesRootForTests, createCanvasSkillPath, resolveCanvasServerPath } from "./definitions";
 import { resolveTrustedCanvasServerPath } from "./trust";
 import { requestApproval, requiresApproval } from "../agent/approval";
 import { TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "../agent/tool-gate";
 import type { McpServerEntry, McpServersMap } from "../mcp/config";
 import { CANVAS_MCP_SERVER_PREFIX } from "../mcp/managed";
+import * as CH from "../ipc-channels";
 
 export { _setCanvasesRootForTests, resolveCanvasServerPath };
 
@@ -193,12 +194,21 @@ export function canvasMcpServersForSession(
 }
 
 /**
- * A short system-prompt addendum (mirrors `buildMemoryContext`) listing the
- * session's attached canvases so the model knows they exist and what they're
- * for, without spending a tool call to discover them. Empty when nothing is
- * attached.
+ * The system-prompt addendum (mirrors `buildMemoryContext`). Every turn gets a
+ * one-paragraph note that canvases exist and how to build one (#229 — no tool
+ * cost: the model reads the bundled `create-canvas` guide only when asked).
+ * When the session has canvases attached, they're listed after it so the model
+ * also knows which tools are live.
  */
 export function buildCanvasSystemPromptAddendum(db: Database, sessionId: string): string {
+  const awareness =
+    "\n\nCanvases — full-stack work surfaces (a kanban board, a checklist, a data browser, …) that you " +
+    "and the user both operate on, shown in the Canvas tab. If the user asks for a canvas, or would clearly " +
+    "benefit from one, read the guide at " +
+    createCanvasSkillPath() +
+    " (the `create-canvas` skill) and follow it to build a definition under .agents/canvases/ in the project. " +
+    "Built-in canvases: kanban, checklist, markdown.";
+
   // Same "definition missing" / untrusted-project-tier exclusion as
   // `canvasMcpServersForSession` — no point telling the model about a canvas
   // whose tools aren't offered. Same `checkDeps: false` perf reasoning too
@@ -210,10 +220,11 @@ export function buildCanvasSystemPromptAddendum(db: Database, sessionId: string)
       ? resolveTrustedCanvasServerPath(db, c, projectPath, { checkDeps: false })
       : resolveCanvasServerPath(c.definition)
   );
-  if (attached.length === 0) return "";
+  if (attached.length === 0) return awareness;
   const lines = attached.map((c) => `- ${c.title} (${c.definition})`).join("\n");
   return (
-    "\n\nAttached canvases — full-stack work surfaces with their own agent-callable " +
+    awareness +
+    "\n\nAttached canvases — with their own agent-callable " +
     `tools (exposed as "canvas-*" MCP tools):\n${lines}`
   );
 }
@@ -486,6 +497,11 @@ export class CanvasMcpEndpoint {
 
     const descriptor = this.hostManager.getTools(canvasId)?.find((t) => t.name === toolName);
     if (!descriptor) return toolErrorContent(`Unknown canvas tool "${toolName}"`);
+
+    // Surface the Canvas tab (#229): the renderer switches to it when this is
+    // the active session. Fired before the gate so an approval prompt for a
+    // canvas tool appears with its canvas already visible.
+    this.getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "focus", sessionId });
 
     const gate = await this.gate(canvasId, sessionId, toolName, args, descriptor.approval);
     if (!gate.allowed) return toolErrorContent(gate.message);

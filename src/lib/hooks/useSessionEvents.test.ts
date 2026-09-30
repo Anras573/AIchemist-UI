@@ -412,6 +412,17 @@ describe("SESSION_FILE_CHANGE", () => {
     expect(useSessionStore.getState().tabSwitchRequest).toBe("changes");
   });
 
+  it("requests the canvas tab on a canvas focus event for the active session only", () => {
+    renderHook(() => useSessionEvents());
+    useSessionStore.setState({ activeSessionId: "sess-1", tabSwitchRequest: null });
+
+    getCb(IPC_CHANNELS.CANVAS_EVENT)({ canvasId: "c1", kind: "focus", sessionId: "other" });
+    expect(useSessionStore.getState().tabSwitchRequest).toBeNull();
+
+    getCb(IPC_CHANNELS.CANVAS_EVENT)({ canvasId: "c1", kind: "focus", sessionId: "sess-1" });
+    expect(useSessionStore.getState().tabSwitchRequest).toBe("canvas");
+  });
+
   it("accumulates multiple file changes for the same session", () => {
     renderHook(() => useSessionEvents());
 

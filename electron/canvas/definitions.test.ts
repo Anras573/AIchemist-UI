@@ -48,13 +48,13 @@ describe("built-in tier — the real, shipped kanban definition", () => {
 
   it("lists kanban's manifest via CANVAS_LIST_DEFINITIONS' backing function", () => {
     const definitions = listBuiltinCanvasDefinitions();
-    expect(definitions).toHaveLength(1);
-    expect(definitions[0]).toMatchObject({
-      name: "kanban",
-      server: "server.mjs",
-      ui: "ui/index.html",
-    });
-    expect(typeof definitions[0].description).toBe("string");
+    expect(definitions.map((d) => d.name).sort()).toEqual(["checklist", "kanban", "markdown"]);
+    for (const def of definitions) {
+      expect(def).toMatchObject({ server: "server.mjs", ui: "ui/index.html" });
+      expect(typeof def.description).toBe("string");
+      expect(resolveCanvasServerPath(def.name)).not.toBeNull();
+      expect(fs.existsSync(nodePath.join(resolveCanvasUiDir(def.name)!, "index.html"))).toBe(true);
+    }
   });
 });
 
