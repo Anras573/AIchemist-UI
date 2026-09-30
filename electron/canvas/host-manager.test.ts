@@ -1228,8 +1228,40 @@ describe("CanvasHostManager — a rejected state write is reconciled, not left d
     try {
       db.prepare("DELETE FROM canvases WHERE id = ?").run(canvas.id);
       await manager.callTool(canvas.id, "add_card", { title: "a" });
-      // Persist failed -> host got state.rejected (no row -> null state).
-      await expect(manager.callTool(canvas.id, "get_board", {})).resolves.not.toEqual({ cards: ["a"] });
+      // Persist failed -> host got state.rejected (no row -> null state ->
+      // falls back to the definition's initialState, same as a fresh init).
+      await expect(manager.callTool(canvas.id, "get_board", {})).resolves.toEqual({ cards: [] });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("drops stale-epoch writes after a rejection but still persists ones stamped with the new epoch", async () => {
+    const canvas = createCanvas(db, {
+      projectId: "p1",
+      definition: "kanban",
+      title: "Board",
+      initialState: { cards: [] },
+    });
+    const { factory, processes } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const manager = new CanvasHostManager(db, { spawn: factory });
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // Real rejection (row deleted) bumps the record's epoch to 1.
+      db.prepare("DELETE FROM canvases WHERE id = ?").run(canvas.id);
+      await manager.callTool(canvas.id, "add_card", { title: "a" });
+      // Row comes back so later persists can succeed.
+      createCanvas(db, { id: canvas.id, projectId: "p1", definition: "kanban", title: "Board", initialState: { cards: [] } });
+
+      // A write already in flight (unstamped, epoch 0 < 1) must be dropped.
+      processes[0].emit("message", { type: "state.changed", state: { cards: ["stale"] }, revision: 5 });
+      expect(getCanvas(db, canvas.id)?.state).toEqual({ cards: [] });
+
+      // A write stamped with the new epoch is persisted.
+      processes[0].emit("message", { type: "state.changed", state: { cards: ["fresh"] }, revision: 1, epoch: 1 });
+      expect(getCanvas(db, canvas.id)?.state).toEqual({ cards: ["fresh"] });
     } finally {
       consoleError.mockRestore();
     }
