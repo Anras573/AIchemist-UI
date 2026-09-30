@@ -9,7 +9,8 @@ vi.mock("./claude", () => ({
   readAgentFileSystemPrompt: vi.fn(() => agentFileMock.result),
 }));
 
-import { composeCopilotSystemMessage, resolveSelectedAgent } from "./copilot";
+import { composeCopilotSystemMessage, computeCopilotMcpFingerprint, resolveSelectedAgent } from "./copilot";
+import { CANVAS_MANAGER_SERVER_NAME } from "../mcp/managed";
 
 const tempProjects: string[] = [];
 
@@ -166,5 +167,36 @@ describe("composeCopilotSystemMessage", () => {
       memoryContext: "",
     });
     expect(content).not.toContain("Attached canvases");
+  });
+});
+
+describe("computeCopilotMcpFingerprint (#229)", () => {
+  const manager = (port: number, token: string) => ({
+    [CANVAS_MANAGER_SERVER_NAME]: {
+      type: "http" as const,
+      url: `http://127.0.0.1:${port}/session/s1/canvas-manager/mcp`,
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  });
+  const board = (port: number) => ({
+    "canvas-board-1234abcd": {
+      type: "http" as const,
+      url: `http://127.0.0.1:${port}/canvas/c1/session/s1/mcp`,
+      headers: { Authorization: "Bearer t" },
+    },
+  });
+
+  it("ignores the manager entry entirely — a new port/token between launches must not reset sessions", () => {
+    expect(computeCopilotMcpFingerprint(manager(1111, "aaa"))).toBe(computeCopilotMcpFingerprint(manager(2222, "bbb")));
+    expect(computeCopilotMcpFingerprint(manager(1111, "aaa"))).toBeNull();
+    const user = { mine: { command: "x" } };
+    expect(computeCopilotMcpFingerprint({ ...user, ...manager(1, "a") })).toBe(computeCopilotMcpFingerprint(user));
+  });
+
+  it("still changes when a real canvas is attached, and reverts when detached", () => {
+    const base = computeCopilotMcpFingerprint(manager(1, "a"));
+    const attached = computeCopilotMcpFingerprint({ ...manager(1, "a"), ...board(1) });
+    expect(attached).not.toBe(base);
+    expect(computeCopilotMcpFingerprint(manager(1, "a"))).toBe(base);
   });
 });

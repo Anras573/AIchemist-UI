@@ -549,7 +549,9 @@ export class CanvasMcpEndpoint {
       );
     }
 
-    const gate = await this.gate(null, sessionId, "create_canvas_instance", { definition, title }, "ask");
+    const gate = await this.gate(null, sessionId, "create_canvas_instance", { definition, title }, "ask", {
+      neverAllowlisted: true,
+    });
     if (!gate.allowed) return toolErrorContent(gate.message);
 
     const canvas = createCanvas(this.db, { projectId: session.project_id, definition: entry.id, title });
@@ -668,14 +670,19 @@ export class CanvasMcpEndpoint {
     sessionId: string,
     toolName: string,
     args: unknown,
-    approval: "none" | "ask"
+    approval: "none" | "ask",
+    opts?: { neverAllowlisted?: boolean }
   ): Promise<{ allowed: true } | { allowed: false; message: string }> {
     if (approval === "none") return { allowed: true };
 
     const session = getSession(this.db, sessionId);
     const projectConfig = getProjectConfig(this.db, session.project_id);
     const fingerprintName = canvasId === null ? `canvas:${toolName}` : `canvas:${canvasId}:${toolName}`;
-    if (!requiresApproval(sessionId, projectConfig, "canvas", fingerprintName, args)) {
+    // `neverAllowlisted` (create_canvas_instance, #229): skip the session/project
+    // allowlists entirely, so an earlier "always allow" can never let the agent
+    // attach new tool sets to itself without a prompt. Unattended turns still
+    // auto-deny (requestApproval's nonInteractive branch below).
+    if (!opts?.neverAllowlisted && !requiresApproval(sessionId, projectConfig, "canvas", fingerprintName, args)) {
       return { allowed: true };
     }
 

@@ -6,12 +6,12 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { migrate } from "../db";
-import { addProject } from "../projects";
+import { addProject, getProjectConfig, saveProjectConfig } from "../projects";
 import { createSession } from "../sessions";
 import { createCanvas, isCanvasAttached, setCanvasAttached } from "./store";
 import { fingerprintManaged } from "../mcp/managed";
 import { TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "../agent/tool-gate";
-import { resolveApproval } from "../agent/approval";
+import { addToSessionAllowlist, resolveApproval } from "../agent/approval";
 import type { CanvasToolDescriptor } from "./host-protocol";
 import {
   CANVAS_UNAVAILABLE_MESSAGE,
@@ -752,6 +752,50 @@ describe("canvas manager server — create_canvas_instance", () => {
     expect(isCanvasAttached(db, sessionId, created.id)).toBe(true);
     expect(webContentsSend).toHaveBeenCalledWith("canvas:event", { canvasId: created.id, kind: "list", sessionId });
     expect(webContentsSend).toHaveBeenCalledWith("canvas:event", { canvasId: created.id, kind: "focus", sessionId });
+  });
+
+  it("still prompts after a session allowlist entry for it exists (never auto-approved)", async () => {
+    const args = { definition: "checklist", title: "Sneaky" };
+    for (const name of ["canvas:create_canvas_instance", "create_canvas_instance"]) addToSessionAllowlist(sessionId, name, args);
+
+    const pending = callCreate(args);
+    await vi.waitFor(() => expect(nonFocusSends()).toHaveLength(1));
+    expect(nonFocusSends()[0][0]).toBe("session:approval_required");
+    expect(instances().get("Sneaky")).toBeUndefined(); // nothing created before the user answers
+    resolveApproval((nonFocusSends()[0][1] as { approval_id: string }).approval_id, false);
+    await pending;
+    expect(instances().get("Sneaky")).toBeUndefined();
+  });
+
+  it("still prompts after a project allowed_tools entry for it exists", async () => {
+    const config = getProjectConfig(db, projectId);
+    saveProjectConfig(db, projectId, {
+      ...config,
+      allowed_tools: [
+        ...(config.allowed_tools ?? []),
+        { tool_name: "canvas:create_canvas_instance" },
+        { tool_name: "create_canvas_instance" },
+      ],
+    });
+
+    const pending = callCreate({ definition: "checklist", title: "Sneaky 2" });
+    await vi.waitFor(() => expect(nonFocusSends()).toHaveLength(1));
+    resolveApproval((nonFocusSends()[0][1] as { approval_id: string }).approval_id, false);
+    await pending;
+    expect(instances().get("Sneaky 2")).toBeUndefined();
+  });
+
+  it("auto-denies without prompting on an unattended turn, even with an allowlist entry", async () => {
+    addToSessionAllowlist(sessionId, "canvas:create_canvas_instance", {});
+    markSessionNonInteractive(sessionId, true);
+
+    const body = (await (await callCreate({ definition: "checklist", title: "Unattended" })).json()) as {
+      result: { content: Array<{ text: string }>; isError?: boolean };
+    };
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toBe(TOOL_DENIED_UNATTENDED_MESSAGE);
+    expect(nonFocusSends()).toEqual([]);
+    expect(instances().get("Unattended")).toBeUndefined();
   });
 
   it("creates nothing when the user denies", async () => {
