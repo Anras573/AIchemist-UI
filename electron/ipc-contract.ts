@@ -51,6 +51,7 @@ import type {
   CanvasListItem,
   CanvasDiscoveryResult,
   CanvasHostStatus,
+  CanvasSecretStatus,
   CanvasTrustStatus,
   CanvasTrustGrantResult,
   BudgetConfig,
@@ -306,6 +307,18 @@ export type IpcContract = {
   };
   [CH.CANVAS_TRUST_REVOKE]: {
     args: [args: { projectId: string; definition: string }];
+    result: { ok: boolean };
+  };
+  [CH.CANVAS_SECRETS_STATUS]: {
+    args: [args: { projectId: string; definition: string }];
+    result: CanvasSecretStatus[];
+  };
+  [CH.CANVAS_SECRET_SET]: {
+    args: [args: { projectId: string; definition: string; name: string; value: string }];
+    result: { ok: boolean };
+  };
+  [CH.CANVAS_SECRET_CLEAR]: {
+    args: [args: { projectId: string; definition: string; name: string }];
     result: { ok: boolean };
   };
 

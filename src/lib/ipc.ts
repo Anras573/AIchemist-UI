@@ -149,6 +149,11 @@ export const ipc = {
   canvasTrustGrant: (args: { projectId: string; definition: string; expectedContentHash: string }) =>
     window.electronAPI.canvasTrustGrant(args),
   canvasTrustRevoke: (args: { projectId: string; definition: string }) => window.electronAPI.canvasTrustRevoke(args),
+  canvasSecretsStatus: (args: { projectId: string; definition: string }) => window.electronAPI.canvasSecretsStatus(args),
+  canvasSecretSet: (args: { projectId: string; definition: string; name: string; value: string }) =>
+    window.electronAPI.canvasSecretSet(args),
+  canvasSecretClear: (args: { projectId: string; definition: string; name: string }) =>
+    window.electronAPI.canvasSecretClear(args),
 
   // Workflows
   workflowList: (args?: { projectId?: string }) => window.electronAPI.workflowList(args),

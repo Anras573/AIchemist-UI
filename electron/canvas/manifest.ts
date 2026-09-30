@@ -11,6 +11,20 @@
 import { z } from "zod";
 import type { CanvasDefinition } from "../../src/types/index";
 
+/**
+ * Env-var names a declared secret may not use: they'd let a canvas's secret
+ * override something that changes how the host process itself loads code.
+ */
+const RESERVED_SECRET_NAME = /^(PATH|HOME|USER|SHELL|TMPDIR|NODE_.*|ELECTRON_.*|LD_.*|DYLD_.*|BUN_.*)$/i;
+
+export const CanvasSecretSchema = z.object({
+  name: z
+    .string()
+    .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "secret name must be a valid environment variable name")
+    .refine((n) => !RESERVED_SECRET_NAME.test(n), { message: "secret name is reserved" }),
+  description: z.string().optional(),
+});
+
 export const CanvasManifestSchema = z.object({
   name: z.string().min(1, "name must not be empty"),
   description: z.string().default(""),
@@ -40,6 +54,14 @@ export const CanvasManifestSchema = z.object({
       network: z.array(z.string()).optional(),
       exec: z.array(z.string()).optional(),
     })
+    .optional(),
+  /**
+   * Credentials the canvas needs (#249). The user supplies each value per
+   * definition; it's injected as an env var into this definition's host only.
+   */
+  secrets: z
+    .array(CanvasSecretSchema)
+    .refine((list) => new Set(list.map((x) => x.name)).size === list.length, { message: "secret names must be unique" })
     .optional(),
 }) satisfies z.ZodType<CanvasDefinition, unknown>;
 

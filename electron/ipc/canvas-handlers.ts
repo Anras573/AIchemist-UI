@@ -7,6 +7,7 @@ import type {
   CanvasDiscoveryResult,
   CanvasHostStatus,
   CanvasListItem,
+  CanvasSecretStatus,
   CanvasTrustGrantResult,
   CanvasTrustStatus,
 } from "../../src/types/index";
@@ -30,6 +31,13 @@ import {
   revokeProjectCanvasTrust,
   trustProjectCanvas,
 } from "../canvas/trust";
+import {
+  clearCanvasSecret,
+  getCanvasSecretStatus,
+  resolveCanvasSecretEnv,
+  resolveCanvasSecretScope,
+  setCanvasSecret,
+} from "../canvas/secrets";
 import { resolveProjectDefinitionDir } from "../canvas/definitions";
 import { listProjects } from "../projects";
 import { handle } from "./handle";
@@ -79,6 +87,7 @@ function resolveStartOptions(db: Database, canvas: Canvas): StartCanvasHostOptio
     projectId: project.id,
     projectPath: project.path,
     resolveServerPath: () => resolveTrustedCanvasServerPath(db, canvas, project.path),
+    resolveEnv: () => resolveCanvasSecretEnv(project.id, project.path, canvas.definition),
   };
 }
 
@@ -319,6 +328,42 @@ export function registerCanvasHandlers(db: Database, hostManager: CanvasHostMana
       // *start* a new one, but wouldn't touch one already up).
       const instances = listCanvases(db, args.projectId).filter((c) => c.definition === args.definition);
       await Promise.all(instances.map((c) => hostManager.stop(c.id)));
+      return { ok: true };
+    }
+  );
+
+  // ── Declared secrets (#249) — values are write-only from the renderer. ──────
+  function secretScopeFor(projectId: string, definition: string) {
+    const project = findProject(db, projectId);
+    if (!project) throw new IpcError("not_found", `Project not found: ${projectId}`);
+    const resolved = resolveCanvasSecretScope(project.id, project.path, definition);
+    if (!resolved) throw new IpcError("not_found", `Canvas definition not found: ${definition}`);
+    return resolved;
+  }
+
+  handle(CH.CANVAS_SECRETS_STATUS, (_event, args: { projectId: string; definition: string }): CanvasSecretStatus[] => {
+    const { scope, declared } = secretScopeFor(args.projectId, args.definition);
+    return getCanvasSecretStatus(scope, declared);
+  });
+
+  handle(
+    CH.CANVAS_SECRET_SET,
+    async (_event, args: { projectId: string; definition: string; name: string; value: string }): Promise<{ ok: boolean }> => {
+      const { scope, declared } = secretScopeFor(args.projectId, args.definition);
+      try {
+        setCanvasSecret(scope, declared, args.name, args.value);
+      } catch (err) {
+        throw new IpcError("invalid_input", err instanceof Error ? err.message : String(err));
+      }
+      return { ok: true };
+    }
+  );
+
+  handle(
+    CH.CANVAS_SECRET_CLEAR,
+    async (_event, args: { projectId: string; definition: string; name: string }): Promise<{ ok: boolean }> => {
+      const { scope } = secretScopeFor(args.projectId, args.definition);
+      clearCanvasSecret(scope, args.name);
       return { ok: true };
     }
   );

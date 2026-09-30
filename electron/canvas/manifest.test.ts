@@ -124,3 +124,19 @@ describe("parseCanvasManifest", () => {
     }
   });
 });
+
+describe("manifest secrets (#249)", () => {
+  const base = { name: "x", version: 1, server: "server.mjs", ui: "ui/index.html" };
+
+  it("accepts declared secrets", () => {
+    const r = parseCanvasManifest({ ...base, secrets: [{ name: "GITHUB_TOKEN", description: "PAT" }] });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects invalid, reserved and duplicate secret names", () => {
+    expect(parseCanvasManifest({ ...base, secrets: [{ name: "not valid" }] }).success).toBe(false);
+    expect(parseCanvasManifest({ ...base, secrets: [{ name: "PATH" }] }).success).toBe(false);
+    expect(parseCanvasManifest({ ...base, secrets: [{ name: "NODE_OPTIONS" }] }).success).toBe(false);
+    expect(parseCanvasManifest({ ...base, secrets: [{ name: "A" }, { name: "A" }] }).success).toBe(false);
+  });
+});

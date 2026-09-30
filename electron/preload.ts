@@ -187,6 +187,9 @@ export interface ElectronAPI {
     expectedContentHash: string;
   }) => Promise<Res<typeof CH.CANVAS_TRUST_GRANT>>;
   canvasTrustRevoke: (args: { projectId: string; definition: string }) => Promise<Res<typeof CH.CANVAS_TRUST_REVOKE>>;
+  canvasSecretsStatus: (args: { projectId: string; definition: string }) => Promise<Res<typeof CH.CANVAS_SECRETS_STATUS>>;
+  canvasSecretSet: (args: { projectId: string; definition: string; name: string; value: string }) => Promise<Res<typeof CH.CANVAS_SECRET_SET>>;
+  canvasSecretClear: (args: { projectId: string; definition: string; name: string }) => Promise<Res<typeof CH.CANVAS_SECRET_CLEAR>>;
 
   // ── Workflows ─────────────────────────────────────────────────────────────
   workflowList: (args?: { projectId?: string }) => Promise<Res<typeof CH.WORKFLOW_LIST>>;
@@ -328,6 +331,9 @@ const api: ElectronAPI = {
   canvasTrustStatus: (args) => invoke(CH.CANVAS_TRUST_STATUS, args),
   canvasTrustGrant: (args) => invoke(CH.CANVAS_TRUST_GRANT, args),
   canvasTrustRevoke: (args) => invoke(CH.CANVAS_TRUST_REVOKE, args),
+  canvasSecretsStatus: (args) => invoke(CH.CANVAS_SECRETS_STATUS, args),
+  canvasSecretSet: (args) => invoke(CH.CANVAS_SECRET_SET, args),
+  canvasSecretClear: (args) => invoke(CH.CANVAS_SECRET_CLEAR, args),
 
   workflowList: (args) => invoke(CH.WORKFLOW_LIST, args ?? {}),
   workflowUpsert: (input) => invoke(CH.WORKFLOW_UPSERT, input),

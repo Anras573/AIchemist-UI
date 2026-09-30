@@ -220,6 +220,12 @@ const canvasTrustArgsSchema = z.object({
   definition: z.string().trim().min(1),
 });
 
+const canvasSecretClearSchema = canvasTrustArgsSchema.extend({ name: z.string().trim().min(1) });
+
+const canvasSecretSetSchema = canvasSecretClearSchema.extend({
+  value: z.string().min(1).max(64 * 1024),
+});
+
 const canvasTrustGrantSchema = canvasTrustArgsSchema.extend({
   // The hash the renderer displayed in the prompt — the handler's TOCTOU
   // guard (#227 review) rejects the grant if the definition no longer
@@ -259,4 +265,6 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.CANVAS_TRUST_STATUS]: unary(canvasTrustArgsSchema, CH.CANVAS_TRUST_STATUS),
   [CH.CANVAS_TRUST_GRANT]: unary(canvasTrustGrantSchema, CH.CANVAS_TRUST_GRANT),
   [CH.CANVAS_TRUST_REVOKE]: unary(canvasTrustArgsSchema, CH.CANVAS_TRUST_REVOKE),
+  [CH.CANVAS_SECRET_SET]: unary(canvasSecretSetSchema, CH.CANVAS_SECRET_SET),
+  [CH.CANVAS_SECRET_CLEAR]: unary(canvasSecretClearSchema, CH.CANVAS_SECRET_CLEAR),
 };
