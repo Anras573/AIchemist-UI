@@ -46,6 +46,7 @@ vi.mock("../usage-ledger", () => ({
   recordUsage: recordUsageMock,
 }));
 
+import { isSessionNonInteractive } from "../canvas/mcp-endpoint";
 import { runAgentTurn } from "./runner";
 import { TurnEmitter } from "./turn-emitter";
 
@@ -250,5 +251,57 @@ describe("runAgentTurn usage ledger", () => {
     })).rejects.toThrow("boom");
 
     expect(recordUsageMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("runAgentTurn non-interactive marking (#242)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    loadToolCallsForMessageMock.mockReturnValue([]);
+  });
+
+  function turn(nonInteractive?: boolean) {
+    return runAgentTurn({
+      db: { prepare: vi.fn().mockReturnValue({ run: vi.fn(), get: vi.fn() }) } as any,
+      sessionId: "sess-ni",
+      projectId: "proj-1",
+      prompt: "go",
+      projectPath: "/project",
+      projectConfig: { provider: "copilot" } as any,
+      webContents: { send: vi.fn() } as any,
+      nonInteractive,
+    });
+  }
+
+  it("marks the session non-interactive during an unattended turn and clears it on success", async () => {
+    let during: boolean | undefined;
+    copilotRunMock.mockImplementationOnce(async () => {
+      during = isSessionNonInteractive("sess-ni");
+      return "ok";
+    });
+    await turn(true);
+    expect(during).toBe(true);
+    expect(isSessionNonInteractive("sess-ni")).toBe(false);
+  });
+
+  it("does not mark the session during an interactive turn", async () => {
+    let during: boolean | undefined;
+    copilotRunMock.mockImplementationOnce(async () => {
+      during = isSessionNonInteractive("sess-ni");
+      return "ok";
+    });
+    await turn(false);
+    expect(during).toBe(false);
+  });
+
+  it("clears the marking when the turn errors", async () => {
+    let during: boolean | undefined;
+    copilotRunMock.mockImplementationOnce(async () => {
+      during = isSessionNonInteractive("sess-ni");
+      throw new Error("boom");
+    });
+    await expect(turn(true)).rejects.toThrow("boom");
+    expect(during).toBe(true);
+    expect(isSessionNonInteractive("sess-ni")).toBe(false);
   });
 });

@@ -1,5 +1,35 @@
-import { describe, it, expect } from "vitest";
-import { buildFileChange } from "./claude";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const { queryMock, canvasServersMock, canvasAddendumMock, managedMock } = vi.hoisted(() => ({
+  queryMock: vi.fn(),
+  canvasServersMock: vi.fn(() => ({})),
+  canvasAddendumMock: vi.fn(() => ""),
+  managedMock: vi.fn(() => ({})),
+}));
+
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: queryMock }));
+vi.mock("./mcp-tools", () => ({
+  createApprovalMcpServer: vi.fn(async () => ({ type: "sdk", name: "aichemist-tools" })),
+}));
+vi.mock("../canvas/mcp-endpoint", () => ({
+  canvasMcpServersForSession: canvasServersMock,
+  buildCanvasSystemPromptAddendum: canvasAddendumMock,
+}));
+vi.mock("../mcp", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../mcp")>();
+  return { ...actual, loadManagedMcpServers: managedMock };
+});
+vi.mock("../sessions", () => ({
+  saveToolCall: vi.fn(),
+  updateToolCallStatus: vi.fn(),
+  getDisabledMcpServers: vi.fn(() => []),
+}));
+vi.mock("./skills", () => ({ buildSkillsContext: vi.fn(() => "") }));
+vi.mock("./provider-session-store", () => ({
+  providerSessionStore: { get: vi.fn(() => ({})), set: vi.fn(), reset: vi.fn() },
+}));
+
+import { buildFileChange, runClaudeAgentTurn } from "./claude";
 
 // ─── buildFileChange ────────────────────────────────────────────────────────
 //
@@ -96,5 +126,55 @@ describe("buildFileChange", () => {
 
     expect(change.tooLarge).toBe(true);
     expect(change.isBinary).toBeUndefined();
+  });
+});
+
+// ─── canvas injection (#223 / #242) ─────────────────────────────────────────
+
+describe("runClaudeAgentTurn canvas injection", () => {
+  const CANVAS_ENTRY = { type: "http", url: "http://127.0.0.1:1/canvas/c1/session/s1/mcp", headers: {} };
+  const CANVAS_BLOCK = "\n\nAttached canvases — Release board (kanban)";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    managedMock.mockReturnValue({ "user-server": { type: "http", url: "http://example.test/mcp" } } as never);
+    canvasServersMock.mockReturnValue({ "canvas-board-1234abcd": CANVAS_ENTRY } as never);
+    canvasAddendumMock.mockReturnValue(CANVAS_BLOCK as never);
+    queryMock.mockImplementation(() => (async function* () {})());
+  });
+
+  function run(noTools = false) {
+    return runClaudeAgentTurn({
+      db: {} as never,
+      sessionId: "s1",
+      messageId: "m1",
+      sdkSessionId: null,
+      prompt: "hi",
+      projectPath: "/project",
+      projectConfig: { provider: "anthropic", model: "claude-sonnet-4-6" } as never,
+      webContents: { send: vi.fn() } as never,
+      noTools,
+    });
+  }
+
+  it("passes the attached canvas entry in mcpServers alongside managed servers and aichemist-tools", async () => {
+    await run();
+    const options = queryMock.mock.calls[0][0].options;
+    expect(canvasServersMock).toHaveBeenCalledWith(expect.anything(), "s1");
+    expect(Object.keys(options.mcpServers)).toEqual(
+      expect.arrayContaining(["user-server", "canvas-board-1234abcd", "aichemist-tools"]),
+    );
+    expect(options.mcpServers["canvas-board-1234abcd"]).toMatchObject({ url: CANVAS_ENTRY.url });
+  });
+
+  it("appends the canvas addendum to the system prompt", async () => {
+    await run();
+    expect(canvasAddendumMock).toHaveBeenCalledWith(expect.anything(), "s1");
+    expect(queryMock.mock.calls[0][0].options.systemPrompt).toContain(CANVAS_BLOCK);
+  });
+
+  it("injects no mcpServers for noTools turns", async () => {
+    await run(true);
+    expect(queryMock.mock.calls[0][0].options.mcpServers).toEqual({});
   });
 });
