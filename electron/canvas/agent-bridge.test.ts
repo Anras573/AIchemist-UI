@@ -8,13 +8,14 @@ const hasPendingApproval = vi.fn();
 vi.mock("../ipc/agent-turn-queue", () => ({ enqueueTurn: (...a: unknown[]) => enqueueTurn(...a) }));
 vi.mock("../agent/approval", () => ({ hasPendingApproval: (id: string) => hasPendingApproval(id) }));
 
-import { AgentBridge, AGENT_SEND_MAX_PER_WINDOW, AGENT_SEND_WINDOW_MS } from "./agent-bridge";
+import { AgentBridge, AGENT_SEND_INFLIGHT_EXPIRY_MS, AGENT_SEND_MAX_PER_WINDOW, AGENT_SEND_WINDOW_MS } from "./agent-bridge";
 import { createCanvas, setCanvasAttached } from "./store";
 
 let db: Database.Database;
 let now: number;
 let bridge: AgentBridge;
 let canvasId: string;
+const send = vi.fn();
 const turnCtx = { db: null as never, activeTurns: new Set<string>(), getMainWindow: () => null };
 
 beforeEach(() => {
@@ -28,7 +29,9 @@ beforeEach(() => {
   }
   canvasId = createCanvas(db, { projectId: "p1", definition: "connect4", title: "C4" }).id;
   now = 1_000_000;
-  bridge = new AgentBridge({ db, turnCtx: { ...turnCtx, db }, now: () => now });
+  send.mockReset();
+  const win = { webContents: { send } } as never;
+  bridge = new AgentBridge({ db, turnCtx: { ...turnCtx, db }, getMainWindow: () => win, now: () => now });
 });
 
 const messages = (sid: string) =>
@@ -72,6 +75,17 @@ describe("AgentBridge delivery", () => {
     expect(enqueueTurn.mock.calls[0][2]).toMatchObject({ messageId: id });
   });
 
+  it("pushes the message to the renderer, flagged queued only when behind a running turn", () => {
+    bridge.send(canvasId, "first");
+    expect(send.mock.calls[0][1]).toMatchObject({ session_id: "s1", message: { source: "canvas:connect4" } });
+    expect(send.mock.calls[0][1].queued).toBeUndefined();
+
+    (enqueueTurn.mock.calls[0][2] as { onSettled: () => void }).onSettled();
+    enqueueTurn.mockReturnValue({ queued: true });
+    bridge.send(canvasId, "second");
+    expect(send.mock.calls[1][1].queued).toBe(true);
+  });
+
   it("refuses while the session awaits an approval, without persisting", () => {
     hasPendingApproval.mockReturnValue(true);
     expect(() => bridge.send(canvasId, "hi")).toThrow(/awaiting user approval/);
@@ -94,6 +108,15 @@ describe("AgentBridge rate limiting", () => {
     expect(() => bridge.send(canvasId, "two")).toThrow(/still in flight/);
     settle();
     expect(() => bridge.send(canvasId, "two")).not.toThrow();
+  });
+
+  it("a stale send settling after expiry does not clear a newer send's in-flight flag", () => {
+    bridge.send(canvasId, "old");
+    const oldTurn = enqueueTurn.mock.calls[0][2] as { onSettled: () => void };
+    now += AGENT_SEND_INFLIGHT_EXPIRY_MS + 1;
+    bridge.send(canvasId, "new");
+    oldTurn.onSettled();
+    expect(() => bridge.send(canvasId, "third")).toThrow(/still in flight/);
   });
 
   it("caps sends per minute and recovers after the window", () => {

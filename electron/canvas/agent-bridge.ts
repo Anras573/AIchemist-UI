@@ -31,7 +31,8 @@ export interface AgentBridgeOptions {
 
 export class AgentBridge {
   private readonly sends = new Map<string, number[]>();
-  private readonly inFlight = new Map<string, number>();
+  /** canvasId → { startedAt, token }; the token lets a stale send's settle skip a newer send's entry. */
+  private readonly inFlight = new Map<string, { startedAt: number; token: symbol }>();
 
   constructor(private readonly opts: AgentBridgeOptions) {}
 
@@ -68,8 +69,8 @@ export class AgentBridge {
       throw new Error("ctx.agent.send: session is paused awaiting user approval — try again later");
     }
 
-    const startedAt = this.inFlight.get(canvasId);
-    if (startedAt !== undefined && now - startedAt < AGENT_SEND_INFLIGHT_EXPIRY_MS) {
+    const current = this.inFlight.get(canvasId);
+    if (current !== undefined && now - current.startedAt < AGENT_SEND_INFLIGHT_EXPIRY_MS) {
       throw new Error("ctx.agent.send: a previous send from this canvas is still in flight");
     }
     const recent = (this.sends.get(canvasId) ?? []).filter((t) => now - t < AGENT_SEND_WINDOW_MS);
@@ -86,20 +87,30 @@ export class AgentBridge {
       content: text,
       source: `canvas:${canvas.definition}`,
     });
+    const token = Symbol("agent-send");
+    const release = () => {
+      if (this.inFlight.get(canvasId)?.token === token) this.inFlight.delete(canvasId);
+    };
     this.sends.set(canvasId, [...recent, now]);
-    this.inFlight.set(canvasId, now);
-    // Show the user message in an open timeline right away.
-    this.opts.getMainWindow?.()?.webContents.send(CH.SESSION_MESSAGE, { session_id: sessionId, message });
+    this.inFlight.set(canvasId, { startedAt: now, token });
 
+    let queued: boolean;
     try {
-      enqueueTurn(turnCtx, sessionId, {
+      ({ queued } = enqueueTurn(turnCtx, sessionId, {
         prompt: text,
         messageId: message.id,
-        onSettled: () => this.inFlight.delete(canvasId),
-      });
+        onSettled: release,
+      }));
     } catch (err) {
-      this.inFlight.delete(canvasId);
+      release();
       throw err;
     }
+    // Show the user message in an open timeline right away (flagged so it gets
+    // a "Queued" badge when it sits behind a running turn).
+    this.opts.getMainWindow?.()?.webContents.send(CH.SESSION_MESSAGE, {
+      session_id: sessionId,
+      message,
+      ...(queued ? { queued: true } : {}),
+    });
   }
 }

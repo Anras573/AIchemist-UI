@@ -330,14 +330,16 @@ export const useSessionStore = create<SessionStore>()(
           if (!s) return state;
           // Guard against duplicate delivery (e.g., double IPC dispatch)
           if (s.messages.some((m) => m.id === message.id)) return state;
-          const { [sessionId]: _cleared, ...restStreaming } = state.streamingText;
-          return {
-            sessions: {
-              ...state.sessions,
-              [sessionId]: { ...s, messages: [...s.messages, message] },
-            },
-            streamingText: restStreaming,
+          const sessions = {
+            ...state.sessions,
+            [sessionId]: { ...s, messages: [...s.messages, message] },
           };
+          // Only the turn's final assistant message ends the stream. A user
+          // message pushed from main mid-turn (canvas ctx.agent.send) must not
+          // wipe the in-flight reply.
+          if (message.role !== "assistant") return { sessions };
+          const { [sessionId]: _cleared, ...restStreaming } = state.streamingText;
+          return { sessions, streamingText: restStreaming };
         }),
 
       appendStreamingDelta: (sessionId, delta) =>

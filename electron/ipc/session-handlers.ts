@@ -158,7 +158,9 @@ export function registerSessionHandlers(
   handle(
     CH.SAVE_MESSAGE,
     (_event, args: { sessionId: string; role: string; content: string }) =>
-      saveMessage(db, args)
+      // Explicit fields only: `source` is reserved for main-process senders
+      // (canvas bridge), never renderer-supplied.
+      saveMessage(db, { sessionId: args.sessionId, role: args.role, content: args.content })
   );
   handle(
     CH.UPDATE_SESSION_TITLE,

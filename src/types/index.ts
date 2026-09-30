@@ -466,6 +466,8 @@ export interface SessionDeltaEvent {
 export interface SessionMessageEvent {
   session_id: string;
   message: Message;
+  /** Set for a user message pushed from main (canvas send) that is queued behind a running turn. */
+  queued?: boolean;
 }
 
 export interface SessionToolCallEvent {
