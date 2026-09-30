@@ -14,6 +14,9 @@ import { z } from "zod";
 /** Default tool-call timeout, overridable per tool via `CanvasTool.timeoutMs`. */
 export const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
 
+/** State documents are capped at 1 MB — larger data belongs in the canvas's own storage. */
+export const CANVAS_STATE_MAX_BYTES = 1024 * 1024;
+
 export const CanvasToolDescriptorSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -64,8 +67,25 @@ const AgentSendResultSchema = z.object({
   error: z.string().optional(),
 });
 
+/**
+ * Main's nack for a `state.changed` it failed to persist (over the store's
+ * cap, or the canvas row is gone — #233). Carries the DB's authoritative
+ * state/revision so the host can roll back, plus the new `epoch`: the host
+ * stamps every `state.changed` with its epoch and main drops any stamped
+ * lower than the current one, so writes already in flight when the rejection
+ * happened (computed on top of the rejected value) can't re-drift the DB.
+ */
+const StateRejectedSchema = z.object({
+  type: z.literal("state.rejected"),
+  state: z.unknown(),
+  revision: z.number().int().nonnegative(),
+  epoch: z.number().int().positive(),
+  error: z.string().optional(),
+});
+
 export const MainToHostMessageSchema = z.discriminatedUnion("type", [
   InitMessageSchema,
+  StateRejectedSchema,
   ToolCallMessageSchema,
   UiMessageToHostSchema,
   AgentSendResultSchema,
@@ -102,6 +122,8 @@ const StateChangedMessageSchema = z.object({
   type: z.literal("state.changed"),
   state: z.unknown(),
   revision: z.number().int().nonnegative(),
+  /** Omitted while 0 (no rejection has happened yet); see `StateRejectedSchema`. */
+  epoch: z.number().int().positive().optional(),
 });
 
 const UiMessageFromHostSchema = z.object({

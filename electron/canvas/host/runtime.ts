@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 import {
+  CANVAS_STATE_MAX_BYTES,
   DEFAULT_TOOL_TIMEOUT_MS,
   type CanvasToolDescriptor,
   type HostToMainMessage,
@@ -98,9 +99,22 @@ export function createCanvasHostRuntime(opts: CanvasHostRuntimeOptions): CanvasH
 
   let state: unknown = definition.initialState ?? null;
   let revision = 0;
+  let epoch = 0;
 
   function emitStateChanged(): void {
-    transport.send({ type: "state.changed", state, revision });
+    transport.send({ type: "state.changed", state, revision, ...(epoch > 0 ? { epoch } : {}) });
+  }
+
+  /**
+   * Fails fast, synchronously, from the caller's own perspective — before the
+   * revision is bumped or anything is sent — when a write would exceed the
+   * store's cap (#233). Mirrors the store's `serializeState` check.
+   */
+  function assertStateWithinCap(next: unknown): void {
+    const bytes = Buffer.byteLength(JSON.stringify(next ?? null) ?? "null", "utf8");
+    if (bytes > CANVAS_STATE_MAX_BYTES) {
+      throw new Error(`Canvas state must be at most ${CANVAS_STATE_MAX_BYTES} bytes (got ${bytes})`);
+    }
   }
 
   const pendingAgentSends = new Map<string, { resolve: () => void; reject: (err: Error) => void }>();
@@ -110,12 +124,15 @@ export function createCanvasHostRuntime(opts: CanvasHostRuntimeOptions): CanvasH
     state: {
       get: () => state,
       set: (value: unknown) => {
+        assertStateWithinCap(value);
         state = value;
         revision += 1;
         emitStateChanged();
       },
       update: (fn: (current: unknown) => unknown) => {
-        state = fn(state);
+        const next = fn(state);
+        assertStateWithinCap(next);
+        state = next;
         revision += 1;
         emitStateChanged();
       },
@@ -186,6 +203,12 @@ export function createCanvasHostRuntime(opts: CanvasHostRuntimeOptions): CanvasH
         state = msg.state ?? definition.initialState ?? null;
         revision = msg.revision;
         transport.send({ type: "ready", tools: toolDescriptors(definition) });
+        break;
+      case "state.rejected":
+        // Main couldn't persist a write: roll back to what the DB actually holds.
+        state = msg.state ?? definition.initialState ?? null;
+        revision = msg.revision;
+        epoch = msg.epoch;
         break;
       case "tool.call":
         void handleToolCall(msg);

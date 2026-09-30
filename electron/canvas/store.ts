@@ -1,6 +1,9 @@
 import * as crypto from "crypto";
 import type { Database } from "better-sqlite3";
+import { CANVAS_STATE_MAX_BYTES } from "./host-protocol";
 import type { Canvas, CanvasListItem, CanvasTrust } from "../../src/types/index";
+
+export { CANVAS_STATE_MAX_BYTES };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -8,8 +11,6 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-/** State documents are capped at 1 MB — larger data belongs in the canvas's own storage. */
-export const CANVAS_STATE_MAX_BYTES = 1024 * 1024;
 
 /**
  * Serializes `state` to JSON and enforces the 1 MB cap. Throws a plain `Error`

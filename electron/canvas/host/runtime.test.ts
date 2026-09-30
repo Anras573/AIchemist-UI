@@ -438,3 +438,48 @@ describe("createCanvasHostRuntime — ctx.agent.send", () => {
     );
   });
 });
+
+describe("createCanvasHostRuntime — rejected state writes (#233)", () => {
+  function setup() {
+    const transport = createFakeTransport();
+    const definition = defineCanvas({
+      initialState: { v: 0 },
+      tools: {
+        put: {
+          description: "put",
+          input: z.object({ v: z.string() }),
+          approval: "none",
+          handler: (args, ctx) => ctx.state.set({ v: args.v }),
+        },
+        get: { description: "get", input: z.object({}), approval: "none", handler: (_a, ctx) => ctx.state.get() },
+      },
+    });
+    const runtime = createCanvasHostRuntime({ definition, transport, project: PROJECT });
+    transport.emit({ type: "init", state: { v: 0 }, revision: 0 });
+    return { transport, runtime };
+  }
+
+  it("an oversized set() throws from the tool handler before revising or emitting", async () => {
+    const { transport, runtime } = setup();
+    transport.emit({ type: "tool.call", callId: "c1", tool: "put", args: { v: "x".repeat(2 * 1024 * 1024) } });
+    await vi.waitFor(() => expect(transport.sent.some((m) => m.type === "tool.result")).toBe(true));
+    expect(transport.sent.some((m) => m.type === "state.changed")).toBe(false);
+    expect(runtime.getState()).toEqual({ v: 0 });
+    expect(runtime.getRevision()).toBe(0);
+  });
+
+  it("state.rejected rolls state/revision back and stamps later writes with the new epoch", async () => {
+    const { transport, runtime } = setup();
+    transport.emit({ type: "tool.call", callId: "c1", tool: "put", args: { v: "a" } });
+    await vi.waitFor(() => expect(runtime.getRevision()).toBe(1));
+
+    transport.emit({ type: "state.rejected", state: { v: 0 }, revision: 0, epoch: 1 });
+    expect(runtime.getState()).toEqual({ v: 0 });
+    expect(runtime.getRevision()).toBe(0);
+
+    transport.emit({ type: "tool.call", callId: "c2", tool: "put", args: { v: "b" } });
+    await vi.waitFor(() =>
+      expect(transport.sent).toContainEqual({ type: "state.changed", state: { v: "b" }, revision: 1, epoch: 1 })
+    );
+  });
+});
