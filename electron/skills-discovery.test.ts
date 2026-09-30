@@ -14,9 +14,13 @@ vi.mock("os", async (importOriginal) => {
   };
 });
 
-import { listSkills, _resetSkillsDiscoveryCaches } from "./skills-discovery";
+import { listSkills as listAllSkills, _resetSkillsDiscoveryCaches } from "./skills-discovery";
 
 const tempDirs: string[] = [];
+
+/** Excludes the always-present bundled skill so tier assertions stay focused. */
+const listSkills = (...args: Parameters<typeof listAllSkills>) =>
+  listAllSkills(...args).filter((s) => s.source !== "builtin");
 
 function makeTempDir(prefix: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -78,6 +82,23 @@ describe("listSkills", () => {
     expect(skills).toHaveLength(2);
     expect(skills.find((s) => s.name === "review")).toMatchObject({ source: "project", description: "project tier" });
     expect(skills.find((s) => s.name === "global-only")).toMatchObject({ source: "global" });
+  });
+
+  it("lists the bundled create-canvas skill as a read-only builtin for every provider", () => {
+    const project = makeTempDir("skills-project-");
+    for (const provider of [undefined, "anthropic", "copilot", "ollama", "openai-compatible", "codex"]) {
+      const skill = listAllSkills(project, provider).find((s) => s.name === "create-canvas");
+      expect(skill).toMatchObject({ source: "builtin" });
+      expect(skill!.description).not.toBe("");
+      expect(fs.existsSync(path.join(skill!.path, "SKILL.md"))).toBe(true);
+    }
+  });
+
+  it("lets a project skill named create-canvas suppress the builtin", () => {
+    const project = makeTempDir("skills-project-");
+    writeSkill(path.join(project, ".agents", "skills"), "create-canvas", "---\nname: create-canvas\ndescription: mine\n---\n");
+    const matches = listAllSkills(project).filter((s) => s.name === "create-canvas");
+    expect(matches).toEqual([expect.objectContaining({ source: "project", description: "mine" })]);
   });
 
   it("scans the Copilot global dir when provider is copilot", () => {

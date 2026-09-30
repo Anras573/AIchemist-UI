@@ -11,12 +11,13 @@ import type { Provider, SkillInfo } from "@/types";
 
 // ── Source badge ────────────────────────────────────────────────────────────────
 
-type SkillSource = "project" | "global" | "plugin";
+type SkillSource = "project" | "global" | "plugin" | "builtin";
 
 const SOURCE_LABEL: Record<SkillSource, { label: string; className: string }> = {
   project: { label: "project", className: "text-blue-500" },
   global: { label: "global", className: "text-purple-500" },
   plugin: { label: "plugin", className: "text-amber-500" },
+  builtin: { label: "built-in", className: "text-emerald-500" },
 };
 
 function SkillSourceBadge({ source, plugin }: { source?: string; plugin?: string }) {
@@ -133,7 +134,7 @@ export function SkillsSection({ provider, projectPath }: SkillsSectionProps) {
           </div>
         ) : (
           visibleSkills!.map((skill) => {
-            const isPlugin = skill.source === "plugin";
+            const isPlugin = skill.source === "plugin" || skill.source === "builtin";
             return (
               <div
                 key={`${skill.source ?? ""}:${skill.name}`}

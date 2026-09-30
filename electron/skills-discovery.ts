@@ -3,9 +3,10 @@ import * as os from "os";
 import * as path from "path";
 import type { SkillInfo } from "../src/types/index";
 import { frontmatterField } from "./frontmatter";
+import { createCanvasSkillPath } from "./canvas/definitions";
 
 /**
- * Skill discovery across the three source tiers (project → global → plugin).
+ * Skill discovery across the source tiers (project → global → plugin → builtin).
  * The exact global/plugin paths depend on the provider: Claude scans
  * `~/.claude/...`, Copilot scans `~/.agents/skills` and
  * `~/.copilot/installed-plugins`.
@@ -313,7 +314,26 @@ export function listSkills(projectPath: string, provider?: string): SkillInfo[] 
   const usedNames = new Set([...projectNames, ...globalFiltered.map((s) => s.name)]);
   const pluginFiltered = pluginSkills.filter((s) => !usedNames.has(s.name));
 
-  return [...projectSkills, ...globalFiltered, ...pluginFiltered];
+  const usedWithPlugins = new Set([...usedNames, ...pluginFiltered.map((s) => s.name)]);
+  const builtinFiltered = builtinSkills().filter((s) => !usedWithPlugins.has(s.name));
+
+  return [...projectSkills, ...globalFiltered, ...pluginFiltered, ...builtinFiltered];
+}
+
+/**
+ * Skills bundled with the app (lowest tier, every provider). Read-only: the
+ * card offers a viewer but no editor. Currently just `create-canvas` (#244) —
+ * `readSkillContent` already falls back to the same file when it's activated.
+ */
+function builtinSkills(): SkillInfo[] {
+  const skillFile = createCanvasSkillPath();
+  let description = "";
+  try {
+    description = parseFrontmatterField(fs.readFileSync(skillFile, "utf8"), "description").slice(0, 150);
+  } catch {
+    return []; // bundled file missing — don't advertise a skill that can't be loaded
+  }
+  return [{ name: "create-canvas", description, path: path.dirname(skillFile), source: "builtin" }];
 }
 
 /** Test seam: clears the plugin-skill scan caches. */
