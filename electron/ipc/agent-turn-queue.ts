@@ -29,6 +29,12 @@ export interface QueuedTurn {
    * for user-driven turns from the renderer.
    */
   nonInteractive?: boolean;
+  /**
+   * Fires once the turn has finished (success or failure) or failed to start.
+   * Used by the canvas agent bridge to track its per-instance in-flight send.
+   * Not fired for a turn dropped from a queue that is cleared/skipped.
+   */
+  onSettled?: () => void;
 }
 
 /**
@@ -141,10 +147,12 @@ export function drainNextQueued(ctx: TurnQueueContext, sessionId: string): void 
 
   executeAgentTurn(ctx, sessionId, next, win)
     .then(() => {
+      next.onSettled?.();
       activeTurns.delete(sessionId);
       drainNextQueued(ctx, sessionId);
     })
     .catch((err: unknown) => {
+      next.onSettled?.();
       activeTurns.delete(sessionId);
       console.error(`[queue] queued turn failed for session ${sessionId} (messageId=${next.messageId ?? "none"}):`, err);
       const remaining = [...(sessionQueues.get(sessionId) ?? [])];

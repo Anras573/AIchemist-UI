@@ -27,6 +27,12 @@ export function resolveApproval(approvalId: string, approved: boolean): void {
   }
 }
 
+/** Whether the session has a tool approval awaiting the user's decision. */
+export function hasPendingApproval(sessionId: string): boolean {
+  for (const p of pendingApprovals.values()) if (p.sessionId === sessionId) return true;
+  return false;
+}
+
 /** Returns the stored tool name + args for a pending approval (used for allowlist recording). */
 export function getPendingApprovalData(
   approvalId: string

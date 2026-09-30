@@ -10,7 +10,7 @@ import { useProviderProbes } from "@/lib/hooks/useProviderProbes";
 import { MessageResponse, Message, MessageContent } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
-import { ArrowDownIcon } from "lucide-react";
+import { ArrowDownIcon, LayoutDashboard } from "lucide-react";
 import {
   ConversationEmptyState,
 } from "@/components/ai-elements/conversation";
@@ -61,6 +61,15 @@ const MessageBubble = memo(function MessageBubble({
       {!isUser && message.agent && (
         <span className="text-xs text-muted-foreground/70 px-1 font-medium">
           {message.agent}
+        </span>
+      )}
+      {isUser && message.source?.startsWith("canvas:") && (
+        <span
+          data-testid="canvas-source-badge"
+          className="self-end flex items-center gap-1 text-[10px] font-medium text-muted-foreground px-1.5 py-0.5 rounded bg-muted/60 border border-border/50 select-none"
+        >
+          <LayoutDashboard className="size-3" aria-hidden />
+          Canvas · {message.source.slice("canvas:".length)}
         </span>
       )}
       <MessageContent className="group-[.is-user]:bg-primary group-[.is-user]:text-primary-foreground group-[.is-user]:whitespace-pre-wrap group-[.is-assistant]:bg-muted group-[.is-assistant]:rounded-lg group-[.is-assistant]:px-4 group-[.is-assistant]:py-2.5">

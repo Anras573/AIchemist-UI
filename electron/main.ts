@@ -23,6 +23,7 @@ import { registerBudgetHandlers } from "./ipc/budget-handlers";
 import { registerSpendingHandlers } from "./ipc/spending-handlers";
 import { registerUpdateHandlers } from "./ipc/update-handlers";
 import { WorkflowScheduler } from "./agent/workflow-scheduler";
+import { AgentBridge } from "./canvas/agent-bridge";
 import { CanvasHostManager } from "./canvas/host-manager";
 import { CanvasMcpEndpoint, setActiveCanvasMcpEndpoint } from "./canvas/mcp-endpoint";
 import { registerCanvasProtocol, registerCanvasProtocolScheme } from "./canvas/protocol";
@@ -186,7 +187,13 @@ app.whenReady().then(() => {
   // can start a host. getMainWindow() is safe to call from a hook even before
   // createWindow() runs below: it just resolves to null until then, and
   // webContents.send() on a null window is a no-op via the optional chain.
+  const canvasAgentBridge = new AgentBridge({
+    db,
+    turnCtx: { db, activeTurns, getMainWindow },
+    getMainWindow,
+  });
   canvasHostManager = new CanvasHostManager(db, {
+    agentSend: (canvasId, text, sessionId) => canvasAgentBridge.send(canvasId, text, sessionId),
     hooks: {
       onStateChanged: (canvasId, state, revision) =>
         getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "state", state, revision }),

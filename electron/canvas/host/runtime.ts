@@ -103,6 +103,9 @@ export function createCanvasHostRuntime(opts: CanvasHostRuntimeOptions): CanvasH
     transport.send({ type: "state.changed", state, revision });
   }
 
+  const pendingAgentSends = new Map<string, { resolve: () => void; reject: (err: Error) => void }>();
+  let nextAgentRequestId = 0;
+
   const ctx: CanvasToolContext = {
     state: {
       get: () => state,
@@ -121,9 +124,14 @@ export function createCanvasHostRuntime(opts: CanvasHostRuntimeOptions): CanvasH
       send: (message: unknown) => transport.send({ type: "ui.message", message }),
     },
     agent: {
-      send: async (text: string, sendOpts?: { sessionId?: string }) => {
-        transport.send({ type: "agent.send", text, sessionId: sendOpts?.sessionId });
-      },
+      // Resolves once main has queued the turn; rejects with main's reason
+      // when the send is refused (unattached session, rate limit, paused).
+      send: (text: string, sendOpts?: { sessionId?: string }) =>
+        new Promise<void>((resolve, reject) => {
+          const requestId = `agent-send-${++nextAgentRequestId}`;
+          pendingAgentSends.set(requestId, { resolve, reject });
+          transport.send({ type: "agent.send", requestId, text, sessionId: sendOpts?.sessionId });
+        }),
     },
     project,
     log: (...args: unknown[]) => transport.send({ type: "log", level: "log", args }),
@@ -182,6 +190,14 @@ export function createCanvasHostRuntime(opts: CanvasHostRuntimeOptions): CanvasH
       case "tool.call":
         void handleToolCall(msg);
         break;
+      case "agent.send.result": {
+        const pending = pendingAgentSends.get(msg.requestId);
+        if (!pending) break;
+        pendingAgentSends.delete(msg.requestId);
+        if (msg.ok) pending.resolve();
+        else pending.reject(new Error(msg.error ?? "agent.send refused"));
+        break;
+      }
       case "ui.message":
         if (definition.onUiMessage) void definition.onUiMessage(msg.message, ctx);
         break;
