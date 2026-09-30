@@ -5,6 +5,7 @@ import * as nodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  asUnpackedPath,
   _setBuiltinCanvasesRootForTests,
   _setCanvasesRootForTests,
   builtinCanvasesRoot,
@@ -114,5 +115,19 @@ describe("built-in tier — with a fake root (tier priority + fail-safety)", () 
     expect(listBuiltinCanvasDefinitions()).toEqual([]);
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+});
+
+describe("asUnpackedPath (#229 — external agent CLIs can't read inside app.asar)", () => {
+  it("rewrites a packaged app.asar path to app.asar.unpacked", () => {
+    expect(asUnpackedPath("/Applications/AIchemist.app/Contents/Resources/app.asar/electron/canvas/skills/create-canvas/SKILL.md")).toBe(
+      "/Applications/AIchemist.app/Contents/Resources/app.asar.unpacked/electron/canvas/skills/create-canvas/SKILL.md"
+    );
+    expect(asUnpackedPath("C:\\app\\resources\\app.asar\\electron\\x")).toBe("C:\\app\\resources\\app.asar.unpacked\\electron\\x");
+  });
+
+  it("leaves dev paths (and already-unpacked ones) untouched", () => {
+    expect(asUnpackedPath("/repo/electron/canvas/skills/x")).toBe("/repo/electron/canvas/skills/x");
+    expect(asUnpackedPath("/r/app.asar.unpacked/electron/x")).toBe("/r/app.asar.unpacked/electron/x");
   });
 });

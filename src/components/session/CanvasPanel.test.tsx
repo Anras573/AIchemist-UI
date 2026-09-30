@@ -205,6 +205,32 @@ describe("CanvasPanel", () => {
     });
   });
 
+  it("re-discovers definitions when New canvas opens, so a definition the agent just wrote appears (#229)", async () => {
+    vi.mocked(window.electronAPI.canvasList).mockResolvedValue([]);
+    const entry = (id: string) => ({
+      id,
+      tier: "builtin" as const,
+      path: `/app/${id}`,
+      manifest: { name: id, description: id, version: 1, server: "server.mjs", ui: "ui/index.html" },
+    });
+    vi.mocked(window.electronAPI.canvasListDefinitions).mockResolvedValue({ definitions: [entry("kanban")], errors: [] });
+
+    renderWithProviders(<CanvasPanel />);
+    await waitFor(() => expect(screen.getByText(/No canvases yet/)).toBeInTheDocument());
+
+    // The agent writes a new definition while the panel stays mounted.
+    vi.mocked(window.electronAPI.canvasListDefinitions).mockResolvedValue({
+      definitions: [entry("kanban"), entry("fresh-board")],
+      errors: [],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "New canvas" }));
+
+    const select = await screen.findByLabelText<HTMLSelectElement>("Canvas definition");
+    await waitFor(() =>
+      expect(Array.from(select.options).map((o) => o.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("fresh-board")]))
+    );
+  });
+
   it("distinguishes a same-id project and built-in definition in the picker, and creates the selected one (review regression on #237)", async () => {
     vi.mocked(window.electronAPI.canvasList).mockResolvedValue([]);
     vi.mocked(window.electronAPI.canvasListDefinitions).mockResolvedValue({

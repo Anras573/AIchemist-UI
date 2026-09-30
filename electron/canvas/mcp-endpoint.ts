@@ -36,7 +36,7 @@ import { listProjects } from "../projects";
 import { getSession } from "../sessions";
 import { getAttachedCanvases, getCanvas, isCanvasAttached } from "./store";
 import { CanvasToolError, type CanvasHostManager, type StartCanvasHostOptions } from "./host-manager";
-import { _setCanvasesRootForTests, createCanvasSkillPath, resolveCanvasServerPath } from "./definitions";
+import { _setCanvasesRootForTests, createCanvasSkillPath, kanbanExampleDir, resolveCanvasServerPath } from "./definitions";
 import { resolveTrustedCanvasServerPath } from "./trust";
 import { requestApproval, requiresApproval } from "../agent/approval";
 import { TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "../agent/tool-gate";
@@ -206,7 +206,9 @@ export function buildCanvasSystemPromptAddendum(db: Database, sessionId: string)
     "and the user both operate on, shown in the Canvas tab. If the user asks for a canvas, or would clearly " +
     "benefit from one, read the guide at " +
     createCanvasSkillPath() +
-    " (the `create-canvas` skill) and follow it to build a definition under .agents/canvases/ in the project. " +
+    " (the `create-canvas` skill; worked example: " +
+    kanbanExampleDir() +
+    ") and follow it to build a definition under .agents/canvases/ in the project. " +
     "Built-in canvases: kanban, checklist, markdown.";
 
   // Same "definition missing" / untrusted-project-tier exclusion as

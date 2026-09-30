@@ -4,7 +4,7 @@ description: Build a canvas — a full-stack work surface (server tools + sandbo
 ---
 # Building a canvas
 
-A canvas is a folder that AIchemist runs for you: a **server module** whose tools you can call, a **UI** the user sees in the Canvas tab, and **persisted JSON state** shared by both. Kanban, checklist and markdown ship built in (`electron/canvas/builtin/<name>/` in the app) — kanban is the reference example.
+A canvas is a folder that AIchemist runs for you: a **server module** whose tools you can call, a **UI** the user sees in the Canvas tab, and **persisted JSON state** shared by both. Kanban, checklist and markdown ship built in — kanban is the reference example (its absolute path is given in your system prompt next to this guide's path).
 
 ## 1. Folder layout
 
@@ -98,9 +98,9 @@ Notes: never use `<form>` (submit is blocked in the sandbox) — use buttons + `
 
 1. After writing the files the definition appears in the Canvas tab's "New canvas…" picker (dev reload picks up edits without a restart).
 2. **Project-tier canvases are untrusted until the user approves.** The panel previews the UI and shows a trust prompt (manifest, dependencies, hash). Tell the user to review and click "Trust and run". Any later edit to the server code re-prompts.
-3. Create an instance and attach it to this session so its tools become available to you (the user does this from the panel; tools appear as `canvas-*` MCP tools on your next turn).
+3. **You cannot create or attach an instance yourself** — that is deliberate (an agent must not grant itself new tools). Tell the user to click "New canvas…" in the Canvas tab, pick your definition, and attach it to the session. Its tools then appear as `canvas-*` MCP tools on your *next* turn, so don't promise to use them right away. (For Copilot, attaching also starts a fresh SDK session, so its in-SDK context resets.)
 4. When you call a canvas tool the Canvas tab is brought to the front automatically.
 
 ## Worked example
 
-Read the built-in kanban in the app: `electron/canvas/builtin/kanban/` — `board.mjs` (pure reducers), `definition.mjs` (tools + `onUiMessage`), `server.mjs` (two lines), `ui/`. `checklist` and `markdown` are smaller variations.
+Read the built-in kanban (path in your system prompt) — `board.mjs` (pure reducers), `definition.mjs` (tools + `onUiMessage`), `server.mjs` (two lines), `ui/`. `checklist` and `markdown` are smaller variations.
