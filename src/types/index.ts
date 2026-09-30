@@ -503,7 +503,7 @@ export interface SkillInfo {
   description: string;
   path: string;
   /** Where this skill was discovered. Absent on very old entries — treat as editable. */
-  source?: "project" | "global" | "plugin";
+  source?: "project" | "global" | "plugin" | "builtin";
   /** For plugin skills: the plugin identifier (e.g. "my-org/my-plugin"). */
   plugin?: string;
 }

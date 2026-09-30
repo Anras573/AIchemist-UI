@@ -12,7 +12,7 @@ import { WithTooltip } from "@/components/ui/with-tooltip";
 import { SkillEditorModal } from "@/components/session/SkillEditorModal";
 import type { SkillInfo } from "@/types";
 
-type SkillSource = "project" | "global" | "plugin";
+type SkillSource = "project" | "global" | "plugin" | "builtin";
 
 const SOURCE_LABEL: Record<SkillSource, { label: string; className: string; activeClassName: string }> = {
   project: {
@@ -30,9 +30,14 @@ const SOURCE_LABEL: Record<SkillSource, { label: string; className: string; acti
     className: "text-amber-500/70",
     activeClassName: "border-amber-500/40 bg-amber-500/10 text-amber-300",
   },
+  builtin: {
+    label: "built-in",
+    className: "text-emerald-500/70",
+    activeClassName: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  },
 };
 
-const ALL_SOURCES: SkillSource[] = ["project", "global", "plugin"];
+const ALL_SOURCES: SkillSource[] = ["project", "global", "plugin", "builtin"];
 const EMPTY_SKILLS: string[] = [];
 
 function SkillSourceBadge({ source, plugin }: { source?: string; plugin?: string }) {
@@ -96,7 +101,7 @@ function SkillCard({
                 <Eye className="h-2.5 w-2.5 text-muted-foreground" />
               </button>
             </WithTooltip>
-            {skill.source !== "plugin" && (
+            {skill.source !== "plugin" && skill.source !== "builtin" && (
               <WithTooltip label="Edit skill">
                 <button
                   onClick={(e) => { e.stopPropagation(); onEdit(); }}

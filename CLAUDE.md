@@ -332,7 +332,7 @@ System prompt / instructions here.
 
 > **Configuration vs activation (settings hub overhaul):** the panel is the per-session **activation** surface (the card-body click toggles a skill on/off; the eye opens a read-only viewer inline). **Creating / editing** skills moved into the hub: the panel's pencil and **New Skill** affordances now deep-link to the Skills hub section (`openSettings({ scope: "app", id: "skills" })`) rather than opening an inline editor. The hub section is `src/components/settings/sections/SkillsSection.tsx` — lists `listSkills(projectPath, provider)`, view/edit/create via `SkillEditorModal` rendered inline. It is provider-aware via the resolved hub provider (active session's provider, falling back to `AICHEMIST_DEFAULT_PROVIDER` when the hub is opened with no session); `SettingsView` passes that down, and `SkillEditorModal` gained a `providerOverride` prop so a standalone-hub create still lands in the correct provider's global dir.
 
-Skills with a higher-priority source suppress same-named skills from lower tiers. `SkillInfo.source` controls panel behaviour:
+Skills with a higher-priority source suppress same-named skills from lower tiers. A fourth, lowest tier, `"builtin"`, lists the bundled `create-canvas` skill for every provider (read-only: eye viewer, no pencil; `builtinSkills()` in `skills-discovery.ts`). `SkillInfo.source` controls panel behaviour:
 
 - **`"user"` skills** (project/global) — show pencil icon; click deep-links to the hub Skills section.
 - **`"plugin"` skills** — pencil icon hidden (read-only); eye opens the inline viewer.
