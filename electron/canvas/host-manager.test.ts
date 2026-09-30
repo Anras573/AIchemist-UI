@@ -216,17 +216,13 @@ describe("CanvasHostManager — start, list & call tools, state persistence", ()
 
     await manager.callTool(canvas.id, "set_board", { cards: ["One"] }); // DB + host revision both 1
 
-    // Rejected by the store's 1MB cap: the host's own local revision still
-    // advances to 2 (see "a state persistence failure is a backstop" below),
-    // but the DB's stays at 1 — this is where the two diverge.
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    await manager.callTool(canvas.id, "set_board", { cards: ["x".repeat(2 * 1024 * 1024)] });
-    consoleError.mockRestore();
+    // Rejected by the runtime's 1MB cap before the host's revision moves (#233).
+    await expect(
+      manager.callTool(canvas.id, "set_board", { cards: ["x".repeat(2 * 1024 * 1024)] })
+    ).rejects.toThrow(/must be at most/);
 
-    await manager.callTool(canvas.id, "set_board", { cards: ["One", "Two"] }); // host revision 3, DB revision 2
+    await manager.callTool(canvas.id, "set_board", { cards: ["One", "Two"] }); // host and DB revision both 2
 
-    // Without the fix (emitting the host's own msg.revision), the last call
-    // here would report 3 — the host's count — instead of 2, the DB's.
     expect(onStateChanged).toHaveBeenCalledTimes(2); // the rejected write's onStateChanged is skipped entirely
     expect(onStateChanged).toHaveBeenNthCalledWith(1, canvas.id, { cards: ["One"] }, 1);
     expect(onStateChanged).toHaveBeenNthCalledWith(2, canvas.id, { cards: ["One", "Two"] }, 2);
@@ -1192,10 +1188,10 @@ describe("CanvasHostManager — callTool sizes its safety net off the tool's own
   });
 });
 
-// ─── state.changed persistence failures don't crash the manager ────────────
+// ─── state.changed persistence failures reconcile the host (#233) ──────────
 
-describe("CanvasHostManager — a state persistence failure is a backstop, not an uncaught throw", () => {
-  it("logs and skips onStateChanged when the state exceeds the store's cap, keeping the host running", async () => {
+describe("CanvasHostManager — a rejected state write is reconciled, not left drifted", () => {
+  it("rejects an oversized write synchronously in the host, leaving host state equal to the DB", async () => {
     const canvas = createCanvas(db, {
       projectId: "p1",
       definition: "kanban",
@@ -1207,25 +1203,35 @@ describe("CanvasHostManager — a state persistence failure is a backstop, not a
     const manager = new CanvasHostManager(db, { spawn: factory, hooks: { onStateChanged } });
     await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
 
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const hugeTitle = "x".repeat(2 * 1024 * 1024);
-      await expect(
-        manager.callTool(canvas.id, "add_card", { title: hugeTitle })
-      ).resolves.toEqual({ cards: [hugeTitle] });
-    } finally {
-      consoleError.mockRestore();
-    }
+    const hugeTitle = "x".repeat(2 * 1024 * 1024);
+    await expect(manager.callTool(canvas.id, "add_card", { title: hugeTitle })).rejects.toThrow(/must be at most/);
 
-    // The manager stayed healthy: no uncaught throw, no onStateChanged for the
-    // rejected write, the DB is untouched by the oversized write (store.ts
-    // validates before mutating the row), and the host is still responsive
-    // to further calls afterward (even though its in-memory state has now
-    // drifted from the DB — the known, documented limitation of this backstop).
     expect(onStateChanged).not.toHaveBeenCalled();
     expect(manager.getStatus(canvas.id)).toBe("running");
     expect(getCanvas(db, canvas.id)?.state).toEqual({ cards: [] });
+    // Host's ctx.state matches the DB — no drift.
+    await expect(manager.callTool(canvas.id, "get_board", {})).resolves.toEqual({ cards: [] });
+  });
 
-    await expect(manager.callTool(canvas.id, "get_board", {})).resolves.toBeDefined();
+  it("rolls the host back when main's persist fails (row deleted) instead of leaving drift", async () => {
+    const canvas = createCanvas(db, {
+      projectId: "p1",
+      definition: "kanban",
+      title: "Board",
+      initialState: { cards: [] },
+    });
+    const { factory } = createInProcessHostFactory({ "/defs/kanban/server.mjs": KANBAN_DEFINITION });
+    const manager = new CanvasHostManager(db, { spawn: factory });
+    await manager.start(canvas.id, { serverPath: "/defs/kanban/server.mjs", projectId: "p1", projectPath: "/tmp/p1" });
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      db.prepare("DELETE FROM canvases WHERE id = ?").run(canvas.id);
+      await manager.callTool(canvas.id, "add_card", { title: "a" });
+      // Persist failed -> host got state.rejected (no row -> null state).
+      await expect(manager.callTool(canvas.id, "get_board", {})).resolves.not.toEqual({ cards: ["a"] });
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

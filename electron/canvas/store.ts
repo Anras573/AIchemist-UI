@@ -8,8 +8,8 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-/** State documents are capped at 1 MB — larger data belongs in the canvas's own storage. */
-export const CANVAS_STATE_MAX_BYTES = 1024 * 1024;
+import { CANVAS_STATE_MAX_BYTES } from "./host-protocol";
+export { CANVAS_STATE_MAX_BYTES };
 
 /**
  * Serializes `state` to JSON and enforces the 1 MB cap. Throws a plain `Error`

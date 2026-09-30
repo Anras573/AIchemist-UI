@@ -284,6 +284,8 @@ interface HostRecord {
   status: CanvasHostStatus;
   tools: CanvasToolDescriptor[];
   pendingCalls: Map<string, PendingCall>;
+  /** Bumped on each rejected `state.changed`; older-epoch writes are dropped (#233). */
+  stateEpoch: number;
   panelOpen: boolean;
   turnActive: boolean;
   idleTimer: ReturnType<typeof setTimeout> | null;
@@ -432,6 +434,7 @@ export class CanvasHostManager {
       status: "starting",
       tools: [],
       pendingCalls: new Map(),
+      stateEpoch: 0,
       // Carried over (not reset) across a crash restart — the renderer only
       // calls setPanelOpen/setTurnActive on a *change*, so a restart that
       // forgot these would let the idle timer stop a host whose panel is
@@ -583,22 +586,32 @@ export class CanvasHostManager {
         break;
       }
       case "state.changed": {
-        // A canvas can trigger this by writing state past the store's 1MB cap,
-        // or by writing after its row was deleted out from under it — neither
-        // is allowed to reach main as an uncaught exception. The host's local
-        // state/revision can drift from the DB when this happens (tracked as
-        // a follow-up: https://github.com/Anras573/AIchemist-UI/issues/233 —
-        // the host has no ack path yet to reject `ctx.state.set` when the
-        // persist fails), so this is a backstop, not a full fix. Emitting the
-        // *store's* returned state/revision here (rather than the host's own
-        // `msg.state`/`msg.revision`) at least keeps every consumer of this
-        // hook — including the eventual UI sync — seeing only the DB's
-        // authoritative value instead of drifting right along with the host.
+        // A write persisted after a rejection but computed before the host
+        // learned of it is stale — the host already rolled back, drop it.
+        if ((msg.epoch ?? 0) < record.stateEpoch) break;
+        // A persist can fail (state past the store's 1MB cap, or the row was
+        // deleted). Never an uncaught exception; the host is told via
+        // `state.rejected` with the DB's authoritative state so its
+        // ctx.state can't drift (#233). Hook consumers only ever see the
+        // store's returned state/revision.
         let saved;
         try {
           saved = setCanvasState(this.db, record.canvasId, msg.state);
         } catch (err) {
           console.error(`[canvas-host-manager] failed to persist state for ${record.canvasId}:`, err);
+          record.stateEpoch += 1;
+          const current = getCanvas(this.db, record.canvasId);
+          try {
+            record.process.postMessage({
+              type: "state.rejected",
+              state: current?.state ?? null,
+              revision: current?.revision ?? 0,
+              epoch: record.stateEpoch,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          } catch (postErr) {
+            console.error(`[canvas-host-manager] failed to send state.rejected for ${record.canvasId}:`, postErr);
+          }
           break;
         }
         this.callHook("onStateChanged", record.canvasId, saved.state, saved.revision);
