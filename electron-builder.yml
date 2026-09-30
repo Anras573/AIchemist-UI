@@ -28,10 +28,16 @@ files:
   # resolves them from (`<app root>/electron/canvas/builtin`, computed relative
   # to dist/main so it also works unpackaged in dev).
   - electron/canvas/builtin/**
+  # Bundled skills (#229) — plain markdown, e.g. the create-canvas guide.
+  - electron/canvas/skills/**
   - package.json
   - "!**/*.map"
 asarUnpack:
   - "**/*.node"
+  # The create-canvas guide + built-in canvases are read by external agent CLIs
+  # (Claude / Copilot / Codex) that can't open files inside app.asar (#229).
+  - electron/canvas/skills/**
+  - electron/canvas/builtin/**
 win:
   target:
     - target: nsis

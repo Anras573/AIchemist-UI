@@ -1,0 +1,9 @@
+{
+  "name": "checklist",
+  "description": "A checklist — tick items off yourself, or ask the agent to add, complete, edit, or remove them.",
+  "version": 1,
+  "server": "server.mjs",
+  "ui": "ui/index.html",
+  "attachByDefault": false,
+  "permissions": {}
+}

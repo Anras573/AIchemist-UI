@@ -46,7 +46,7 @@ export function canvasesRoot(): string {
  * manifest validation, but until then this is the app's own registry of
  * what it ships. Adding a new built-in means adding its name here.
  */
-const BUILTIN_DEFINITION_NAMES = ["kanban"] as const;
+const BUILTIN_DEFINITION_NAMES = ["kanban", "checklist", "markdown"] as const;
 
 /**
  * Test seam: override the built-in canvases directory. Pass null to restore
@@ -77,6 +77,37 @@ function computeBuiltinCanvasesRoot(): string {
 
 export function builtinCanvasesRoot(): string {
   return builtinCanvasesRootOverride ?? computeBuiltinCanvasesRoot();
+}
+
+/**
+ * Path to the bundled `create-canvas` skill (#229) — plain markdown shipped
+ * beside the built-in canvases (same `__dirname`-relative resolution, same
+ * `electron-builder.yml` packaging rule), never scanned as a canvas
+ * definition. The agent awareness note points models at this file so any
+ * provider can read it on demand; `readSkillContent` also falls back to it so
+ * activating `create-canvas` by name injects it like any other skill.
+ */
+export function createCanvasSkillPath(): string {
+  return asUnpackedPath(nodePath.join(__dirname, "..", "..", "electron", "canvas", "skills", "create-canvas", "SKILL.md"));
+}
+
+/**
+ * Absolute path to the built-in kanban folder, for the guide's worked example
+ * (asar-unpacked like the skill so external CLIs can read it).
+ */
+export function kanbanExampleDir(): string {
+  return asUnpackedPath(nodePath.join(builtinCanvasesRoot(), "kanban"));
+}
+
+/**
+ * In a packaged app `__dirname` sits inside `app.asar`, which only Electron's
+ * own `fs` can read — the Claude / Copilot / Codex CLIs run outside Electron
+ * and get ENOTDIR. `electron-builder.yml` unpacks the skill + built-in folders
+ * (`asarUnpack`) so a real copy exists at `app.asar.unpacked`; point at that.
+ * A no-op in dev, where there is no asar.
+ */
+export function asUnpackedPath(p: string): string {
+  return p.replace(/([\\/])app\.asar(?=[\\/])/, "$1app.asar.unpacked");
 }
 
 /** A definition name may not contain path separators or traverse (`..`). */

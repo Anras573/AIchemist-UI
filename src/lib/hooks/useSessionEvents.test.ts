@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useSessionEvents } from "@/lib/hooks/useSessionEvents";
+import { useCanvasStore } from "@/lib/store/useCanvasStore";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { IPC_CHANNELS } from "@/lib/ipc";
 import type { Session } from "@/types";
@@ -410,6 +411,24 @@ describe("SESSION_FILE_CHANGE", () => {
     });
 
     expect(useSessionStore.getState().tabSwitchRequest).toBe("changes");
+  });
+
+  it("requests the canvas tab on a canvas focus event for the active session only", () => {
+    renderHook(() => useSessionEvents());
+    useSessionStore.setState({ activeSessionId: "sess-1", tabSwitchRequest: null });
+
+    getCb(IPC_CHANNELS.CANVAS_EVENT)({ canvasId: "c1", kind: "focus", sessionId: "other" });
+    expect(useSessionStore.getState().tabSwitchRequest).toBeNull();
+
+    getCb(IPC_CHANNELS.CANVAS_EVENT)({ canvasId: "c1", kind: "focus", sessionId: "sess-1" });
+    expect(useSessionStore.getState().tabSwitchRequest).toBe("canvas");
+  });
+
+  it("bumps the canvas list nonce when the agent creates an instance (list event)", () => {
+    renderHook(() => useSessionEvents());
+    const before = useCanvasStore.getState().listNonce;
+    getCb(IPC_CHANNELS.CANVAS_EVENT)({ canvasId: "c1", kind: "list", sessionId: "sess-1" });
+    expect(useCanvasStore.getState().listNonce).toBe(before + 1);
   });
 
   it("accumulates multiple file changes for the same session", () => {

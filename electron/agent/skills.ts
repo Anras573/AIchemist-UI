@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { createCanvasSkillPath } from "../canvas/definitions";
 
 /** Lazy-loaded cache: skill name → directory path, built from installed_plugins.json. */
 let pluginSkillPathCache: Map<string, string> | null = null;
@@ -135,6 +136,9 @@ function readSkillContent(skillName: string, projectPath: string): string | null
   if (copilotPluginDir) {
     candidates.push(path.join(copilotPluginDir, "SKILL.md"));
   }
+
+  // Lowest priority: skills bundled with the app (#229).
+  if (skillName === "create-canvas") candidates.push(createCanvasSkillPath());
 
   for (const filePath of candidates) {
     try {

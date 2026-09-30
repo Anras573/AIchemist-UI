@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
@@ -92,6 +92,7 @@ export function CanvasPanel() {
   const lastMessageByCanvas = useCanvasStore((s) => s.lastMessageByCanvas);
   const logsByCanvas = useCanvasStore((s) => s.logsByCanvas);
   const reloadNonceByCanvas = useCanvasStore((s) => s.reloadNonceByCanvas);
+  const listNonce = useCanvasStore((s) => s.listNonce);
   const setCanvasState = useCanvasStore((s) => s.setCanvasState);
   const setCanvasStatus = useCanvasStore((s) => s.setCanvasStatus);
   const clearCanvasLogs = useCanvasStore((s) => s.clearCanvasLogs);
@@ -112,12 +113,20 @@ export function CanvasPanel() {
     { ttl: 5_000 }
   );
 
+  // The agent created + attached an instance (#229): refresh the picker.
+  const lastListNonce = useRef(listNonce);
+  useEffect(() => {
+    if (lastListNonce.current === listNonce) return;
+    lastListNonce.current = listNonce;
+    void refetch();
+  }, [listNonce, refetch]);
+
   // Discovered across all three tiers (project/global/built-in, #226) — this
   // is what lets "New canvas…" offer a picker instead of a free-text
   // definition name. Manifest errors are surfaced in the Settings hub's
   // Canvases section, not here.
   const definitionsKey = `canvas-definitions:${activeProjectId ?? ""}`;
-  const { data: discovery } = useIpcQuery<CanvasDiscoveryResult>(
+  const { data: discovery, refetch: refetchDefinitions } = useIpcQuery<CanvasDiscoveryResult>(
     definitionsKey,
     () => ipc.canvasListDefinitions({ projectId: activeProjectId ?? undefined }),
     { ttl: 60_000 }
@@ -296,7 +305,12 @@ export function CanvasPanel() {
             size="icon-sm"
             variant="ghost"
             aria-label="New canvas"
-            onClick={() => setShowCreate((v) => !v)}
+            onClick={() => {
+              // Definitions are cached for 60 s, but the agent may have just
+              // written a new one (#229) — re-discover whenever the form opens.
+              if (!showCreate) void refetchDefinitions();
+              setShowCreate((v) => !v);
+            }}
           >
             <Plus className="h-3.5 w-3.5" />
           </Button>

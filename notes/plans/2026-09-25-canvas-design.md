@@ -467,8 +467,41 @@ validator → handler → `preload.ts` → `src/lib/ipc.ts`.
 - A bundled `create-canvas` skill documents the folder layout, the manifest,
   the server SDK, the UI client helper and the trust/reload flow, with the
   kanban built-in as a worked example. The agent writes the definition to
-  `<projectPath>/.agents/canvases/<name>/` (or the global dir on request),
-  creates an instance, attaches it, and the dev-reload watcher opens it.
+  `<projectPath>/.agents/canvases/<name>/` (or the global dir on request)
+  with the normal approval-gated `write_file`, then calls
+  `create_canvas_instance` to create and attach an instance; dev reload opens
+  it.
+
+**`create_canvas_instance` (chosen design).** The agent can instantiate and
+attach a canvas itself, through one gated tool rather than a user-only step:
+
+- **Route.** A session-scoped route on the same loopback MCP endpoint,
+  `/session/<sessionId>/canvas-manager/mcp`, injected for every provider as
+  the managed server `canvas-manager` (`CANVAS_MANAGER_SERVER_NAME`, under the
+  reserved `canvas-` prefix so a user's `mcp.json` can't shadow it). It takes
+  `{ definition, title }`, finds the definition across tiers (a runnable tier
+  wins over a same-named project one), creates the instance, attaches it to
+  the calling session, and pushes `list` + `focus` events so the panel's
+  picker refreshes and the Canvas tab opens.
+- **Approval is always required and never allowlisted.** Attaching a canvas
+  hands the agent a new set of tools, so the tool must not be grantable once
+  and forgotten. It bypasses the session and project allowlists (an "always
+  allow" entry for it is ignored) and unattended turns auto-deny, like every
+  other gated tool.
+- **Trust still applies.** Instantiating a project-tier definition does not
+  run it: its server stays unstarted, and its tools are not advertised, until
+  the user reviews it and clicks "Trust and run" (content-hash re-prompt on
+  any later edit, as in the trust model above). The tool result says so.
+- **Tools arrive on the next turn.** The attached canvas's tools join the
+  managed-server map when the next turn builds it, so the model is told not
+  to call them straight away. For Copilot, attaching changes the resume
+  fingerprint and starts a fresh SDK session; the always-on `canvas-manager`
+  entry itself is excluded from that fingerprint (its url/token change every
+  launch) so it never resets sessions on its own.
+
+Considered and rejected: leaving attach to the user (a manual three-step flow
+of trust, create, attach) and auto-attaching without a prompt (lets the agent
+grant itself tools).
 
 ## Alternatives considered
 

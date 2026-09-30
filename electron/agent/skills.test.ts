@@ -181,3 +181,21 @@ describe("buildSkillsContext", () => {
     expect(result).not.toContain("Copilot user loses.");
   });
 });
+
+describe("bundled create-canvas skill (#229)", () => {
+  it("is injectable by name as the lowest-priority fallback, frontmatter stripped", () => {
+    _resetPluginSkillCache();
+    vi.mocked(os.homedir).mockReturnValue("/home/user");
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (String(filePath).endsWith("canvas/skills/create-canvas/SKILL.md")) {
+        return "---\nname: create-canvas\n---\nBuild a canvas.";
+      }
+      throw new Error("ENOENT");
+    });
+    const ctx = buildSkillsContext(["create-canvas"], "/proj");
+    expect(ctx).toContain("## Skill: create-canvas");
+    expect(ctx).toContain("Build a canvas.");
+    expect(ctx).not.toContain("name: create-canvas");
+  });
+});

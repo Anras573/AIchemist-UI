@@ -1,3 +1,5 @@
+import { CANVAS_MANAGER_SERVER_NAME } from "../mcp/managed";
+import type { McpServersMap } from "../mcp/config";
 import type {
   CopilotClient as CopilotClientType,
   PermissionRequest,
@@ -223,6 +225,20 @@ const MEMORY_INSTRUCTION =
   "\n\nUse the write_memory tool to persist durable facts about this project " +
   "(conventions, decisions, gotchas) so they survive across turns, read_memory to recall " +
   "a saved note, and delete_memory to remove one that is no longer accurate.";
+
+/**
+ * Resume-invalidation fingerprint over the managed MCP map (see
+ * `fingerprintManaged`). The always-on canvas manager entry (#229) is left OUT:
+ * it is injected for every session and its url/token change per launch, so
+ * including it would reset every Copilot session on each relaunch, not just
+ * ones with canvases attached. Real per-canvas entries stay IN, so attaching or
+ * detaching a canvas still invalidates the cached SDK session.
+ */
+export function computeCopilotMcpFingerprint(managedMcpRaw: McpServersMap): string | null {
+  const { [CANVAS_MANAGER_SERVER_NAME]: _manager, ...rest } = managedMcpRaw;
+  void _manager;
+  return fingerprintManaged(rest);
+}
 
 /**
  * Compose the Copilot `systemMessage` content + mode from the resolved agent
@@ -650,7 +666,7 @@ export async function runCopilotAgentTurn(params: {
         ...loadManagedMcpServers({ excludeNames: new Set(getDisabledMcpServers(db, sessionId)) }),
         ...canvasServers,
       };
-  const mcpFingerprint = fingerprintManaged(managedMcpRaw);
+  const mcpFingerprint = computeCopilotMcpFingerprint(managedMcpRaw);
 
   const sessionConfig = {
     model: agentModelOverride?.trim() || projectConfig.model,

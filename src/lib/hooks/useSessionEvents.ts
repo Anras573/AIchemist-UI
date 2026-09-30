@@ -128,13 +128,14 @@ export function useSessionEvents() {
     }))
   );
 
-  const { setCanvasState, setCanvasStatus, pushCanvasMessage, pushCanvasLog, bumpCanvasReload } = useCanvasStore(
+  const { setCanvasState, setCanvasStatus, pushCanvasMessage, pushCanvasLog, bumpCanvasReload, bumpCanvasList } = useCanvasStore(
     useShallow((s) => ({
       setCanvasState: s.setCanvasState,
       setCanvasStatus: s.setCanvasStatus,
       pushCanvasMessage: s.pushCanvasMessage,
       pushCanvasLog: s.pushCanvasLog,
       bumpCanvasReload: s.bumpCanvasReload,
+      bumpCanvasList: s.bumpCanvasList,
     }))
   );
 
@@ -287,6 +288,17 @@ export function useSessionEvents() {
           case "reload":
             bumpCanvasReload(payload.canvasId);
             break;
+          case "list":
+            // The agent created + attached an instance — refresh the picker.
+            bumpCanvasList();
+            break;
+          case "focus":
+            // An agent tool call targeted a canvas — surface the Canvas tab,
+            // but only for the session the user is looking at.
+            if (payload.sessionId && payload.sessionId === useSessionStore.getState().activeSessionId) {
+              requestTabSwitch("canvas");
+            }
+            break;
         }
       }),
     ];
@@ -320,5 +332,6 @@ export function useSessionEvents() {
     pushCanvasMessage,
     pushCanvasLog,
     bumpCanvasReload,
+    bumpCanvasList,
   ]);
 }

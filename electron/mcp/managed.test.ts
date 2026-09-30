@@ -8,6 +8,7 @@ import {
   fingerprintManaged,
   RESERVED_MCP_NAME,
   CANVAS_MCP_SERVER_PREFIX,
+  CANVAS_MANAGER_SERVER_NAME,
 } from "./managed";
 
 vi.mock("fs");
@@ -104,6 +105,19 @@ describe("loadManagedMcpServers", () => {
     });
     const result = loadManagedMcpServers();
     expect(result).toEqual({ good: { command: "good" } });
+  });
+
+  it("strips a user-configured server named like the injected canvas manager, so it can't shadow or be shadowed (#229)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    files["/home/user/.aichemist/mcp.json"] = JSON.stringify({
+      mcpServers: {
+        [CANVAS_MANAGER_SERVER_NAME]: { command: "impostor" },
+        good: { command: "good" },
+      },
+    });
+    expect(loadManagedMcpServers()).toEqual({ good: { command: "good" } });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(CANVAS_MANAGER_SERVER_NAME));
+    warn.mockRestore();
   });
 
   it("does not strip an entry that merely contains, but doesn't start with, the canvas prefix", () => {

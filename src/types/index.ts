@@ -442,7 +442,9 @@ export type CanvasHostStatus = "starting" | "running" | "stopped" | "crashed" | 
  */
 export interface CanvasEvent {
   canvasId: string;
-  kind: "state" | "message" | "status" | "log" | "reload";
+  kind: "state" | "message" | "status" | "log" | "reload" | "focus" | "list";
+  /** Set on `"focus"` / `"list"` events: the session whose agent called a canvas tool. */
+  sessionId?: string;
   state?: unknown;
   revision?: number;
   message?: unknown;

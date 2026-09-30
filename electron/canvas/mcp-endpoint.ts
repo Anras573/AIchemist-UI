@@ -34,14 +34,16 @@ import type { Canvas } from "../../src/types/index";
 import { getProjectConfig } from "../projects";
 import { listProjects } from "../projects";
 import { getSession } from "../sessions";
-import { getAttachedCanvases, getCanvas, isCanvasAttached } from "./store";
+import { createCanvas, getAttachedCanvases, getCanvas, isCanvasAttached, setCanvasAttached } from "./store";
+import { discoverCanvasDefinitions } from "./discovery";
 import { CanvasToolError, type CanvasHostManager, type StartCanvasHostOptions } from "./host-manager";
-import { _setCanvasesRootForTests, resolveCanvasServerPath } from "./definitions";
+import { _setCanvasesRootForTests, createCanvasSkillPath, kanbanExampleDir, resolveCanvasServerPath } from "./definitions";
 import { resolveTrustedCanvasServerPath } from "./trust";
 import { requestApproval, requiresApproval } from "../agent/approval";
 import { TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "../agent/tool-gate";
 import type { McpServerEntry, McpServersMap } from "../mcp/config";
-import { CANVAS_MCP_SERVER_PREFIX } from "../mcp/managed";
+import { CANVAS_MANAGER_SERVER_NAME, CANVAS_MCP_SERVER_PREFIX } from "../mcp/managed";
+import * as CH from "../ipc-channels";
 
 export { _setCanvasesRootForTests, resolveCanvasServerPath };
 
@@ -53,6 +55,28 @@ export const CANVAS_UNAVAILABLE_MESSAGE = "Canvas unavailable — its host could
 const PROTOCOL_VERSION = "2025-06-18";
 const MAX_BODY_BYTES = 2 * 1024 * 1024; // 2 MB — generous for tool args, small enough to bound abuse.
 const ROUTE_RE = /^\/canvas\/([^/]+)\/session\/([^/]+)\/mcp\/?$/;
+/** Session-scoped route for the canvas *manager* server (`create_canvas_instance`, #229) — no canvas id, it acts on the session's project. */
+const MANAGER_ROUTE_RE = /^\/session\/([^/]+)\/canvas-manager\/mcp\/?$/;
+
+export { CANVAS_MANAGER_SERVER_NAME };
+
+const CREATE_INSTANCE_TOOL = {
+  name: "create_canvas_instance",
+  description:
+    "Create an instance of a canvas definition in this project and attach it to this session, so the user can open it in the Canvas tab " +
+    "and its tools become available to you on your NEXT turn. Requires the user's approval. Use it after writing a definition under " +
+    ".agents/canvases/<name>/ (or to instantiate a built-in: kanban, checklist, markdown). A project-tier definition still needs the user to " +
+    'review and click "Trust and run" before it runs.',
+  inputSchema: {
+    type: "object",
+    properties: {
+      definition: { type: "string", description: "The definition's folder name (e.g. \"kanban\", or the <name> you wrote under .agents/canvases/)." },
+      title: { type: "string", description: "Display title for the new canvas (e.g. \"Release board\")." },
+    },
+    required: ["definition", "title"],
+    additionalProperties: false,
+  },
+};
 
 // A no-op WebContents for turns with no live renderer — mirrors the pattern in
 // `agent-turn-queue.ts`. `requestApproval` only ever calls `.send()` on it, and
@@ -156,10 +180,17 @@ export function canvasMcpServersForSession(
 ): McpServersMap {
   if (!endpoint?.baseUrl) return {};
   const attached = tryGetAttachedCanvases(db, sessionId);
-  if (attached.length === 0) return {};
 
   const projectPath = tryResolveSessionProjectPath(db, sessionId);
-  const out: McpServersMap = {};
+  // Always offered (#229): lets the agent instantiate + attach a canvas it just
+  // wrote. Approval-gated inside the endpoint.
+  const out: McpServersMap = {
+    [CANVAS_MANAGER_SERVER_NAME]: {
+      type: "http",
+      url: `${endpoint.baseUrl}/session/${sessionId}/canvas-manager/mcp`,
+      headers: { Authorization: `Bearer ${endpoint.token}` },
+    },
+  };
   for (const canvas of attached) {
     // A definition deleted from disk while an instance still exists (#226's
     // "definition missing" state), OR an untrusted/edited-since-trust
@@ -193,12 +224,23 @@ export function canvasMcpServersForSession(
 }
 
 /**
- * A short system-prompt addendum (mirrors `buildMemoryContext`) listing the
- * session's attached canvases so the model knows they exist and what they're
- * for, without spending a tool call to discover them. Empty when nothing is
- * attached.
+ * The system-prompt addendum (mirrors `buildMemoryContext`). Every turn gets a
+ * one-paragraph note that canvases exist and how to build one (#229 — no tool
+ * cost: the model reads the bundled `create-canvas` guide only when asked).
+ * When the session has canvases attached, they're listed after it so the model
+ * also knows which tools are live.
  */
 export function buildCanvasSystemPromptAddendum(db: Database, sessionId: string): string {
+  const awareness =
+    "\n\nCanvases — full-stack work surfaces (a kanban board, a checklist, a data browser, …) that you " +
+    "and the user both operate on, shown in the Canvas tab. If the user asks for a canvas, or would clearly " +
+    "benefit from one, read the guide at " +
+    createCanvasSkillPath() +
+    " (the `create-canvas` skill; then use `create_canvas_instance` to attach it; worked example: " +
+    kanbanExampleDir() +
+    ") and follow it to build a definition under .agents/canvases/ in the project. " +
+    "Built-in canvases: kanban, checklist, markdown.";
+
   // Same "definition missing" / untrusted-project-tier exclusion as
   // `canvasMcpServersForSession` — no point telling the model about a canvas
   // whose tools aren't offered. Same `checkDeps: false` perf reasoning too
@@ -210,10 +252,11 @@ export function buildCanvasSystemPromptAddendum(db: Database, sessionId: string)
       ? resolveTrustedCanvasServerPath(db, c, projectPath, { checkDeps: false })
       : resolveCanvasServerPath(c.definition)
   );
-  if (attached.length === 0) return "";
+  if (attached.length === 0) return awareness;
   const lines = attached.map((c) => `- ${c.title} (${c.definition})`).join("\n");
   return (
-    "\n\nAttached canvases — full-stack work surfaces with their own agent-callable " +
+    awareness +
+    "\n\nAttached canvases — with their own agent-callable " +
     `tools (exposed as "canvas-*" MCP tools):\n${lines}`
   );
 }
@@ -376,12 +419,15 @@ export class CanvasMcpEndpoint {
 
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://internal");
-    const match = ROUTE_RE.exec(url.pathname);
-    if (!match) {
+    const managerMatch = MANAGER_ROUTE_RE.exec(url.pathname);
+    const match = managerMatch ? null : ROUTE_RE.exec(url.pathname);
+    if (!match && !managerMatch) {
       sendJson(res, 404, { error: "not found" });
       return;
     }
-    const [, canvasId, sessionId] = match;
+    // canvasId is null on the manager route (it acts on the session, not one canvas).
+    const canvasId: string | null = match ? match[1] : null;
+    const sessionId: string = match ? match[2] : managerMatch![1];
 
     if (req.method !== "POST") {
       sendJson(res, 405, { error: "method not allowed" });
@@ -394,7 +440,7 @@ export class CanvasMcpEndpoint {
       return;
     }
 
-    if (!isCanvasAttached(this.db, sessionId, canvasId)) {
+    if (canvasId !== null && !isCanvasAttached(this.db, sessionId, canvasId)) {
       sendJson(res, 403, { error: "canvas is not attached to this session" });
       return;
     }
@@ -429,7 +475,7 @@ export class CanvasMcpEndpoint {
     }
   }
 
-  private async dispatch(canvasId: string, sessionId: string, method: string, params: unknown): Promise<unknown> {
+  private async dispatch(canvasId: string | null, sessionId: string, method: string, params: unknown): Promise<unknown> {
     switch (method) {
       case "initialize": {
         const requested = (params as { protocolVersion?: string } | undefined)?.protocolVersion;
@@ -444,9 +490,11 @@ export class CanvasMcpEndpoint {
       case "ping":
         return {};
       case "tools/list":
-        return { tools: await this.listTools(canvasId, sessionId) };
+        return { tools: canvasId === null ? [CREATE_INSTANCE_TOOL] : await this.listTools(canvasId, sessionId) };
       case "tools/call":
-        return this.callTool(canvasId, sessionId, params as { name?: string; arguments?: Record<string, unknown> });
+        return canvasId === null
+          ? this.createInstance(sessionId, params as { name?: string; arguments?: Record<string, unknown> })
+          : this.callTool(canvasId, sessionId, params as { name?: string; arguments?: Record<string, unknown> });
       default:
         throw new Error(`Unknown method: ${method}`);
     }
@@ -469,6 +517,66 @@ export class CanvasMcpEndpoint {
     }));
   }
 
+  /** `create_canvas_instance`: approval-gated create + attach for the calling session (#229). */
+  private async createInstance(
+    sessionId: string,
+    params: { name?: string; arguments?: Record<string, unknown> } | undefined
+  ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
+    if (params?.name !== CREATE_INSTANCE_TOOL.name) return toolErrorContent(`Unknown tool "${params?.name ?? ""}"`);
+    const definition = typeof params.arguments?.definition === "string" ? params.arguments.definition.trim() : "";
+    const title = typeof params.arguments?.title === "string" ? params.arguments.title.trim() : "";
+    if (!definition || !title) return toolErrorContent("Both `definition` and `title` are required.");
+
+    let session;
+    let projectPath: string | null;
+    try {
+      session = getSession(this.db, sessionId);
+      projectPath = tryResolveSessionProjectPath(this.db, sessionId);
+    } catch {
+      return toolErrorContent("Session not found.");
+    }
+    if (!projectPath) return toolErrorContent("Could not resolve this session's project.");
+
+    // Prefer a runnable definition (global/built-in) over a same-named project one,
+    // mirroring how the panel's picker defaults.
+    const { definitions } = discoverCanvasDefinitions(projectPath);
+    const matches = definitions.filter((d) => d.id === definition);
+    const entry = matches.find((d) => d.tier !== "project") ?? matches[0];
+    if (!entry) {
+      const known = [...new Set(definitions.map((d) => d.id))].join(", ") || "none";
+      return toolErrorContent(
+        `No canvas definition named "${definition}". Available: ${known}. Write it under .agents/canvases/${definition}/ first (see the create-canvas guide).`
+      );
+    }
+
+    const gate = await this.gate(null, sessionId, "create_canvas_instance", { definition, title }, "ask", {
+      neverAllowlisted: true,
+    });
+    if (!gate.allowed) return toolErrorContent(gate.message);
+
+    const canvas = createCanvas(this.db, { projectId: session.project_id, definition: entry.id, title });
+    setCanvasAttached(this.db, sessionId, canvas.id, true);
+
+    const webContents = this.getMainWindow()?.webContents;
+    webContents?.send(CH.CANVAS_EVENT, { canvasId: canvas.id, kind: "list", sessionId });
+    webContents?.send(CH.CANVAS_EVENT, { canvasId: canvas.id, kind: "focus", sessionId });
+
+    const trustNote =
+      entry.tier === "project"
+        ? " It is a project canvas, so the user must review and click \"Trust and run\" in the Canvas tab before it runs."
+        : "";
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `Created and attached canvas "${title}" (${entry.id}, id ${canvas.id}).${trustNote} ` +
+            "Its tools become available on your next turn — don't call them yet.",
+        },
+      ],
+    };
+  }
+
   private async callTool(
     canvasId: string,
     sessionId: string,
@@ -486,6 +594,11 @@ export class CanvasMcpEndpoint {
 
     const descriptor = this.hostManager.getTools(canvasId)?.find((t) => t.name === toolName);
     if (!descriptor) return toolErrorContent(`Unknown canvas tool "${toolName}"`);
+
+    // Surface the Canvas tab (#229): the renderer switches to it when this is
+    // the active session. Fired before the gate so an approval prompt for a
+    // canvas tool appears with its canvas already visible.
+    this.getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "focus", sessionId });
 
     const gate = await this.gate(canvasId, sessionId, toolName, args, descriptor.approval);
     if (!gate.allowed) return toolErrorContent(gate.message);
@@ -553,18 +666,23 @@ export class CanvasMcpEndpoint {
    * existing session/project allowlist and the unattended auto-deny for free.
    */
   private async gate(
-    canvasId: string,
+    canvasId: string | null,
     sessionId: string,
     toolName: string,
     args: unknown,
-    approval: "none" | "ask"
+    approval: "none" | "ask",
+    opts?: { neverAllowlisted?: boolean }
   ): Promise<{ allowed: true } | { allowed: false; message: string }> {
     if (approval === "none") return { allowed: true };
 
     const session = getSession(this.db, sessionId);
     const projectConfig = getProjectConfig(this.db, session.project_id);
-    const fingerprintName = `canvas:${canvasId}:${toolName}`;
-    if (!requiresApproval(sessionId, projectConfig, "canvas", fingerprintName, args)) {
+    const fingerprintName = canvasId === null ? `canvas:${toolName}` : `canvas:${canvasId}:${toolName}`;
+    // `neverAllowlisted` (create_canvas_instance, #229): skip the session/project
+    // allowlists entirely, so an earlier "always allow" can never let the agent
+    // attach new tool sets to itself without a prompt. Unattended turns still
+    // auto-deny (requestApproval's nonInteractive branch below).
+    if (!opts?.neverAllowlisted && !requiresApproval(sessionId, projectConfig, "canvas", fingerprintName, args)) {
       return { allowed: true };
     }
 

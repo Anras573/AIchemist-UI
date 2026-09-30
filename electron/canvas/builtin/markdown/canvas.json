@@ -1,0 +1,9 @@
+{
+  "name": "markdown",
+  "description": "A shared markdown document — the agent can read, append to, or rewrite it; you can edit it directly.",
+  "version": 1,
+  "server": "server.mjs",
+  "ui": "ui/index.html",
+  "attachByDefault": false,
+  "permissions": {}
+}
