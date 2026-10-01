@@ -64,4 +64,15 @@ describe("CanvasPopoutManager", () => {
     expect(onClosed).toHaveBeenCalledWith(10);
     expect(mgr.isOpen("c1")).toBe(false);
   });
+
+  it("close() closes only that instance's pop-out", () => {
+    const { mgr, wins, onClosed } = setup();
+    mgr.open("c1", meta);
+    mgr.open("c2", meta);
+    mgr.close("c1");
+    expect(mgr.isOpen("c1")).toBe(false);
+    expect(mgr.isOpen("c2")).toBe(true);
+    expect(onClosed).toHaveBeenCalledWith(wins[0].webContents.id);
+    mgr.close("nope"); // no-op
+  });
 });

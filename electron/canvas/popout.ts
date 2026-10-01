@@ -14,6 +14,7 @@ export interface PopoutWindowLike {
   isMinimized(): boolean;
   restore(): void;
   focus(): void;
+  close(): void;
   on(event: "closed", listener: () => void): unknown;
 }
 
@@ -49,6 +50,12 @@ export class CanvasPopoutManager {
       if (this.windows.get(canvasId) === win) this.windows.delete(canvasId);
       this.opts.onClosed?.(webContentsId);
     });
+  }
+
+  /** Closes an instance's pop-out, if any (e.g. the instance was deleted). */
+  close(canvasId: string): void {
+    const win = this.windows.get(canvasId);
+    if (win && !win.isDestroyed()) win.close();
   }
 
   isOpen(canvasId: string): boolean {

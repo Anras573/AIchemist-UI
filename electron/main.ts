@@ -154,6 +154,8 @@ const canvasPopouts = new CanvasPopoutManager({
         webviewTag: false,
       },
     });
+    // Keep the instance title: Electron otherwise swaps it for index.html's <title> on load.
+    win.on("page-title-updated", (e) => e.preventDefault());
     // Same self-navigation guard as the main window — see createWindow().
     installCanvasFrameNavigationGuard(win.webContents);
     const query = { canvasPopout: canvasId, definition: meta.definition, title: meta.title };

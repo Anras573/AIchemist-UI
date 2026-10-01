@@ -57,6 +57,7 @@ export interface CanvasHostManagerLike {
 /** The subset of `CanvasPopoutManager` these handlers depend on (#248). */
 export interface CanvasPopoutLike {
   open(canvasId: string, meta: { title: string; definition: string }): void;
+  close(canvasId: string): void;
 }
 
 /** Stable id for the calling window; tests invoke handlers with a bare `{}` event. */
@@ -150,6 +151,8 @@ export function registerCanvasHandlers(
 
   handle(CH.CANVAS_DELETE, (_event, args: { canvasId: string }): { ok: boolean } => {
     deleteCanvas(db, args.canvasId);
+    // An open pop-out would otherwise keep showing a canvas whose row is gone.
+    deps.popouts?.close(args.canvasId);
     return { ok: true };
   });
 

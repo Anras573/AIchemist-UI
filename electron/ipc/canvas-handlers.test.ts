@@ -692,10 +692,19 @@ describe("pop-out (#248)", () => {
   it("CANVAS_POP_OUT opens a window for an existing canvas and rejects unknown ids", async () => {
     const open = vi.fn();
     handlers.clear();
-    registerCanvasHandlers(db, hostManager, { popouts: { open } });
+    registerCanvasHandlers(db, hostManager, { popouts: { open, close: vi.fn() } });
     const c = ((await call<{ id: string }>(CH.CANVAS_CREATE, { projectId: "p1", definition: "kanban", title: "B" })) as { ok: true; data: { id: string } }).data;
     expect((await call(CH.CANVAS_POP_OUT, { canvasId: c.id })).ok).toBe(true);
     expect(open).toHaveBeenCalledWith(c.id, { title: "B", definition: "kanban" });
     expect((await call(CH.CANVAS_POP_OUT, { canvasId: "nope" })).ok).toBe(false);
+  });
+
+  it("CANVAS_DELETE closes the instance's pop-out", async () => {
+    const close = vi.fn();
+    handlers.clear();
+    registerCanvasHandlers(db, hostManager, { popouts: { open: vi.fn(), close } });
+    const c = ((await call<{ id: string }>(CH.CANVAS_CREATE, { projectId: "p1", definition: "kanban", title: "B" })) as { ok: true; data: { id: string } }).data;
+    await call(CH.CANVAS_DELETE, { canvasId: c.id });
+    expect(close).toHaveBeenCalledWith(c.id);
   });
 });
