@@ -163,6 +163,9 @@ export const CANVAS_EVENT               = "canvas:event"; // push: main → rend
 export const CANVAS_TRUST_STATUS        = "canvas:trust-status";
 export const CANVAS_TRUST_GRANT         = "canvas:trust-grant";
 export const CANVAS_TRUST_REVOKE        = "canvas:trust-revoke";
+export const CANVAS_SECRETS_STATUS      = "canvas:secrets-status";
+export const CANVAS_SECRET_SET          = "canvas:secret-set";
+export const CANVAS_SECRET_CLEAR        = "canvas:secret-clear";
 
 // ── Auto-update (electron-updater) ────────────────────────────────────────────
 export const UPDATE_CHECK              = "update:check";

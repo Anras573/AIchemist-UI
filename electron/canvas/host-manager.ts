@@ -199,6 +199,13 @@ export interface StartCanvasHostOptions {
    * re-approved (#227 review on PR #238).
    */
   resolveServerPath?: () => string | null;
+  /**
+   * Extra env vars for the host (#249: the canvas's declared secrets),
+   * evaluated fresh before every spawn so a value changed in settings applies
+   * on the next restart. Applied on top of `buildHostEnv`, so it is the only
+   * way a provider-style credential reaches a host.
+   */
+  resolveEnv?: () => Record<string, string>;
 }
 
 export interface CanvasHostManagerOptions {
@@ -424,7 +431,7 @@ export class CanvasHostManager {
       modulePath: this.entryPath,
       args: [effectiveOpts.serverPath, JSON.stringify({ id: effectiveOpts.projectId, path: effectiveOpts.projectPath })],
       cwd: effectiveOpts.projectPath,
-      env: buildHostEnv(process.env),
+      env: { ...buildHostEnv(process.env), ...(effectiveOpts.resolveEnv?.() ?? {}) },
     });
 
     const record: HostRecord = {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Loader2, ShieldAlert } from "lucide-react";
 import { IpcError, useIpc } from "@/lib/ipc";
 import { Button } from "@/components/ui/button";
+import { CanvasSecretsEditor } from "./CanvasSecretsEditor";
 import type { CanvasTrustStatus } from "@/types";
 
 interface CanvasTrustPromptProps {
@@ -111,6 +112,10 @@ export function CanvasTrustPrompt({ projectId, status, onTrusted, onStale }: Can
                 </>
               )}
             </dl>
+          )}
+
+          {!status.blockedReason && (manifest.secrets?.length ?? 0) > 0 && (
+            <CanvasSecretsEditor projectId={projectId} definition={status.definition} />
           )}
 
           {error && <p className="text-destructive">{error}</p>}

@@ -3,6 +3,7 @@ import { AlertCircle, Loader2, ShieldCheck } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
 import { Button } from "@/components/ui/button";
+import { CanvasSecretsEditor } from "@/components/session/CanvasSecretsEditor";
 import { cn } from "@/lib/utils";
 import type { CanvasDefinitionTier, CanvasDiscoveryResult, CanvasTrustStatus } from "@/types";
 
@@ -146,6 +147,11 @@ export function CanvasesSection({ projectId }: CanvasesSectionProps) {
                     <p className="text-[10px] text-muted-foreground/70 mt-1 truncate" title={d.path}>
                       {d.path}
                     </p>
+                    {projectId && (d.manifest.secrets?.length ?? 0) > 0 && (
+                      <div className="mt-2">
+                        <CanvasSecretsEditor projectId={projectId} definition={d.id} />
+                      </div>
+                    )}
                   </div>
                 </div>
               ))

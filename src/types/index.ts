@@ -320,6 +320,19 @@ export interface CanvasDefinition {
     network?: string[];
     exec?: string[];
   };
+  /** Credentials the canvas needs, supplied by the user and injected as env vars into its host (#249). */
+  secrets?: CanvasSecretDeclaration[];
+}
+
+export interface CanvasSecretDeclaration {
+  /** Environment variable name the host receives. */
+  name: string;
+  description?: string;
+}
+
+/** A declared secret plus whether the user has supplied a value — never the value itself. */
+export interface CanvasSecretStatus extends CanvasSecretDeclaration {
+  set: boolean;
 }
 
 /**

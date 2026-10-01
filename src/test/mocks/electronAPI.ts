@@ -172,6 +172,9 @@ export function createElectronAPIMock(): Window["electronAPI"] {
       install: { ok: true, output: "" },
     }),
     canvasTrustRevoke: vi.fn().mockResolvedValue({ ok: true }),
+    canvasSecretsStatus: vi.fn().mockResolvedValue([]),
+    canvasSecretSet: vi.fn().mockResolvedValue({ ok: true }),
+    canvasSecretClear: vi.fn().mockResolvedValue({ ok: true }),
     workflowList: vi.fn().mockResolvedValue([]),
     workflowUpsert: vi.fn().mockResolvedValue({
       id: "mock-workflow-id",

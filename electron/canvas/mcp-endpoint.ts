@@ -38,6 +38,7 @@ import { createCanvas, getAttachedCanvases, getCanvas, isCanvasAttached, setCanv
 import { discoverCanvasDefinitions } from "./discovery";
 import { CanvasToolError, type CanvasHostManager, type StartCanvasHostOptions } from "./host-manager";
 import { _setCanvasesRootForTests, createCanvasSkillPath, kanbanExampleDir, resolveCanvasServerPath } from "./definitions";
+import { resolveCanvasSecretEnv } from "./secrets";
 import { resolveTrustedCanvasServerPath } from "./trust";
 import { requestApproval, requiresApproval } from "../agent/approval";
 import { TOOL_DENIED_MESSAGE, TOOL_DENIED_UNATTENDED_MESSAGE } from "../agent/tool-gate";
@@ -646,6 +647,7 @@ export class CanvasMcpEndpoint {
       // Re-checked on every respawn the manager triggers on its own (#227
       // review on PR #238) — see `resolveServerPath`'s own docstring.
       resolveServerPath: () => resolveTrustedCanvasServerPath(this.db, canvas, projectPath),
+      resolveEnv: () => resolveCanvasSecretEnv(project.id, projectPath, canvas.definition),
     };
     await this.hostManager.start(canvasId, startOpts);
     // A host that had no record yet (the common case — a session's first
