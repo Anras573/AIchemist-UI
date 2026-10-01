@@ -293,6 +293,7 @@ export type IpcContract = {
     args: [args: { canvasId: string; message: unknown }];
     result: { ok: boolean };
   };
+  [CH.CANVAS_POP_OUT]: { args: [args: { canvasId: string }]; result: { ok: boolean } };
   [CH.CANVAS_RESTART]: {
     args: [args: { canvasId: string }];
     result: { state: unknown; revision: number; status: CanvasHostStatus | "unknown" };

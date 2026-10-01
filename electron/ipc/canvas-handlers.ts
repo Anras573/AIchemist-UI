@@ -40,6 +40,7 @@ import {
 } from "../canvas/secrets";
 import { resolveProjectDefinitionDir } from "../canvas/definitions";
 import { listProjects } from "../projects";
+import { CanvasViewerTracker } from "../canvas/viewers";
 import { handle } from "./handle";
 import { IpcError } from "./errors";
 
@@ -51,6 +52,17 @@ export interface CanvasHostManagerLike {
   setPanelOpen(canvasId: string, open: boolean): void;
   sendUiMessage(canvasId: string, message: unknown): void;
   getStatus(canvasId: string): HostManagerStatus | undefined;
+}
+
+/** The subset of `CanvasPopoutManager` these handlers depend on (#248). */
+export interface CanvasPopoutLike {
+  open(canvasId: string, meta: { title: string; definition: string }): void;
+  close(canvasId: string): void;
+}
+
+/** Stable id for the calling window; tests invoke handlers with a bare `{}` event. */
+function senderId(event: unknown): number {
+  return (event as { sender?: { id?: number } } | undefined)?.sender?.id ?? 0;
 }
 
 function findProject(db: Database, projectId: string) {
@@ -98,7 +110,15 @@ function resolveStartOptions(db: Database, canvas: Canvas): StartCanvasHostOptio
  * allow it to idle-stop), relay a UI message to `onUiMessage`, and manual
  * restart.
  */
-export function registerCanvasHandlers(db: Database, hostManager: CanvasHostManagerLike): void {
+export function registerCanvasHandlers(
+  db: Database,
+  hostManager: CanvasHostManagerLike,
+  deps: { popouts?: CanvasPopoutLike; viewers?: CanvasViewerTracker } = {}
+): void {
+  // An instance counts as "panel open" while ANY window shows it (#248), so the
+  // right-panel tab closing doesn't release a host a pop-out is still using.
+  const viewers = deps.viewers ?? new CanvasViewerTracker();
+
   handle(
     CH.CANVAS_LIST_DEFINITIONS,
     (_event, args: { projectId?: string }): CanvasDiscoveryResult => {
@@ -131,6 +151,8 @@ export function registerCanvasHandlers(db: Database, hostManager: CanvasHostMana
 
   handle(CH.CANVAS_DELETE, (_event, args: { canvasId: string }): { ok: boolean } => {
     deleteCanvas(db, args.canvasId);
+    // An open pop-out would otherwise keep showing a canvas whose row is gone.
+    deps.popouts?.close(args.canvasId);
     return { ok: true };
   });
 
@@ -154,7 +176,7 @@ export function registerCanvasHandlers(db: Database, hostManager: CanvasHostMana
   handle(
     CH.CANVAS_OPEN,
     async (
-      _event,
+      event,
       args: { canvasId: string }
     ): Promise<{ state: unknown; revision: number; status: CanvasHostStatus | "unknown" }> => {
       const canvas = getCanvas(db, args.canvasId);
@@ -174,6 +196,7 @@ export function registerCanvasHandlers(db: Database, hostManager: CanvasHostMana
           console.error(`[canvas-handlers] failed to start host for ${args.canvasId}:`, err);
         }
       }
+      viewers.add(args.canvasId, senderId(event));
       hostManager.setPanelOpen(args.canvasId, true);
 
       const latest = getCanvas(db, args.canvasId) ?? canvas;
@@ -187,15 +210,26 @@ export function registerCanvasHandlers(db: Database, hostManager: CanvasHostMana
 
   handle(
     CH.CANVAS_CLOSE,
-    (_event, args: { canvasId: string }): { state: unknown; revision: number } => {
+    (event, args: { canvasId: string }): { state: unknown; revision: number } => {
       // Marks the panel closed so the host's idle-stop timer can eventually
       // stop it — never stops it directly, so a turn still running against
       // this canvas (setTurnActive) keeps it alive regardless of the panel.
-      hostManager.setPanelOpen(args.canvasId, false);
+      // Only when this was the LAST view (panel or pop-out, #248).
+      if (viewers.remove(args.canvasId, senderId(event)) === 0) {
+        hostManager.setPanelOpen(args.canvasId, false);
+      }
       const canvas = getCanvas(db, args.canvasId);
       return { state: canvas?.state ?? null, revision: canvas?.revision ?? 0 };
     }
   );
+
+  handle(CH.CANVAS_POP_OUT, (_event, args: { canvasId: string }): { ok: boolean } => {
+    const canvas = getCanvas(db, args.canvasId);
+    if (!canvas) throw new IpcError("not_found", `Canvas not found: ${args.canvasId}`);
+    if (!deps.popouts) throw new IpcError("unavailable", "Pop-out windows are unavailable");
+    deps.popouts.open(args.canvasId, { title: canvas.title, definition: canvas.definition });
+    return { ok: true };
+  });
 
   handle(
     CH.CANVAS_UI_MESSAGE,

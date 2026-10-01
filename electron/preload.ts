@@ -179,6 +179,7 @@ export interface ElectronAPI {
   canvasOpen: (canvasId: string) => Promise<Res<typeof CH.CANVAS_OPEN>>;
   canvasClose: (canvasId: string) => Promise<Res<typeof CH.CANVAS_CLOSE>>;
   canvasUiMessage: (canvasId: string, message: unknown) => Promise<Res<typeof CH.CANVAS_UI_MESSAGE>>;
+  canvasPopOut: (canvasId: string) => Promise<Res<typeof CH.CANVAS_POP_OUT>>;
   canvasRestart: (canvasId: string) => Promise<Res<typeof CH.CANVAS_RESTART>>;
   canvasTrustStatus: (args: { projectId: string; definition: string }) => Promise<Res<typeof CH.CANVAS_TRUST_STATUS>>;
   canvasTrustGrant: (args: {
@@ -327,6 +328,7 @@ const api: ElectronAPI = {
   canvasOpen: (canvasId) => invoke(CH.CANVAS_OPEN, { canvasId }),
   canvasClose: (canvasId) => invoke(CH.CANVAS_CLOSE, { canvasId }),
   canvasUiMessage: (canvasId, message) => invoke(CH.CANVAS_UI_MESSAGE, { canvasId, message }),
+  canvasPopOut: (canvasId) => invoke(CH.CANVAS_POP_OUT, { canvasId }),
   canvasRestart: (canvasId) => invoke(CH.CANVAS_RESTART, { canvasId }),
   canvasTrustStatus: (args) => invoke(CH.CANVAS_TRUST_STATUS, args),
   canvasTrustGrant: (args) => invoke(CH.CANVAS_TRUST_GRANT, args),

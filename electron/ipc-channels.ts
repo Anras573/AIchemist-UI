@@ -158,6 +158,7 @@ export const CANVAS_ATTACH              = "canvas:attach";
 export const CANVAS_OPEN                = "canvas:open";
 export const CANVAS_CLOSE               = "canvas:close";
 export const CANVAS_UI_MESSAGE          = "canvas:ui-message";
+export const CANVAS_POP_OUT             = "canvas:pop-out";
 export const CANVAS_RESTART             = "canvas:restart";
 export const CANVAS_EVENT               = "canvas:event"; // push: main → renderer
 export const CANVAS_TRUST_STATUS        = "canvas:trust-status";

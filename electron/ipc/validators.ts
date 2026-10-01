@@ -261,6 +261,7 @@ export const validators: Partial<Record<RequestChannel, (args: unknown[]) => voi
   [CH.CANVAS_OPEN]: unary(canvasIdSchema, CH.CANVAS_OPEN),
   [CH.CANVAS_CLOSE]: unary(canvasIdSchema, CH.CANVAS_CLOSE),
   [CH.CANVAS_UI_MESSAGE]: unary(canvasUiMessageSchema, CH.CANVAS_UI_MESSAGE),
+  [CH.CANVAS_POP_OUT]: unary(canvasIdSchema, CH.CANVAS_POP_OUT),
   [CH.CANVAS_RESTART]: unary(canvasIdSchema, CH.CANVAS_RESTART),
   [CH.CANVAS_TRUST_STATUS]: unary(canvasTrustArgsSchema, CH.CANVAS_TRUST_STATUS),
   [CH.CANVAS_TRUST_GRANT]: unary(canvasTrustGrantSchema, CH.CANVAS_TRUST_GRANT),

@@ -144,6 +144,7 @@ export const ipc = {
   canvasOpen: (canvasId: string) => window.electronAPI.canvasOpen(canvasId),
   canvasClose: (canvasId: string) => window.electronAPI.canvasClose(canvasId),
   canvasUiMessage: (canvasId: string, message: unknown) => window.electronAPI.canvasUiMessage(canvasId, message),
+  canvasPopOut: (canvasId: string) => window.electronAPI.canvasPopOut(canvasId),
   canvasRestart: (canvasId: string) => window.electronAPI.canvasRestart(canvasId),
   canvasTrustStatus: (args: { projectId: string; definition: string }) => window.electronAPI.canvasTrustStatus(args),
   canvasTrustGrant: (args: { projectId: string; definition: string; expectedContentHash: string }) =>

@@ -28,6 +28,8 @@ import { CanvasHostManager } from "./canvas/host-manager";
 import { CanvasMcpEndpoint, setActiveCanvasMcpEndpoint } from "./canvas/mcp-endpoint";
 import { registerCanvasProtocol, registerCanvasProtocolScheme } from "./canvas/protocol";
 import { installCanvasFrameNavigationGuard } from "./canvas/frame-navigation-guard";
+import { CanvasPopoutManager } from "./canvas/popout";
+import { CanvasViewerTracker } from "./canvas/viewers";
 import { TrayController } from "./tray";
 import { initAutoUpdater, checkForUpdates } from "./updater";
 
@@ -131,6 +133,49 @@ let workflowScheduler: WorkflowScheduler | null = null;
 let canvasHostManager: CanvasHostManager | null = null;
 let canvasMcpEndpoint: CanvasMcpEndpoint | null = null;
 
+// Pop-out canvas windows (#248). Each shows one instance in its own window via
+// the same renderer bundle (`?canvasPopout=<id>`); CANVAS_EVENT pushes go
+// through `canvasPopouts.broadcast()` so the panel and every pop-out stay live.
+// `canvasViewers` keeps an instance's host from idle-stopping while any window
+// (panel or pop-out) still shows it.
+const canvasViewers = new CanvasViewerTracker();
+const canvasPopouts = new CanvasPopoutManager({
+  getMainWindow,
+  createWindow: (canvasId, meta) => {
+    const win = new BrowserWindow({
+      width: 1000,
+      height: 720,
+      title: meta.title,
+      webPreferences: {
+        preload: path.join(__dirname, "../preload/preload.js"),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false,
+        webviewTag: false,
+      },
+    });
+    // Keep the instance title: Electron otherwise swaps it for index.html's <title> on load.
+    win.on("page-title-updated", (e) => e.preventDefault());
+    // Same self-navigation guard as the main window — see createWindow().
+    installCanvasFrameNavigationGuard(win.webContents);
+    const query = { canvasPopout: canvasId, definition: meta.definition, title: meta.title };
+    if (process.env["ELECTRON_RENDERER_URL"]) {
+      const url = new URL(process.env["ELECTRON_RENDERER_URL"]);
+      for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
+      void win.loadURL(url.toString());
+    } else {
+      void win.loadFile(path.join(__dirname, "../renderer/index.html"), { query });
+    }
+    return win;
+  },
+  onClosed: (webContentsId) => {
+    // The window may close without its renderer getting to send CANVAS_CLOSE.
+    for (const id of canvasViewers.releaseSender(webContentsId)) {
+      canvasHostManager?.setPanelOpen(id, false);
+    }
+  },
+});
+
 // Optional menu-bar/system-tray icon. Present only while ≥1 enabled scheduled
 // workflow is armed — that is exactly when the app survives window close, so the
 // tray is the user's handle on the otherwise windowless process.
@@ -148,7 +193,7 @@ function registerAllHandlers(scheduler: WorkflowScheduler, hostManager: CanvasHo
   registerGitHubHandlers();
   registerMcpHandlers();
   registerWorkflowHandlers(db, scheduler);
-  registerCanvasHandlers(db, hostManager);
+  registerCanvasHandlers(db, hostManager, { popouts: canvasPopouts, viewers: canvasViewers });
   registerBudgetHandlers(db);
   registerSpendingHandlers(db);
   registerUpdateHandlers();
@@ -196,15 +241,15 @@ app.whenReady().then(() => {
     agentSend: (canvasId, text, sessionId) => canvasAgentBridge.send(canvasId, text, sessionId),
     hooks: {
       onStateChanged: (canvasId, state, revision) =>
-        getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "state", state, revision }),
+        canvasPopouts.broadcast(CH.CANVAS_EVENT, { canvasId, kind: "state", state, revision }),
       onUiMessage: (canvasId, message) =>
-        getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "message", message }),
+        canvasPopouts.broadcast(CH.CANVAS_EVENT, { canvasId, kind: "message", message }),
       onStatusChanged: (canvasId, status) =>
-        getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "status", status }),
+        canvasPopouts.broadcast(CH.CANVAS_EVENT, { canvasId, kind: "status", status }),
       onLog: (canvasId, level, args) =>
-        getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "log", level, args }),
+        canvasPopouts.broadcast(CH.CANVAS_EVENT, { canvasId, kind: "log", level, args }),
       onDevReload: (canvasId) =>
-        getMainWindow()?.webContents.send(CH.CANVAS_EVENT, { canvasId, kind: "reload" }),
+        canvasPopouts.broadcast(CH.CANVAS_EVENT, { canvasId, kind: "reload" }),
     },
   });
   registerAllHandlers(workflowScheduler, canvasHostManager);

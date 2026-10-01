@@ -165,6 +165,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     canvasOpen: vi.fn().mockResolvedValue({ state: null, revision: 0, status: "running" }),
     canvasClose: vi.fn().mockResolvedValue({ state: null, revision: 0 }),
     canvasUiMessage: vi.fn().mockResolvedValue({ ok: true }),
+    canvasPopOut: vi.fn().mockResolvedValue({ ok: true }),
     canvasRestart: vi.fn().mockResolvedValue({ state: null, revision: 0, status: "running" }),
     canvasTrustStatus: vi.fn().mockResolvedValue(null),
     canvasTrustGrant: vi.fn().mockResolvedValue({
