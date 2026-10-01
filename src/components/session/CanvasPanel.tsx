@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, ExternalLink, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useIpc } from "@/lib/ipc";
 import { useIpcQuery } from "@/lib/hooks/useIpcQuery";
 import { useProjectStore } from "@/lib/store/useProjectStore";
@@ -326,6 +326,18 @@ export function CanvasPanel() {
           >
             <Plus className="h-3.5 w-3.5" />
           </Button>
+          {selected && !definitionMissing && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Pop out canvas"
+              onClick={() =>
+                void ipc.canvasPopOut(selected.id).catch((err) => console.error(`[canvas] pop-out failed for ${selected.id}:`, err))
+              }
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </Button>
+          )}
           {selected && (
             <Button
               size="icon-sm"
