@@ -17,6 +17,24 @@ function emit(status: UpdateStatus): void {
   getWindow?.()?.webContents.send(CH.UPDATE_STATUS, status);
 }
 
+/**
+ * release-please publishes the GitHub Release before the CI build matrix has
+ * uploaded its assets, so for the minutes (Windows/macOS take longest) while
+ * installers are still being built, `latest*.yml` 404s. That's a transient
+ * "release not ready yet", not a failure — the next periodic check picks it up.
+ */
+export function isReleaseAssetsPendingError(message: string): boolean {
+  return /Cannot find latest[\w-]*\.yml in the latest release artifacts/i.test(message);
+}
+
+function emitError(message: string): void {
+  if (isReleaseAssetsPendingError(message)) {
+    emit({ state: "not-available" });
+    return;
+  }
+  emit({ state: "error", error: message });
+}
+
 /** Last known update status — used by UPDATE_GET_STATE so a late-mounted UI can render the current state without waiting for the next push event. */
 export function getUpdateStatus(): UpdateStatus {
   return latestStatus;
@@ -33,7 +51,7 @@ export function initAutoUpdater(getMainWindow: () => BrowserWindow | null): void
     emit({ state: "downloading", percent: Math.round(progress.percent) })
   );
   autoUpdater.on("update-downloaded", (info) => emit({ state: "downloaded", version: info.version }));
-  autoUpdater.on("error", (err) => emit({ state: "error", error: err.message }));
+  autoUpdater.on("error", (err) => emitError(err.message));
 }
 
 /**
@@ -49,7 +67,7 @@ export async function checkForUpdates(): Promise<void> {
   try {
     await autoUpdater.checkForUpdates();
   } catch (err) {
-    emit({ state: "error", error: err instanceof Error ? err.message : String(err) });
+    emitError(err instanceof Error ? err.message : String(err));
   }
 }
 
