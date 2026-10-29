@@ -125,6 +125,17 @@
     }
   html {
     @apply font-sans;
+    color-scheme: light;
+    }
+  html.dark {
+    color-scheme: dark;
+    }
+  /* Native <select> popups ignore the transparent control background; give
+     options the theme colors so the dropdown follows light/dark. */
+  option,
+  optgroup {
+    background-color: var(--background);
+    color: var(--foreground);
     }
 }
 
