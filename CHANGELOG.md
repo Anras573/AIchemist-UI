@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/Anras573/AIchemist-UI/compare/v1.1.1...v1.1.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* **ui:** make native select dropdowns follow the app theme ([#263](https://github.com/Anras573/AIchemist-UI/issues/263)) ([7194db1](https://github.com/Anras573/AIchemist-UI/commit/7194db18fc10fadf555f64613b515e111ba4c58a))
+
 ## [1.1.1](https://github.com/Anras573/AIchemist-UI/compare/v1.1.0...v1.1.1) (2026-10-29)
 
 
