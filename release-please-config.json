@@ -4,5 +4,6 @@
   "draft": true,
   "packages": {
     ".": {}
-  }
+  },
+  "include-component-in-tag": false
 }
