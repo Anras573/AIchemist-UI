@@ -15,11 +15,16 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - uses: googleapis/release-please-action@v5
         id: release
+        # Config (release-please-config.json) creates the GitHub Release as a
+        # *draft*, so auto-updating clients can't see it until the `publish`
+        # job below flips it public after every installer + latest*.yml is up.
         with:
-          release-type: node
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
   build:
     name: Build & publish (${{ matrix.os }})
@@ -39,7 +44,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          # A draft release has no git tag yet (GitHub creates it on publish),
+          # so check out the release commit instead of the tag.
+          ref: ${{ needs.release-please.outputs.sha }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -60,3 +67,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
+
+  # Runs only when every platform's build + upload succeeded, so a failed
+  # matrix leaves the release as an unpublished draft instead of a public
+  # release whose latest*.yml 404s (issue #256).
+  publish:
+    name: Publish release
+    needs: [release-please, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish draft release
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
