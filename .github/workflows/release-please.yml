@@ -3,8 +3,12 @@ name: release-please
 on:
   push:
     branches: [main]
+  # Also fired by the `publish` job below (a release published with GITHUB_TOKEN
+  # doesn't trigger workflows itself).
+  workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
   issues: write
@@ -81,3 +85,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
+
+      # A draft release has no git tag until it's published, so until now
+      # release-please couldn't see the release it just made and its open
+      # release PR kept a stale baseline (the whole history as "unreleased").
+      # Re-run it now that the tag exists so the PR is rebuilt from here.
+      - name: Refresh the release PR
+        run: gh workflow run release-please.yml --repo "$GITHUB_REPOSITORY" --ref main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
