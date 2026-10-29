@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.1.0](https://github.com/Anras573/AIchemist-UI/compare/v1.0.3...v1.1.0) (2026-10-01)
+
+
+### Features
+
+* **canvas:** add host runtime + server SDK ([#232](https://github.com/Anras573/AIchemist-UI/issues/232)) ([bd4ff99](https://github.com/Anras573/AIchemist-UI/commit/bd4ff990cc415aa402b05e897395c1e4840ecac1))
+* **canvas:** add persistence layer for canvas instances ([#221](https://github.com/Anras573/AIchemist-UI/issues/221)) ([#230](https://github.com/Anras573/AIchemist-UI/issues/230)) ([4b40ff0](https://github.com/Anras573/AIchemist-UI/commit/4b40ff0cf015a181eff106a8f5baed7e04e09b04))
+* **canvas:** auto-select the canvas the agent called ([#245](https://github.com/Anras573/AIchemist-UI/issues/245)) ([#253](https://github.com/Anras573/AIchemist-UI/issues/253)) ([a9e16a3](https://github.com/Anras573/AIchemist-UI/commit/a9e16a3f3998e1209a082144bc627abe032f884b))
+* **canvas:** create-canvas skill, agent awareness, auto-switch, checklist + markdown built-ins ([#240](https://github.com/Anras573/AIchemist-UI/issues/240)) ([bea3863](https://github.com/Anras573/AIchemist-UI/commit/bea3863205a36ba539097e71197877eb6f638065))
+* **canvas:** list bundled create-canvas skill in Skills panel and / palette ([#252](https://github.com/Anras573/AIchemist-UI/issues/252)) ([f699312](https://github.com/Anras573/AIchemist-UI/commit/f69931205c7cbc72aa0716791994675e8f06c53f))
+* **canvas:** per-canvas declared secrets ([#249](https://github.com/Anras573/AIchemist-UI/issues/249)) ([#254](https://github.com/Anras573/AIchemist-UI/issues/254)) ([6c6762d](https://github.com/Anras573/AIchemist-UI/commit/6c6762d7e42d4dafa5f5cf1f73a1a3a6bc704f3b))
+* **canvas:** pop-out canvas windows ([#255](https://github.com/Anras573/AIchemist-UI/issues/255)) ([11f9963](https://github.com/Anras573/AIchemist-UI/commit/11f99633f0dacfa19839cae324be55e204ddda2f))
+* **canvas:** server → agent messaging (ctx.agent.send) ([#239](https://github.com/Anras573/AIchemist-UI/issues/239)) ([8acefb8](https://github.com/Anras573/AIchemist-UI/commit/8acefb8d29227dff96b6f147d0d2be288ed985cb))
+
+
+### Bug Fixes
+
+* **canvas:** reconcile host state after a rejected ctx.state write ([#241](https://github.com/Anras573/AIchemist-UI/issues/241)) ([774d96b](https://github.com/Anras573/AIchemist-UI/commit/774d96bf85f2aa7cd45b1598c0c74aaa9eb63dbb))
+
 ## [1.0.3](https://github.com/Anras573/AIchemist-UI/compare/v1.0.2...v1.0.3) (2026-09-25)
 
 
