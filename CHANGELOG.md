@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/Anras573/AIchemist-UI/compare/v1.1.0...v1.1.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **release:** keep v-prefixed tags without the component name ([#259](https://github.com/Anras573/AIchemist-UI/issues/259)) ([36c371e](https://github.com/Anras573/AIchemist-UI/commit/36c371ecc64605c3523fd5b17f6ceaf1ace1ae06))
+* **updater:** don't surface a missing latest.yml as an error during release upload ([#257](https://github.com/Anras573/AIchemist-UI/issues/257)) ([5fe4e33](https://github.com/Anras573/AIchemist-UI/commit/5fe4e331e38181b496c2aa776cf4a6d2511db841))
+
 ## [1.1.0](https://github.com/Anras573/AIchemist-UI/compare/v1.0.3...v1.1.0) (2026-10-01)
 
 
