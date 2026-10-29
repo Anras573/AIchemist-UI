@@ -86,11 +86,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
 
-      # A draft release has no git tag until it's published, so until now
-      # release-please couldn't see the release it just made and its open
-      # release PR kept a stale baseline (the whole history as "unreleased").
-      # Re-run it now that the tag exists so the PR is rebuilt from here.
-      - name: Refresh the release PR
-        run: gh workflow run release-please.yml --repo "$GITHUB_REPOSITORY" --ref main
+      # release-please opens the *next* release PR the moment a release PR
+      # merges, while the new release is still an untagged draft it can't see,
+      # so that PR is built against a stale baseline (the whole history as
+      # "unreleased"). Once the release is published and tagged, close it and
+      # re-run release-please: it recreates the PR from the right baseline when
+      # there are user-facing commits, and otherwise leaves nothing open (a bare
+      # re-run would just skip and keep the stale PR).
+      - name: Reset the open release PR
+        run: |
+          for pr in $(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+              --label "autorelease: pending" --json number --jq '.[].number'); do
+            gh pr close "$pr" --repo "$GITHUB_REPOSITORY" \
+              --comment "Closing: it was built before ${TAG} was tagged. release-please will reopen it from the correct baseline."
+          done
+          gh workflow run release-please.yml --repo "$GITHUB_REPOSITORY" --ref main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
