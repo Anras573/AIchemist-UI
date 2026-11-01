@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0](https://github.com/Anras573/AIchemist-UI/compare/v1.1.2...v1.2.0) (2026-11-01)
+
+
+### Features
+
+* attach images and files to messages ([#269](https://github.com/Anras573/AIchemist-UI/issues/269)) ([bb54785](https://github.com/Anras573/AIchemist-UI/commit/bb54785eb199bb37da20c9a89d2727b280851f0b))
+* **attachments:** send attached images to Ollama and OpenAI-compatible models ([#271](https://github.com/Anras573/AIchemist-UI/issues/271)) ([d1c2f8e](https://github.com/Anras573/AIchemist-UI/commit/d1c2f8ee10e74966ecf7a9d2143d5309c793a730))
+* **attachments:** show inline image previews in sent messages ([#272](https://github.com/Anras573/AIchemist-UI/issues/272)) ([09291aa](https://github.com/Anras573/AIchemist-UI/commit/09291aa3b19217a2cc5aab6cd5527ce034727775))
+
 ## [1.1.2](https://github.com/Anras573/AIchemist-UI/compare/v1.1.1...v1.1.2) (2026-10-29)
 
 
