@@ -11,6 +11,8 @@ import {
   appendAttachmentsToPrompt,
   deleteSessionAttachments,
   isInsideAttachmentsRoot,
+  AttachmentPreviewError,
+  readAttachmentDataUrl,
   MAX_VISION_IMAGES,
   selectInlineImages,
   sanitizeFileName,
@@ -159,5 +161,43 @@ describe("selectInlineImages", () => {
     const svg = { ...png("a.svg"), media_type: "image/svg+xml" };
     const big = { ...png("big.png"), size: 9 * 1024 * 1024 };
     expect(selectInlineImages([[svg, big]])[0]).toEqual([]);
+  });
+});
+
+describe("readAttachmentDataUrl", () => {
+  const save = (name: string, mediaType: string, body = "px") =>
+    saveAttachments("prev", [{ name, mediaType, dataUrl: dataUrl(body, mediaType) }])[0];
+
+  it("returns a data URL for a stored image", () => {
+    const a = save("a.png", "image/png", "hello");
+    expect(readAttachmentDataUrl(a)).toBe(`data:image/png;base64,${Buffer.from("hello").toString("base64")}`);
+  });
+
+  it("rejects missing attachments, non-images and svg", () => {
+    expect(() => readAttachmentDataUrl(undefined)).toThrow(AttachmentPreviewError);
+    expect(() => readAttachmentDataUrl(save("a.txt", "text/plain"))).toThrow(/cannot be previewed/);
+    expect(() => readAttachmentDataUrl(save("a.svg", "image/svg+xml"))).toThrow(/cannot be previewed/);
+  });
+
+  it("rejects oversized images", () => {
+    const a = { ...save("big.png", "image/png"), size: 9 * 1024 * 1024 };
+    expect(() => readAttachmentDataUrl(a)).toThrow(/too large/);
+  });
+
+  it("refuses a path outside the attachments root (tampered metadata)", () => {
+    const outside = path.join(os.tmpdir(), `outside-${Date.now()}.png`);
+    fs.writeFileSync(outside, "secret");
+    try {
+      const a = { ...save("a.png", "image/png"), path: outside };
+      expect(() => readAttachmentDataUrl(a)).toThrow(AttachmentPreviewError);
+    } finally {
+      fs.rmSync(outside, { force: true });
+    }
+  });
+
+  it("reports a deleted file as not found", () => {
+    const a = save("a.png", "image/png");
+    fs.rmSync(a.path);
+    expect(() => readAttachmentDataUrl(a)).toThrow(AttachmentPreviewError);
   });
 });

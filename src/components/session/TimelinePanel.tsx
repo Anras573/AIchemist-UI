@@ -75,7 +75,7 @@ const MessageBubble = memo(function MessageBubble({
         </span>
       )}
       {isUser && message.attachments && message.attachments.length > 0 && (
-        <MessageAttachmentChips attachments={message.attachments} />
+        <MessageAttachmentChips messageId={message.id} attachments={message.attachments} />
       )}
       {(!isUser || message.content) && (
       <MessageContent className="group-[.is-user]:bg-primary group-[.is-user]:text-primary-foreground group-[.is-user]:whitespace-pre-wrap group-[.is-assistant]:bg-muted group-[.is-assistant]:rounded-lg group-[.is-assistant]:px-4 group-[.is-assistant]:py-2.5">

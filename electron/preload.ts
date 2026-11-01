@@ -51,6 +51,10 @@ export interface ElectronAPI {
     content: string;
     attachments?: import("./attachments").AttachmentInput[];
   }) => Promise<Res<typeof CH.SAVE_MESSAGE>>;
+  readAttachmentImage: (args: {
+    messageId: string;
+    attachmentId: string;
+  }) => Promise<Res<typeof CH.READ_ATTACHMENT_IMAGE>>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<Res<typeof CH.UPDATE_SESSION_TITLE>>;
   updateSessionModel: (
     sessionId: string,
@@ -261,6 +265,7 @@ const api: ElectronAPI = {
   getSession: (sessionId, options) => invoke(CH.GET_SESSION, sessionId, options),
   deleteSession: (sessionId, options) => invoke(CH.DELETE_SESSION, sessionId, options),
   saveMessage: (args) => invoke(CH.SAVE_MESSAGE, args),
+  readAttachmentImage: (args) => invoke(CH.READ_ATTACHMENT_IMAGE, args),
   updateSessionTitle: (sessionId, title) => invoke(CH.UPDATE_SESSION_TITLE, sessionId, title),
   updateSessionModel: (sessionId, provider, model) => invoke(CH.UPDATE_SESSION_MODEL, sessionId, provider, model),
   updateSessionAgent: (sessionId, agent) => invoke(CH.UPDATE_SESSION_AGENT, sessionId, agent),

@@ -67,6 +67,11 @@ const saveMessageSchema = z.object({
     .optional(),
 });
 
+const readAttachmentImageSchema = z.object({
+  messageId: z.string().min(1),
+  attachmentId: z.string().min(1),
+});
+
 const writeAgentFileSchema = z.object({
   filePath: z.string().min(1),
   content: z.string(),
@@ -250,6 +255,7 @@ const canvasTrustGrantSchema = canvasTrustArgsSchema.extend({
 export const validators: Partial<Record<RequestChannel, (args: unknown[]) => void>> = {
   [CH.AGENT_SEND]: unary(agentSendSchema, CH.AGENT_SEND),
   [CH.SAVE_MESSAGE]: unary(saveMessageSchema, CH.SAVE_MESSAGE),
+  [CH.READ_ATTACHMENT_IMAGE]: unary(readAttachmentImageSchema, CH.READ_ATTACHMENT_IMAGE),
   [CH.WRITE_AGENT_FILE]: unary(writeAgentFileSchema, CH.WRITE_AGENT_FILE),
   [CH.WRITE_SKILL_FILE]: unary(writeSkillFileSchema, CH.WRITE_SKILL_FILE),
   [CH.CREATE_AGENT]: unary(createAgentSchema, CH.CREATE_AGENT),
