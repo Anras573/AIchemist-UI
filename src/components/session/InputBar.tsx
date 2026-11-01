@@ -3,10 +3,19 @@ import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { SkillInfo } from "@/types";
 import type { Provider } from "@/types";
+import type { FileUIPart } from "ai";
 import { useIpc } from "@/lib/ipc";
 import { useActiveSessionProvider } from "@/lib/hooks/useActiveSessionProvider";
 import { useGitBranch } from "@/lib/hooks/useGitBranch";
+import type { AttachmentInput } from "../../../electron/attachments";
 import { AgentPickerButton } from "./AgentPickerButton";
+import {
+  AttachFilesButton,
+  ComposerAttachmentStrip,
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENT_BYTES,
+  formatBytes,
+} from "./ComposerAttachments";
 import { ModelPickerButton } from "./ModelPickerButton";
 import {
   PromptInput,
@@ -90,7 +99,7 @@ function SessionContextUsage({
 export interface InputBarProps {
   disabled?: boolean;
   placeholder?: string;
-  onSend?: (text: string, oneshotSkills?: string[]) => void;
+  onSend?: (text: string, oneshotSkills?: string[], attachments?: AttachmentInput[]) => void;
   onNewSession?: (providerOverride?: Provider, issueNumber?: number) => void;
 }
 
@@ -134,6 +143,7 @@ function InputBarInner({
   const [slashQuery, setSlashQuery] = useState("");
   const [slashBadges, setSlashBadges] = useState<SkillInfo[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [attachError, setAttachError] = useState<string | null>(null);
 
   // Reset the skill cache and one-shot badges when the effective skill scope
   // changes: the session path (sessions can have per-worktree workspace_path
@@ -247,14 +257,26 @@ function InputBarInner({
   }, []);
 
   const handleSubmit = useCallback(
-    ({ text }: { text: string }) => {
+    ({ text, files }: { text: string; files: FileUIPart[] }) => {
       const trimmed = text.trim();
-      if (!trimmed && slashBadges.length === 0) return;
+      const attachments: AttachmentInput[] = files
+        .filter((f) => f.url.startsWith("data:"))
+        .map((f) => ({
+          name: f.filename ?? "attachment",
+          mediaType: f.mediaType || "application/octet-stream",
+          dataUrl: f.url,
+        }));
+      if (!trimmed && slashBadges.length === 0 && attachments.length === 0) return;
       if (onSend) {
         const skillNames = slashBadges.map((b) => b.name);
-        onSend(trimmed, skillNames.length > 0 ? skillNames : undefined);
+        onSend(
+          trimmed,
+          skillNames.length > 0 ? skillNames : undefined,
+          attachments.length > 0 ? attachments : undefined
+        );
       }
       setSlashBadges([]);
+      setAttachError(null);
     },
     [onSend, slashBadges]
   );
@@ -272,8 +294,27 @@ function InputBarInner({
       <PromptInput
         className="border-t rounded-none border-x-0 border-b-0"
         onSubmit={handleSubmit}
+        multiple
+        globalDrop
+        maxFiles={MAX_ATTACHMENTS}
+        maxFileSize={MAX_ATTACHMENT_BYTES}
+        onError={(err) =>
+          setAttachError(
+            err.code === "max_file_size"
+              ? `Files must be under ${formatBytes(MAX_ATTACHMENT_BYTES)}.`
+              : err.code === "max_files"
+                ? `You can attach up to ${MAX_ATTACHMENTS} files per message.`
+                : err.message
+          )
+        }
       >
         <PromptInputBody>
+          <ComposerAttachmentStrip />
+          {attachError && (
+            <p role="alert" className="px-3 pt-2 text-xs text-destructive">
+              {attachError}
+            </p>
+          )}
           {/* One-shot skill badges */}
           {slashBadges.length > 0 && (
             <div className="flex flex-wrap gap-1 px-3 pt-2">
@@ -299,6 +340,7 @@ function InputBarInner({
         </PromptInputBody>
         <PromptInputFooter>
           <PromptInputTools>
+            <AttachFilesButton disabled={disabled} />
             {activeSession && (
               <ModelPickerButton
                 sessionId={activeSession.id}

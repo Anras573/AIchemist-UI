@@ -29,6 +29,8 @@ import {
 } from "@/components/ai-elements/reasoning";
 import { EmptyStateNewSession } from "./EmptyStateNewSession";
 import { InputBar } from "./InputBar";
+import { MessageAttachmentChips } from "./ComposerAttachments";
+import type { AttachmentInput } from "../../../electron/attachments";
 import { QuestionCard } from "./QuestionCard";
 import { useIpc } from "@/lib/ipc";
 import { useLoadOlderMessages } from "@/lib/hooks/useLoadOlderMessages";
@@ -72,6 +74,10 @@ const MessageBubble = memo(function MessageBubble({
           Canvas · {message.source.slice("canvas:".length)}
         </span>
       )}
+      {isUser && message.attachments && message.attachments.length > 0 && (
+        <MessageAttachmentChips attachments={message.attachments} />
+      )}
+      {(!isUser || message.content) && (
       <MessageContent className="group-[.is-user]:bg-primary group-[.is-user]:text-primary-foreground group-[.is-user]:whitespace-pre-wrap group-[.is-assistant]:bg-muted group-[.is-assistant]:rounded-lg group-[.is-assistant]:px-4 group-[.is-assistant]:py-2.5">
         {isUser ? (
           message.content
@@ -79,6 +85,7 @@ const MessageBubble = memo(function MessageBubble({
           <MessageResponse className="text-sm">{message.content}</MessageResponse>
         )}
       </MessageContent>
+      )}
       {isQueued && (
         <span className="self-end text-[10px] font-medium text-muted-foreground/60 px-1 py-0.5 rounded bg-muted/60 border border-border/50 select-none">
           Queued
@@ -348,7 +355,7 @@ function TimelineFooter({ context }: { context?: TimelineFooterContext }) {
 
 interface TimelinePanelProps {
   /** Called by Phase 4 when the user submits a message. */
-  onSendMessage?: (text: string, oneshotSkills?: string[]) => void;
+  onSendMessage?: (text: string, oneshotSkills?: string[], attachments?: AttachmentInput[]) => void;
   /** Called when the user clicks "Create new session" from the empty state. Optional provider override locks the new session provider. */
   onNewSession?: (providerOverride?: Provider, issueNumber?: number) => void;
   /** Error message from a failed session creation attempt, to surface in the empty state. */

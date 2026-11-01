@@ -21,6 +21,7 @@
  * shape is a compile error.
  */
 import type * as CH from "./ipc-channels";
+import type { AttachmentInput } from "./attachments";
 import type {
   Project,
   ProjectConfig,
@@ -129,7 +130,7 @@ export type IpcContract = {
   };
   [CH.DELETE_SESSION]: { args: [sessionId: string, options?: { cleanupWorktree?: boolean }]; result: void };
   [CH.SAVE_MESSAGE]: {
-    args: [args: { sessionId: string; role: Message["role"]; content: string }];
+    args: [args: { sessionId: string; role: Message["role"]; content: string; attachments?: AttachmentInput[] }];
     result: Message;
   };
   [CH.UPDATE_SESSION_TITLE]: { args: [sessionId: string, title: string]; result: void };

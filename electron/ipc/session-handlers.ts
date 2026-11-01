@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import type { Database } from "better-sqlite3";
 import type { BrowserWindow } from "electron";
 import * as CH from "../ipc-channels";
+import { saveAttachments, deleteSessionAttachments, type AttachmentInput } from "../attachments";
 import {
   createSession,
   listSessions,
@@ -153,14 +154,21 @@ export function registerSessionHandlers(
     providerSessionStore.forget(sessionId);
     activeTurns.delete(sessionId);
     cleanupSessionQueueState(sessionId);
+    deleteSessionAttachments(sessionId);
     return deleteSession(db, sessionId);
   });
   handle(
     CH.SAVE_MESSAGE,
-    (_event, args: { sessionId: string; role: string; content: string }) =>
+    (_event, args: { sessionId: string; role: string; content: string; attachments?: AttachmentInput[] }) =>
       // Explicit fields only: `source` is reserved for main-process senders
-      // (canvas bridge), never renderer-supplied.
-      saveMessage(db, { sessionId: args.sessionId, role: args.role, content: args.content })
+      // (canvas bridge), never renderer-supplied. Attachment bytes are written
+      // to disk here; only their metadata is stored on the message.
+      saveMessage(db, {
+        sessionId: args.sessionId,
+        role: args.role,
+        content: args.content,
+        attachments: args.attachments?.length ? saveAttachments(args.sessionId, args.attachments) : undefined,
+      })
   );
   handle(
     CH.UPDATE_SESSION_TITLE,

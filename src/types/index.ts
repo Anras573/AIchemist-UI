@@ -163,6 +163,16 @@ export type SessionStatus =
 
 export type MessageRole = "user" | "assistant" | "tool";
 
+/** A file the user attached to a message. Bytes live on disk; this is the metadata. */
+export interface MessageAttachment {
+  id: string;
+  name: string;
+  media_type: string;
+  size: number;
+  /** Absolute path under ~/.aichemist/attachments/<sessionId>/. */
+  path: string;
+}
+
 export interface Message {
   id: string;
   session_id: string;
@@ -173,6 +183,8 @@ export interface Message {
   agent?: string | null;
   /** Origin tag for canvas-originated user messages (e.g. "canvas:kanban"). Null for ordinary messages. */
   source?: string | null;
+  /** Files attached to this (user) message. */
+  attachments?: MessageAttachment[];
 }
 
 export interface Session {

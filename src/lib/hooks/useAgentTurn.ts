@@ -4,6 +4,7 @@ import { useIpc } from "@/lib/ipc";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import type { Message, SessionStatus } from "@/types";
+import type { AttachmentInput } from "../../../electron/attachments";
 
 /**
  * Provides a stable `sendMessage` callback for the active session.
@@ -46,7 +47,7 @@ export function useAgentTurn() {
   );
 
   const sendMessage = useCallback(
-    async (text: string, oneshotSkills?: string[]) => {
+    async (text: string, oneshotSkills?: string[], attachments?: AttachmentInput[]) => {
       if (!activeSessionId) return;
       if (!session || !project) return;
 
@@ -57,6 +58,7 @@ export function useAgentTurn() {
           sessionId: activeSessionId,
           role: "user",
           content: text,
+          attachments,
         });
       } catch (err) {
         console.error("save_message (user) failed:", err);
@@ -66,7 +68,8 @@ export function useAgentTurn() {
 
       // 2. Auto-title the session from the first user message
       if (session.messages.length === 0) {
-        const title = text.length > 60 ? text.slice(0, 57) + "…" : text;
+        const titleSource = text || attachments?.[0]?.name || "Attachment";
+        const title = titleSource.length > 60 ? titleSource.slice(0, 57) + "…" : titleSource;
         ipc.updateSessionTitle(activeSessionId, title)
           .then(() => updateSessionTitle(activeSessionId, title))
           .catch(console.error);

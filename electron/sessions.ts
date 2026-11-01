@@ -1,7 +1,8 @@
 import * as crypto from "crypto";
 import type { Database } from "better-sqlite3";
-import type { Message, Provider, Session, ToolCall, ToolCallStatus, ToolCategory } from "../src/types/index";
+import type { Message, MessageAttachment, Provider, Session, ToolCall, ToolCallStatus, ToolCategory } from "../src/types/index";
 import { stmt } from "./db-stmt-cache";
+import { parseAttachments } from "./attachments";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -118,6 +119,7 @@ type MessageRow = {
   created_at: string;
   agent: string | null;
   source: string | null;
+  attachments: string | null;
 };
 
 /**
@@ -149,13 +151,13 @@ function loadMessagePage(
     cursorRowid !== undefined
       ? stmt(
           db,
-          `SELECT rowid, id, session_id, role, content, created_at, agent, source
+          `SELECT rowid, id, session_id, role, content, created_at, agent, source, attachments
              FROM messages WHERE session_id = ? AND rowid < ?
              ORDER BY rowid DESC LIMIT ?`
         ).all(sessionId, cursorRowid, pageSize + 1)
       : stmt(
           db,
-          `SELECT rowid, id, session_id, role, content, created_at, agent, source
+          `SELECT rowid, id, session_id, role, content, created_at, agent, source, attachments
              FROM messages WHERE session_id = ?
              ORDER BY rowid DESC LIMIT ?`
         ).all(sessionId, pageSize + 1)
@@ -210,7 +212,7 @@ export function getSession(db: Database, sessionId: string, options: GetSessionO
   } else {
     messageRows = stmt(
       db,
-      `SELECT rowid, id, session_id, role, content, created_at, agent, source
+      `SELECT rowid, id, session_id, role, content, created_at, agent, source, attachments
          FROM messages
          WHERE session_id = ?
          ORDER BY created_at ASC`
@@ -266,6 +268,7 @@ export function getSession(db: Database, sessionId: string, options: GetSessionO
     created_at: m.created_at,
     agent: m.agent,
     source: m.source,
+    ...(m.attachments ? { attachments: parseAttachments(m.attachments) } : {}),
   }));
 
   return {
@@ -323,15 +326,31 @@ export function recoverStaleSessionStatuses(db: Database): number {
  */
 export function saveMessage(
   db: Database,
-  args: { sessionId: string; role: string; content: string; agent?: string | null; source?: string | null }
+  args: {
+    sessionId: string;
+    role: string;
+    content: string;
+    agent?: string | null;
+    source?: string | null;
+    attachments?: MessageAttachment[];
+  }
 ): Message {
   const id = crypto.randomUUID();
   const createdAt = nowIso();
 
   stmt(
     db,
-    "INSERT INTO messages (id, session_id, role, content, created_at, agent, source) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run(id, args.sessionId, args.role, args.content, createdAt, args.agent ?? null, args.source ?? null);
+    "INSERT INTO messages (id, session_id, role, content, created_at, agent, source, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    id,
+    args.sessionId,
+    args.role,
+    args.content,
+    createdAt,
+    args.agent ?? null,
+    args.source ?? null,
+    args.attachments && args.attachments.length > 0 ? JSON.stringify(args.attachments) : null
+  );
 
   return {
     id,
@@ -342,7 +361,16 @@ export function saveMessage(
     created_at: createdAt,
     agent: args.agent ?? null,
     source: args.source ?? null,
+    ...(args.attachments && args.attachments.length > 0 ? { attachments: args.attachments } : {}),
   };
+}
+
+/** Attachments stored on a message (empty when none / message missing). */
+export function getMessageAttachments(db: Database, messageId: string): MessageAttachment[] {
+  const row = stmt(db, "SELECT attachments FROM messages WHERE id = ?").get(messageId) as
+    | { attachments: string | null }
+    | undefined;
+  return parseAttachments(row?.attachments);
 }
 
 /**

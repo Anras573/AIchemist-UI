@@ -55,6 +55,16 @@ const saveMessageSchema = z.object({
   sessionId: z.string().min(1),
   role: z.enum(["user", "assistant", "tool"]),
   content: z.string(),
+  attachments: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        mediaType: z.string(),
+        dataUrl: z.string().startsWith("data:"),
+      })
+    )
+    .max(10)
+    .optional(),
 });
 
 const writeAgentFileSchema = z.object({

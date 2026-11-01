@@ -3,6 +3,7 @@ import * as path from "path";
 import * as childProcess from "child_process";
 import { createPatch } from "diff";
 import type { FileChange } from "../../src/types/index";
+import { isInsideAttachmentsRoot } from "../attachments";
 
 // ── SDK-agnostic tool implementations ────────────────────────────────────────
 //
@@ -134,6 +135,11 @@ function safeJson(value: unknown): string {
 function resolveProjectPath(projectPath: string, inputPath: string): string {
   const root = fs.realpathSync(path.resolve(projectPath));
   const candidate = path.resolve(root, inputPath);
+  // User-attached files live outside the project (~/.aichemist/attachments) but
+  // the prompt points the model at their absolute paths, so they must be readable.
+  if (path.isAbsolute(inputPath) && isInsideAttachmentsRoot(candidate)) {
+    return fs.realpathSync(candidate);
+  }
   const rel = path.relative(root, candidate).replace(/\\/g, "/");
   if (isSensitiveRelativePath(rel)) {
     throw new Error(`Access to sensitive path is not allowed: "${rel}"`);
