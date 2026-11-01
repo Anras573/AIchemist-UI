@@ -227,6 +227,12 @@ const MIGRATIONS: Migration[] = [
   (db) => {
     addColumnIfMissing(db, "canvas_trust", "deps_hash", "TEXT");
   },
+  // v10 — user message attachments: JSON array of attachment metadata
+  // (name, media type, size, absolute path of the file under
+  // ~/.aichemist/attachments). Nullable — most messages have none.
+  (db) => {
+    addColumnIfMissing(db, "messages", "attachments", "TEXT");
+  },
 ];
 
 /**

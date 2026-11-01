@@ -46,7 +46,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
 
-    expect(userVersion(db)).toBe(9);
+    expect(userVersion(db)).toBe(10);
     const cols = columnNames(db, "sessions");
     for (const c of EXPECTED_SESSION_COLUMNS) {
       expect(cols).toContain(c);
@@ -122,7 +122,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
 
-    expect(userVersion(db)).toBe(9);
+    expect(userVersion(db)).toBe(10);
     const tables = tableNames(db);
     expect(tables).toContain("canvases");
     expect(tables).toContain("session_canvases");
@@ -140,11 +140,17 @@ describe("migrate", () => {
     expect(columnNames(db, "messages")).toContain("source");
   });
 
+  it("adds messages.attachments at v10", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+    expect(columnNames(db, "messages")).toContain("attachments");
+  });
+
   it("adds canvas_trust.deps_hash at v9 (#227 review round 3)", () => {
     const db = new Database(":memory:");
     migrate(db);
 
-    expect(userVersion(db)).toBe(9);
+    expect(userVersion(db)).toBe(10);
     expect(columnNames(db, "canvas_trust")).toContain("deps_hash");
 
     db.prepare(
@@ -189,7 +195,7 @@ describe("migrate", () => {
     const db = new Database(":memory:");
     migrate(db);
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(9);
+    expect(userVersion(db)).toBe(10);
   });
 
   it("does not throw when provider_state already exists below user_version 2", () => {
@@ -198,7 +204,7 @@ describe("migrate", () => {
     // Simulate a dev build / partial migration: column exists but version rewound.
     db.exec("PRAGMA user_version = 1;");
     expect(() => migrate(db)).not.toThrow();
-    expect(userVersion(db)).toBe(9);
+    expect(userVersion(db)).toBe(10);
   });
 
   it("upgrades a legacy database (columns present, user_version 0) without error", () => {
@@ -223,7 +229,7 @@ describe("migrate", () => {
 
     expect(() => migrate(db)).not.toThrow();
 
-    expect(userVersion(db)).toBe(9);
+    expect(userVersion(db)).toBe(10);
     expect(columnNames(db, "sessions")).toContain("provider_state");
     expect(tableNames(db)).toContain("workflows");
     // Existing data is preserved, including the legacy copilot id used as a dead read.

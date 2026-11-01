@@ -49,6 +49,7 @@ export interface ElectronAPI {
     sessionId: string;
     role: import("../src/types").Message["role"];
     content: string;
+    attachments?: import("./attachments").AttachmentInput[];
   }) => Promise<Res<typeof CH.SAVE_MESSAGE>>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<Res<typeof CH.UPDATE_SESSION_TITLE>>;
   updateSessionModel: (

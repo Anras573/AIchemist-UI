@@ -1,7 +1,8 @@
 import type { Database } from "better-sqlite3";
 import type { BrowserWindow } from "electron";
 import * as CH from "../ipc-channels";
-import { getSession } from "../sessions";
+import { getSession, getMessageAttachments } from "../sessions";
+import { appendAttachmentsToPrompt } from "../attachments";
 import { listProjects } from "../projects";
 import { runAgentTurn } from "../agent/runner";
 import { getIssue } from "../github";
@@ -97,6 +98,11 @@ export async function executeAgentTurn(
     } catch (err) {
       console.warn(`[issue-context] Failed to fetch issue #${session.github_issue_number}:`, err);
     }
+  }
+
+  // Tell the model about files attached to this message (stored content stays clean).
+  if (turn.messageId) {
+    prompt = appendAttachmentsToPrompt(prompt, getMessageAttachments(db, turn.messageId));
   }
 
   await runAgentTurn({

@@ -1,3 +1,4 @@
+import { appendAttachmentsToPrompt, parseAttachments } from "../attachments";
 import type { Database } from "better-sqlite3";
 import { buildSkillsContext } from "./skills";
 import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory } from "./memory";
@@ -202,18 +203,18 @@ function buildSystemPrompt(params: AgentProviderParams): string {
 function loadHistory(db: Database, sessionId: string, placeholderMessageId: string): OllamaMessage[] {
   const rows = db
     .prepare(
-      `SELECT id, role, content
+      `SELECT id, role, content, attachments
        FROM messages
        WHERE session_id = ?
        ORDER BY created_at ASC`
     )
-    .all(sessionId) as Array<{ id: string; role: string; content: string }>;
+    .all(sessionId) as Array<{ id: string; role: string; content: string; attachments: string | null }>;
 
   const history: OllamaMessage[] = [];
   for (const row of rows) {
     if (row.id === placeholderMessageId) continue;
     if (row.role === "user") {
-      history.push({ role: "user", content: row.content });
+      history.push({ role: "user", content: appendAttachmentsToPrompt(row.content, parseAttachments(row.attachments)) });
       continue;
     }
     if (row.role !== "assistant") continue;

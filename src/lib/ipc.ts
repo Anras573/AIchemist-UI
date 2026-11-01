@@ -12,6 +12,7 @@ import type {
   Provider,
 } from "@/types";
 import type { IpcErrorCode } from "../../electron/ipc/errors";
+import type { AttachmentInput } from "../../electron/attachments";
 import { isIpcErrorCode } from "../../electron/ipc/errors";
 
 // ── Typed wrapper over window.electronAPI ─────────────────────────────────────
@@ -39,7 +40,7 @@ export const ipc = {
     window.electronAPI.getSession(sessionId, options),
   deleteSession: (sessionId: string, options?: { cleanupWorktree?: boolean }) =>
     window.electronAPI.deleteSession(sessionId, options),
-  saveMessage: (args: { sessionId: string; role: MessageRole; content: string }) =>
+  saveMessage: (args: { sessionId: string; role: MessageRole; content: string; attachments?: AttachmentInput[] }) =>
     window.electronAPI.saveMessage(args),
   updateSessionTitle: (sessionId: string, title: string) =>
     window.electronAPI.updateSessionTitle(sessionId, title),
