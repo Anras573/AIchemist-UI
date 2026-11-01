@@ -11,6 +11,8 @@ import {
   appendAttachmentsToPrompt,
   deleteSessionAttachments,
   isInsideAttachmentsRoot,
+  MAX_VISION_IMAGES,
+  selectInlineImages,
   sanitizeFileName,
   saveAttachments,
 } from "./attachments";
@@ -117,5 +119,45 @@ describe("message persistence", () => {
     const loaded = getSession(db, session.id).messages;
     expect(loaded.find((m) => m.id === msg.id)?.attachments).toEqual(atts);
     expect(loaded.find((m) => m.id === plain.id)?.attachments).toBeUndefined();
+  });
+});
+
+describe("selectInlineImages", () => {
+  const png = (name: string) => {
+    const [a] = saveAttachments("vis", [{ name, mediaType: "image/png", dataUrl: dataUrl(name, "image/png") }]);
+    return a;
+  };
+
+  it("inlines eligible images and skips non-images", () => {
+    const [txt] = saveAttachments("vis", [{ name: "a.txt", mediaType: "text/plain", dataUrl: dataUrl("a") }]);
+    const img = png("one.png");
+    const out = selectInlineImages([[txt, img]]);
+    expect(out[0]).toEqual([
+      { name: "one.png", mediaType: "image/png", base64: Buffer.from("one.png").toString("base64") },
+    ]);
+  });
+
+  it("keeps only the newest MAX_VISION_IMAGES across messages", () => {
+    const msgs = Array.from({ length: MAX_VISION_IMAGES + 2 }, (_, i) => [png(`img${i}.png`)]);
+    const out = selectInlineImages(msgs);
+    expect(out).toHaveLength(msgs.length);
+    expect(out[0]).toEqual([]);
+    expect(out[1]).toEqual([]);
+    expect(out.slice(2).every((o) => o.length === 1)).toBe(true);
+  });
+
+  it("skips unreadable files without spending budget", () => {
+    const gone = png("gone.png");
+    fs.rmSync(gone.path);
+    const ok = png("ok.png");
+    const out = selectInlineImages([[ok], [gone]]);
+    expect(out[0]).toHaveLength(1);
+    expect(out[1]).toEqual([]);
+  });
+
+  it("ignores unsupported image types and oversized files", () => {
+    const svg = { ...png("a.svg"), media_type: "image/svg+xml" };
+    const big = { ...png("big.png"), size: 9 * 1024 * 1024 };
+    expect(selectInlineImages([[svg, big]])[0]).toEqual([]);
   });
 });

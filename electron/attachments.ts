@@ -141,3 +141,56 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+// ── Vision input (Ollama / OpenAI-compatible) ─────────────────────────────────
+//
+// Providers with a history-replay loop can hand the model real image data
+// instead of just a path. Every replayed turn would re-send its images, so the
+// total is bounded: only the most recent `MAX_VISION_IMAGES` eligible images are
+// inlined and older ones fall back to the path note already in the prompt.
+
+/** Image types the vision-capable local backends accept. */
+export const VISION_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+export const MAX_VISION_IMAGES = 4;
+export const MAX_VISION_IMAGE_BYTES = 8 * 1024 * 1024;
+
+export interface InlineImage {
+  name: string;
+  mediaType: string;
+  /** Raw base64 payload (no `data:` prefix). */
+  base64: string;
+}
+
+function isVisionEligible(a: MessageAttachment): boolean {
+  return VISION_IMAGE_TYPES.includes(a.media_type.toLowerCase()) && a.size <= MAX_VISION_IMAGE_BYTES;
+}
+
+/**
+ * Given the attachments of each message in conversation order (oldest first),
+ * return the images to inline per message — the newest `MAX_VISION_IMAGES`
+ * eligible ones overall. Files that can no longer be read are skipped (and do
+ * not consume budget). The result has the same length/order as the input.
+ */
+export function selectInlineImages(perMessage: MessageAttachment[][]): InlineImage[][] {
+  const result: InlineImage[][] = perMessage.map(() => []);
+  let budget = MAX_VISION_IMAGES;
+  for (let i = perMessage.length - 1; i >= 0 && budget > 0; i--) {
+    const picked: InlineImage[] = [];
+    for (const a of perMessage[i]) {
+      if (budget === 0) break;
+      if (!isVisionEligible(a)) continue;
+      try {
+        picked.push({
+          name: a.name,
+          mediaType: a.media_type.toLowerCase(),
+          base64: fs.readFileSync(a.path).toString("base64"),
+        });
+        budget--;
+      } catch {
+        // File deleted/unreadable — the path note still tells the model about it.
+      }
+    }
+    result[i] = picked;
+  }
+  return result;
+}

@@ -1,4 +1,4 @@
-import { appendAttachmentsToPrompt, parseAttachments } from "../attachments";
+import { appendAttachmentsToPrompt, parseAttachments, selectInlineImages, type InlineImage } from "../attachments";
 /**
  * OpenAI-compatible provider.
  *
@@ -14,7 +14,7 @@ import { appendAttachmentsToPrompt, parseAttachments } from "../attachments";
  * SESSION_TOOL_CALL / SESSION_TOOL_RESULT events work like the other providers.
  */
 import type { Database } from "better-sqlite3";
-import type { LanguageModel, ModelMessage, ToolSet } from "ai";
+import type { LanguageModel, ModelMessage, ToolSet, UserModelMessage } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
 import { z } from "zod";
 
@@ -412,7 +412,21 @@ function stringifyToolResult(result: unknown): string {
   }
 }
 
-function loadHistory(db: Database, sessionId: string, placeholderMessageId: string): ModelMessage[] {
+/** User message content: plain text, or text + image parts when images are inlined. */
+function userContent(text: string, images: InlineImage[] | undefined): UserModelMessage["content"] {
+  if (!images || images.length === 0) return text;
+  return [
+    { type: "text" as const, text },
+    ...images.map((img) => ({ type: "image" as const, image: img.base64, mediaType: img.mediaType })),
+  ];
+}
+
+function loadHistory(
+  db: Database,
+  sessionId: string,
+  placeholderMessageId: string,
+  withImages = true,
+): ModelMessage[] {
   const rows = db
     .prepare(
       `SELECT id, role, content, attachments
@@ -422,11 +436,27 @@ function loadHistory(db: Database, sessionId: string, placeholderMessageId: stri
     )
     .all(sessionId) as Array<{ id: string; role: string; content: string; attachments: string | null }>;
 
+  // Bounded to the most recent few images across the whole replay.
+  const userRows = rows.filter((r) => r.role === "user" && r.id !== placeholderMessageId);
+  const imagesByUserRow = new Map<string, InlineImage[]>();
+  if (withImages) {
+    const picked = selectInlineImages(userRows.map((r) => parseAttachments(r.attachments)));
+    userRows.forEach((r, i) => {
+      if (picked[i].length > 0) imagesByUserRow.set(r.id, picked[i]);
+    });
+  }
+
   const history: ModelMessage[] = [];
   for (const row of rows) {
     if (row.id === placeholderMessageId) continue;
     if (row.role === "user") {
-      history.push({ role: "user", content: appendAttachmentsToPrompt(row.content, parseAttachments(row.attachments)) });
+      history.push({
+        role: "user",
+        content: userContent(
+          appendAttachmentsToPrompt(row.content, parseAttachments(row.attachments)),
+          imagesByUserRow.get(row.id),
+        ),
+      });
       continue;
     }
     if (row.role !== "assistant") continue;
@@ -471,9 +501,22 @@ function loadHistory(db: Database, sessionId: string, placeholderMessageId: stri
 function withCurrentPrompt(history: ModelMessage[], prompt: string): ModelMessage[] {
   const last = history[history.length - 1];
   if (last && last.role === "user") {
-    return [...history.slice(0, -1), { role: "user", content: prompt }];
+    // Keep any inlined image parts: only the text is being swapped for the augmented prompt.
+    const images = Array.isArray(last.content)
+      ? last.content.filter((part) => part.type === "image")
+      : [];
+    return [
+      ...history.slice(0, -1),
+      { role: "user", content: images.length > 0 ? [{ type: "text" as const, text: prompt }, ...images] : prompt },
+    ];
   }
   return [...history, { role: "user", content: prompt }];
+}
+
+function hasImageParts(messages: ModelMessage[]): boolean {
+  return messages.some(
+    (m) => m.role === "user" && Array.isArray(m.content) && m.content.some((part) => part.type === "image"),
+  );
 }
 
 // ── Tools ─────────────────────────────────────────────────────────────────────
@@ -814,7 +857,14 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
     ? { ...(await makeBuiltinTools(ctx)), ...(await makeMcpTools(ctx, managedMcpBridge)) }
     : undefined;
 
-  const messages = withCurrentPrompt(loadHistory(params.db, params.sessionId, params.messageId), params.prompt);
+  // OpenAI-compatible endpoints expose no standard capability flag, so images
+  // are always offered (text-only turns excluded) and `streamAttempt` below
+  // falls back to text-only if the endpoint rejects them.
+  const withImages = !params.noTools;
+  const messages = withCurrentPrompt(
+    loadHistory(params.db, params.sessionId, params.messageId, withImages),
+    params.prompt,
+  );
 
   // Open the transcript turn only after the throwing setup (bridge/history)
   // succeeds, so a failed setup can't leave an unterminated "running" span.
@@ -829,21 +879,28 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   // SDK halted the multi-step loop at `stepCountIs(maxToolRounds)` while the
   // model still wanted to call tools — i.e. the turn was truncated.
   let finishReason: string | undefined;
-  try {
+  // True once the model has produced any output or run a tool, i.e. the endpoint
+  // accepted the request. Used to decide whether a failure is a safe-to-retry
+  // rejection of the image input rather than a mid-turn error.
+  let sawOutput = false;
+
+  const streamAttempt = async (msgs: ModelMessage[]): Promise<void> => {
     const result = streamText({
       model,
       system: buildSystemPrompt(params),
-      messages,
+      messages: msgs,
       ...(tools ? { tools, stopWhen: stepCountIs(maxToolRounds) } : {}),
     });
 
     for await (const part of result.fullStream) {
       switch (part.type) {
         case "text-delta":
+          sawOutput = true;
           fullText += part.text;
           emitter.delta(part.text);
           break;
         case "reasoning-delta":
+          sawOutput = true;
           emitter.thinkingDelta(part.text);
           recorder?.reasoning(part.text);
           break;
@@ -869,8 +926,30 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
           throw part.error instanceof Error ? part.error : new Error(String(part.error));
         default:
           // Tool calls/results are emitted and persisted inside runGatedTool.
+          if (part.type.startsWith("tool")) sawOutput = true;
           break;
       }
+    }
+  };
+
+  try {
+    try {
+      await streamAttempt(messages);
+    } catch (err) {
+      // A non-vision model/endpoint rejects image parts outright. If that is what
+      // happened (images were sent and nothing came back yet), retry once as
+      // text-only — the path note in the prompt still tells the model about the
+      // files — rather than failing every future turn of the session.
+      if (sawOutput || !hasImageParts(messages)) throw err;
+      console.warn(
+        `[openai-compat] Request with image input failed (${err instanceof Error ? err.message : String(err)}); retrying text-only`,
+      );
+      const notice = "_(The model didn't accept image input, so attached images were sent as file paths only.)_\n\n";
+      fullText += notice;
+      emitter.delta(notice);
+      await streamAttempt(
+        withCurrentPrompt(loadHistory(params.db, params.sessionId, params.messageId, false), params.prompt),
+      );
     }
     // The loop stopped on `tool-calls` rather than a natural `stop`: the step
     // cap was hit mid-workflow. Surface the truncation (and keep any partial

@@ -1333,6 +1333,53 @@ describe("ollama provider", () => {
     });
   });
 
+  describe("image attachments", () => {
+    const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+    function imageRows() {
+      const dir = fs.mkdtempSync(path.join(process.cwd(), ".ollama-attach-"));
+      tempDirs.push(dir);
+      const imgPath = path.join(dir, "shot.png");
+      fs.writeFileSync(imgPath, PNG_BYTES);
+      const attachments = JSON.stringify([
+        { id: "a1", name: "shot.png", media_type: "image/png", size: PNG_BYTES.length, path: imgPath },
+      ]);
+      return {
+        rows: [
+          { id: "m-placeholder", role: "assistant", content: "" },
+          { id: "m-user", role: "user", content: "what is this?", attachments },
+        ],
+      };
+    }
+
+    async function runWith(capabilities: string[]) {
+      ollamaMocks.show.mockResolvedValue({ capabilities });
+      ollamaMocks.chat.mockResolvedValue(streamChunks([{ message: { content: "ok" } }]));
+      const { rows } = imageRows();
+      await runOllamaAgentTurn({
+        db: makeDb(rows) as never,
+        sessionId: "s-img",
+        messageId: "m-placeholder",
+        prompt: "what is this?",
+        projectConfig: { model: "llava:latest", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send: vi.fn() } as never,
+      } as never);
+      return { call: ollamaMocks.chat.mock.calls[0][0] };
+    }
+
+    it("sends attached images as base64 `images` to a vision-capable model", async () => {
+      const { call } = await runWith(["completion", "vision"]);
+      const user = call.messages.find((m: { role: string }) => m.role === "user");
+      expect(user.images).toEqual([PNG_BYTES.toString("base64")]);
+    });
+
+    it("does not send images to a model without the vision capability", async () => {
+      const { call } = await runWith(["completion", "tools"]);
+      const user = call.messages.find((m: { role: string }) => m.role === "user");
+      expect(user.images).toBeUndefined();
+    });
+  });
+
   describe("extended thinking / reasoning", () => {
     it("requests thinking and streams reasoning deltas for a thinking-capable model", async () => {
       const send = vi.fn();
