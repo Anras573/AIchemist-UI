@@ -27,6 +27,7 @@ export const LIST_SESSIONS          = "sessions:list";
 export const GET_SESSION            = "sessions:get";
 export const DELETE_SESSION         = "sessions:delete";
 export const SAVE_MESSAGE           = "sessions:save-message";
+export const READ_ATTACHMENT_IMAGE  = "sessions:read-attachment-image";
 export const UPDATE_SESSION_TITLE   = "sessions:update-title";
 export const UPDATE_SESSION_MODEL   = "sessions:update-model";
 export const UPDATE_SESSION_AGENT   = "sessions:update-agent";

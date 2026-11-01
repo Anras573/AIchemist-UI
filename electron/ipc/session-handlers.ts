@@ -2,7 +2,13 @@ import * as crypto from "crypto";
 import type { Database } from "better-sqlite3";
 import type { BrowserWindow } from "electron";
 import * as CH from "../ipc-channels";
-import { saveAttachments, deleteSessionAttachments, type AttachmentInput } from "../attachments";
+import {
+  saveAttachments,
+  deleteSessionAttachments,
+  readAttachmentDataUrl,
+  AttachmentPreviewError,
+  type AttachmentInput,
+} from "../attachments";
 import {
   createSession,
   listSessions,
@@ -15,6 +21,7 @@ import {
   updateSessionSkills,
   setDisabledMcpServers,
   getDisabledMcpServers,
+  getMessageAttachments,
 } from "../sessions";
 import { listProjects } from "../projects";
 import { isProviderId } from "../providers";
@@ -33,6 +40,7 @@ import { OPENAI_COMPAT_NO_MODELS_ERROR } from "../agent/openai-compat";
 import { cleanupSessionQueueState } from "./agent-handlers";
 import type { Provider } from "../../src/types/index";
 import { handle } from "./handle";
+import { IpcError } from "./errors";
 
 export function registerSessionHandlers(
   db: Database,
@@ -170,6 +178,18 @@ export function registerSessionHandlers(
         attachments: args.attachments?.length ? saveAttachments(args.sessionId, args.attachments) : undefined,
       })
   );
+  handle(CH.READ_ATTACHMENT_IMAGE, (_event, args: { messageId: string; attachmentId: string }) => {
+    // Look the file up by ids in our own DB — the renderer never supplies a path.
+    const attachment = getMessageAttachments(db, args.messageId).find((a) => a.id === args.attachmentId);
+    try {
+      return { dataUrl: readAttachmentDataUrl(attachment) };
+    } catch (err) {
+      if (err instanceof AttachmentPreviewError) {
+        throw new IpcError(err.reason === "not_found" ? "not_found" : "invalid_input", err.message);
+      }
+      throw err;
+    }
+  });
   handle(
     CH.UPDATE_SESSION_TITLE,
     (_event, sessionId: string, title: string) =>

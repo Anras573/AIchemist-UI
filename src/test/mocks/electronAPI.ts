@@ -36,6 +36,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     getSession: vi.fn().mockResolvedValue(undefined),
     deleteSession: vi.fn().mockResolvedValue(undefined),
     saveMessage: vi.fn().mockResolvedValue(undefined),
+    readAttachmentImage: vi.fn().mockResolvedValue({ dataUrl: "data:image/png;base64,AA==" }),
     updateSessionTitle: vi.fn().mockResolvedValue(undefined),
     updateSessionModel: vi.fn().mockResolvedValue(undefined),
     updateSessionAgent: vi.fn().mockResolvedValue(undefined),

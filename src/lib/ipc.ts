@@ -42,6 +42,8 @@ export const ipc = {
     window.electronAPI.deleteSession(sessionId, options),
   saveMessage: (args: { sessionId: string; role: MessageRole; content: string; attachments?: AttachmentInput[] }) =>
     window.electronAPI.saveMessage(args),
+  readAttachmentImage: (args: { messageId: string; attachmentId: string }) =>
+    window.electronAPI.readAttachmentImage(args),
   updateSessionTitle: (sessionId: string, title: string) =>
     window.electronAPI.updateSessionTitle(sessionId, title),
   updateSessionModel: (sessionId: string, provider: Provider, model: string) =>

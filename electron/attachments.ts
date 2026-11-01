@@ -194,3 +194,41 @@ export function selectInlineImages(perMessage: MessageAttachment[][]): InlineIma
   }
   return result;
 }
+
+// ── Preview (renderer thumbnails) ─────────────────────────────────────────────
+
+/** Types the renderer may preview. SVG is deliberately excluded (can embed script). */
+export const PREVIEW_IMAGE_TYPES = VISION_IMAGE_TYPES;
+export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;
+
+export class AttachmentPreviewError extends Error {
+  constructor(
+    readonly reason: "not_found" | "not_previewable",
+    message: string
+  ) {
+    super(message);
+    this.name = "AttachmentPreviewError";
+  }
+}
+
+/**
+ * Read a stored image attachment as a `data:` URL for the renderer. The caller
+ * passes metadata that came from the DB (never a renderer-supplied path); the
+ * file is additionally required to live inside the attachments root, so a
+ * tampered row can't be used to read arbitrary files.
+ */
+export function readAttachmentDataUrl(attachment: MessageAttachment | undefined): string {
+  if (!attachment) throw new AttachmentPreviewError("not_found", "Attachment not found");
+  const mediaType = attachment.media_type.toLowerCase();
+  if (!PREVIEW_IMAGE_TYPES.includes(mediaType)) {
+    throw new AttachmentPreviewError("not_previewable", `${attachment.media_type} cannot be previewed`);
+  }
+  if (attachment.size > MAX_PREVIEW_BYTES) {
+    throw new AttachmentPreviewError("not_previewable", "Image is too large to preview");
+  }
+  if (!isInsideAttachmentsRoot(attachment.path)) {
+    throw new AttachmentPreviewError("not_found", "Attachment file is missing");
+  }
+  const bytes = fs.readFileSync(attachment.path);
+  return `data:${mediaType};base64,${bytes.toString("base64")}`;
+}

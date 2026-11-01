@@ -133,6 +133,10 @@ export type IpcContract = {
     args: [args: { sessionId: string; role: Message["role"]; content: string; attachments?: AttachmentInput[] }];
     result: Message;
   };
+  [CH.READ_ATTACHMENT_IMAGE]: {
+    args: [args: { messageId: string; attachmentId: string }];
+    result: { dataUrl: string };
+  };
   [CH.UPDATE_SESSION_TITLE]: { args: [sessionId: string, title: string]; result: void };
   [CH.UPDATE_SESSION_MODEL]: { args: [sessionId: string, provider: Provider, model: string]; result: void };
   [CH.UPDATE_SESSION_AGENT]: { args: [sessionId: string, agent: string | null]; result: void };
