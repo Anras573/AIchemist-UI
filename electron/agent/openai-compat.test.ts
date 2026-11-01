@@ -759,6 +759,123 @@ describe("openai-compat turn execution", () => {
   });
 });
 
+describe("openai-compat image attachments", () => {
+  const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  function imageRows() {
+    const dir = makeTempProject();
+    const imgPath = path.join(dir, "shot.png");
+    fs.writeFileSync(imgPath, PNG_BYTES);
+    const attachments = JSON.stringify([
+      { id: "a1", name: "shot.png", media_type: "image/png", size: PNG_BYTES.length, path: imgPath },
+    ]);
+    return {
+      rows: [
+        { id: "m-placeholder", role: "assistant", content: "" },
+        { id: "m-user", role: "user", content: "what is this?", attachments },
+      ] as Array<{ id: string; role: string; content: string }>,
+      dir,
+      imgPath,
+    };
+  }
+
+  type PromptMessage = { role: string; content: unknown };
+  const imageFileParts = (prompt: PromptMessage[]) =>
+    prompt
+      .filter((m) => m.role === "user" && Array.isArray(m.content))
+      .flatMap((m) => m.content as Array<{ type: string; mediaType?: string }>)
+      .filter((part) => part.type === "file" && part.mediaType?.startsWith("image/"));
+
+  it("sends attached images to the model as image input", async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    let capturedPrompt: PromptMessage[] = [];
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({
+        doStream: async (options) => {
+          capturedPrompt = options.prompt as unknown as PromptMessage[];
+          return textStream(["ok"]);
+        },
+      }),
+    );
+    const { rows, dir } = imageRows();
+
+    await runOpenAiCompatTurn({
+      db: makeDb(rows) as never,
+      sessionId: "s-img",
+      messageId: "m-placeholder",
+      prompt: "what is this?",
+      projectPath: dir,
+      projectConfig: { model: "local/vision-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send: vi.fn() } as never,
+    } as never);
+
+    expect(imageFileParts(capturedPrompt)).toHaveLength(1);
+  });
+
+  it("retries text-only when the endpoint rejects image input", async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    const prompts: PromptMessage[][] = [];
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({
+        doStream: async (options) => {
+          const prompt = options.prompt as unknown as PromptMessage[];
+          prompts.push(prompt);
+          if (imageFileParts(prompt).length > 0) {
+            throw new Error("400 This model does not support image input");
+          }
+          return textStream(["fine"]);
+        },
+      }),
+    );
+    const { rows, dir } = imageRows();
+    const send = vi.fn();
+
+    const text = await runOpenAiCompatTurn({
+      db: makeDb(rows) as never,
+      sessionId: "s-img-2",
+      messageId: "m-placeholder",
+      prompt: "what is this?",
+      projectPath: dir,
+      projectConfig: { model: "local/text-model", approval_mode: "none", approval_rules: [] } as never,
+      webContents: { send } as never,
+    } as never);
+
+    expect(prompts).toHaveLength(2);
+    expect(imageFileParts(prompts[1])).toHaveLength(0);
+    expect(text).toContain("didn't accept image input");
+    expect(text).toContain("fine");
+  });
+
+  it("does not swallow errors when no images were sent", async () => {
+    setEndpoints({ local: { baseURL: "http://localhost:1234/v1" } });
+    let calls = 0;
+    _setClientFactory(() => () =>
+      new MockLanguageModelV3({
+        doStream: async () => {
+          calls++;
+          throw new Error("boom");
+        },
+      }),
+    );
+
+    await expect(
+      runOpenAiCompatTurn({
+        db: makeDb([
+          { id: "m-placeholder", role: "assistant", content: "" },
+          { id: "m-user", role: "user", content: "hi" },
+        ]) as never,
+        sessionId: "s-noimg",
+        messageId: "m-placeholder",
+        prompt: "hi",
+        projectPath: makeTempProject(),
+        projectConfig: { model: "local/m", approval_mode: "none", approval_rules: [] } as never,
+        webContents: { send: vi.fn() } as never,
+      } as never),
+    ).rejects.toThrow();
+    expect(calls).toBe(1);
+  });
+});
+
 describe("openai-compat agent model override", () => {
   const ENDPOINTS = {
     alpha: { baseURL: "http://alpha.local/v1" },

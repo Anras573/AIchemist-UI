@@ -1,4 +1,4 @@
-import { appendAttachmentsToPrompt, parseAttachments } from "../attachments";
+import { appendAttachmentsToPrompt, parseAttachments, selectInlineImages } from "../attachments";
 import type { Database } from "better-sqlite3";
 import { buildSkillsContext } from "./skills";
 import { buildMemoryContext, implDeleteMemory, implReadMemory, implWriteMemory } from "./memory";
@@ -39,6 +39,8 @@ type ChatRole = "system" | "user" | "assistant" | "tool";
 interface OllamaMessage {
   role: ChatRole;
   content: string;
+  /** Base64 image payloads (vision-capable models only). */
+  images?: string[];
   thinking?: string;
   tool_calls?: OllamaToolCall[];
   tool_name?: string;
@@ -136,35 +138,33 @@ function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
 // Per-model capability cache. `show()` is a cheap local call, but the result is
 // stable for the lifetime of an installed model, so cache it to avoid a probe on
 // every turn. Cleared by `_resetOllamaClientForTests`.
-const thinkingCapabilityCache = new Map<string, boolean>();
+const capabilityCache = new Map<string, string[]>();
 
 /**
- * Whether the given model exposes a structured thinking/reasoning channel.
- * Resolved from `ollama.show()`'s `capabilities` list. Fail-safe: it never
- * throws — a turn must not break over a capability probe, it just won't stream
- * reasoning for that model.
- *
- * Caching: a successful probe (or an absent `show`, which can't change at
- * runtime) is cached per model id. A *transient* probe failure (server briefly
- * unavailable, model still pulling) returns `false` WITHOUT caching, so a later
- * turn retries rather than permanently disabling thinking for the session.
+ * The model's capability list from `ollama.show()` (e.g. "thinking", "vision").
+ * One probe serves every capability check, so it is cached per model id. Fail-safe:
+ * it never throws — a turn must not break over a capability probe. An absent
+ * `show` (can't change at runtime) is cached as "no capabilities"; a *transient*
+ * failure (Ollama unavailable, model still pulling) returns `[]` WITHOUT caching,
+ * so a later turn retries rather than permanently disabling a capability for
+ * the session.
  */
-async function modelSupportsThinking(client: OllamaClientLike, model: string): Promise<boolean> {
-  const cached = thinkingCapabilityCache.get(model);
+async function getModelCapabilities(client: OllamaClientLike, model: string): Promise<string[]> {
+  const cached = capabilityCache.get(model);
   if (cached !== undefined) return cached;
 
   if (typeof client.show !== "function") {
-    thinkingCapabilityCache.set(model, false);
-    return false;
+    capabilityCache.set(model, []);
+    return [];
   }
 
   try {
     const info = await client.show({ model });
-    const supported = Array.isArray(info?.capabilities) && info.capabilities.includes("thinking");
-    thinkingCapabilityCache.set(model, supported);
-    return supported;
+    const capabilities = Array.isArray(info?.capabilities) ? info.capabilities : [];
+    capabilityCache.set(model, capabilities);
+    return capabilities;
   } catch {
-    return false;
+    return [];
   }
 }
 
@@ -200,7 +200,12 @@ function buildSystemPrompt(params: AgentProviderParams): string {
   return parts.filter((part) => part.trim().length > 0).join("\n\n");
 }
 
-function loadHistory(db: Database, sessionId: string, placeholderMessageId: string): OllamaMessage[] {
+function loadHistory(
+  db: Database,
+  sessionId: string,
+  placeholderMessageId: string,
+  withImages = false,
+): OllamaMessage[] {
   const rows = db
     .prepare(
       `SELECT id, role, content, attachments
@@ -210,11 +215,27 @@ function loadHistory(db: Database, sessionId: string, placeholderMessageId: stri
     )
     .all(sessionId) as Array<{ id: string; role: string; content: string; attachments: string | null }>;
 
+  // Image bytes are only read for vision-capable models, bounded to the most
+  // recent few across the whole replay (see `selectInlineImages`).
+  const userRows = rows.filter((r) => r.role === "user" && r.id !== placeholderMessageId);
+  const imagesByUserRow = new Map<string, string[]>();
+  if (withImages) {
+    const picked = selectInlineImages(userRows.map((r) => parseAttachments(r.attachments)));
+    userRows.forEach((r, i) => {
+      if (picked[i].length > 0) imagesByUserRow.set(r.id, picked[i].map((img) => img.base64));
+    });
+  }
+
   const history: OllamaMessage[] = [];
   for (const row of rows) {
     if (row.id === placeholderMessageId) continue;
     if (row.role === "user") {
-      history.push({ role: "user", content: appendAttachmentsToPrompt(row.content, parseAttachments(row.attachments)) });
+      const images = imagesByUserRow.get(row.id);
+      history.push({
+        role: "user",
+        content: appendAttachmentsToPrompt(row.content, parseAttachments(row.attachments)),
+        ...(images ? { images } : {}),
+      });
       continue;
     }
     if (row.role !== "assistant") continue;
@@ -259,7 +280,8 @@ function stringifyToolResult(result: unknown): string {
 function withCurrentPrompt(history: OllamaMessage[], prompt: string): OllamaMessage[] {
   const last = history[history.length - 1];
   if (last && last.role === "user") {
-    return [...history.slice(0, -1), { role: "user", content: prompt }];
+    // Keep any inlined images: only the text is being swapped for the augmented prompt.
+    return [...history.slice(0, -1), { role: "user", content: prompt, ...(last.images ? { images: last.images } : {}) }];
   }
   return [...history, { role: "user", content: prompt }];
 }
@@ -769,8 +791,14 @@ async function runChatRound(
 
 export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<string> {
   const client = await loadClient();
-  const history = loadHistory(params.db, params.sessionId, params.messageId);
   const model = await resolveModelForTurn(client, params);
+  // One capability probe per turn serves both checks below. noTools turns are
+  // text-only generation, so skip it.
+  const capabilities = params.noTools ? [] : await getModelCapabilities(client, model);
+  // Attached images are only sent as real image input to vision-capable models
+  // (others would error); for the rest the path note in the prompt is all they get.
+  const withImages = capabilities.includes("vision");
+  const history = loadHistory(params.db, params.sessionId, params.messageId, withImages);
 
   // When noTools is true (text-only generation turns), skip all tool definitions
   // and MCP bridge startup to prevent any filesystem/shell side-effects.
@@ -818,7 +846,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   // so the `Reasoning` component lights up without breaking non-reasoning models
   // (passing `think: true` to one errors in Ollama). noTools turns are text-only
   // generation that isn't recorded, so skip the probe.
-  const think = params.noTools ? false : await modelSupportsThinking(client, model);
+  const think = capabilities.includes("thinking");
 
   // Tool rounds only happen when tools are available; a text-only (noTools)
   // turn returns after the first model response, so skip the settings read and
@@ -916,7 +944,7 @@ export async function getOllamaModels(): Promise<Array<{ id: string; name: strin
 
 export function _resetOllamaClientForTests(): void {
   clientPromise = null;
-  thinkingCapabilityCache.clear();
+  capabilityCache.clear();
 }
 
 export const ollamaProvider: AgentProvider = {
