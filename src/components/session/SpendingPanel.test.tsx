@@ -200,6 +200,8 @@ describe("SpendingPanel", () => {
           costUSD: 10,
           confidence: "exact",
           percentOfTotal: 100,
+          reportedCostUSD: 0,
+          premiumRequests: null,
         },
       ],
     });
@@ -236,6 +238,8 @@ describe("SpendingPanel", () => {
           costUSD: 0,
           confidence: "unknown",
           percentOfTotal: 0,
+          reportedCostUSD: 0,
+          premiumRequests: null,
         },
       ],
     });
@@ -276,6 +280,8 @@ describe("SpendingPanel", () => {
           costUSD: 5,
           confidence: "exact",
           percentOfTotal: 50,
+          reportedCostUSD: 0,
+          premiumRequests: null,
         },
         {
           provider: "copilot",
@@ -287,6 +293,8 @@ describe("SpendingPanel", () => {
           costUSD: 5,
           confidence: "estimated",
           percentOfTotal: 50,
+          reportedCostUSD: 0,
+          premiumRequests: null,
         },
       ],
     });
@@ -375,4 +383,60 @@ describe("SpendingPanel", () => {
     fireEvent.change(screen.getByLabelText("Custom range end"), { target: { value: "2026-07-10" } });
     expect(await screen.findByLabelText("Custom range start")).toHaveAttribute("max", "2026-07-10");
   });
+
+  it("shows the Copilot plan card from the provider's quota, omitting unlimited non-premium buckets", async () => {
+    activateProject();
+    vi.mocked(window.electronAPI.spendingCopilotQuota).mockResolvedValue({
+      ok: true,
+      snapshots: [
+        { key: "chat", unlimited: true, entitlement: -1, used: 40, remainingPercentage: 100, overage: 0, resetDate: null },
+        { key: "premium_interactions", unlimited: false, entitlement: 300, used: 120, remainingPercentage: 60, overage: 0, resetDate: "2026-12-01T00:00:00Z" },
+      ],
+    });
+    renderWithProviders(<SpendingPanel />);
+
+    const card = await screen.findByLabelText("Copilot plan usage");
+    expect(within(card).getByText("Premium requests")).toBeInTheDocument();
+    expect(within(card).getByText("120 / 300")).toBeInTheDocument();
+    expect(within(card).getByText(/60% left/)).toBeInTheDocument();
+    expect(within(card).queryByText("Chat")).not.toBeInTheDocument();
+  });
+
+  it("hides the Copilot plan card when the quota is unavailable", async () => {
+    activateProject();
+    renderWithProviders(<SpendingPanel />);
+    await waitFor(() => expect(window.electronAPI.spendingCopilotQuota).toHaveBeenCalled());
+    await screen.findByText("No usage recorded in this range.");
+    expect(screen.queryByLabelText("Copilot plan usage")).not.toBeInTheDocument();
+  });
+
+  it("marks provider-reported cost and shows Copilot premium requests in the provider table", async () => {
+    activateProject();
+    vi.mocked(window.electronAPI.spendingGetSummary).mockResolvedValue({
+      ...EMPTY_SUMMARY,
+      periodSpendUSD: 3,
+      byProvider: [
+        {
+          provider: "anthropic",
+          input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+          turn_count: 1, costUSD: 2, confidence: "exact", percentOfTotal: 66.7,
+          reportedCostUSD: 2, premiumRequests: null,
+        },
+        {
+          provider: "copilot",
+          input_tokens: 0, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+          turn_count: 3, costUSD: 1, confidence: "estimated", percentOfTotal: 33.3,
+          reportedCostUSD: 0, premiumRequests: 4.5,
+        },
+      ],
+    });
+    renderWithProviders(<SpendingPanel />);
+
+    const anthropicRow = (await screen.findByText("Claude")).closest("tr")!;
+    expect(within(anthropicRow).getByLabelText("provider-reported cost")).toBeInTheDocument();
+    const copilotRow = screen.getByText("Copilot").closest("tr")!;
+    expect(within(copilotRow).queryByLabelText("provider-reported cost")).not.toBeInTheDocument();
+    expect(within(copilotRow).getByText(`${(4.5).toLocaleString(undefined, { maximumFractionDigits: 2 })} premium req.`)).toBeInTheDocument();
+  });
 });
+

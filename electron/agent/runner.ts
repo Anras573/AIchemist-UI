@@ -10,7 +10,7 @@ import { ollamaProvider } from "./ollama";
 import { openaiCompatProvider } from "./openai-compat";
 import { codexProvider } from "./codex";
 import type { AgentProvider, AgentProviderParams } from "./provider";
-import { TurnEmitter, clearLastUsage, getLastUsage } from "./turn-emitter";
+import { TurnEmitter, clearLastUsage, getLastReportedUsage, getLastUsage } from "./turn-emitter";
 
 // ── Provider registry ─────────────────────────────────────────────────────────
 
@@ -126,6 +126,7 @@ export async function runAgentTurn(params: {
         provider: projectConfig.provider,
         model: projectConfig.model,
         usage: getLastUsage(sessionId),
+        reported: getLastReportedUsage(sessionId),
       });
     } catch (err) {
       console.error(`[usage-ledger] Failed to record usage for session ${sessionId}:`, err);

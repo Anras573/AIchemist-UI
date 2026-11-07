@@ -233,6 +233,15 @@ const MIGRATIONS: Migration[] = [
   (db) => {
     addColumnIfMissing(db, "messages", "attachments", "TEXT");
   },
+  // v11 — provider-reported usage on the ledger. `reported_cost_usd` is the
+  // USD cost the provider's own SDK computed for the turn (Claude Agent SDK);
+  // when set, the spending engine uses it instead of the token × price-table
+  // estimate. `premium_requests` is GitHub Copilot's premium-request count for
+  // the turn. Both nullable — most turns/providers report neither.
+  (db) => {
+    addColumnIfMissing(db, "usage_ledger", "reported_cost_usd", "REAL");
+    addColumnIfMissing(db, "usage_ledger", "premium_requests", "REAL");
+  },
 ];
 
 /**

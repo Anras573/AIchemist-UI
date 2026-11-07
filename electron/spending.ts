@@ -17,7 +17,7 @@ import type {
   SpendingProviderBreakdown,
 } from "../src/types/index";
 import { getUsageByProjectProviderModel, getUsageByProviderModel, type UsageFilter } from "./usage-ledger";
-import { estimateCost, safeReadPricingOverrides } from "./pricing";
+import { costUsageGroup, safeReadPricingOverrides } from "./pricing";
 import type { PricingOverrideMap } from "./pricing-overrides";
 
 const CONFIDENCE_RANK: Record<CostConfidence, number> = { exact: 0, estimated: 1, unknown: 2 };
@@ -36,6 +36,13 @@ interface ProviderAccumulator {
   turn_count: number;
   costUSD: number;
   confidence: CostConfidence;
+  reportedCostUSD: number;
+  premiumRequests: number | null;
+}
+
+/** Sum two optional counts — `null` only when both are. */
+function addNullable(a: number | null, b: number | null): number | null {
+  return a === null && b === null ? null : (a ?? 0) + (b ?? 0);
 }
 
 /**
@@ -54,7 +61,7 @@ function accumulateByProvider(
   const byProvider = new Map<Provider, ProviderAccumulator>();
 
   for (const row of rows) {
-    const cost = estimateCost({ provider: row.provider, model: row.model, usage: row, overrides });
+    const cost = costUsageGroup(row, overrides);
     const existing = byProvider.get(row.provider);
     if (existing) {
       existing.input_tokens += row.input_tokens;
@@ -64,6 +71,8 @@ function accumulateByProvider(
       existing.turn_count += row.turn_count;
       existing.costUSD += cost.totalUSD;
       existing.confidence = worseConfidence(existing.confidence, cost.confidence);
+      existing.reportedCostUSD += cost.reportedUSD;
+      existing.premiumRequests = addNullable(existing.premiumRequests, row.premium_requests);
     } else {
       byProvider.set(row.provider, {
         provider: row.provider,
@@ -74,6 +83,8 @@ function accumulateByProvider(
         turn_count: row.turn_count,
         costUSD: cost.totalUSD,
         confidence: cost.confidence,
+        reportedCostUSD: cost.reportedUSD,
+        premiumRequests: row.premium_requests,
       });
     }
   }
@@ -96,7 +107,7 @@ function accumulateByProject(
 ): Map<string, ProjectAccumulator> {
   const byProject = new Map<string, ProjectAccumulator>();
   for (const row of getUsageByProjectProviderModel(db, filter)) {
-    const cost = estimateCost({ provider: row.provider, model: row.model, usage: row, overrides });
+    const cost = costUsageGroup(row, overrides);
     const existing = byProject.get(row.project_id);
     if (existing) {
       existing.turn_count += row.turn_count;
@@ -183,6 +194,8 @@ export function getSpendingSummary(
       costUSD: p.costUSD,
       confidence: p.confidence,
       percentOfTotal: periodSpendUSD > 0 ? (p.costUSD / periodSpendUSD) * 100 : 0,
+      reportedCostUSD: p.reportedCostUSD,
+      premiumRequests: p.premiumRequests,
     }));
 
   let byProject: SpendingProjectBreakdown[] = [];

@@ -76,6 +76,7 @@ export const ipc = {
   budgetGetStatus: () => window.electronAPI.budgetGetStatus(),
   spendingGetSummary: (params: { projectId?: string | null; since?: string | null; until?: string | null }) =>
     window.electronAPI.spendingGetSummary(params),
+  spendingCopilotQuota: () => window.electronAPI.spendingCopilotQuota(),
 
   // Agent
   agentSend: (args: { sessionId: string; prompt: string; agent?: string; oneshotSkills?: string[]; skipPersistence?: boolean; messageId?: string }) =>

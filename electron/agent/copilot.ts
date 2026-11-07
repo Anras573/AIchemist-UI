@@ -10,7 +10,7 @@ import type { Database } from "better-sqlite3";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { AgentInfo, ProjectConfig } from "../../src/types/index";
+import type { AgentInfo, CopilotQuotaSnapshot, CopilotQuotaStatus, ProjectConfig } from "../../src/types/index";
 import { getApiKey } from "../config";
 import { parseAgentMarkdown } from "./agent-file";
 import { requestApproval, requiresApproval } from "./approval";
@@ -82,6 +82,57 @@ export async function getCopilotModels(): Promise<Array<{ id: string; name: stri
   const client = await getClient();
   const models = await client.listModels();
   return models.map((m) => ({ id: m.id, name: m.name }));
+}
+
+/** Fold one `assistant.usage` event into the turn's running premium-request count (`null` until a billable call is seen). Exported for tests. */
+export function addPremiumRequests(
+  running: number | null,
+  data: { cost?: number; initiator?: string; isByok?: boolean }
+): number | null {
+  if (data.initiator || data.isByok) return running;
+  if (typeof data.cost !== "number" || !Number.isFinite(data.cost) || data.cost < 0) return running;
+  return (running ?? 0) + data.cost;
+}
+
+const QUOTA_TIMEOUT_MS = 5_000;
+
+/**
+ * The signed-in Copilot user's plan quota for the current billing period, via
+ * the SDK's (experimental) `account.getQuota()` RPC. Never throws — a missing
+ * token, timeout, or RPC failure resolves `{ ok: false, reason }`.
+ */
+export async function getCopilotQuota(): Promise<CopilotQuotaStatus> {
+  if (!getApiKey("github")) return { ok: false, reason: "GITHUB_TOKEN is not configured" };
+  try {
+    const client = await getClient();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Timed out fetching Copilot quota")), QUOTA_TIMEOUT_MS);
+    });
+    try {
+      const result = await Promise.race([client.rpc.account.getQuota({}), timeout]);
+      const snapshots: CopilotQuotaSnapshot[] = Object.entries(result.quotaSnapshots ?? {}).flatMap(([key, q]) =>
+        q
+          ? [
+              {
+                key,
+                unlimited: q.isUnlimitedEntitlement,
+                entitlement: q.entitlementRequests,
+                used: q.usedRequests,
+                remainingPercentage: q.remainingPercentage,
+                overage: q.overage,
+                resetDate: q.resetDate ?? null,
+              },
+            ]
+          : []
+      );
+      return { ok: true, snapshots };
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 // ── Agent scanning ────────────────────────────────────────────────────────────
@@ -792,7 +843,17 @@ export async function runCopilotAgentTurn(params: {
 
   let fullText = "";
   let turnOutputTokens = 0;
+  let turnPremiumRequests: number | null = null;
   const done = new Promise<void>((resolve, reject) => {
+    // Copilot's own billing figure for each model call: `cost` is the model's
+    // premium-request multiplier. Only user-initiated calls are counted
+    // (`initiator` is set for sub-agent / MCP-sampling calls, which aren't
+    // billed as separate premium requests), and BYOK calls are never billed.
+    session.on("assistant.usage", (event) => {
+      turnPremiumRequests = addPremiumRequests(turnPremiumRequests, event.data);
+      if (turnPremiumRequests !== null) emitter.reportedUsage({ premium_requests: turnPremiumRequests });
+    });
+
     // The SDK emits "assistant.message" each time the accumulated text grows
     // (streaming). Track previous length to compute incremental deltas.
     session.on("assistant.message", (event) => {

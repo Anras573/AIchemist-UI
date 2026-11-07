@@ -178,3 +178,20 @@ describe("computeBudgetStatus — configured budget", () => {
     expect(status.global.burnRatePerDayUSD).toBeLessThanOrEqual(status.global.spendUSD * 24 + 1e-9);
   });
 });
+
+describe("computeBudgetStatus — provider-reported cost", () => {
+  it("counts a turn's provider-reported cost instead of the token estimate", () => {
+    recordUsage(db, {
+      sessionId: "s1",
+      projectId: "p1",
+      provider: "anthropic",
+      model: "claude-3-7-sonnet-20250219",
+      usage: USAGE,
+      reported: { cost_usd: 0.42 },
+      createdAt: "2026-07-10T00:00:00.000Z",
+    });
+
+    const status = computeBudgetStatus(db, emptyBudgetConfig(), new Date("2026-07-10T12:00:00Z"));
+    expect(status.global.spendUSD).toBeCloseTo(0.42);
+  });
+});

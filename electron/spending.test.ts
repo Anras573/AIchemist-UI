@@ -276,3 +276,37 @@ describe("getSpendingSummary — all projects", () => {
     expect(getSpendingSummary(db, { projectId: "p1" }).byProject).toEqual([]);
   });
 });
+
+describe("getSpendingSummary — provider-reported usage", () => {
+  it("uses provider-reported cost for reported turns and estimates the rest", () => {
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    const estimateOnly = getSpendingSummary(db, { projectId: "p1" }).periodSpendUSD;
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE, reported: { cost_usd: 0.5 } });
+
+    const summary = getSpendingSummary(db, { projectId: "p1" });
+    expect(summary.periodSpendUSD).toBeCloseTo(estimateOnly + 0.5);
+    expect(summary.byProvider).toHaveLength(1);
+    expect(summary.byProvider[0]).toMatchObject({ turn_count: 2, reportedCostUSD: 0.5 });
+  });
+
+  it("surfaces Copilot premium requests per provider, null for providers that report none", () => {
+    const usage = { input_tokens: 0, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "copilot", model: "gpt-4o", usage, reported: { premium_requests: 1 } });
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "copilot", model: "gpt-4o", usage, reported: { premium_requests: 0.33 } });
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+
+    const summary = getSpendingSummary(db, { projectId: "p1" });
+    const copilot = summary.byProvider.find((p) => p.provider === "copilot")!;
+    const anthropic = summary.byProvider.find((p) => p.provider === "anthropic")!;
+    expect(copilot.premiumRequests).toBeCloseTo(1.33);
+    expect(copilot.reportedCostUSD).toBe(0);
+    expect(anthropic.premiumRequests).toBeNull();
+  });
+
+  it("applies reported cost to the all-projects per-project breakdown too", () => {
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE, reported: { cost_usd: 0.25 } });
+    const all = getSpendingSummary(db, {});
+    expect(all.byProject[0]).toMatchObject({ projectId: "p2", costUSD: 0.25, confidence: "exact" });
+  });
+});
+

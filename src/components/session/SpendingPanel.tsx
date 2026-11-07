@@ -8,7 +8,14 @@ import { PROVIDER_SHORT_LABELS } from "@/lib/providers";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { WithTooltip } from "@/components/ui/with-tooltip";
-import type { BudgetStatus, CostConfidence, SessionStatusEvent, SpendingSummary } from "@/types";
+import type {
+  BudgetStatus,
+  CopilotQuotaSnapshot,
+  CopilotQuotaStatus,
+  CostConfidence,
+  SessionStatusEvent,
+  SpendingSummary,
+} from "@/types";
 
 // ── Scope ───────────────────────────────────────────────────────────────────────
 
@@ -67,6 +74,11 @@ function formatTokens(v: number): string {
   return v.toLocaleString();
 }
 
+/** Premium-request counts can be fractional (model multipliers like 0.33×). */
+function formatRequests(v: number): string {
+  return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
 /**
  * A row/total priced `unknown` always carries `costUSD: 0` (`estimateCost()`
  * returns `zeroCost()` when no pricing data resolves) — that's a "we don't
@@ -101,6 +113,103 @@ function ConfidenceBadge({ confidence }: { confidence: CostConfidence }) {
         {CONFIDENCE_LABEL[confidence]}
       </Badge>
     </WithTooltip>
+  );
+}
+
+// ── Provider-reported badge ─────────────────────────────────────────────────────
+
+function ReportedBadge({ reportedUSD, totalUSD }: { reportedUSD: number; totalUSD: number }) {
+  if (reportedUSD <= 0) return null;
+  const all = reportedUSD >= totalUSD - 1e-9;
+  const label = all
+    ? "Cost reported by the provider's SDK rather than estimated from token counts."
+    : `${formatUSD(reportedUSD)} of ${formatUSD(totalUSD)} was reported by the provider's SDK; the rest is estimated from token counts.`;
+  return (
+    <WithTooltip label={label}>
+      <Badge
+        variant="outline"
+        aria-label="provider-reported cost"
+        className="border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400"
+      >
+        reported
+      </Badge>
+    </WithTooltip>
+  );
+}
+
+// ── Copilot plan quota ──────────────────────────────────────────────────────────
+
+const QUOTA_LABELS: Record<string, string> = {
+  premium_interactions: "Premium requests",
+  chat: "Chat",
+  completions: "Completions",
+};
+
+function quotaLabel(key: string): string {
+  return QUOTA_LABELS[key] ?? key.replace(/_/g, " ");
+}
+
+function formatResetDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/**
+ * Copilot's own view of the plan — premium requests used vs. included this
+ * billing period, straight from the SDK's `account.getQuota()`. Unlimited
+ * buckets (chat/completions on paid plans) are omitted as noise, except
+ * premium requests, which are always shown.
+ */
+function CopilotQuotaCard({ snapshots }: { snapshots: CopilotQuotaSnapshot[] }) {
+  const shown = snapshots
+    .filter((q) => !q.unlimited || q.key === "premium_interactions")
+    .sort((a, b) => (a.key === "premium_interactions" ? -1 : b.key === "premium_interactions" ? 1 : 0));
+  if (shown.length === 0) return null;
+  return (
+    <div className="rounded-md border border-border px-3 py-2 space-y-2" aria-label="Copilot plan usage">
+      <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Copilot plan (reported by GitHub)</p>
+      {shown.map((q) => {
+        const reset = formatResetDate(q.resetDate);
+        const usedPct = q.unlimited || q.entitlement <= 0 ? 0 : Math.min(100, (q.used / q.entitlement) * 100);
+        return (
+          <div key={q.key} className="space-y-1">
+            <div className="flex items-baseline justify-between gap-2 text-xs">
+              <span>{quotaLabel(q.key)}</span>
+              <span className="tabular-nums font-medium">
+                {q.unlimited ? "Unlimited" : `${formatRequests(q.used)} / ${formatRequests(q.entitlement)}`}
+              </span>
+            </div>
+            {!q.unlimited && (
+              <div
+                className="h-1.5 rounded-full bg-muted overflow-hidden"
+                role="progressbar"
+                aria-label={`${quotaLabel(q.key)} used`}
+                aria-valuenow={Math.round(usedPct)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className={cn("h-full rounded-full", usedPct >= 90 ? "bg-destructive" : "bg-foreground/60")}
+                  style={{ width: `${usedPct}%` }}
+                />
+              </div>
+            )}
+            {(!q.unlimited || reset) && (
+              <p className="text-[11px] text-muted-foreground">
+                {[
+                  !q.unlimited ? `${Math.round(q.remainingPercentage)}% left` : null,
+                  q.overage > 0 ? `${formatRequests(q.overage)} over` : null,
+                  reset ? `resets ${reset}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -153,6 +262,11 @@ export function SpendingHeaderInfo() {
             across all projects.
           </span>
           <span className="text-muted-foreground">
+            Rows marked &ldquo;reported&rdquo; use the cost the provider&apos;s own SDK computed
+            (Claude Agent SDK) instead of our estimate. Copilot rows show premium requests, and the
+            Copilot plan card shows your quota as GitHub reports it.
+          </span>
+          <span className="text-muted-foreground">
             Switch to &ldquo;All projects&rdquo; for a total breakdown across every project.
           </span>
         </div>
@@ -201,6 +315,12 @@ export function SpendingPanel() {
   const budgetKey = "spending-budget-status";
   const budget = useIpcQuery<BudgetStatus>(budgetKey, () => ipc.budgetGetStatus(), { ttl: 15_000 });
 
+  const copilotQuota = useIpcQuery<CopilotQuotaStatus>(
+    "spending-copilot-quota",
+    () => ipc.spendingCopilotQuota(),
+    { ttl: 60_000 }
+  );
+
   // Refresh once a turn's usage row is durably recorded — `recordUsage()` runs
   // before the session transitions to "idle" (see electron/agent/runner.ts), so
   // by the time this fires the ledger already reflects the completed turn. Any
@@ -213,8 +333,9 @@ export function SpendingPanel() {
       if (payload.status !== "idle") return;
       void summary.refetch();
       void budget.refetch();
+      void copilotQuota.refetch();
     });
-  }, [summary.refetch, budget.refetch]);
+  }, [summary.refetch, budget.refetch, copilotQuota.refetch]);
 
   const scopeToggle = (
     <div className="flex items-center gap-1" role="group" aria-label="Spending scope">
@@ -342,6 +463,8 @@ export function SpendingPanel() {
         <KpiCard label="Burn rate" value={burnRate} />
       </div>
 
+      {copilotQuota.data?.ok && <CopilotQuotaCard snapshots={copilotQuota.data.snapshots} />}
+
       {/* Provider breakdown */}
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">By provider</p>
@@ -367,7 +490,13 @@ export function SpendingPanel() {
                       <span className="flex items-center gap-1.5">
                         {PROVIDER_SHORT_LABELS[p.provider]}
                         <ConfidenceBadge confidence={p.confidence} />
+                        <ReportedBadge reportedUSD={p.reportedCostUSD} totalUSD={p.costUSD} />
                       </span>
+                      {p.premiumRequests !== null && (
+                        <span className="block text-[11px] text-muted-foreground tabular-nums">
+                          {`${formatRequests(p.premiumRequests)} premium req.`}
+                        </span>
+                      )}
                     </td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{formatTokens(p.input_tokens)}</td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{formatTokens(p.output_tokens)}</td>

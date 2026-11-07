@@ -84,6 +84,7 @@ export interface ElectronAPI {
     since?: string | null;
     until?: string | null;
   }) => Promise<Res<typeof CH.SPENDING_GET_SUMMARY>>;
+  spendingCopilotQuota: () => Promise<Res<typeof CH.SPENDING_COPILOT_QUOTA>>;
 
   // ── Dialog ────────────────────────────────────────────────────────────────
   openFolderDialog: () => Promise<Res<typeof CH.OPEN_FOLDER_DIALOG>>;
@@ -284,6 +285,7 @@ const api: ElectronAPI = {
   budgetWrite: (config) => invoke(CH.BUDGET_WRITE, config),
   budgetGetStatus: () => invoke(CH.BUDGET_GET_STATUS),
   spendingGetSummary: (params) => invoke(CH.SPENDING_GET_SUMMARY, params),
+  spendingCopilotQuota: () => invoke(CH.SPENDING_COPILOT_QUOTA),
 
   openFolderDialog: () => invoke(CH.OPEN_FOLDER_DIALOG),
   openGitHubUrl: (url) => invoke(CH.OPEN_GITHUB_URL, url),
