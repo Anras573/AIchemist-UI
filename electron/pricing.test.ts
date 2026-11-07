@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import { defaultCatalog, getModelMeta } from "tokenlens";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "./db";
-import { estimateCost } from "./pricing";
+import { costUsageGroup, estimateCost } from "./pricing";
 import { _setPricingOverridesPathForTests, readPricingOverrides, upsertPricingOverride } from "./pricing-overrides";
 import { getUsageByProviderModel, recordUsage } from "./usage-ledger";
 
@@ -316,5 +316,27 @@ describe("integration — costing the usage-ledger's provider/model aggregation"
       requireCatalogRate("anthropic", "claude-3-5-haiku-20241022", "input");
     expect(totalUSD).toBeCloseTo(expectedUSD, 5);
     expect(costs.every((c) => c.confidence === "exact")).toBe(true);
+  });
+});
+
+describe("costUsageGroup", () => {
+  const usage = { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+
+  it("uses a group's reported cost as-is, marked exact", () => {
+    const cost = costUsageGroup({
+      provider: "anthropic",
+      model: "claude-3-7-sonnet-20250219",
+      has_reported_cost: 1,
+      reported_cost_usd: 0.12,
+      ...usage,
+    });
+    expect(cost).toEqual({ totalUSD: 0.12, confidence: "exact", reportedUSD: 0.12 });
+  });
+
+  it("falls back to the token estimate when the group has no reported cost", () => {
+    const row = { provider: "anthropic" as const, model: "claude-3-7-sonnet-20250219", has_reported_cost: 0 as const, reported_cost_usd: null, ...usage };
+    const cost = costUsageGroup(row);
+    expect(cost.reportedUSD).toBe(0);
+    expect(cost.totalUSD).toBe(estimateCost({ provider: row.provider, model: row.model, usage }).totalUSD);
   });
 });

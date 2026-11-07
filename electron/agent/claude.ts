@@ -449,6 +449,11 @@ export async function runClaudeAgentTurn(params: {
   });
 
   let resultSessionId: string | null = null;
+  // Cumulative SDK-estimated cost from the latest result message (see
+  // reportedClaudeTurnCost); null when no result arrived or its pricing basis
+  // was unknown.
+  let resultCostTotalUSD: number | null = null;
+  let resultCostBasisUnknown = false;
   let fullText = "";
 
   // Map tool_use_id → tool_name so we can label results
@@ -587,6 +592,10 @@ export async function runClaudeAgentTurn(params: {
         }
       } else if (msg.type === "result") {
         resultSessionId = msg.session_id;
+        if (typeof msg.total_cost_usd === "number" && Number.isFinite(msg.total_cost_usd)) {
+          resultCostTotalUSD = msg.total_cost_usd;
+        }
+        resultCostBasisUnknown = Object.values(msg.modelUsage ?? {}).some((m) => m.costBasis === "unknown");
       } else if (msg.type === "system") {
         const sysMsg = msg as { type: "system"; subtype: string; [key: string]: unknown };
         if (sysMsg.subtype === "compact_boundary") {
@@ -606,12 +615,59 @@ export async function runClaudeAgentTurn(params: {
     emitter.flush();
   }
 
-  // 5. Persist the SDK session id if it changed or was assigned for the first time
-  if (resultSessionId && resultSessionId !== sdkSessionId) {
-    providerSessionStore.set(db, sessionId, "claude", { sdkSessionId: resultSessionId });
+  // 5. Report the SDK's own cost for this turn, then persist the SDK session id
+  //    (if it changed or was assigned for the first time) and the new cost
+  //    baseline.
+  const prior = providerSessionStore.get(db, sessionId, "claude");
+  if (resultCostTotalUSD !== null) {
+    const turnCostUSD = reportedClaudeTurnCost({
+      resumedFrom: sdkSessionId,
+      resultSessionId,
+      totalUSD: resultCostTotalUSD,
+      priorTotalUSD: prior?.costTotalUSD ?? null,
+    });
+    if (turnCostUSD !== null && !resultCostBasisUnknown) emitter.reportedUsage({ cost_usd: turnCostUSD });
+  }
+  const nextSdkSessionId = resultSessionId ?? sdkSessionId;
+  const nextCostTotalUSD = resultCostTotalUSD ?? prior?.costTotalUSD ?? null;
+  if (
+    nextSdkSessionId &&
+    (nextSdkSessionId !== sdkSessionId || nextCostTotalUSD !== (prior?.costTotalUSD ?? null))
+  ) {
+    providerSessionStore.set(db, sessionId, "claude", {
+      sdkSessionId: nextSdkSessionId,
+      costTotalUSD: nextCostTotalUSD,
+    });
   }
 
   return fullText;
+}
+
+/**
+ * This turn's cost from the Agent SDK's `result.total_cost_usd`, or `null` when
+ * it can't be isolated. The SDK figure is CUMULATIVE for the SDK session (a
+ * resumed session continues from its transcript's saved total), and it
+ * includes subagent calls — unlike our token-based ledger usage. So:
+ * - fresh SDK session (no resume, or the resume produced a different session
+ *   id) → the total IS this turn's cost;
+ * - resumed with a known baseline → the difference (a total below the
+ *   baseline means the SDK reset its running total, so the total is this
+ *   turn's cost);
+ * - resumed with no baseline (first turn after this shipped) → unknown; the
+ *   turn falls back to the price-table estimate and this result becomes the
+ *   baseline for next time.
+ */
+export function reportedClaudeTurnCost(params: {
+  resumedFrom: string | null;
+  resultSessionId: string | null;
+  totalUSD: number;
+  priorTotalUSD: number | null;
+}): number | null {
+  const { resumedFrom, resultSessionId, totalUSD, priorTotalUSD } = params;
+  const fresh = !resumedFrom || (resultSessionId !== null && resultSessionId !== resumedFrom);
+  if (fresh) return totalUSD;
+  if (priorTotalUSD === null) return null;
+  return totalUSD >= priorTotalUSD ? totalUSD - priorTotalUSD : totalUSD;
 }
 
 // ── AgentProvider implementation ──────────────────────────────────────────────

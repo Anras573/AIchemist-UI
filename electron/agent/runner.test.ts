@@ -167,7 +167,37 @@ describe("runAgentTurn usage ledger", () => {
       provider: "copilot",
       model: "gpt-x",
       usage,
+      reported: {},
     });
+  });
+
+  it("passes provider-reported usage through to the ledger and clears it for the next turn", async () => {
+    loadToolCallsForMessageMock.mockReturnValue([]);
+    copilotRunMock.mockImplementationOnce(async (params: { webContents: Electron.WebContents; sessionId: string }) => {
+      const emitter = new TurnEmitter(params.webContents, params.sessionId);
+      emitter.reportedUsage({ premium_requests: 1 });
+      emitter.reportedUsage({ premium_requests: 2 });
+      emitter.reportedUsage({ cost_usd: 0.5 });
+      return "response";
+    });
+    copilotRunMock.mockResolvedValueOnce("second");
+
+    const db = makeDb();
+    const turn = {
+      db: db as any,
+      sessionId: "sess-3",
+      projectId: "proj-1",
+      prompt: "help me",
+      projectPath: "/project",
+      projectConfig: { provider: "copilot", model: "gpt-x" } as any,
+      webContents: { send: vi.fn() } as any,
+    };
+    await runAgentTurn(turn);
+    await runAgentTurn(turn);
+
+    expect(recordUsageMock.mock.calls[0][1].reported).toEqual({ premium_requests: 2, cost_usd: 0.5 });
+    expect(recordUsageMock.mock.calls[1][1].reported).toEqual({});
+    loadToolCallsForMessageMock.mockReset();
   });
 
   it("records an all-zero usage row when the provider never calls usage()", async () => {
@@ -195,6 +225,7 @@ describe("runAgentTurn usage ledger", () => {
       provider: "copilot",
       model: "",
       usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      reported: {},
     });
   });
 

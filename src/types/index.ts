@@ -602,6 +602,18 @@ export interface SessionUsage {
   cache_creation_input_tokens: number;
 }
 
+/**
+ * Cost/usage figures a provider's own SDK reported for a turn, as opposed to
+ * our token-count × price-table estimate. Every field is optional — most
+ * providers report none of them.
+ */
+export interface ProviderReportedUsage {
+  /** USD cost the provider SDK computed for the turn (Claude Agent SDK's `total_cost_usd`, differenced per turn). */
+  cost_usd?: number | null;
+  /** GitHub Copilot premium requests consumed by the turn (sum of `assistant.usage.cost` multipliers). */
+  premium_requests?: number | null;
+}
+
 export interface SessionUsageEvent {
   session_id: string;
   usage: SessionUsage;
@@ -698,11 +710,33 @@ export interface SpendingProviderBreakdown {
   confidence: CostConfidence;
   /** 0-100, this row's share of `periodSpendUSD`. `0` when the period total is 0. */
   percentOfTotal: number;
+  /** Portion of `costUSD` taken from the provider's own reported cost rather than our price-table estimate. `0` when nothing was reported. */
+  reportedCostUSD: number;
+  /** Copilot premium requests the provider reported for this range, or `null` when none were reported (any non-Copilot provider). */
+  premiumRequests: number | null;
 }
 
-/** Result of SPENDING_GET_SUMMARY — one project's spend for `range`, aggregated across every provider used in it, plus that project's all-time total. */
-export interface SpendingSummary {
+/** One project's spend for a time range — a row in the Spending panel's "All projects" per-project breakdown. */
+export interface SpendingProjectBreakdown {
   projectId: string;
+  /** The project's display name, or `null` if the project row no longer resolves. */
+  projectName: string | null;
+  turn_count: number;
+  costUSD: number;
+  /** Worst-of the confidence across every provider/model group rolled into this row. */
+  confidence: CostConfidence;
+  /** 0-100, this row's share of `periodSpendUSD`. `0` when the period total is 0. */
+  percentOfTotal: number;
+}
+
+/**
+ * Result of SPENDING_GET_SUMMARY — spend for `range`, aggregated across every
+ * provider, plus the all-time total. Scoped to one project when `projectId` is
+ * set, or across every project when it's `null`.
+ */
+export interface SpendingSummary {
+  /** The project the summary is scoped to, or `null` for the all-projects rollup. */
+  projectId: string | null;
   range: SpendingRangeFilter;
   periodSpendUSD: number;
   /** Worst-of the confidence across every `byProvider` row — `exact` when there's no usage in the range (nothing to be uncertain about). Lets the KPI card mark `periodSpendUSD` as estimated rather than presenting a total built from partial data as exact. */
@@ -712,7 +746,30 @@ export interface SpendingSummary {
   lifetimeConfidence: CostConfidence;
   /** Sorted by `costUSD` descending. */
   byProvider: SpendingProviderBreakdown[];
+  /** Per-project breakdown for `range`, sorted by `costUSD` descending. Only populated for the all-projects rollup (`projectId === null`); empty otherwise. */
+  byProject: SpendingProjectBreakdown[];
 }
+
+/** One Copilot quota bucket (e.g. `premium_interactions`) for the current billing period, from the SDK's `account.getQuota()`. */
+export interface CopilotQuotaSnapshot {
+  /** Quota type key as the SDK reports it — `premium_interactions`, `chat`, `completions`, … */
+  key: string;
+  unlimited: boolean;
+  /** Requests included in the plan; `-1` when unlimited. */
+  entitlement: number;
+  used: number;
+  /** 0-100. */
+  remainingPercentage: number;
+  /** Requests made past the entitlement this period. */
+  overage: number;
+  /** ISO date the quota resets, when the SDK reports one. */
+  resetDate: string | null;
+}
+
+/** Result of COPILOT_GET_QUOTA. `ok: false` when Copilot isn't configured or the quota lookup failed. */
+export type CopilotQuotaStatus =
+  | { ok: true; snapshots: CopilotQuotaSnapshot[] }
+  | { ok: false; reason: string };
 
 // ── Auto-update ─────────────────────────────────────────────────────────────
 

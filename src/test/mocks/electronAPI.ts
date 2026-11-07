@@ -69,7 +69,9 @@ export function createElectronAPIMock(): Window["electronAPI"] {
       lifetimeSpendUSD: 0,
       lifetimeConfidence: "exact",
       byProvider: [],
+      byProject: [],
     }),
+    spendingCopilotQuota: vi.fn().mockResolvedValue({ ok: false, reason: "GITHUB_TOKEN is not configured" }),
 
     // Dialog
     openFolderDialog: vi.fn().mockResolvedValue(null),

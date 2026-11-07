@@ -3,6 +3,7 @@ import type {
   CompactionEvent,
   Message,
   FileChange,
+  ProviderReportedUsage,
   SessionStatus,
   SessionUsage,
 } from "../../src/types/index";
@@ -35,6 +36,21 @@ export function getLastUsage(sessionId: string): SessionUsage {
 /** Drop the tracked usage reading for `sessionId`. Call after consuming it, and before starting a new turn. */
 export function clearLastUsage(sessionId: string): void {
   lastUsageBySession.delete(sessionId);
+  reportedUsageBySession.delete(sessionId);
+}
+
+/**
+ * Provider-reported cost/usage for the current turn, keyed by `sessionId` —
+ * same seam and lifecycle as {@link lastUsageBySession} (set via
+ * `TurnEmitter.reportedUsage()`, read by the runner post-turn, cleared by
+ * {@link clearLastUsage}). Main-process only; nothing is pushed to the
+ * renderer for it.
+ */
+const reportedUsageBySession = new Map<string, ProviderReportedUsage>();
+
+/** The provider-reported usage recorded for `sessionId` this turn (`{}` if none). Always a fresh object. */
+export function getLastReportedUsage(sessionId: string): ProviderReportedUsage {
+  return { ...(reportedUsageBySession.get(sessionId) ?? {}) };
 }
 
 /**
@@ -172,6 +188,16 @@ export class TurnEmitter {
   thinkingDone(): void {
     this.flush();
     this.webContents.send(CH.SESSION_THINKING_DONE, { session_id: this.sessionId });
+  }
+
+  /**
+   * Record cost/usage the provider's own SDK reported for the current turn.
+   * Merged field-by-field into the turn's running value (each call carries a
+   * running total, not a delta), so a provider reporting cost and premium
+   * requests at different points doesn't clobber one with the other.
+   */
+  reportedUsage(reported: ProviderReportedUsage): void {
+    reportedUsageBySession.set(this.sessionId, { ...reportedUsageBySession.get(this.sessionId), ...reported });
   }
 
   /** Token usage update for the current turn (SESSION_USAGE). */

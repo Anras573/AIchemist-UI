@@ -1,6 +1,6 @@
 import * as crypto from "crypto";
 import type { Database } from "better-sqlite3";
-import type { Provider, SessionUsage } from "../src/types/index";
+import type { Provider, ProviderReportedUsage, SessionUsage } from "../src/types/index";
 import { stmt } from "./db-stmt-cache";
 
 /**
@@ -26,6 +26,15 @@ export interface UsageLedgerRow {
   cache_creation_input_tokens: number;
   created_at: string;
   source: UsageSource;
+  /** USD cost the provider's SDK reported for the turn; `null` when it reported none (priced from tokens instead). */
+  reported_cost_usd: number | null;
+  /** Copilot premium requests for the turn; `null` for other providers / when unreported. */
+  premium_requests: number | null;
+}
+
+/** A reported figure is only kept when it's a finite, non-negative number — anything else is treated as "not reported". */
+function reportedNumber(v: number | null | undefined): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
 }
 
 /** Record one completed turn's token usage. Fails loudly — callers should treat this as best-effort and not let a write error break the turn. */
@@ -41,14 +50,16 @@ export function recordUsage(
     createdAt?: string;
     /** Defaults to `"live"` — the runner never passes this explicitly. */
     source?: UsageSource;
+    /** Cost/usage the provider's own SDK reported for the turn, if any. */
+    reported?: ProviderReportedUsage;
   }
 ): void {
   const model = params.model?.trim() || null;
   stmt(
     db,
     `INSERT INTO usage_ledger
-       (id, session_id, project_id, provider, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, created_at, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, session_id, project_id, provider, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, created_at, source, reported_cost_usd, premium_requests)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     crypto.randomUUID(),
     params.sessionId,
@@ -60,7 +71,9 @@ export function recordUsage(
     params.usage.cache_read_input_tokens,
     params.usage.cache_creation_input_tokens,
     params.createdAt ?? new Date().toISOString(),
-    params.source ?? "live"
+    params.source ?? "live",
+    reportedNumber(params.reported?.cost_usd),
+    reportedNumber(params.reported?.premium_requests)
   );
 }
 
@@ -98,6 +111,20 @@ export interface UsageBySession extends UsageTotals {
 export interface UsageByProviderModel extends UsageTotals {
   provider: Provider;
   model: string | null;
+  /**
+   * `1` when every row in this group carries a provider-reported cost, `0` when
+   * none does — the priced queries split each provider+model group on this so
+   * reported turns use their reported cost and the rest are priced from tokens.
+   */
+  has_reported_cost: 0 | 1;
+  /** Sum of `reported_cost_usd` — `null` exactly when `has_reported_cost` is `0`. */
+  reported_cost_usd: number | null;
+  /** Sum of `premium_requests`, or `null` when no row in the group reported any. */
+  premium_requests: number | null;
+}
+
+export interface UsageByProjectProviderModel extends UsageByProviderModel {
+  project_id: string;
 }
 
 export interface UsageByDay extends UsageTotals {
@@ -180,16 +207,45 @@ export function getUsageBySession(db: Database, filter: UsageFilter = {}): Usage
 /**
  * Totals grouped by provider + model — the granularity the pricing engine
  * (`electron/pricing.ts`) needs, since cost depends on which model served each
- * turn and a provider's rows may span several differently-priced models.
+ * turn and a provider's rows may span several differently-priced models. Each
+ * group is further split on whether its rows carry a provider-reported cost
+ * (`has_reported_cost`), so a provider+model can appear twice; price rows with
+ * `costUsageGroup()` rather than `estimateCost()` directly.
  */
 export function getUsageByProviderModel(db: Database, filter: UsageFilter = {}): UsageByProviderModel[] {
   const { clause, params } = buildWhere(filter);
   return db
     .prepare(
-      `SELECT provider, model, ${TOTALS_SELECT} FROM usage_ledger ${clause} GROUP BY provider, model ORDER BY provider, model`
+      `SELECT provider, model, ${TOTALS_SELECT}, ${REPORTED_SELECT} FROM usage_ledger ${clause}
+       GROUP BY provider, model, has_reported_cost ORDER BY provider, model, has_reported_cost`
     )
     .all(...params) as UsageByProviderModel[];
 }
+
+/**
+ * Totals grouped by project + provider + model — the cross-project rollup at
+ * the granularity the pricing engine needs (see `getUsageByProviderModel`).
+ * Backs the Spending panel's "All projects" per-project breakdown.
+ */
+export function getUsageByProjectProviderModel(
+  db: Database,
+  filter: UsageFilter = {}
+): UsageByProjectProviderModel[] {
+  const { clause, params } = buildWhere(filter);
+  return db
+    .prepare(
+      `SELECT project_id, provider, model, ${TOTALS_SELECT}, ${REPORTED_SELECT} FROM usage_ledger ${clause}
+       GROUP BY project_id, provider, model, has_reported_cost ORDER BY project_id, provider, model, has_reported_cost`
+    )
+    .all(...params) as UsageByProjectProviderModel[];
+}
+
+/** Columns the priced (provider+model) queries add on top of {@link TOTALS_SELECT}. */
+const REPORTED_SELECT = `
+  (reported_cost_usd IS NOT NULL) AS has_reported_cost,
+  SUM(reported_cost_usd) AS reported_cost_usd,
+  SUM(premium_requests) AS premium_requests
+`;
 
 /** Totals grouped by calendar day (UTC date prefix of `created_at`) — backs time-series charts. */
 export function getUsageByDay(db: Database, filter: UsageFilter = {}): UsageByDay[] {

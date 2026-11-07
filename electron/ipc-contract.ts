@@ -58,6 +58,7 @@ import type {
   BudgetConfig,
   BudgetStatus,
   SpendingSummary,
+  CopilotQuotaStatus,
   UpdateStateSnapshot,
   UpdateStatus,
 } from "../src/types";
@@ -157,9 +158,10 @@ export type IpcContract = {
   [CH.BUDGET_WRITE]: { args: [config: BudgetConfig]; result: BudgetConfig };
   [CH.BUDGET_GET_STATUS]: { args: []; result: BudgetStatus };
   [CH.SPENDING_GET_SUMMARY]: {
-    args: [params: { projectId: string; since?: string | null; until?: string | null }];
+    args: [params: { projectId?: string | null; since?: string | null; until?: string | null }];
     result: SpendingSummary;
   };
+  [CH.SPENDING_COPILOT_QUOTA]: { args: []; result: CopilotQuotaStatus };
 
   // ── Dialog / shell ──────────────────────────────────────────────────────────
   [CH.OPEN_FOLDER_DIALOG]: { args: []; result: string | null };

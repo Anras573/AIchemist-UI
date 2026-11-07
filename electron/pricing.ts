@@ -25,6 +25,7 @@ import { getModelMeta, defaultCatalog } from "tokenlens";
 import type { CostConfidence, Provider, SessionUsage } from "../src/types/index";
 import { parseCompositeModelId } from "./openai-endpoints";
 import { readPricingOverrides, overrideKey, type PricingOverrideMap, type PricingRates } from "./pricing-overrides";
+import type { UsageByProviderModel } from "./usage-ledger";
 
 // Canonical definition lives in src/types/index.ts (shared with the renderer,
 // e.g. the Spending panel) — re-exported here so existing imports of
@@ -211,4 +212,24 @@ export function estimateCost(params: {
         ? "estimated"
         : "exact",
   };
+}
+
+/**
+ * Price one priced-ledger group (a `getUsageByProviderModel()` /
+ * `getUsageByProjectProviderModel()` row). A group whose rows carry a
+ * provider-reported cost (`has_reported_cost`) uses that sum as-is — it's what
+ * the provider's own SDK computed, so it's preferred over our price-table
+ * estimate and reported as `exact`. Every other group falls back to
+ * {@link estimateCost} over its token totals. `reportedUSD` is the part of
+ * `totalUSD` that came from the provider.
+ */
+export function costUsageGroup(
+  row: Pick<UsageByProviderModel, "provider" | "model" | "has_reported_cost" | "reported_cost_usd"> & SessionUsage,
+  overrides?: PricingOverrideMap
+): { totalUSD: number; confidence: CostConfidence; reportedUSD: number } {
+  if (row.has_reported_cost && row.reported_cost_usd !== null) {
+    return { totalUSD: row.reported_cost_usd, confidence: "exact", reportedUSD: row.reported_cost_usd };
+  }
+  const est = estimateCost({ provider: row.provider, model: row.model, usage: row, overrides });
+  return { totalUSD: est.totalUSD, confidence: est.confidence, reportedUSD: 0 };
 }
