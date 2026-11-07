@@ -157,7 +157,7 @@ export type IpcContract = {
   [CH.BUDGET_WRITE]: { args: [config: BudgetConfig]; result: BudgetConfig };
   [CH.BUDGET_GET_STATUS]: { args: []; result: BudgetStatus };
   [CH.SPENDING_GET_SUMMARY]: {
-    args: [params: { projectId: string; since?: string | null; until?: string | null }];
+    args: [params: { projectId?: string | null; since?: string | null; until?: string | null }];
     result: SpendingSummary;
   };
 

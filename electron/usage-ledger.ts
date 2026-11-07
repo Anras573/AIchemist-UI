@@ -100,6 +100,10 @@ export interface UsageByProviderModel extends UsageTotals {
   model: string | null;
 }
 
+export interface UsageByProjectProviderModel extends UsageByProviderModel {
+  project_id: string;
+}
+
 export interface UsageByDay extends UsageTotals {
   /** `YYYY-MM-DD`, derived from the `created_at` ISO timestamp's date prefix. */
   day: string;
@@ -189,6 +193,24 @@ export function getUsageByProviderModel(db: Database, filter: UsageFilter = {}):
       `SELECT provider, model, ${TOTALS_SELECT} FROM usage_ledger ${clause} GROUP BY provider, model ORDER BY provider, model`
     )
     .all(...params) as UsageByProviderModel[];
+}
+
+/**
+ * Totals grouped by project + provider + model — the cross-project rollup at
+ * the granularity the pricing engine needs (see `getUsageByProviderModel`).
+ * Backs the Spending panel's "All projects" per-project breakdown.
+ */
+export function getUsageByProjectProviderModel(
+  db: Database,
+  filter: UsageFilter = {}
+): UsageByProjectProviderModel[] {
+  const { clause, params } = buildWhere(filter);
+  return db
+    .prepare(
+      `SELECT project_id, provider, model, ${TOTALS_SELECT} FROM usage_ledger ${clause}
+       GROUP BY project_id, provider, model ORDER BY project_id, provider, model`
+    )
+    .all(...params) as UsageByProjectProviderModel[];
 }
 
 /** Totals grouped by calendar day (UTC date prefix of `created_at`) — backs time-series charts. */

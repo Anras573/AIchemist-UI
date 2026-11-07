@@ -175,7 +175,8 @@ const budgetWriteSchema = z.object({
 // misleading spend total. The renderer only ever sends `Date#toISOString()`
 // values, which `z.iso.datetime()` accepts.
 const spendingGetSummarySchema = z.object({
-  projectId: z.string().trim().min(1),
+  // Omitted / null = the all-projects rollup.
+  projectId: z.string().trim().min(1).nullable().optional(),
   since: z.iso.datetime().nullable().optional(),
   until: z.iso.datetime().nullable().optional(),
 });

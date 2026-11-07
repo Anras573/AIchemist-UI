@@ -700,9 +700,27 @@ export interface SpendingProviderBreakdown {
   percentOfTotal: number;
 }
 
-/** Result of SPENDING_GET_SUMMARY — one project's spend for `range`, aggregated across every provider used in it, plus that project's all-time total. */
-export interface SpendingSummary {
+/** One project's spend for a time range — a row in the Spending panel's "All projects" per-project breakdown. */
+export interface SpendingProjectBreakdown {
   projectId: string;
+  /** The project's display name, or `null` if the project row no longer resolves. */
+  projectName: string | null;
+  turn_count: number;
+  costUSD: number;
+  /** Worst-of the confidence across every provider/model group rolled into this row. */
+  confidence: CostConfidence;
+  /** 0-100, this row's share of `periodSpendUSD`. `0` when the period total is 0. */
+  percentOfTotal: number;
+}
+
+/**
+ * Result of SPENDING_GET_SUMMARY — spend for `range`, aggregated across every
+ * provider, plus the all-time total. Scoped to one project when `projectId` is
+ * set, or across every project when it's `null`.
+ */
+export interface SpendingSummary {
+  /** The project the summary is scoped to, or `null` for the all-projects rollup. */
+  projectId: string | null;
   range: SpendingRangeFilter;
   periodSpendUSD: number;
   /** Worst-of the confidence across every `byProvider` row — `exact` when there's no usage in the range (nothing to be uncertain about). Lets the KPI card mark `periodSpendUSD` as estimated rather than presenting a total built from partial data as exact. */
@@ -712,6 +730,8 @@ export interface SpendingSummary {
   lifetimeConfidence: CostConfidence;
   /** Sorted by `costUSD` descending. */
   byProvider: SpendingProviderBreakdown[];
+  /** Per-project breakdown for `range`, sorted by `costUSD` descending. Only populated for the all-projects rollup (`projectId === null`); empty otherwise. */
+  byProject: SpendingProjectBreakdown[];
 }
 
 // ── Auto-update ─────────────────────────────────────────────────────────────

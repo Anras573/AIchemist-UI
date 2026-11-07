@@ -79,7 +79,8 @@ export interface ElectronAPI {
   budgetWrite: (config: import("../src/types").BudgetConfig) => Promise<Res<typeof CH.BUDGET_WRITE>>;
   budgetGetStatus: () => Promise<Res<typeof CH.BUDGET_GET_STATUS>>;
   spendingGetSummary: (params: {
-    projectId: string;
+    /** Omit / `null` for the all-projects rollup. */
+    projectId?: string | null;
     since?: string | null;
     until?: string | null;
   }) => Promise<Res<typeof CH.SPENDING_GET_SUMMARY>>;

@@ -261,14 +261,14 @@ Traces only appear once the session has run at least one turn — that's when th
 
 ## Spending (epic #155)
 
-A cross-provider spend ledger + cost engine + budget model, surfaced in a dedicated **Spending** tab (`ToolStrip` + `ContextPanel` → `SpendingPanel.tsx`). Aggregates across every provider used in the active project — deliberately not gated by the session's provider lock the way Skills/MCP/Memory are.
+A cross-provider spend ledger + cost engine + budget model, surfaced in a dedicated **Spending** tab (`ToolStrip` + `ContextPanel` → `SpendingPanel.tsx`). Aggregates across every provider — deliberately not gated by the session's provider lock the way Skills/MCP/Memory are. A **This project / All projects** scope toggle switches between the active project and an app-wide rollup (the panel falls back to All projects when no project is open); the all-projects view adds a per-project breakdown table.
 
 | Module | Role |
 |---|---|
 | `electron/usage-ledger.ts` | `usage_ledger` SQLite table (migration v5) — one row per completed turn (`recordUsage()`, called from `electron/agent/runner.ts` after every turn) plus aggregation queries (`getUsageTotals`, `getUsageByProvider`, `getUsageByProviderModel`, `getUsageByDay`, …). `session_id` is deliberately FK-free (deleting a session must not delete the spend it incurred); only `project_id` cascades. |
 | `electron/pricing.ts` + `electron/pricing-overrides.ts` | `estimateCost({ provider, model, usage })` prices a usage row via `tokenlens`'s bundled catalog, with manual overrides (`~/.aichemist/pricing-overrides.json`) taking priority. Returns a `CostConfidence` (`exact` / `estimated` / `unknown`, `src/types/index.ts`) — `estimated` for providers with known partial token fidelity (Copilot, Ollama), `unknown` when nothing prices the provider/model (never silently `0`). |
 | `electron/budget.ts` + `electron/budget-status.ts` | `~/.aichemist/budget.json` — a global USD budget + optional per-provider overrides, resetting daily/weekly/monthly. `computeBudgetStatus()` resolves the current period's spend (via the ledger + pricing engine) into remaining balance + burn rate. |
-| `electron/spending.ts` | `getSpendingSummary()` — combines the ledger + pricing engine into one project's time-range-filtered per-provider breakdown plus lifetime total; backs `SPENDING_GET_SUMMARY`. |
+| `electron/spending.ts` | `getSpendingSummary()` — combines the ledger + pricing engine into a time-range-filtered per-provider breakdown plus lifetime total; backs `SPENDING_GET_SUMMARY`. Scoped to `projectId` when given; omitted/`null` rolls up every project and also fills `byProject` (priced via `getUsageByProjectProviderModel()`, names joined from `projects`). |
 | `src/components/settings/sections/SpendingSection.tsx` | Settings → Spending hub section — budget editor + pricing overrides. |
 
 ### Usage-ledger backfill — `electron/usage-backfill.ts` (issue #160)

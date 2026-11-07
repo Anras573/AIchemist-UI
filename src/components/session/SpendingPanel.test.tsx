@@ -34,6 +34,7 @@ const EMPTY_SUMMARY: SpendingSummary = {
   lifetimeSpendUSD: 0,
   lifetimeConfidence: "exact",
   byProvider: [],
+  byProject: [],
 };
 
 const EMPTY_BUDGET: BudgetStatus = {
@@ -65,15 +66,53 @@ describe("SpendingPanel", () => {
     vi.mocked(window.electronAPI.budgetGetStatus).mockResolvedValue(EMPTY_BUDGET);
   });
 
-  it("shows 'No project open' when there is no active project", () => {
+  it("falls back to the all-projects rollup when there is no active project", async () => {
     renderWithProviders(<SpendingPanel />);
-    expect(screen.getByText("No project open")).toBeInTheDocument();
+
+    await waitFor(() => expect(window.electronAPI.spendingGetSummary).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(window.electronAPI.spendingGetSummary).mock.calls[0][0].projectId).toBeNull();
+    expect(await screen.findByRole("button", { name: "This project" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "All projects" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("doesn't fetch spend or budget data when there is no active project", () => {
+  it("defaults to the active project's scope", async () => {
+    activateProject();
     renderWithProviders(<SpendingPanel />);
-    expect(window.electronAPI.spendingGetSummary).not.toHaveBeenCalled();
-    expect(window.electronAPI.budgetGetStatus).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(window.electronAPI.spendingGetSummary).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(window.electronAPI.spendingGetSummary).mock.calls[0][0].projectId).toBe("proj-1");
+    expect(await screen.findByRole("button", { name: "This project" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("By project")).not.toBeInTheDocument();
+  });
+
+  it("switching to All projects refetches unscoped and shows the per-project breakdown", async () => {
+    activateProject();
+    const user = userEvent.setup();
+    vi.mocked(window.electronAPI.spendingGetSummary).mockImplementation(async (params) =>
+      params.projectId
+        ? EMPTY_SUMMARY
+        : {
+            ...EMPTY_SUMMARY,
+            projectId: null,
+            periodSpendUSD: 30,
+            byProject: [
+              { projectId: "proj-1", projectName: "My Project", turn_count: 4, costUSD: 20, confidence: "exact", percentOfTotal: 66.7 },
+              { projectId: "proj-2", projectName: "Other Project", turn_count: 2, costUSD: 10, confidence: "estimated", percentOfTotal: 33.3 },
+            ],
+          }
+    );
+    renderWithProviders(<SpendingPanel />);
+    await waitFor(() => expect(window.electronAPI.spendingGetSummary).toHaveBeenCalledTimes(1));
+
+    await user.click(await screen.findByRole("button", { name: "All projects" }));
+
+    await waitFor(() => expect(window.electronAPI.spendingGetSummary).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(window.electronAPI.spendingGetSummary).mock.calls.at(-1)![0].projectId).toBeNull();
+    expect(await screen.findByText("By project")).toBeInTheDocument();
+    const otherRow = screen.getByText("Other Project").closest("tr")!;
+    expect(within(otherRow).getByText(usd(10))).toBeInTheDocument();
+    expect(within(otherRow).getByText("33.3%")).toBeInTheDocument();
+    expect(within(otherRow).getByLabelText("estimated cost")).toBeInTheDocument();
   });
 
   it("renders KPI cards for period spend, lifetime spend, remaining budget, and burn rate", async () => {

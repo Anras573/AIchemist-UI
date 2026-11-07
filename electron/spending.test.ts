@@ -228,3 +228,51 @@ describe("getSpendingSummary", () => {
     expect(summary.byProvider[0].confidence).toBe("exact");
   });
 });
+
+describe("getSpendingSummary — all projects", () => {
+  it("rolls usage up across every project when projectId is omitted", () => {
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+
+    const p1 = getSpendingSummary(db, { projectId: "p1" });
+    const all = getSpendingSummary(db, {});
+
+    expect(all.projectId).toBeNull();
+    expect(all.periodSpendUSD).toBeCloseTo(p1.periodSpendUSD * 2);
+    expect(all.lifetimeSpendUSD).toBeCloseTo(p1.lifetimeSpendUSD * 2);
+    expect(all.byProvider).toHaveLength(1);
+    expect(all.byProvider[0].turn_count).toBe(2);
+  });
+
+  it("treats projectId: null the same as omitted", () => {
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    expect(getSpendingSummary(db, { projectId: null }).periodSpendUSD).toBeGreaterThan(0);
+  });
+
+  it("returns a per-project breakdown with names, sorted by cost, with shares summing to 100%", () => {
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+
+    const all = getSpendingSummary(db, {});
+    expect(all.byProject.map((p) => p.projectId)).toEqual(["p2", "p1"]);
+    expect(all.byProject[0].projectName).toBe("p2");
+    expect(all.byProject[0].turn_count).toBe(2);
+    expect(all.byProject[0].percentOfTotal).toBeCloseTo(66.67, 1);
+    expect(all.byProject.reduce((sum, p) => sum + p.percentOfTotal, 0)).toBeCloseTo(100);
+  });
+
+  it("applies the time range to the per-project breakdown", () => {
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE, createdAt: "2026-01-01T00:00:00.000Z" });
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE, createdAt: "2026-07-05T00:00:00.000Z" });
+
+    const all = getSpendingSummary(db, { since: "2026-07-01T00:00:00.000Z" });
+    expect(all.byProject.map((p) => p.projectId)).toEqual(["p2"]);
+    expect(all.lifetimeSpendUSD).toBeGreaterThan(all.periodSpendUSD);
+  });
+
+  it("leaves byProject empty for a project-scoped summary", () => {
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    expect(getSpendingSummary(db, { projectId: "p1" }).byProject).toEqual([]);
+  });
+});
