@@ -13,6 +13,12 @@ import type { Database } from "better-sqlite3";
 export interface ClaudeSessionState {
   /** Anthropic SDK session id — enables `resume:` across turns and restarts. */
   sdkSessionId?: string | null;
+  /**
+   * The SDK's cumulative `total_cost_usd` as of the last completed turn on
+   * `sdkSessionId` — the baseline the next turn's reported cost is differenced
+   * against (see `reportedClaudeTurnCost()` in `claude.ts`).
+   */
+  costTotalUSD?: number | null;
 }
 
 /** Copilot (GitHub) per-session SDK state. */

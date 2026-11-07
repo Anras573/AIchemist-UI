@@ -94,6 +94,7 @@ export const BUDGET_READ            = "budget:read";
 export const BUDGET_WRITE           = "budget:write";
 export const BUDGET_GET_STATUS      = "budget:get-status";
 export const SPENDING_GET_SUMMARY   = "spending:get-summary";
+export const SPENDING_COPILOT_QUOTA = "spending:copilot-quota";
 export const SESSION_STATUS           = "session:status";
 export const SESSION_DELTA            = "session:delta";
 export const SESSION_TOOL_CALL        = "session:tool_call";

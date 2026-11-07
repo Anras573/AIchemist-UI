@@ -228,3 +228,85 @@ describe("getSpendingSummary", () => {
     expect(summary.byProvider[0].confidence).toBe("exact");
   });
 });
+
+describe("getSpendingSummary — all projects", () => {
+  it("rolls usage up across every project when projectId is omitted", () => {
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+
+    const p1 = getSpendingSummary(db, { projectId: "p1" });
+    const all = getSpendingSummary(db, {});
+
+    expect(all.projectId).toBeNull();
+    expect(all.periodSpendUSD).toBeCloseTo(p1.periodSpendUSD * 2);
+    expect(all.lifetimeSpendUSD).toBeCloseTo(p1.lifetimeSpendUSD * 2);
+    expect(all.byProvider).toHaveLength(1);
+    expect(all.byProvider[0].turn_count).toBe(2);
+  });
+
+  it("treats projectId: null the same as omitted", () => {
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    expect(getSpendingSummary(db, { projectId: null }).periodSpendUSD).toBeGreaterThan(0);
+  });
+
+  it("returns a per-project breakdown with names, sorted by cost, with shares summing to 100%", () => {
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+
+    const all = getSpendingSummary(db, {});
+    expect(all.byProject.map((p) => p.projectId)).toEqual(["p2", "p1"]);
+    expect(all.byProject[0].projectName).toBe("p2");
+    expect(all.byProject[0].turn_count).toBe(2);
+    expect(all.byProject[0].percentOfTotal).toBeCloseTo(66.67, 1);
+    expect(all.byProject.reduce((sum, p) => sum + p.percentOfTotal, 0)).toBeCloseTo(100);
+  });
+
+  it("applies the time range to the per-project breakdown", () => {
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE, createdAt: "2026-01-01T00:00:00.000Z" });
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE, createdAt: "2026-07-05T00:00:00.000Z" });
+
+    const all = getSpendingSummary(db, { since: "2026-07-01T00:00:00.000Z" });
+    expect(all.byProject.map((p) => p.projectId)).toEqual(["p2"]);
+    expect(all.lifetimeSpendUSD).toBeGreaterThan(all.periodSpendUSD);
+  });
+
+  it("leaves byProject empty for a project-scoped summary", () => {
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    expect(getSpendingSummary(db, { projectId: "p1" }).byProject).toEqual([]);
+  });
+});
+
+describe("getSpendingSummary — provider-reported usage", () => {
+  it("uses provider-reported cost for reported turns and estimates the rest", () => {
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+    const estimateOnly = getSpendingSummary(db, { projectId: "p1" }).periodSpendUSD;
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE, reported: { cost_usd: 0.5 } });
+
+    const summary = getSpendingSummary(db, { projectId: "p1" });
+    expect(summary.periodSpendUSD).toBeCloseTo(estimateOnly + 0.5);
+    expect(summary.byProvider).toHaveLength(1);
+    expect(summary.byProvider[0]).toMatchObject({ turn_count: 2, reportedCostUSD: 0.5 });
+  });
+
+  it("surfaces Copilot premium requests per provider, null for providers that report none", () => {
+    const usage = { input_tokens: 0, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "copilot", model: "gpt-4o", usage, reported: { premium_requests: 1 } });
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "copilot", model: "gpt-4o", usage, reported: { premium_requests: 0.33 } });
+    recordUsage(db, { sessionId: "s1", projectId: "p1", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE });
+
+    const summary = getSpendingSummary(db, { projectId: "p1" });
+    const copilot = summary.byProvider.find((p) => p.provider === "copilot")!;
+    const anthropic = summary.byProvider.find((p) => p.provider === "anthropic")!;
+    expect(copilot.premiumRequests).toBeCloseTo(1.33);
+    expect(copilot.reportedCostUSD).toBe(0);
+    expect(anthropic.premiumRequests).toBeNull();
+  });
+
+  it("applies reported cost to the all-projects per-project breakdown too", () => {
+    recordUsage(db, { sessionId: "s2", projectId: "p2", provider: "anthropic", model: "claude-3-7-sonnet-20250219", usage: ANTHROPIC_USAGE, reported: { cost_usd: 0.25 } });
+    const all = getSpendingSummary(db, {});
+    expect(all.byProject[0]).toMatchObject({ projectId: "p2", costUSD: 0.25, confidence: "exact" });
+  });
+});
+

@@ -292,10 +292,33 @@ describe("aggregation queries", () => {
 
     const rows = getUsageByProviderModel(db, { projectId: "proj-1" });
     expect(rows).toEqual([
-      { provider: "anthropic", model: "claude", input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 10, cache_creation_input_tokens: 5, turn_count: 1 },
-      { provider: "anthropic", model: "claude-haiku", input_tokens: 9, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, turn_count: 1 },
-      { provider: "copilot", model: null, input_tokens: 0, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, turn_count: 1 },
+      { provider: "anthropic", model: "claude", input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 10, cache_creation_input_tokens: 5, turn_count: 1, has_reported_cost: 0, reported_cost_usd: null, premium_requests: null },
+      { provider: "anthropic", model: "claude-haiku", input_tokens: 9, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, turn_count: 1, has_reported_cost: 0, reported_cost_usd: null, premium_requests: null },
+      { provider: "copilot", model: null, input_tokens: 0, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, turn_count: 1, has_reported_cost: 0, reported_cost_usd: null, premium_requests: null },
     ]);
+  });
+
+  it("getUsageByProviderModel splits a group on whether rows carry a reported cost, and sums reported figures", () => {
+    const usage = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    recordUsage(db, { sessionId: "sess-1", projectId: "proj-1", provider: "anthropic", model: "claude", usage, reported: { cost_usd: 0.25 } });
+    recordUsage(db, { sessionId: "sess-1", projectId: "proj-1", provider: "anthropic", model: "claude", usage, reported: { cost_usd: 0.5 } });
+    recordUsage(db, { sessionId: "sess-1", projectId: "proj-1", provider: "copilot", model: null, usage, reported: { premium_requests: 1.5 } });
+
+    const rows = getUsageByProviderModel(db, { projectId: "proj-1" });
+    const claude = rows.filter((r) => r.provider === "anthropic" && r.model === "claude");
+    expect(claude).toHaveLength(2);
+    expect(claude[0]).toMatchObject({ has_reported_cost: 0, reported_cost_usd: null, turn_count: 1 });
+    expect(claude[1]).toMatchObject({ has_reported_cost: 1, reported_cost_usd: 0.75, turn_count: 2 });
+    const copilot = rows.filter((r) => r.provider === "copilot");
+    expect(copilot).toHaveLength(1);
+    expect(copilot[0]).toMatchObject({ has_reported_cost: 0, premium_requests: 1.5, turn_count: 2 });
+  });
+
+  it("recordUsage drops reported figures that aren't finite, non-negative numbers", () => {
+    const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    recordUsage(db, { sessionId: "sess-1", projectId: "proj-1", provider: "anthropic", model: "x", usage, reported: { cost_usd: -1, premium_requests: Number.NaN } });
+    const row = db.prepare("SELECT reported_cost_usd, premium_requests FROM usage_ledger WHERE model = 'x'").get();
+    expect(row).toEqual({ reported_cost_usd: null, premium_requests: null });
   });
 
   it("composes multiple filters together (project + provider + time window)", () => {

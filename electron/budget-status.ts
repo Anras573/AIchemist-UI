@@ -8,7 +8,7 @@
 import type { Database } from "better-sqlite3";
 import type { BudgetConfig, BudgetLineStatus, BudgetPeriod, BudgetStatus, Provider, ProviderBudgetStatus } from "../src/types/index";
 import { getUsageByProviderModel } from "./usage-ledger";
-import { estimateCost } from "./pricing";
+import { costUsageGroup } from "./pricing";
 import { readPricingOverrides } from "./pricing-overrides";
 import { PROVIDER_IDS } from "./providers";
 
@@ -71,14 +71,14 @@ export function computeBudgetStatus(db: Database, config: BudgetConfig, now: Dat
 
   // Costing an aggregate requires per-model granularity (a provider's rows may
   // span several differently-priced models — see pricing.ts) — read the
-  // overrides once and reuse across every estimateCost() call rather than
+  // overrides once and reuse across every costUsageGroup() call rather than
   // re-reading the file per row.
   const overrides = readPricingOverrides();
   const rows = getUsageByProviderModel(db, { since: start.toISOString(), until: end.toISOString() });
 
   const spendByProvider = new Map<Provider, number>();
   for (const row of rows) {
-    const cost = estimateCost({ provider: row.provider, model: row.model, usage: row, overrides });
+    const cost = costUsageGroup(row, overrides);
     spendByProvider.set(row.provider, (spendByProvider.get(row.provider) ?? 0) + cost.totalUSD);
   }
 

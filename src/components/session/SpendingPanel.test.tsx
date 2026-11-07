@@ -34,6 +34,7 @@ const EMPTY_SUMMARY: SpendingSummary = {
   lifetimeSpendUSD: 0,
   lifetimeConfidence: "exact",
   byProvider: [],
+  byProject: [],
 };
 
 const EMPTY_BUDGET: BudgetStatus = {
@@ -65,15 +66,53 @@ describe("SpendingPanel", () => {
     vi.mocked(window.electronAPI.budgetGetStatus).mockResolvedValue(EMPTY_BUDGET);
   });
 
-  it("shows 'No project open' when there is no active project", () => {
+  it("falls back to the all-projects rollup when there is no active project", async () => {
     renderWithProviders(<SpendingPanel />);
-    expect(screen.getByText("No project open")).toBeInTheDocument();
+
+    await waitFor(() => expect(window.electronAPI.spendingGetSummary).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(window.electronAPI.spendingGetSummary).mock.calls[0][0].projectId).toBeNull();
+    expect(await screen.findByRole("button", { name: "This project" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "All projects" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("doesn't fetch spend or budget data when there is no active project", () => {
+  it("defaults to the active project's scope", async () => {
+    activateProject();
     renderWithProviders(<SpendingPanel />);
-    expect(window.electronAPI.spendingGetSummary).not.toHaveBeenCalled();
-    expect(window.electronAPI.budgetGetStatus).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(window.electronAPI.spendingGetSummary).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(window.electronAPI.spendingGetSummary).mock.calls[0][0].projectId).toBe("proj-1");
+    expect(await screen.findByRole("button", { name: "This project" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText("By project")).not.toBeInTheDocument();
+  });
+
+  it("switching to All projects refetches unscoped and shows the per-project breakdown", async () => {
+    activateProject();
+    const user = userEvent.setup();
+    vi.mocked(window.electronAPI.spendingGetSummary).mockImplementation(async (params) =>
+      params.projectId
+        ? EMPTY_SUMMARY
+        : {
+            ...EMPTY_SUMMARY,
+            projectId: null,
+            periodSpendUSD: 30,
+            byProject: [
+              { projectId: "proj-1", projectName: "My Project", turn_count: 4, costUSD: 20, confidence: "exact", percentOfTotal: 66.7 },
+              { projectId: "proj-2", projectName: "Other Project", turn_count: 2, costUSD: 10, confidence: "estimated", percentOfTotal: 33.3 },
+            ],
+          }
+    );
+    renderWithProviders(<SpendingPanel />);
+    await waitFor(() => expect(window.electronAPI.spendingGetSummary).toHaveBeenCalledTimes(1));
+
+    await user.click(await screen.findByRole("button", { name: "All projects" }));
+
+    await waitFor(() => expect(window.electronAPI.spendingGetSummary).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(window.electronAPI.spendingGetSummary).mock.calls.at(-1)![0].projectId).toBeNull();
+    expect(await screen.findByText("By project")).toBeInTheDocument();
+    const otherRow = screen.getByText("Other Project").closest("tr")!;
+    expect(within(otherRow).getByText(usd(10))).toBeInTheDocument();
+    expect(within(otherRow).getByText("33.3%")).toBeInTheDocument();
+    expect(within(otherRow).getByLabelText("estimated cost")).toBeInTheDocument();
   });
 
   it("renders KPI cards for period spend, lifetime spend, remaining budget, and burn rate", async () => {
@@ -161,6 +200,8 @@ describe("SpendingPanel", () => {
           costUSD: 10,
           confidence: "exact",
           percentOfTotal: 100,
+          reportedCostUSD: 0,
+          premiumRequests: null,
         },
       ],
     });
@@ -197,6 +238,8 @@ describe("SpendingPanel", () => {
           costUSD: 0,
           confidence: "unknown",
           percentOfTotal: 0,
+          reportedCostUSD: 0,
+          premiumRequests: null,
         },
       ],
     });
@@ -237,6 +280,8 @@ describe("SpendingPanel", () => {
           costUSD: 5,
           confidence: "exact",
           percentOfTotal: 50,
+          reportedCostUSD: 0,
+          premiumRequests: null,
         },
         {
           provider: "copilot",
@@ -248,6 +293,8 @@ describe("SpendingPanel", () => {
           costUSD: 5,
           confidence: "estimated",
           percentOfTotal: 50,
+          reportedCostUSD: 0,
+          premiumRequests: null,
         },
       ],
     });
@@ -336,4 +383,60 @@ describe("SpendingPanel", () => {
     fireEvent.change(screen.getByLabelText("Custom range end"), { target: { value: "2026-07-10" } });
     expect(await screen.findByLabelText("Custom range start")).toHaveAttribute("max", "2026-07-10");
   });
+
+  it("shows the Copilot plan card from the provider's quota, omitting unlimited non-premium buckets", async () => {
+    activateProject();
+    vi.mocked(window.electronAPI.spendingCopilotQuota).mockResolvedValue({
+      ok: true,
+      snapshots: [
+        { key: "chat", unlimited: true, entitlement: -1, used: 40, remainingPercentage: 100, overage: 0, resetDate: null },
+        { key: "premium_interactions", unlimited: false, entitlement: 300, used: 120, remainingPercentage: 60, overage: 0, resetDate: "2026-12-01T00:00:00Z" },
+      ],
+    });
+    renderWithProviders(<SpendingPanel />);
+
+    const card = await screen.findByLabelText("Copilot plan usage");
+    expect(within(card).getByText("Premium requests")).toBeInTheDocument();
+    expect(within(card).getByText("120 / 300")).toBeInTheDocument();
+    expect(within(card).getByText(/60% left/)).toBeInTheDocument();
+    expect(within(card).queryByText("Chat")).not.toBeInTheDocument();
+  });
+
+  it("hides the Copilot plan card when the quota is unavailable", async () => {
+    activateProject();
+    renderWithProviders(<SpendingPanel />);
+    await waitFor(() => expect(window.electronAPI.spendingCopilotQuota).toHaveBeenCalled());
+    await screen.findByText("No usage recorded in this range.");
+    expect(screen.queryByLabelText("Copilot plan usage")).not.toBeInTheDocument();
+  });
+
+  it("marks provider-reported cost and shows Copilot premium requests in the provider table", async () => {
+    activateProject();
+    vi.mocked(window.electronAPI.spendingGetSummary).mockResolvedValue({
+      ...EMPTY_SUMMARY,
+      periodSpendUSD: 3,
+      byProvider: [
+        {
+          provider: "anthropic",
+          input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+          turn_count: 1, costUSD: 2, confidence: "exact", percentOfTotal: 66.7,
+          reportedCostUSD: 2, premiumRequests: null,
+        },
+        {
+          provider: "copilot",
+          input_tokens: 0, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+          turn_count: 3, costUSD: 1, confidence: "estimated", percentOfTotal: 33.3,
+          reportedCostUSD: 0, premiumRequests: 4.5,
+        },
+      ],
+    });
+    renderWithProviders(<SpendingPanel />);
+
+    const anthropicRow = (await screen.findByText("Claude")).closest("tr")!;
+    expect(within(anthropicRow).getByLabelText("provider-reported cost")).toBeInTheDocument();
+    const copilotRow = screen.getByText("Copilot").closest("tr")!;
+    expect(within(copilotRow).queryByLabelText("provider-reported cost")).not.toBeInTheDocument();
+    expect(within(copilotRow).getByText(`${(4.5).toLocaleString(undefined, { maximumFractionDigits: 2 })} premium req.`)).toBeInTheDocument();
+  });
 });
+
