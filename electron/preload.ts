@@ -144,7 +144,7 @@ export interface ElectronAPI {
     name: string;
     projectPath?: string;
   }) => Promise<Res<typeof CH.MCP_DELETE_SERVER>>;
-  mcpMarketplaceList: () => Promise<Res<typeof CH.MCP_MARKETPLACE_LIST>>;
+  mcpMarketplaceList: (args?: { force?: boolean }) => Promise<Res<typeof CH.MCP_MARKETPLACE_LIST>>;
   mcpMarketplaceInstall: (args: {
     entryId: string;
     values: Record<string, string>;
@@ -318,7 +318,7 @@ const api: ElectronAPI = {
   mcpReadConfig: (args) => invoke(CH.MCP_READ_CONFIG, args),
   mcpWriteConfig: (args) => invoke(CH.MCP_WRITE_CONFIG, args),
   mcpDeleteServer: (args) => invoke(CH.MCP_DELETE_SERVER, args),
-  mcpMarketplaceList: () => invoke(CH.MCP_MARKETPLACE_LIST),
+  mcpMarketplaceList: (args) => invoke(CH.MCP_MARKETPLACE_LIST, args),
   mcpMarketplaceInstall: (args) => invoke(CH.MCP_MARKETPLACE_INSTALL, args),
   mcpMarketplaceUninstall: (args) => invoke(CH.MCP_MARKETPLACE_UNINSTALL, args),
 

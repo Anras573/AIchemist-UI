@@ -9,14 +9,15 @@ import {
   writeMcpServers as writeMcpServersConfig,
   deleteMcpServer as deleteMcpServerConfig,
   upsertMcpServer,
-  listMarketplaceEntries,
-  getMarketplaceEntry,
+  listMarketplace,
+  resolveMarketplaceEntry,
   missingRequiredFields,
   buildServerEntry,
   type McpScope,
   type McpServersMap,
 } from "../mcp";
 import type { McpServerInfo } from "../../src/types/index";
+import { isMcpRegistryEnabled } from "../settings";
 import { handle } from "./handle";
 import { IpcError } from "./errors";
 
@@ -127,12 +128,14 @@ export function registerMcpHandlers(): void {
     },
   );
 
-  handle(CH.MCP_MARKETPLACE_LIST, () => listMarketplaceEntries());
+  handle(CH.MCP_MARKETPLACE_LIST, (_event, args?: { force?: boolean }) =>
+    listMarketplace({ registryEnabled: isMcpRegistryEnabled(), force: args?.force }),
+  );
 
   handle(
     CH.MCP_MARKETPLACE_INSTALL,
     async (_event, args: { entryId: string; values: Record<string, string> }) => {
-      const entry = getMarketplaceEntry(args.entryId);
+      const entry = await resolveMarketplaceEntry(args.entryId, { registryEnabled: isMcpRegistryEnabled() });
       if (!entry) {
         throw new IpcError("not_found", `Unknown marketplace entry: ${args.entryId}`);
       }

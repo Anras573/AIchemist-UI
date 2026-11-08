@@ -30,6 +30,8 @@ interface MarketplaceEntry {
   url?: string;
   headers?: Record<string, string>;
   configFields?: MarketplaceConfigField[];
+  /** Absent/"bundled" = curated ("Verified"); "registry" = live community registry. */
+  source?: "bundled" | "registry";
 }
 
 type MarketplaceListItem = MarketplaceEntry & { installed: boolean };
@@ -83,16 +85,22 @@ export function McpMarketplacePanel({ open, onOpenChange, onChanged }: McpMarket
   const [entries, setEntries] = useState<MarketplaceListItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [registryError, setRegistryError] = useState<string | null>(null);
+  const [registryEnabled, setRegistryEnabled] = useState(false);
   const [query, setQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [uiState, setUiState] = useState<Record<string, EntryUiState>>({});
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force?: boolean) => {
     setLoading(true);
     setLoadError(null);
     try {
-      setEntries(await ipc.mcpMarketplaceList());
+      const settings = await ipc.settingsRead();
+      setRegistryEnabled(settings?.AICHEMIST_MCP_REGISTRY_ENABLED === "true");
+      const result = await ipc.mcpMarketplaceList(force ? { force: true } : undefined);
+      setEntries(result.entries);
+      setRegistryError(result.registryError ?? null);
     } catch (e) {
       setLoadError(String(e));
     } finally {
@@ -103,6 +111,17 @@ export function McpMarketplacePanel({ open, onOpenChange, onChanged }: McpMarket
   useEffect(() => {
     if (open) void load();
   }, [open, load]);
+
+  const toggleRegistry = async (enabled: boolean) => {
+    setRegistryEnabled(enabled);
+    try {
+      await ipc.settingsWrite({ AICHEMIST_MCP_REGISTRY_ENABLED: enabled ? "true" : "" });
+      await load(true);
+    } catch (e) {
+      setRegistryEnabled(!enabled);
+      setLoadError(String(e));
+    }
+  };
 
   const tags = useMemo(() => {
     const set = new Set<string>();
@@ -177,11 +196,35 @@ export function McpMarketplacePanel({ open, onOpenChange, onChanged }: McpMarket
             <Store className="h-4 w-4" /> MCP Marketplace
           </DialogTitle>
           <DialogDescription>
-            A curated set of MCP servers you can install into the AIchemist-managed scope
+            Curated (and optionally community) MCP servers you can install into the AIchemist-managed scope
             (<code className="font-mono text-xs">~/.aichemist/mcp.json</code>). Installing runs the
             server's command locally — review it before confirming.
           </DialogDescription>
         </DialogHeader>
+
+        <div className="rounded-md border p-2 space-y-1">
+          <label className="flex items-start gap-2 text-xs cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={registryEnabled}
+              onChange={(e) => void toggleRegistry(e.target.checked)}
+            />
+            <span>
+              <span className="font-medium">Include community servers from the official MCP registry</span>
+              <span className="block text-muted-foreground">
+                Fetches registry.modelcontextprotocol.io. Community entries are published by third parties and
+                are not vetted by AIchemist — installing one runs its command locally.
+              </span>
+            </span>
+          </label>
+          {registryEnabled && registryError && (
+            <p className="text-[11px] text-destructive flex items-start gap-1">
+              <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" /> Couldn&apos;t reach the registry ({registryError});
+              showing the bundled catalog only.
+            </p>
+          )}
+        </div>
 
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -277,7 +320,7 @@ function MarketplaceCard({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-sm">{entry.name}</span>
             <Badge variant="outline" className="text-[10px]">
-              Verified
+              {entry.source === "registry" ? "Community" : "Verified"}
             </Badge>
             {entry.installed && (
               <span className="flex items-center gap-1 text-[11px] text-emerald-600">

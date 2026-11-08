@@ -510,6 +510,15 @@ VS Code-style editor-owned MCP config. AIchemist maintains its own MCP server li
 | Per-session disable | Toggle in the panel persists names to `sessions.disabled_mcp_servers` via `MCP_TOGGLE_SESSION_SERVER` and `setDisabledMcpServers`. Both runners read the disabled set per turn and pass it via `loadManagedMcpServers({ excludeNames })`. Claude picks up the new map per-turn (no cache work needed). For Copilot, the disabled set is filtered BEFORE `fingerprintManaged()` so toggling naturally invalidates the cached SDK session. |
 | No project-level managed scope | Intentional — projects should use the de-facto `.mcp.json` at the project root, which both SDKs already discover. |
 
+
+### MCP Marketplace — bundled + optional live registry (#199)
+
+Settings → MCP Servers → Marketplace lists the **bundled, hand-vetted catalog** (`marketplace-catalog.ts`, "Verified") and — only when the user opts in via the checkbox in the panel (`AICHEMIST_MCP_REGISTRY_ENABLED=true`, `isMcpRegistryEnabled()` in `settings.ts`) — **community servers** from the official registry (`registry.modelcontextprotocol.io`, "Community" badge, `MarketplaceEntry.source === "registry"`).
+
+- `electron/mcp/marketplace-registry.ts` fetches `/v0/servers?version=latest` (up to 3 pages, 8 s timeout, 10 min in-memory TTL cache) and maps each server via `mapRegistryServer()`: npm → `npx -y pkg@ver`, pypi → `uvx pkg==ver` (stdio only), else a `streamable-http`/`sse` remote. Required/secret env vars, headers, and valueless required package args become `configFields` (`{{env_X}}`, `{{header_X}}`, `{{arg_N}}`) so the existing `buildServerEntry` substitution is unchanged. Unsupported shapes (oci/nuget, templated URLs) are skipped.
+- **Fail-safe:** `fetchRegistryEntries()` never throws; `listMarketplace()` falls back to the bundled catalog and returns `registryError`, which the panel shows as a notice. Bundled ids win over same-id registry entries. `MCP_MARKETPLACE_LIST` now returns `{ entries, registryError? }` and takes optional `{ force }`.
+- **Install** resolves entries main-side only (`resolveMarketplaceEntry`: bundled, then the fetched registry) — the renderer never supplies an entry definition. Install/uninstall IPC is otherwise unchanged. Test seam: `_setRegistryFetch`.
+
 ---
 
 ## Canvases

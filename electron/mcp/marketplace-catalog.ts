@@ -1,11 +1,11 @@
 /**
  * Bundled, curated catalog of installable MCP servers for the marketplace panel.
  *
- * This is intentionally a static, hand-vetted list (not a live remote registry
- * fetch) — every package name below was verified against the npm/PyPI registry
- * at the time it was added, so installing one just means running a package we
- * already know resolves. A live community registry (with its own trust/vetting
- * story) is a deliberate future phase, not this one.
+ * This is a static, hand-vetted list — every package name below was verified
+ * against the npm/PyPI registry at the time it was added ("Verified" in the
+ * UI). It is always available offline and is the fallback when the optional,
+ * opt-in live registry (marketplace-registry.ts, "Community" entries) is
+ * disabled or unreachable.
  *
  * `command`/`args`/`env`/`url`/`headers` values may contain `{{token}}`
  * placeholders that match a `configFields[].key` — `buildServerEntry()` (see

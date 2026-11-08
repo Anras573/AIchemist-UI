@@ -112,7 +112,7 @@ export function createElectronAPIMock(): Window["electronAPI"] {
     mcpReadConfig: vi.fn().mockResolvedValue({}),
     mcpWriteConfig: vi.fn().mockResolvedValue(undefined),
     mcpDeleteServer: vi.fn().mockResolvedValue(undefined),
-    mcpMarketplaceList: vi.fn().mockResolvedValue([]),
+    mcpMarketplaceList: vi.fn().mockResolvedValue({ entries: [] }),
     mcpMarketplaceInstall: vi.fn().mockResolvedValue({ probe: { connected: true, tools: [], durationMs: 0 } }),
     mcpMarketplaceUninstall: vi.fn().mockResolvedValue(undefined),
 

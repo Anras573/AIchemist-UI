@@ -6,6 +6,7 @@
 import type { McpServerEntry } from "./config";
 import { readMcpServers } from "./config";
 import { MARKETPLACE_CATALOG } from "./marketplace-catalog";
+import { fetchRegistryEntries } from "./marketplace-registry";
 
 /** A single user-supplied value the entry's command/args/env/url/headers need before install. */
 export interface MarketplaceConfigField {
@@ -38,9 +39,17 @@ export interface MarketplaceEntry {
   url?: string;
   headers?: Record<string, string>;
   configFields?: MarketplaceConfigField[];
+  /** Where the entry came from. Absent = bundled/curated ("Verified"); "registry" = live community registry. */
+  source?: "bundled" | "registry";
 }
 
 export type MarketplaceListItem = MarketplaceEntry & { installed: boolean };
+
+export interface MarketplaceListResult {
+  entries: MarketplaceListItem[];
+  /** Set when the live registry was requested but could not be fetched (bundled entries are still returned). */
+  registryError?: string;
+}
 
 /**
  * List every catalog entry, flagged with whether a server of the same id is
@@ -55,7 +64,36 @@ export function listMarketplaceEntries(): MarketplaceListItem[] {
   }));
 }
 
-/** Look up a single catalog entry by id, or `undefined` if unknown. */
+/**
+ * List bundled entries plus (when `registryEnabled`) live registry entries.
+ * Never throws on registry failure — falls back to the bundled catalog with
+ * `registryError` set. Bundled ids win over same-id registry entries.
+ */
+export async function listMarketplace(opts: { registryEnabled: boolean; force?: boolean }): Promise<MarketplaceListResult> {
+  const bundled = listMarketplaceEntries();
+  if (!opts.registryEnabled) return { entries: bundled };
+  const { entries: remote, error } = await fetchRegistryEntries({ force: opts.force });
+  const bundledIds = new Set(bundled.map((e) => e.id));
+  const installedNames = new Set(Object.keys(readMcpServers("aichemist-global")));
+  const extra = remote
+    .filter((e) => !bundledIds.has(e.id))
+    .map((e) => ({ ...e, installed: installedNames.has(e.id) }));
+  return { entries: [...bundled, ...extra], ...(error ? { registryError: error } : {}) };
+}
+
+/**
+ * Resolve an entry by id for install: bundled first, then (when enabled) the
+ * live registry. Registry entries are only ever resolved from the fetched
+ * registry data, never from renderer-supplied definitions.
+ */
+export async function resolveMarketplaceEntry(id: string, opts: { registryEnabled: boolean }): Promise<MarketplaceEntry | undefined> {
+  const bundled = getMarketplaceEntry(id);
+  if (bundled || !opts.registryEnabled) return bundled;
+  const { entries } = await fetchRegistryEntries();
+  return entries.find((e) => e.id === id);
+}
+
+/** Look up a single bundled catalog entry by id, or `undefined` if unknown. */
 export function getMarketplaceEntry(id: string): MarketplaceEntry | undefined {
   return MARKETPLACE_CATALOG.find((entry) => entry.id === id);
 }
