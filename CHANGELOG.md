@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/Anras573/AIchemist-UI/compare/v1.2.0...v1.3.0) (2026-11-08)
+
+
+### Features
+
+* **mcp:** opt-in live MCP registry in the Marketplace ([#199](https://github.com/Anras573/AIchemist-UI/issues/199)) ([#282](https://github.com/Anras573/AIchemist-UI/issues/282)) ([facbe8a](https://github.com/Anras573/AIchemist-UI/commit/facbe8ac0dd5fa1a07b24353e79ec127b14c1e55))
+* **spending:** all-projects view, provider-reported cost, Copilot plan quota ([#274](https://github.com/Anras573/AIchemist-UI/issues/274)) ([3e58212](https://github.com/Anras573/AIchemist-UI/commit/3e582122a4f2c1114ab4b037d5254c06a5102cef))
+
 ## [1.2.0](https://github.com/Anras573/AIchemist-UI/compare/v1.1.2...v1.2.0) (2026-11-01)
 
 
