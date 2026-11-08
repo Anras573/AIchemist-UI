@@ -116,7 +116,7 @@ export const ipc = {
     window.electronAPI.mcpWriteConfig(args),
   mcpDeleteServer: (args: Parameters<typeof window.electronAPI.mcpDeleteServer>[0]) =>
     window.electronAPI.mcpDeleteServer(args),
-  mcpMarketplaceList: () => window.electronAPI.mcpMarketplaceList(),
+  mcpMarketplaceList: (args?: { force?: boolean }) => window.electronAPI.mcpMarketplaceList(args),
   mcpMarketplaceInstall: (args: Parameters<typeof window.electronAPI.mcpMarketplaceInstall>[0]) =>
     window.electronAPI.mcpMarketplaceInstall(args),
   mcpMarketplaceUninstall: (args: Parameters<typeof window.electronAPI.mcpMarketplaceUninstall>[0]) =>

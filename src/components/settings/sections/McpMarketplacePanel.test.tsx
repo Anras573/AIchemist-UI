@@ -46,10 +46,9 @@ function renderPanel(props: Partial<React.ComponentProps<typeof McpMarketplacePa
 describe("McpMarketplacePanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(window.electronAPI.mcpMarketplaceList).mockResolvedValue([
-      ENTRY_NO_CONFIG,
-      ENTRY_WITH_CONFIG,
-    ]);
+    vi.mocked(window.electronAPI.mcpMarketplaceList).mockResolvedValue({
+      entries: [ENTRY_NO_CONFIG, ENTRY_WITH_CONFIG],
+    });
     vi.mocked(window.electronAPI.mcpMarketplaceInstall).mockResolvedValue({
       probe: { connected: true, tools: ["read", "write"], durationMs: 12 },
     });
@@ -145,9 +144,9 @@ describe("McpMarketplacePanel", () => {
   });
 
   it("uninstalls an already-installed entry", async () => {
-    vi.mocked(window.electronAPI.mcpMarketplaceList).mockResolvedValue([
-      { ...ENTRY_NO_CONFIG, installed: true },
-    ]);
+    vi.mocked(window.electronAPI.mcpMarketplaceList).mockResolvedValue({
+      entries: [{ ...ENTRY_NO_CONFIG, installed: true }],
+    });
     const { onChanged } = renderPanel();
     await screen.findByText("Memory");
 
@@ -158,5 +157,28 @@ describe("McpMarketplacePanel", () => {
     );
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
+  });
+
+  it("labels registry entries Community and shows a fallback notice on registry failure", async () => {
+    vi.mocked(window.electronAPI.settingsRead).mockResolvedValue({ AICHEMIST_MCP_REGISTRY_ENABLED: "true" } as never);
+    vi.mocked(window.electronAPI.mcpMarketplaceList).mockResolvedValue({
+      entries: [ENTRY_NO_CONFIG, { ...ENTRY_WITH_CONFIG, source: "registry" }],
+      registryError: "HTTP 503",
+    });
+    renderPanel();
+    await screen.findByText("Memory");
+    expect(screen.getByText("Community")).toBeInTheDocument();
+    expect(screen.getAllByText("Verified")).toHaveLength(1);
+    expect(screen.getByText(/Couldn.t reach the registry \(HTTP 503\)/)).toBeInTheDocument();
+  });
+
+  it("persists the opt-in toggle and reloads with force", async () => {
+    renderPanel();
+    await screen.findByText("Memory");
+    await userEvent.click(screen.getByRole("checkbox"));
+    await waitFor(() =>
+      expect(window.electronAPI.settingsWrite).toHaveBeenCalledWith({ AICHEMIST_MCP_REGISTRY_ENABLED: "true" }),
+    );
+    await waitFor(() => expect(window.electronAPI.mcpMarketplaceList).toHaveBeenLastCalledWith({ force: true }));
   });
 });

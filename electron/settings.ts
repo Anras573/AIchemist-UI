@@ -32,6 +32,11 @@ export interface SettingsMap {
    * (Claude, Copilot) are bounded by the context window and ignore this.
    */
   AICHEMIST_MAX_TOOL_ROUNDS: string;
+  /**
+   * "true" opts in to fetching the live MCP registry in the Marketplace
+   * (third-party "Community" entries). Anything else = bundled catalog only.
+   */
+  AICHEMIST_MCP_REGISTRY_ENABLED: string;
 }
 
 const KNOWN_KEYS = new Set<string>([
@@ -42,6 +47,7 @@ const KNOWN_KEYS = new Set<string>([
   "AICHEMIST_THEME",
   "AICHEMIST_DISABLED_PROVIDERS",
   "AICHEMIST_MAX_TOOL_ROUNDS",
+  "AICHEMIST_MCP_REGISTRY_ENABLED",
 ]);
 
 /** Default tool-round cap for self-driven providers when unset / invalid. */
@@ -65,6 +71,11 @@ export function parseMaxToolRounds(raw: string | undefined): number {
 /** Resolve the effective tool-round cap from persisted settings. */
 export function readMaxToolRounds(): number {
   return parseMaxToolRounds(readSettings().AICHEMIST_MAX_TOOL_ROUNDS);
+}
+
+/** Whether the user opted in to the live MCP registry in the Marketplace. */
+export function isMcpRegistryEnabled(): boolean {
+  return readSettings().AICHEMIST_MCP_REGISTRY_ENABLED.trim().toLowerCase() === "true";
 }
 
 function envPath(): string {
@@ -104,6 +115,7 @@ export function readSettings(): SettingsMap {
     AICHEMIST_THEME:                 env["AICHEMIST_THEME"] ?? "system",
     AICHEMIST_DISABLED_PROVIDERS:    env["AICHEMIST_DISABLED_PROVIDERS"] ?? "",
     AICHEMIST_MAX_TOOL_ROUNDS:       env["AICHEMIST_MAX_TOOL_ROUNDS"] ?? "",
+    AICHEMIST_MCP_REGISTRY_ENABLED:  env["AICHEMIST_MCP_REGISTRY_ENABLED"] ?? "",
   };
 }
 
