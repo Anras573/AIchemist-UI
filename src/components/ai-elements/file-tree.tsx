@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -14,7 +15,9 @@ import {
 } from "lucide-react";
 import type { HTMLAttributes, ReactNode } from "react";
 import {
+  Children,
   createContext,
+  isValidElement,
   useCallback,
   useContext,
   useMemo,
@@ -151,51 +154,48 @@ export const FileTreeFolder = ({
     togglePath(path);
   }, [togglePath, path]);
 
-  const handleSelect = useCallback(() => {
-    onSelect?.(path);
-  }, [onSelect, path]);
-
   const folderContextValue = useMemo(
     () => ({ isExpanded, name, path }),
     [isExpanded, name, path]
   );
 
+  const handleTriggerClick = useCallback(() => {
+    // The whole row toggles; also mark the folder selected like a file click.
+    onSelect?.(path);
+  }, [onSelect, path]);
+
   return (
     <FileTreeFolderContext.Provider value={folderContextValue}>
       <Collapsible onOpenChange={handleOpenChange} open={isExpanded}>
-        <div
-          className={cn("", className)}
-          role="treeitem"
-          tabIndex={0}
-          {...props}
-        >
-          <div
-            className={cn(
-              "flex w-full items-center gap-1 rounded px-2 py-1 text-left transition-colors hover:bg-muted/50",
-              isSelected && "bg-muted"
-            )}
-          >
-            <CollapsibleTrigger render={<button className="flex shrink-0 cursor-pointer items-center border-none bg-transparent p-0" type="button" />}><ChevronRightIcon
-                                        className={cn(
-                                          "size-4 shrink-0 text-muted-foreground transition-transform",
-                                          isExpanded && "rotate-90"
-                                        )}
-                                      /></CollapsibleTrigger>
-            <button
-              className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 border-none bg-transparent p-0 text-left"
-              onClick={handleSelect}
-              type="button"
-            >
-              <FileTreeIcon>
-                {isExpanded ? (
-                  <FolderOpenIcon className="size-4 text-blue-500" />
-                ) : (
-                  <FolderIcon className="size-4 text-blue-500" />
+        <div className={cn("", className)} role="treeitem" {...props}>
+          <CollapsibleTrigger
+            onClick={handleTriggerClick}
+            render={
+              <Button
+                className={cn(
+                  "w-full justify-start gap-1 px-2 font-mono",
+                  isSelected && "bg-muted"
                 )}
-              </FileTreeIcon>
-              <FileTreeName>{name}</FileTreeName>
-            </button>
-          </div>
+                size="sm"
+                variant="ghost"
+              />
+            }
+          >
+            <ChevronRightIcon
+              className={cn(
+                "size-4 shrink-0 text-muted-foreground transition-transform",
+                isExpanded && "rotate-90"
+              )}
+            />
+            <FileTreeIcon>
+              {isExpanded ? (
+                <FolderOpenIcon className="size-4 text-blue-500" />
+              ) : (
+                <FolderIcon className="size-4 text-blue-500" />
+              )}
+            </FileTreeIcon>
+            <FileTreeName>{name}</FileTreeName>
+          </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="ml-4 border-l pl-2">{children}</div>
           </CollapsibleContent>
@@ -236,41 +236,46 @@ export const FileTreeFile = ({
     onSelect?.(path);
   }, [onSelect, path]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        onSelect?.(path);
-      }
-    },
-    [onSelect, path]
-  );
-
   const fileContextValue = useMemo(() => ({ name, path }), [name, path]);
+
+  // Actions are buttons; they can't nest inside the row button, so they
+  // render beside it.
+  const childList = Children.toArray(children);
+  const actions = childList.filter(
+    (child) => isValidElement(child) && child.type === FileTreeActions
+  );
+  const rowContent = childList.filter((child) => !actions.includes(child));
 
   return (
     <FileTreeFileContext.Provider value={fileContextValue}>
       <div
-        className={cn(
-          "flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors hover:bg-muted/50",
-          isSelected && "bg-muted",
-          className
-        )}
-        onClick={handleClick}
-        onKeyDown={handleKeyDown}
+        className={cn("flex items-center gap-1", className)}
         role="treeitem"
-        tabIndex={0}
         {...props}
       >
-        {children ?? (
-          <>
-            {/* Spacer for alignment */}
-            <span className="size-4 shrink-0" />
-            <FileTreeIcon>
-              {icon ?? <FileIcon className="size-4 text-muted-foreground" />}
-            </FileTreeIcon>
-            <FileTreeName>{name}</FileTreeName>
-          </>
-        )}
+        <Button
+          className={cn(
+            "min-w-0 flex-1 justify-start gap-1 px-2 font-mono",
+            isSelected && "bg-muted"
+          )}
+          onClick={handleClick}
+          size="sm"
+          variant="ghost"
+        >
+          {rowContent.length > 0 ? (
+            rowContent
+          ) : (
+            <>
+              {/* Spacer for alignment */}
+              <span className="size-4 shrink-0" />
+              <FileTreeIcon>
+                {icon ?? <FileIcon className="size-4 text-muted-foreground" />}
+              </FileTreeIcon>
+              <FileTreeName>{name}</FileTreeName>
+            </>
+          )}
+        </Button>
+        {actions}
       </div>
     </FileTreeFileContext.Provider>
   );

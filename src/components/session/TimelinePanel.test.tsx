@@ -297,7 +297,7 @@ describe("TimelinePanel live turn state", () => {
     });
 
     renderWithProviders(<TimelinePanel />);
-    expect(screen.getByText("write_file")).toBeInTheDocument();
+    expect(screen.getByText("Running write_file")).toBeInTheDocument();
   });
 
   it("renders approval gates with allow/deny actions", () => {
@@ -318,7 +318,7 @@ describe("TimelinePanel live turn state", () => {
     });
 
     renderWithProviders(<TimelinePanel />);
-    expect(screen.getByText("execute_bash")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting approval to run execute_bash")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /allow once/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /deny/i })).toBeInTheDocument();
   });

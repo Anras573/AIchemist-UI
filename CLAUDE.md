@@ -411,6 +411,14 @@ Model overrides match by substring (e.g. `claude-sonnet-4-6` → overridden by `
 
 The AI Elements skill is installed at `.agents/skills/ai-elements/`. Reference docs for every component live at `.agents/skills/ai-elements/references/<component>.md`.
 
+**Migration to shadcn AI Elements (in progress):** the shadcn/ui AI Elements docs describe moving each `ai-elements/*.tsx` wrapper onto shadcn primitives (`ui/trace`, `ui/progress`, `ui/bubble`, …) while keeping its exports and props. Migrated so far: `task`, `file-tree`, `context`, `message`, `reasoning`, `tool`, `shimmer`, `prompt-input`. Notes:
+- `message`: our `Message` wraps its children in shadcn's `MessageContent` (a column body) because `TimelinePanel` puts labels/chips/bubble as siblings, and keeps the `group` + `is-user`/`is-assistant` classes for role-based styling. Our `MessageContent` is a shadcn `Bubble` (variant derived from role).
+- `tool` / `reasoning` render Trace lines (no status badge); `tool` highlights JSON through `ui/code-block` + `useHighlightedCode` (`src/lib/hooks/`, shiki via `src/lib/highlighter.tsx` — add languages there).
+- `shimmer` is the pure-CSS `shimmer` utility from `shadcn/tailwind.css` (the `motion` dependency was dropped).
+- `prompt-input` was already built on `ui/input-group`; the migration only adjusted the textarea padding, the action-menu trigger (outline, round) and the submit button (round, up-arrow). `PromptInputHeader` is unchanged — nothing uses it and this copy has no attachment chip component.
+- **Not migrated:** `terminal` (shadcn's is a collapsible one-line Trace, which doesn't fit `InteractiveTerminal`'s full-height xterm chrome), `ai-elements/code-block` (our shiki `CodeBlock` with `code`/`language` props is still used by `ChangesPanel`; shadcn's is a compositional primitive now living in `ui/code-block`), `conversation` (conflicts with the Virtuoso timeline), and `model-selector` (shadcn's version swaps the Dialog for a DropdownMenu, which has no search field; `ModelPickerButton` is the only consumer of the picker and relies on search for long local-model lists — `ModelSelectorLogo`/`Name`/`LogoGroup`, the only parts shadcn keeps unchanged, are what other components import).
+- When adding registry items, don't run `shadcn add` blindly — it adds an unrelated `cn` npm package; write the file with `cn` from `@/lib/utils` instead.
+
 **Critical — no `useChat`:** AI Elements examples use `useChat` from `@ai-sdk/react`, which requires an HTTP endpoint and **does not work in Electron**. This project drives AI Elements components from Zustand state updated by push events from the main process. Do not use `useChat`.
 
 **`@/` alias required** for all AI Elements imports (`@/components/ai-elements/...`). Configured in both `vite.config.ts` (`resolve.alias`) and `tsconfig.json` (`paths`).
