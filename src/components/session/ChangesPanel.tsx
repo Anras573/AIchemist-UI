@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   RefreshCw,
   ChevronDown,
@@ -9,25 +9,22 @@ import { useProjectStore } from "@/lib/store/useProjectStore";
 import { useIpc } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import type { FileChange } from "@/types";
-import { CodeBlock } from "@/components/ai-elements/code-block";
+import { languageForPath } from "@/lib/languageForPath";
+import {
+  addedRows,
+  countDiffRows,
+  parseUnifiedDiff,
+  type DiffRow,
+} from "@/lib/parseUnifiedDiff";
+import { DiffBlock } from "./DiffBlock";
 import { OpenPrSection } from "./OpenPrSection";
 
 const EMPTY_FILE_CHANGES: FileChange[] = [];
 
-// ── countDiffStats ────────────────────────────────────────────────────────────
+// ── DiffStats ─────────────────────────────────────────────────────────────────
 
-function countDiffStats(diff: string): { added: number; removed: number } {
-  let added = 0;
-  let removed = 0;
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) added++;
-    else if (line.startsWith("-") && !line.startsWith("---")) removed++;
-  }
-  return { added, removed };
-}
-
-function DiffStats({ diff }: { diff: string }) {
-  const { added, removed } = countDiffStats(diff);
+function DiffStats({ rows }: { rows: DiffRow[] }) {
+  const { added, removed } = countDiffRows(rows);
   if (added === 0 && removed === 0) return null;
   return (
     <span className="flex items-center gap-1 shrink-0 font-sans font-medium text-[11px]">
@@ -41,6 +38,7 @@ function DiffStats({ diff }: { diff: string }) {
 
 function CollapsibleChange({ change }: { change: FileChange }) {
   const [open, setOpen] = useState(false);
+  const rows = useMemo(() => parseUnifiedDiff(change.diff), [change.diff]);
 
   return (
     <div className="border rounded-md overflow-hidden">
@@ -54,7 +52,7 @@ function CollapsibleChange({ change }: { change: FileChange }) {
           <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
         )}
         <span className="truncate flex-1 text-foreground">{change.relativePath}</span>
-        {!change.isBinary && !change.tooLarge && <DiffStats diff={change.diff} />}
+        {!change.isBinary && !change.tooLarge && <DiffStats rows={rows} />}
         <span
           className={cn(
             "text-[10px] px-1.5 py-0.5 rounded font-sans font-medium shrink-0",
@@ -77,7 +75,7 @@ function CollapsibleChange({ change }: { change: FileChange }) {
               File too large — diff not computed.
             </p>
           ) : (
-            <CodeBlock code={change.diff} language="diff" />
+            <DiffBlock rows={rows} language={languageForPath(change.relativePath)} />
           )}
         </div>
       )}
@@ -124,6 +122,12 @@ function GitFileDiff({ entry, projectPath }: { entry: GitFileEntry; projectPath:
   const [open, setOpen] = useState(false);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const trackedRows = useMemo(() => parseUnifiedDiff(entry.diff), [entry.diff]);
+  const untrackedRows = useMemo(
+    () => (fileContent === null ? [] : addedRows(fileContent)),
+    [fileContent]
+  );
+  const language = languageForPath(entry.relativePath);
 
   const handleToggle = useCallback(async () => {
     const next = !open;
@@ -150,10 +154,8 @@ function GitFileDiff({ entry, projectPath }: { entry: GitFileEntry; projectPath:
           <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
         )}
         <span className="truncate flex-1 text-foreground">{entry.relativePath}</span>
-        {!entry.isUntracked && <DiffStats diff={entry.diff} />}
-        {entry.isUntracked && fileContent !== null && (
-          <DiffStats diff={fileContent.split("\n").map((l) => `+${l}`).join("\n")} />
-        )}
+        {!entry.isUntracked && <DiffStats rows={trackedRows} />}
+        {entry.isUntracked && fileContent !== null && <DiffStats rows={untrackedRows} />}
         <span
           className={cn(
             "text-[10px] px-1.5 py-0.5 rounded font-sans font-medium shrink-0",
@@ -173,13 +175,10 @@ function GitFileDiff({ entry, projectPath }: { entry: GitFileEntry; projectPath:
             ) : fileContent === null ? (
               <p className="text-xs text-muted-foreground italic px-3 py-2">Loading…</p>
             ) : (
-              <CodeBlock
-                code={fileContent.split("\n").map((l) => `+${l}`).join("\n")}
-                language="diff"
-              />
+              <DiffBlock rows={untrackedRows} language={language} />
             )
           ) : (
-            <CodeBlock code={entry.diff} language="diff" />
+            <DiffBlock rows={trackedRows} language={language} />
           )}
         </div>
       )}

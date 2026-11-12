@@ -32,44 +32,51 @@ describe("diff content rendering", () => {
     useSessionStore.setState({ activeSessionId: null, sessions: {}, sessionFileChanges: {} });
   });
 
-  it("renders added lines in the diff", () => {
+  function openDiff() {
     useSessionStore.getState().addSession(makeSession("sess-1"));
     useSessionStore.getState().setActiveSession("sess-1");
     useSessionStore.getState().addFileChange("sess-1", makeFileChange());
+    const view = renderWithProviders(<ChangesPanel />);
+    fireEvent.click(view.container.querySelector("button")!);
+    return view.container;
+  }
 
-    const { container } = renderWithProviders(<ChangesPanel />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(container.textContent).toContain("+new line");
+  const linesOf = (container: HTMLElement, variant: string) =>
+    Array.from(
+      container.querySelectorAll(`[data-slot=code-block-line][data-variant=${variant}]`)
+    ).map((el) => el.textContent);
+
+  it("renders added lines in the diff", () => {
+    const container = openDiff();
+    expect(linesOf(container, "added")).toEqual(["new line", "added line"]);
   });
 
   it("renders removed lines in the diff", () => {
-    useSessionStore.getState().addSession(makeSession("sess-1"));
-    useSessionStore.getState().setActiveSession("sess-1");
-    useSessionStore.getState().addFileChange("sess-1", makeFileChange());
-
-    const { container } = renderWithProviders(<ChangesPanel />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(container.textContent).toContain("-old line");
+    const container = openDiff();
+    expect(linesOf(container, "removed")).toEqual(["old line"]);
   });
 
   it("renders hunk headers in the diff", () => {
-    useSessionStore.getState().addSession(makeSession("sess-1"));
-    useSessionStore.getState().setActiveSession("sess-1");
-    useSessionStore.getState().addFileChange("sess-1", makeFileChange());
-
-    const { container } = renderWithProviders(<ChangesPanel />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(container.textContent).toContain("@@");
+    const container = openDiff();
+    expect(linesOf(container, "highlighted")).toEqual(["@@ -1,3 +1,4 @@"]);
   });
 
-  it("renders context lines in the diff", () => {
+  it("renders context lines and file headers as unmarked lines", () => {
+    const container = openDiff();
+    expect(linesOf(container, "default")).toEqual([
+      "--- src/foo.ts",
+      "+++ src/foo.ts",
+      "unchanged",
+    ]);
+  });
+
+  it("shows +/- counts in the file header", () => {
     useSessionStore.getState().addSession(makeSession("sess-1"));
     useSessionStore.getState().setActiveSession("sess-1");
     useSessionStore.getState().addFileChange("sess-1", makeFileChange());
-
-    const { container } = renderWithProviders(<ChangesPanel />);
-    fireEvent.click(container.querySelector("button")!);
-    expect(container.textContent).toContain(" unchanged");
+    renderWithProviders(<ChangesPanel />);
+    expect(screen.getByText("+2")).toBeInTheDocument();
+    expect(screen.getByText("-1")).toBeInTheDocument();
   });
 
   it("shows a size-limit message instead of a diff when the change is too large", () => {
@@ -863,5 +870,75 @@ describe("ChangesPanel Open PR flow", () => {
 
     expect(await screen.findByText("IPC channel error")).toBeInTheDocument();
     expect(window.electronAPI.agentSend).not.toHaveBeenCalled();
+  });
+});
+
+
+// ─── Git diff section ─────────────────────────────────────────────────────────
+
+describe("ChangesPanel git diff", () => {
+  const GIT_DIFF = [
+    "diff --git a/src/a.ts b/src/a.ts",
+    "index 111..222 100644",
+    "--- a/src/a.ts",
+    "+++ b/src/a.ts",
+    "@@ -1,2 +1,2 @@",
+    " keep",
+    "-const a = 1;",
+    "+const a = 2;",
+    "diff --git a/-- b/--",
+    "--- a/--",
+    "+++ b/--",
+    "@@ -1 +1 @@",
+    "--- a note",
+    "+++ a note",
+    "=== Untracked files ===",
+    "docs/new.md",
+    "",
+  ].join("\n");
+
+  beforeEach(() => {
+    useSessionStore.setState({ activeSessionId: null, sessions: {}, sessionFileChanges: {} });
+    useProjectStore.setState({ projects: [], activeProjectId: null });
+    useSessionStore.getState().addSession(makeSession("sess-git", { workspace_path: "/ws" }));
+    useSessionStore.getState().setActiveSession("sess-git");
+    window.electronAPI.getGitDiff = vi.fn().mockResolvedValue(GIT_DIFF);
+    window.electronAPI.readFile = vi.fn().mockResolvedValue({ content: "# Title\nbody" });
+  });
+
+  async function loadDiff() {
+    const view = renderWithProviders(<ChangesPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: /refresh/i }));
+    await screen.findByText("src/a.ts");
+    return view.container;
+  }
+
+  it("renders a tracked file's diff with added/removed variants", async () => {
+    const container = await loadDiff();
+    fireEvent.click(screen.getByText("src/a.ts"));
+    const added = container.querySelectorAll("[data-variant=added]");
+    const removed = container.querySelectorAll("[data-variant=removed]");
+    expect(Array.from(added).map((e) => e.textContent)).toEqual(["const a = 2;"]);
+    expect(Array.from(removed).map((e) => e.textContent)).toEqual(["const a = 1;"]);
+  });
+
+  it("counts a removed '-- ' line as a removal, not a file header", async () => {
+    const container = await loadDiff();
+    fireEvent.click(screen.getByText("--"));
+    const removed = Array.from(container.querySelectorAll("[data-variant=removed]"));
+    expect(removed.map((e) => e.textContent)).toEqual(["-- a note"]);
+    const added = Array.from(container.querySelectorAll("[data-variant=added]"));
+    expect(added.map((e) => e.textContent)).toEqual(["++ a note"]);
+  });
+
+  it("previews an untracked file as all-added lines", async () => {
+    const container = await loadDiff();
+    fireEvent.click(screen.getByText("docs/new.md"));
+    await waitFor(() => {
+      expect(
+        Array.from(container.querySelectorAll("[data-variant=added]")).map((e) => e.textContent)
+      ).toEqual(["# Title", "body"]);
+    });
+    expect(window.electronAPI.readFile).toHaveBeenCalledWith("/ws/docs/new.md");
   });
 });
