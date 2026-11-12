@@ -1,12 +1,17 @@
 "use client";
 
+import type { Collapsible } from "@/components/ui/collapsible";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "@/components/ui/trace";
 import { cn } from "@/lib/utils";
-import { BrainIcon, ChevronDownIcon } from "lucide-react";
+import { BrainIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import {
   createContext,
@@ -84,14 +89,16 @@ export function Reasoning({
 
   return (
     <ReasoningContext.Provider value={ctx}>
-      <Collapsible
-        open={isOpen}
-        onOpenChange={handleOpenChange}
-        className={cn("w-full", className)}
-        {...props}
-      >
-        {children}
-      </Collapsible>
+      <Trace>
+        <TraceCollapsible
+          open={isOpen}
+          onOpenChange={handleOpenChange}
+          className={className}
+          {...props}
+        >
+          {children}
+        </TraceCollapsible>
+      </Trace>
     </ReasoningContext.Provider>
   );
 }
@@ -100,7 +107,7 @@ Reasoning.displayName = "Reasoning";
 
 // ─── ReasoningTrigger ─────────────────────────────────────────────────────────
 
-export type ReasoningTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
+export type ReasoningTriggerProps = ComponentProps<typeof TraceCollapsibleTrigger> & {
   getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode;
 };
 
@@ -109,38 +116,25 @@ export function ReasoningTrigger({
   getThinkingMessage,
   ...props
 }: ReasoningTriggerProps) {
-  const { isStreaming, isOpen, duration } = useReasoning();
+  const { isStreaming, duration } = useReasoning();
 
   const message = getThinkingMessage
     ? getThinkingMessage(isStreaming, duration)
     : isStreaming
       ? "Thinking…"
-      : "Thought for a moment";
+      : duration !== undefined && duration > 0
+        ? `Thought for ${duration}s`
+        : "Thought for a moment";
 
   return (
-    <CollapsibleTrigger
-      className={cn(
-        "flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors py-1 select-none",
-        className
-      )}
-      {...props}
-    >
-      <BrainIcon className="size-3.5 shrink-0" />
-      <span>{message}</span>
-      {isStreaming && (
-        <span className="flex gap-0.5 items-center ml-1">
-          <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
-          <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:150ms]" />
-          <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:300ms]" />
-        </span>
-      )}
-      <ChevronDownIcon
-        className={cn(
-          "size-3.5 shrink-0 transition-transform duration-200 ml-1",
-          isOpen && "rotate-180"
-        )}
-      />
-    </CollapsibleTrigger>
+    <TraceCollapsibleTrigger className={className} {...props}>
+      <TraceLine status={isStreaming ? "running" : undefined}>
+        <TraceIcon>
+          <BrainIcon />
+        </TraceIcon>
+        <TraceTitle>{message}</TraceTitle>
+      </TraceLine>
+    </TraceCollapsibleTrigger>
   );
 }
 
@@ -149,7 +143,7 @@ ReasoningTrigger.displayName = "ReasoningTrigger";
 // ─── ReasoningContent ─────────────────────────────────────────────────────────
 
 export type ReasoningContentProps = Omit<
-  ComponentProps<typeof CollapsibleContent>,
+  ComponentProps<typeof TraceCollapsibleContent>,
   "children"
 > & {
   children: string;
@@ -161,19 +155,16 @@ export function ReasoningContent({
   ...props
 }: ReasoningContentProps) {
   return (
-    <CollapsibleContent
+    <TraceCollapsibleContent
       className={cn(
-        "mt-1 border-l-2 border-muted-foreground/20 pl-3 py-1",
-        "text-xs text-muted-foreground font-mono whitespace-pre-wrap break-words",
+        "text-xs font-mono whitespace-pre-wrap break-words",
         "max-h-64 overflow-y-auto",
-        "data-[state=closed]:animate-out data-[state=open]:animate-in",
-        "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         className
       )}
       {...props}
     >
       {children}
-    </CollapsibleContent>
+    </TraceCollapsibleContent>
   );
 }
 
