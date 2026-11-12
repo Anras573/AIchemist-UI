@@ -1,4 +1,6 @@
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import {
   HoverCard,
   HoverCardContent,
@@ -98,11 +100,10 @@ export function ContextTrigger({ children, className, ...props }: ContextTrigger
 
   return (
     <HoverCardTrigger
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-xs text-muted-foreground",
-        "hover:text-foreground hover:bg-muted/50 transition-colors cursor-default select-none",
-        className
-      )}
+      delay={10}
+      closeDelay={100}
+      render={<Button variant="outline" size="xs" />}
+      className={cn("cursor-default text-muted-foreground", className)}
       aria-label={pct != null ? `Context window usage: ${pct}%` : usedTokens != null ? `Context window usage: ${formatTokens(usedTokens)} tokens` : "Context window usage"}
       {...props}
     >
@@ -187,15 +188,16 @@ export function ContextContentHeader({ children, className, ...props }: ContextC
         )}
       </div>
       {maxTokens != null && (
-        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-          <div
-            className={cn(
-              "h-full rounded-full transition-all duration-500",
-              percentage >= 0.9 ? "bg-destructive" : percentage >= 0.7 ? "bg-yellow-500" : "bg-primary"
-            )}
-            style={{ width: `${Math.round(percentage * 100)}%` }}
-          />
-        </div>
+        <Progress
+          aria-label="Context used"
+          value={Math.round(percentage * 100)}
+          className={cn(
+            "gap-0 [&_[data-slot=progress-track]]:h-1.5",
+            percentage >= 0.9
+              ? "[&_[data-slot=progress-indicator]]:bg-destructive"
+              : percentage >= 0.7 && "[&_[data-slot=progress-indicator]]:bg-yellow-500"
+          )}
+        />
       )}
     </div>
   );

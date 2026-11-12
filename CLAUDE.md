@@ -411,6 +411,8 @@ Model overrides match by substring (e.g. `claude-sonnet-4-6` → overridden by `
 
 The AI Elements skill is installed at `.agents/skills/ai-elements/`. Reference docs for every component live at `.agents/skills/ai-elements/references/<component>.md`.
 
+**Migration to shadcn AI Elements (in progress):** the shadcn/ui AI Elements docs describe moving each `ai-elements/*.tsx` wrapper onto shadcn primitives (`ui/trace`, `ui/progress`, …) while keeping its exports and props. Migrated so far: `task`, `file-tree`, `context`. Not yet: `terminal` (shadcn's is a collapsible one-line Trace, which doesn't fit `InteractiveTerminal`'s full-height xterm chrome), `code-block` (shadcn's is a compositional primitive with no `code`/`language` props, unlike ours), `conversation` (conflicts with the Virtuoso timeline), and `message`/`reasoning`/`tool`/`shimmer`, `prompt-input`, `model-selector`. When adding registry items, don't run `shadcn add` blindly — it adds an unrelated `cn` npm package; write the file with `cn` from `@/lib/utils` instead.
+
 **Critical — no `useChat`:** AI Elements examples use `useChat` from `@ai-sdk/react`, which requires an HTTP endpoint and **does not work in Electron**. This project drives AI Elements components from Zustand state updated by push events from the main process. Do not use `useChat`.
 
 **`@/` alias required** for all AI Elements imports (`@/components/ai-elements/...`). Configured in both `vite.config.ts` (`resolve.alias`) and `tsconfig.json` (`paths`).
