@@ -72,10 +72,43 @@ export async function implDeleteFile(args: {
   }
 }
 
+/** Default wall-clock bound for a shell command (10 min). */
+export const DEFAULT_BASH_TIMEOUT_MS = 10 * 60 * 1000;
+/** Per-stream output cap; anything beyond is dropped with a marker. */
+export const MAX_BASH_OUTPUT_BYTES = 1024 * 1024;
+const BASH_TRUNCATION_MARKER = "\n[output truncated]";
+
+// Controllers for in-flight shell commands, keyed by session, so cancelling or
+// deleting a session can kill what it is running.
+const sessionShellControllers = new Map<string, Set<AbortController>>();
+
+/** Abort every shell command currently running for a session. */
+export function cancelSessionShells(sessionId: string): void {
+  const set = sessionShellControllers.get(sessionId);
+  if (!set) return;
+  for (const c of [...set]) c.abort();
+}
+
+function killProcessTree(proc: childProcess.ChildProcess): void {
+  if (proc.pid === undefined) return;
+  try {
+    if (process.platform === "win32") {
+      childProcess.spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { stdio: "ignore" });
+    } else {
+      process.kill(-proc.pid, "SIGKILL"); // whole process group (spawned detached)
+    }
+  } catch {
+    try { proc.kill("SIGKILL"); } catch { /* already gone */ }
+  }
+}
+
 export async function implExecuteBash(args: {
   command: string;
   cwd?: string;
   projectPath?: string;
+  sessionId?: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<string> {
   let cwd = args.cwd;
   if (cwd !== undefined && args.projectPath !== undefined) {
@@ -89,16 +122,87 @@ export async function implExecuteBash(args: {
       });
     }
   }
-  const proc = childProcess.spawnSync(args.command, {
-    shell: true,
-    cwd,
-    encoding: "utf8",
-  });
-  return JSON.stringify({
-    stdout: proc.stdout ?? "",
-    stderr: proc.stderr ?? "",
-    exit_code: proc.status ?? -1,
-  });
+
+  const timeoutMs = args.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS;
+  const controller = new AbortController();
+  const onExternalAbort = () => controller.abort();
+  if (args.signal?.aborted) controller.abort();
+  else args.signal?.addEventListener("abort", onExternalAbort, { once: true });
+  if (args.sessionId) {
+    let set = sessionShellControllers.get(args.sessionId);
+    if (!set) sessionShellControllers.set(args.sessionId, (set = new Set()));
+    set.add(controller);
+  }
+
+  try {
+    return await new Promise<string>((resolve) => {
+      let stdout = "";
+      let stderr = "";
+      let outTruncated = false;
+      let errTruncated = false;
+      let timedOut = false;
+      let aborted = false;
+      let settled = false;
+
+      const append = (cur: string, chunk: Buffer, truncated: boolean): [string, boolean] => {
+        if (truncated) return [cur, true];
+        const room = MAX_BASH_OUTPUT_BYTES - Buffer.byteLength(cur);
+        if (chunk.length <= room) return [cur + chunk.toString("utf8"), false];
+        return [cur + chunk.subarray(0, Math.max(room, 0)).toString("utf8"), true];
+      };
+
+      const finish = (exitCode: number, extraStderr = "") => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (outTruncated) stdout += BASH_TRUNCATION_MARKER;
+        if (errTruncated) stderr += BASH_TRUNCATION_MARKER;
+        if (extraStderr) stderr += (stderr && !stderr.endsWith("\n") ? "\n" : "") + extraStderr;
+        resolve(JSON.stringify({ stdout, stderr, exit_code: exitCode }));
+      };
+
+      const proc = childProcess.spawn(args.command, {
+        shell: true,
+        cwd,
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      const stop = () => killProcessTree(proc);
+      const timer = setTimeout(() => {
+        timedOut = true;
+        stop();
+      }, timeoutMs);
+      controller.signal.addEventListener("abort", () => {
+        aborted = true;
+        stop();
+      }, { once: true });
+      if (controller.signal.aborted) {
+        aborted = true;
+        stop();
+      }
+
+      proc.stdout?.on("data", (c: Buffer) => {
+        [stdout, outTruncated] = append(stdout, c, outTruncated);
+      });
+      proc.stderr?.on("data", (c: Buffer) => {
+        [stderr, errTruncated] = append(stderr, c, errTruncated);
+      });
+      proc.on("error", (err) => finish(-1, `Error: ${err.message}`));
+      proc.on("close", (code) => {
+        if (timedOut) return finish(-1, `Command timed out after ${timeoutMs} ms and was killed.`);
+        if (aborted) return finish(-1, "Command was cancelled.");
+        finish(code ?? -1);
+      });
+    });
+  } finally {
+    args.signal?.removeEventListener("abort", onExternalAbort);
+    if (args.sessionId) {
+      const set = sessionShellControllers.get(args.sessionId);
+      set?.delete(controller);
+      if (set?.size === 0) sessionShellControllers.delete(args.sessionId);
+    }
+  }
 }
 
 export async function implWebFetch(args: { url: string }): Promise<string> {

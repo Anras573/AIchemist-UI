@@ -591,7 +591,7 @@ async function makeBuiltinTools(ctx: ToolContext): Promise<ToolSet> {
       }),
       execute: ({ command, cwd }) =>
         runTool(ctx, "execute_bash", { command, cwd }, "shell", async () =>
-          implExecuteBash({ command, cwd, projectPath: ctx.projectPath }),
+          implExecuteBash({ command, cwd, projectPath: ctx.projectPath, sessionId: ctx.sessionId }),
         ),
     }),
     web_fetch: tool({

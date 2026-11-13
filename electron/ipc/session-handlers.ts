@@ -33,6 +33,7 @@ import {
 } from "../worktree";
 import { cancelSessionApprovals } from "../agent/approval";
 import { cancelSessionQuestions } from "../agent/question";
+import { cancelSessionShells } from "../agent/tool-impls";
 import { providerSessionStore } from "../agent/provider-session-store";
 import { getProvider } from "../agent/runner";
 import { OLLAMA_NO_MODELS_ERROR } from "../agent/ollama";
@@ -98,14 +99,14 @@ export function registerSessionHandlers(
     let workspacePath = project.path;
 
     if (project.config.create_worktree_per_session) {
-      if (isGitRepo(project.path)) {
+      if (await isGitRepo(project.path)) {
         const { managedRoot, warning } = resolveManagedWorktreeRoot(project.path, project.config.worktree_root_path);
         if (warning) {
           console.warn(`[worktree] ${warning}`);
           getMainWindow()?.webContents.send(CH.WORKTREE_WARNING, { message: warning });
         }
 
-        const worktree = createManagedWorktree(project.path, sessionId, managedRoot);
+        const worktree = await createManagedWorktree(project.path, sessionId, managedRoot);
         if (worktree.created) {
           branch = worktree.branch;
           workspacePath = worktree.workspacePath;
@@ -138,7 +139,7 @@ export function registerSessionHandlers(
     (_event, sessionId: string, options?: { limit?: number; beforeMessageId?: string }) =>
       getSession(db, sessionId, options)
   );
-  handle(CH.DELETE_SESSION, (_event, sessionId: string, options?: { cleanupWorktree?: boolean }) => {
+  handle(CH.DELETE_SESSION, async (_event, sessionId: string, options?: { cleanupWorktree?: boolean }) => {
     const session = getSession(db, sessionId);
     const project = listProjects(db).find((p) => p.id === session.project_id);
     if (!project) throw new Error(`Project not found for session ${sessionId}`);
@@ -149,7 +150,7 @@ export function registerSessionHandlers(
       session.workspace_path !== project.path;
 
     if (options?.cleanupWorktree && ownsManagedWorktree) {
-      cleanupManagedWorktree({
+      await cleanupManagedWorktree({
         repoRoot: project.path,
         workspacePath: session.workspace_path ?? project.path,
         branch: session.branch ?? "",
@@ -158,6 +159,7 @@ export function registerSessionHandlers(
 
     cancelSessionApprovals(sessionId);
     cancelSessionQuestions(sessionId);
+    cancelSessionShells(sessionId);
     // Drop the cached provider session state (the DB row goes away via cascade).
     providerSessionStore.forget(sessionId);
     activeTurns.delete(sessionId);

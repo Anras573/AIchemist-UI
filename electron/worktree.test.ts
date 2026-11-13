@@ -5,10 +5,10 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("child_process", () => ({
-  spawnSync: vi.fn(),
+  execFile: vi.fn(),
 }));
 
-import { spawnSync } from "child_process";
+import { execFile } from "child_process";
 import {
   cleanupManagedWorktree,
   createManagedWorktree,
@@ -16,7 +16,17 @@ import {
   resolveManagedWorktreeRoot,
 } from "./worktree";
 
-const mockSpawnSync = vi.mocked(spawnSync);
+const mockExecFile = vi.mocked(execFile);
+
+type GitOutcome = { status: number; stdout?: string; stderr?: string };
+const mockOutcome = (o: GitOutcome, once = false) => {
+  const impl = ((_cmd: string, _args: string[], _opts: unknown, cb: (...a: unknown[]) => void) => {
+    if (o.status === 0) cb(null, o.stdout ?? "", o.stderr ?? "");
+    else cb(Object.assign(new Error("git failed"), { code: o.status }), o.stdout ?? "", o.stderr ?? "");
+  }) as never;
+  if (once) mockExecFile.mockImplementationOnce(impl);
+  else mockExecFile.mockImplementation(impl);
+};
 
 describe("resolveManagedWorktreeRoot", () => {
   let tmpDir: string;
@@ -29,20 +39,20 @@ describe("resolveManagedWorktreeRoot", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("falls back to the project parent when no override is set", () => {
+  it("falls back to the project parent when no override is set", async () => {
     const projectPath = path.join(tmpDir, "repo");
     const result = resolveManagedWorktreeRoot(projectPath);
     expect(result.managedRoot).toBe(tmpDir);
   });
 
-  it("uses a valid override path", () => {
+  it("uses a valid override path", async () => {
     const override = path.join(tmpDir, "managed");
     fs.mkdirSync(override);
     const result = resolveManagedWorktreeRoot(path.join(tmpDir, "repo"), override);
     expect(result.managedRoot).toBe(override);
   });
 
-  it("falls back and warns for an invalid override path", () => {
+  it("falls back and warns for an invalid override path", async () => {
     const result = resolveManagedWorktreeRoot(path.join(tmpDir, "repo"), path.join(tmpDir, "missing"));
     expect(result.managedRoot).toBe(tmpDir);
     expect(result.warning).toMatch(/Invalid worktree root path/);
@@ -51,86 +61,88 @@ describe("resolveManagedWorktreeRoot", () => {
 
 describe("worktree git helpers", () => {
   beforeEach(() => {
-    mockSpawnSync.mockReset();
+    mockExecFile.mockReset();
   });
 
-  it("detects git repositories via rev-parse", () => {
-    mockSpawnSync.mockReturnValue({ status: 0, stdout: "true\n", stderr: "" } as never);
-    expect(isGitRepo("/repo")).toBe(true);
+  it("detects git repositories via rev-parse", async () => {
+    mockOutcome({ status: 0, stdout: "true\n", stderr: "" });
+    expect(await isGitRepo("/repo")).toBe(true);
   });
 
-  it("creates a managed worktree on the first successful attempt", () => {
-    mockSpawnSync.mockReturnValue({ status: 0, stdout: "", stderr: "" } as never);
+  it("creates a managed worktree on the first successful attempt", async () => {
+    mockOutcome({ status: 0, stdout: "", stderr: "" });
     const managedRoot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aichemist-worktree-root-")), "managed");
 
-    const result = createManagedWorktree("/repo", "session-123", managedRoot);
+    const result = await createManagedWorktree("/repo", "session-123", managedRoot);
 
     expect(result.created).toBe(true);
     expect(result.branch).toBe("aichemist/session-123");
     expect(result.workspacePath).toBe(path.join(managedRoot, "aichemist-session-123"));
-    expect(mockSpawnSync).toHaveBeenCalledWith(
+    expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["-C", "/repo", "worktree", "add", "-b", "aichemist/session-123", path.join(managedRoot, "aichemist-session-123")],
-      expect.objectContaining({ encoding: "utf8" })
+      expect.objectContaining({ encoding: "utf8" }),
+      expect.any(Function)
     );
   });
 
-  it("retries with a suffix when the first attempt fails", () => {
-    mockSpawnSync
-      .mockReturnValueOnce({ status: 1, stdout: "", stderr: "already exists" } as never)
-      .mockReturnValueOnce({ status: 0, stdout: "", stderr: "" } as never);
+  it("retries with a suffix when the first attempt fails", async () => {
+    mockOutcome({ status: 1, stderr: "already exists" }, true);
+    mockOutcome({ status: 0 }, true);
     const managedRoot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aichemist-worktree-root-")), "managed");
 
-    const result = createManagedWorktree("/repo", "session-123", managedRoot);
+    const result = await createManagedWorktree("/repo", "session-123", managedRoot);
 
     expect(result.created).toBe(true);
     expect(result.branch).toBe("aichemist/session-123-1");
     expect(result.workspacePath).toBe(path.join(managedRoot, "aichemist-session-123-1"));
   });
 
-  it("does not remove a pre-existing non-empty folder", () => {
-    mockSpawnSync
-      .mockReturnValueOnce({ status: 1, stdout: "", stderr: "already exists" } as never)
-      .mockReturnValueOnce({ status: 0, stdout: "", stderr: "" } as never);
+  it("does not remove a pre-existing non-empty folder", async () => {
+    mockOutcome({ status: 1, stderr: "already exists" }, true);
+    mockOutcome({ status: 0 }, true);
     const managedRoot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aichemist-worktree-root-")), "managed");
     const occupiedPath = path.join(managedRoot, "aichemist-session-123");
     const markerFile = path.join(occupiedPath, "keep.txt");
     fs.mkdirSync(occupiedPath, { recursive: true });
     fs.writeFileSync(markerFile, "keep");
 
-    const result = createManagedWorktree("/repo", "session-123", managedRoot);
+    const result = await createManagedWorktree("/repo", "session-123", managedRoot);
 
     expect(result.created).toBe(true);
     expect(result.workspacePath).toBe(path.join(managedRoot, "aichemist-session-123-1"));
     expect(fs.existsSync(markerFile)).toBe(true);
   });
 
-  it("removes the worktree, prunes metadata, and deletes the branch", () => {
-    mockSpawnSync.mockReturnValue({ status: 0, stdout: "", stderr: "" } as never);
+  it("removes the worktree, prunes metadata, and deletes the branch", async () => {
+    mockOutcome({ status: 0, stdout: "", stderr: "" });
 
-    cleanupManagedWorktree({
+    await cleanupManagedWorktree({
       repoRoot: "/repo",
       workspacePath: "/managed/aichemist-session-123",
       branch: "aichemist/session-123",
     });
 
-    expect(mockSpawnSync).toHaveBeenNthCalledWith(
+    expect(mockExecFile).toHaveBeenNthCalledWith(
       1,
       "git",
       ["-C", "/repo", "worktree", "remove", "--force", "/managed/aichemist-session-123"],
-      expect.any(Object)
+      expect.any(Object),
+      expect.any(Function)
     );
-    expect(mockSpawnSync).toHaveBeenNthCalledWith(
+    expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
       ["-C", "/repo", "worktree", "prune"],
-      expect.any(Object)
+      expect.any(Object),
+      expect.any(Function)
     );
-    expect(mockSpawnSync).toHaveBeenNthCalledWith(
+    expect(mockExecFile).toHaveBeenNthCalledWith(
       3,
       "git",
       ["-C", "/repo", "branch", "-D", "aichemist/session-123"],
-      expect.any(Object)
+      expect.any(Object),
+      expect.any(Function)
     );
   });
 });

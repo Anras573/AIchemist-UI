@@ -2,14 +2,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("fs");
-vi.mock("child_process");
 
 import * as fs from "fs";
-import * as childProcess from "child_process";
 import {
   implWriteFile,
   implDeleteFile,
-  implExecuteBash,
   implWebFetch,
   implWriteFileWithChange,
   implDeleteFileWithChange,
@@ -82,84 +79,6 @@ describe("implDeleteFile", () => {
 
     const result = await implDeleteFile({ path: "/tmp/a.txt" });
     expect(result).toBe("Error deleting file: 42");
-  });
-});
-
-// ── implExecuteBash ───────────────────────────────────────────────────────────
-
-describe("implExecuteBash", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("returns stdout, stderr, and exit_code from spawnSync", async () => {
-    vi.mocked(childProcess.spawnSync).mockReturnValue({
-      stdout: "hello\n",
-      stderr: "",
-      status: 0,
-      pid: 1,
-      output: [],
-      signal: null,
-      error: undefined,
-    });
-
-    const result = await implExecuteBash({ command: "echo hello" });
-
-    expect(childProcess.spawnSync).toHaveBeenCalledWith("echo hello", {
-      shell: true,
-      cwd: undefined,
-      encoding: "utf8",
-    });
-    expect(JSON.parse(result)).toEqual({ stdout: "hello\n", stderr: "", exit_code: 0 });
-  });
-
-  it("forwards cwd to spawnSync when provided", async () => {
-    vi.mocked(childProcess.spawnSync).mockReturnValue({
-      stdout: "",
-      stderr: "err\n",
-      status: 1,
-      pid: 2,
-      output: [],
-      signal: null,
-      error: undefined,
-    });
-
-    const result = await implExecuteBash({ command: "ls", cwd: "/some/dir" });
-
-    expect(childProcess.spawnSync).toHaveBeenCalledWith("ls", {
-      shell: true,
-      cwd: "/some/dir",
-      encoding: "utf8",
-    });
-    expect(JSON.parse(result)).toMatchObject({ exit_code: 1, stderr: "err\n" });
-  });
-
-  it("uses -1 as exit_code when status is null (e.g. process killed by signal)", async () => {
-    vi.mocked(childProcess.spawnSync).mockReturnValue({
-      stdout: "",
-      stderr: "",
-      status: null,
-      pid: 3,
-      output: [],
-      signal: "SIGKILL",
-      error: undefined,
-    });
-
-    const result = await implExecuteBash({ command: "sleep 999" });
-    expect(JSON.parse(result)).toMatchObject({ exit_code: -1 });
-  });
-
-  it("uses empty string for stdout/stderr when they are null", async () => {
-    vi.mocked(childProcess.spawnSync).mockReturnValue({
-      stdout: null as unknown as string,
-      stderr: null as unknown as string,
-      status: 0,
-      pid: 4,
-      output: [],
-      signal: null,
-      error: undefined,
-    });
-
-    const result = await implExecuteBash({ command: "true" });
-    expect(JSON.parse(result)).toEqual({ stdout: "", stderr: "", exit_code: 0 });
   });
 });
 

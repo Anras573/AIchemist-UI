@@ -95,19 +95,42 @@ export function resolveManagedWorktreeRoot(
   }
 }
 
-export function isGitRepo(repoRoot: string): boolean {
-  const result = childProcess.spawnSync("git", ["-C", repoRoot, "rev-parse", "--is-inside-work-tree"], {
-    encoding: "utf8",
-    env: childEnv(),
+interface GitResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/** Async git runner — never blocks the main process. Resolves (never rejects). */
+function runGit(args: string[]): Promise<GitResult> {
+  return new Promise((resolve) => {
+    childProcess.execFile(
+      "git",
+      args,
+      { encoding: "utf8", env: childEnv(), maxBuffer: 16 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (!err) return resolve({ status: 0, stdout, stderr });
+        const code = (err as NodeJS.ErrnoException).code;
+        resolve({
+          status: typeof code === "number" ? code : -1,
+          stdout: stdout ?? "",
+          stderr: stderr || (err instanceof Error ? err.message : String(err)),
+        });
+      }
+    );
   });
+}
+
+export async function isGitRepo(repoRoot: string): Promise<boolean> {
+  const result = await runGit(["-C", repoRoot, "rev-parse", "--is-inside-work-tree"]);
   return result.status === 0 && result.stdout.trim() === "true";
 }
 
-export function createManagedWorktree(
+export async function createManagedWorktree(
   repoRoot: string,
   sessionId: string,
   managedRoot: string
-): ManagedWorktreeResult {
+): Promise<ManagedWorktreeResult> {
   fs.mkdirSync(managedRoot, { recursive: true });
 
   const maxAttempts = 4;
@@ -119,14 +142,7 @@ export function createManagedWorktree(
 
     removeIfEmptyDirectory(workspacePath);
 
-    const result = childProcess.spawnSync(
-      "git",
-      ["-C", repoRoot, "worktree", "add", "-b", branch, workspacePath],
-      {
-        encoding: "utf8",
-        env: childEnv(),
-      }
-    );
+    const result = await runGit(["-C", repoRoot, "worktree", "add", "-b", branch, workspacePath]);
 
     if (result.status === 0) {
       return { repoRoot, managedRoot, branch, workspacePath, created: true };
@@ -147,31 +163,18 @@ export function createManagedWorktree(
   };
 }
 
-export function cleanupManagedWorktree({ repoRoot, workspacePath, branch }: ManagedWorktreeCleanup): void {
-  const env = childEnv();
-
-  const remove = childProcess.spawnSync(
-    "git",
-    ["-C", repoRoot, "worktree", "remove", "--force", workspacePath],
-    { encoding: "utf8", env }
-  );
+export async function cleanupManagedWorktree({ repoRoot, workspacePath, branch }: ManagedWorktreeCleanup): Promise<void> {
+  const remove = await runGit(["-C", repoRoot, "worktree", "remove", "--force", workspacePath]);
   if (remove.status !== 0) {
     throw new Error([remove.stderr, remove.stdout].filter(Boolean).join("").trim() || "Failed to remove worktree");
   }
 
-  const prune = childProcess.spawnSync("git", ["-C", repoRoot, "worktree", "prune"], {
-    encoding: "utf8",
-    env,
-  });
+  const prune = await runGit(["-C", repoRoot, "worktree", "prune"]);
   if (prune.status !== 0) {
     throw new Error([prune.stderr, prune.stdout].filter(Boolean).join("").trim() || "Failed to prune worktree metadata");
   }
 
-  const deleteBranch = childProcess.spawnSync(
-    "git",
-    ["-C", repoRoot, "branch", "-D", branch],
-    { encoding: "utf8", env }
-  );
+  const deleteBranch = await runGit(["-C", repoRoot, "branch", "-D", branch]);
   if (deleteBranch.status !== 0) {
     throw new Error([deleteBranch.stderr, deleteBranch.stdout].filter(Boolean).join("").trim() || "Failed to delete branch");
   }
