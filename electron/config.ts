@@ -51,7 +51,7 @@ export function resolveClaudePath(): string | null {
   // Last resort: scan PATH ourselves (no child process — `which`/`where`
   // would block the main process). Windows also tries the executable shims.
   const exts = isWindows ? [".exe", ".cmd", ".bat", ""] : [""];
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+  for (const dir of buildChildProcessPath(process.env.PATH).split(path.delimiter)) {
     if (!dir) continue;
     for (const ext of exts) {
       const full = path.join(dir, `claude${ext}`);

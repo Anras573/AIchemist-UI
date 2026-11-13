@@ -39,20 +39,20 @@ describe("resolveManagedWorktreeRoot", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("falls back to the project parent when no override is set", async () => {
+  it("falls back to the project parent when no override is set", () => {
     const projectPath = path.join(tmpDir, "repo");
     const result = resolveManagedWorktreeRoot(projectPath);
     expect(result.managedRoot).toBe(tmpDir);
   });
 
-  it("uses a valid override path", async () => {
+  it("uses a valid override path", () => {
     const override = path.join(tmpDir, "managed");
     fs.mkdirSync(override);
     const result = resolveManagedWorktreeRoot(path.join(tmpDir, "repo"), override);
     expect(result.managedRoot).toBe(override);
   });
 
-  it("falls back and warns for an invalid override path", async () => {
+  it("falls back and warns for an invalid override path", () => {
     const result = resolveManagedWorktreeRoot(path.join(tmpDir, "repo"), path.join(tmpDir, "missing"));
     expect(result.managedRoot).toBe(tmpDir);
     expect(result.warning).toMatch(/Invalid worktree root path/);

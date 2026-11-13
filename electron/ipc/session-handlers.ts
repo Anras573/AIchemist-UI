@@ -144,6 +144,11 @@ export function registerSessionHandlers(
     const project = listProjects(db).find((p) => p.id === session.project_id);
     if (!project) throw new Error(`Project not found for session ${sessionId}`);
 
+    // Stop anything still running for the session *before* its worktree is removed.
+    cancelSessionApprovals(sessionId);
+    cancelSessionQuestions(sessionId);
+    cancelSessionShells(sessionId);
+
     const ownsManagedWorktree =
       Boolean(session.branch) &&
       Boolean(session.workspace_path) &&
@@ -157,9 +162,6 @@ export function registerSessionHandlers(
       });
     }
 
-    cancelSessionApprovals(sessionId);
-    cancelSessionQuestions(sessionId);
-    cancelSessionShells(sessionId);
     // Drop the cached provider session state (the DB row goes away via cascade).
     providerSessionStore.forget(sessionId);
     activeTurns.delete(sessionId);

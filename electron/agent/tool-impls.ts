@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as childProcess from "child_process";
+import { StringDecoder } from "string_decoder";
 import { createPatch } from "diff";
 import type { FileChange } from "../../src/types/index";
 import { isInsideAttachmentsRoot } from "../attachments";
@@ -82,6 +83,16 @@ const BASH_TRUNCATION_MARKER = "\n[output truncated]";
 // deleting a session can kill what it is running.
 const sessionShellControllers = new Map<string, Set<AbortController>>();
 
+/** Grace period after a kill before we stop waiting on the pipes. */
+const KILL_GRACE_MS = 2000;
+
+/** Abort every running shell command (app quit — commands are detached). */
+export function cancelAllShells(): void {
+  for (const set of sessionShellControllers.values()) {
+    for (const c of [...set]) c.abort();
+  }
+}
+
 /** Abort every shell command currently running for a session. */
 export function cancelSessionShells(sessionId: string): void {
   const set = sessionShellControllers.get(sessionId);
@@ -138,23 +149,32 @@ export async function implExecuteBash(args: {
     return await new Promise<string>((resolve) => {
       let stdout = "";
       let stderr = "";
+      let outBytes = 0;
+      let errBytes = 0;
       let outTruncated = false;
       let errTruncated = false;
       let timedOut = false;
       let aborted = false;
       let settled = false;
+      let graceTimer: NodeJS.Timeout | undefined;
+      // One decoder per stream so a multi-byte char split across chunks survives.
+      const outDecoder = new StringDecoder("utf8");
+      const errDecoder = new StringDecoder("utf8");
 
-      const append = (cur: string, chunk: Buffer, truncated: boolean): [string, boolean] => {
-        if (truncated) return [cur, true];
-        const room = MAX_BASH_OUTPUT_BYTES - Buffer.byteLength(cur);
-        if (chunk.length <= room) return [cur + chunk.toString("utf8"), false];
-        return [cur + chunk.subarray(0, Math.max(room, 0)).toString("utf8"), true];
+      // Appends up to the byte cap using a running counter (no rescans).
+      const take = (chunk: Buffer, used: number): { text: Buffer; used: number; truncated: boolean } => {
+        const room = MAX_BASH_OUTPUT_BYTES - used;
+        if (chunk.length <= room) return { text: chunk, used: used + chunk.length, truncated: false };
+        return { text: chunk.subarray(0, Math.max(room, 0)), used: MAX_BASH_OUTPUT_BYTES, truncated: true };
       };
 
       const finish = (exitCode: number, extraStderr = "") => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        clearTimeout(graceTimer);
+        stdout += outDecoder.end();
+        stderr += errDecoder.end();
         if (outTruncated) stdout += BASH_TRUNCATION_MARKER;
         if (errTruncated) stderr += BASH_TRUNCATION_MARKER;
         if (extraStderr) stderr += (stderr && !stderr.endsWith("\n") ? "\n" : "") + extraStderr;
@@ -168,7 +188,21 @@ export async function implExecuteBash(args: {
         stdio: ["ignore", "pipe", "pipe"],
       });
 
-      const stop = () => killProcessTree(proc);
+      // Kill the tree, then give the pipes a short grace period: a daemonised
+      // grandchild (setsid/nohup) can hold them open so `close` never fires.
+      const stop = () => {
+        killProcessTree(proc);
+        graceTimer ??= setTimeout(() => {
+          proc.stdout?.destroy();
+          proc.stderr?.destroy();
+          finish(
+            -1,
+            timedOut
+              ? `Command timed out after ${timeoutMs} ms and was killed.`
+              : "Command was cancelled.",
+          );
+        }, KILL_GRACE_MS);
+      };
       const timer = setTimeout(() => {
         timedOut = true;
         stop();
@@ -183,10 +217,18 @@ export async function implExecuteBash(args: {
       }
 
       proc.stdout?.on("data", (c: Buffer) => {
-        [stdout, outTruncated] = append(stdout, c, outTruncated);
+        if (outTruncated) return;
+        const r = take(c, outBytes);
+        outBytes = r.used;
+        outTruncated = r.truncated;
+        stdout += outDecoder.write(r.text);
       });
       proc.stderr?.on("data", (c: Buffer) => {
-        [stderr, errTruncated] = append(stderr, c, errTruncated);
+        if (errTruncated) return;
+        const r = take(c, errBytes);
+        errBytes = r.used;
+        errTruncated = r.truncated;
+        stderr += errDecoder.write(r.text);
       });
       proc.on("error", (err) => finish(-1, `Error: ${err.message}`));
       proc.on("close", (code) => {
