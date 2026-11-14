@@ -1,4 +1,4 @@
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Virtuoso } from "react-virtuoso";
 import { useSessionStore, LiveToolCall, PendingApproval, PendingQuestion } from "@/lib/store/useSessionStore";
@@ -33,6 +33,7 @@ import { MessageAttachmentChips } from "./ComposerAttachments";
 import type { AttachmentInput } from "../../../electron/attachments";
 import { QuestionCard } from "./QuestionCard";
 import { useIpc } from "@/lib/ipc";
+import { useThrottledValue } from "@/lib/hooks/useThrottledValue";
 import { useLoadOlderMessages } from "@/lib/hooks/useLoadOlderMessages";
 
 const EMPTY_COMPACTIONS: CompactionEvent[] = [];
@@ -99,11 +100,13 @@ const MessageBubble = memo(function MessageBubble({
 
 // Subscribes to the hot streaming buffer itself so SESSION_DELTA flushes (up to
 // ~60/s) re-render only this leaf, not the whole TimelinePanel (issue #291).
-// The text is deferred so markdown parsing yields to typing/scrolling and
-// intermediate states are skipped under load.
+// The text is throttled (~10 Hz) so markdown parsing stays off the delta rate
+// but the bubble is guaranteed to keep advancing (useDeferredValue can starve
+// when deltas arrive faster than a render completes).
+const STREAM_RENDER_INTERVAL_MS = 100;
 const StreamingBubble = memo(function StreamingBubble({ sessionId }: { sessionId: string | null }) {
   const live = useSessionStore((s) => (sessionId ? (s.streamingText[sessionId] ?? "") : ""));
-  const text = useDeferredValue(live);
+  const text = useThrottledValue(live, STREAM_RENDER_INTERVAL_MS);
   return (
     <div className="flex w-full justify-start">
       <div className="max-w-[80%] rounded-lg px-4 py-2.5 text-sm bg-muted text-foreground">
@@ -121,14 +124,14 @@ const StreamingBubble = memo(function StreamingBubble({ sessionId }: { sessionId
 const ReasoningBlock = memo(function ReasoningBlock({ sessionId }: { sessionId: string | null }) {
   const thinkingText = useSessionStore((s) => (sessionId ? (s.sessionThinking[sessionId] ?? "") : ""));
   const isThinking = useSessionStore((s) => (sessionId ? (s.sessionIsThinking[sessionId] ?? false) : false));
-  const deferred = useDeferredValue(thinkingText);
-  if (!thinkingText) return null;
+  const throttled = useThrottledValue(thinkingText, STREAM_RENDER_INTERVAL_MS);
+  if (!throttled) return null;
   return (
     <div className="flex w-full justify-start">
       <div className="max-w-[85%]">
         <Reasoning isStreaming={isThinking}>
           <ReasoningTrigger />
-          <ReasoningContent>{deferred}</ReasoningContent>
+          <ReasoningContent>{throttled}</ReasoningContent>
         </Reasoning>
       </div>
     </div>
@@ -380,6 +383,8 @@ function TimelineFooter({ context }: { context?: TimelineFooterContext }) {
 }
 
 const TIMELINE_COMPONENTS = { Footer: TimelineFooter };
+const followTimelineOutput = (atBottom: boolean) => (atBottom ? ("auto" as const) : false);
+const INCREASE_VIEWPORT_BY = { top: 400, bottom: 400 };
 const computeTimelineItemKey = (_: number, item: TimelineItem) => item.data.id;
 
 interface TimelinePanelProps {
@@ -580,6 +585,13 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
     ],
   );
 
+  // Only read by Virtuoso on (re)mount; memoised so the prop stays stable.
+  const lastItemIndex = timelineItems.length - 1;
+  const initialTopMostItemIndex = useMemo(
+    () => (lastItemIndex >= 0 ? { index: lastItemIndex, align: "end" as const } : undefined),
+    [lastItemIndex],
+  );
+
   const itemContent = useCallback(
     (index: number, item: TimelineItem) => (
       <div className={cn("px-4", index === 0 ? "pt-4" : "pt-3")}>
@@ -625,14 +637,12 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
           context={footerContext}
           computeItemKey={computeTimelineItemKey}
           firstItemIndex={firstItemIndex}
-          initialTopMostItemIndex={
-            timelineItems.length > 0 ? { index: timelineItems.length - 1, align: "end" } : undefined
-          }
+          initialTopMostItemIndex={initialTopMostItemIndex}
           startReached={handleStartReached}
-          followOutput={(atBottom) => (atBottom ? "auto" : false)}
+          followOutput={followTimelineOutput}
           atBottomStateChange={handleAtBottomStateChange}
           scrollerRef={setScrollerEl}
-          increaseViewportBy={{ top: 400, bottom: 400 }}
+          increaseViewportBy={INCREASE_VIEWPORT_BY}
           components={TIMELINE_COMPONENTS}
           itemContent={itemContent}
         />
