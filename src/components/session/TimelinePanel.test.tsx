@@ -1,6 +1,6 @@
 import type React from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { TimelinePanel } from "./TimelinePanel";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -285,6 +285,38 @@ describe("TimelinePanel live turn state", () => {
     renderWithProviders(<TimelinePanel />);
     expect(screen.getByText("partial resp")).toBeInTheDocument();
     expect(screen.getByText(/agent is busy/i)).toBeInTheDocument();
+  });
+
+  it("does not re-render the timeline list when streaming text or reasoning updates (issue #291)", async () => {
+    useSessionStore.setState({
+      sessions: {
+        "sess-1": makeSession({
+          id: "sess-1",
+          status: "running",
+          messages: [makeMessage({ id: "m1", role: "user", content: "hello" })],
+        }),
+      },
+      activeSessionId: "sess-1",
+    });
+    renderWithProviders(<TimelinePanel onSendMessage={vi.fn()} />);
+    await screen.findByText("hello");
+    const rendersBefore = mockVirtuoso.mock.calls.length;
+
+    await act(async () => {
+      useSessionStore.setState({ streamingText: { "sess-1": "first chunk" } });
+    });
+    await act(async () => {
+      useSessionStore.setState({
+        streamingText: { "sess-1": "first chunk second chunk" },
+        sessionThinking: { "sess-1": "pondering" },
+      });
+    });
+
+    // The leaf components picked the text up...
+    expect(await screen.findByText(/second chunk/)).toBeInTheDocument();
+    // ...but TimelinePanel (and therefore Virtuoso / the historical items /
+    // the InputBar) did not commit again for the deltas.
+    expect(mockVirtuoso.mock.calls.length).toBe(rendersBefore);
   });
 
   it("renders live tool calls", () => {

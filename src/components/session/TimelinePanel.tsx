@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Virtuoso } from "react-virtuoso";
 import { useSessionStore, LiveToolCall, PendingApproval, PendingQuestion } from "@/lib/store/useSessionStore";
@@ -97,7 +97,13 @@ const MessageBubble = memo(function MessageBubble({
 
 // ─── Streaming indicator ──────────────────────────────────────────────────────
 
-function StreamingBubble({ text }: { text: string }) {
+// Subscribes to the hot streaming buffer itself so SESSION_DELTA flushes (up to
+// ~60/s) re-render only this leaf, not the whole TimelinePanel (issue #291).
+// The text is deferred so markdown parsing yields to typing/scrolling and
+// intermediate states are skipped under load.
+const StreamingBubble = memo(function StreamingBubble({ sessionId }: { sessionId: string | null }) {
+  const live = useSessionStore((s) => (sessionId ? (s.streamingText[sessionId] ?? "") : ""));
+  const text = useDeferredValue(live);
   return (
     <div className="flex w-full justify-start">
       <div className="max-w-[80%] rounded-lg px-4 py-2.5 text-sm bg-muted text-foreground">
@@ -109,7 +115,25 @@ function StreamingBubble({ text }: { text: string }) {
       </div>
     </div>
   );
-}
+});
+
+// Same idea for the reasoning block: it owns its own subscription.
+const ReasoningBlock = memo(function ReasoningBlock({ sessionId }: { sessionId: string | null }) {
+  const thinkingText = useSessionStore((s) => (sessionId ? (s.sessionThinking[sessionId] ?? "") : ""));
+  const isThinking = useSessionStore((s) => (sessionId ? (s.sessionIsThinking[sessionId] ?? false) : false));
+  const deferred = useDeferredValue(thinkingText);
+  if (!thinkingText) return null;
+  return (
+    <div className="flex w-full justify-start">
+      <div className="max-w-[85%]">
+        <Reasoning isStreaming={isThinking}>
+          <ReasoningTrigger />
+          <ReasoningContent>{deferred}</ReasoningContent>
+        </Reasoning>
+      </div>
+    </div>
+  );
+});
 
 // ─── Tool call block ─────────────────────────────────────────────────────────
 
@@ -284,28 +308,39 @@ interface TimelineFooterContext {
   toolCalls: LiveToolCall[];
   approvals: PendingApproval[];
   questions: PendingQuestion[];
-  thinkingText: string;
-  isThinking: boolean;
   showStreamingBubble: boolean;
-  streaming: string;
   queuePausedState: { remainingCount: number; failedMessageId?: string } | null;
   activeSessionId: string | null;
   handleApprovalDecision: (approvalId: string, approved: boolean, scope: ApprovalScope) => void;
   removePendingQuestion: (sessionId: string, questionId: string) => void;
   handleQueueRecovery: (action: "retry" | "skip" | "clear") => void;
+  /** Called when the footer's rendered height changes (streaming/tool/approval growth). */
+  onFooterResize: () => void;
 }
 
 function TimelineFooter({ context }: { context?: TimelineFooterContext }) {
+  const footerRef = useRef<HTMLDivElement | null>(null);
+  const onResizeRef = useRef<(() => void) | undefined>(undefined);
+  onResizeRef.current = context?.onFooterResize;
+
+  // Pin-to-bottom follows footer growth via a ResizeObserver instead of an
+  // effect keyed on every streaming delta (which forced a sync layout read).
+  const hasContext = Boolean(context);
+  useEffect(() => {
+    const el = footerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => onResizeRef.current?.());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hasContext]);
+
   if (!context) return null;
   const {
     showEmptyState,
     toolCalls,
     approvals,
     questions,
-    thinkingText,
-    isThinking,
     showStreamingBubble,
-    streaming,
     queuePausedState,
     activeSessionId,
     handleApprovalDecision,
@@ -314,7 +349,7 @@ function TimelineFooter({ context }: { context?: TimelineFooterContext }) {
   } = context;
 
   return (
-    <div className="flex flex-col gap-3 px-4 pt-3 pb-4">
+    <div ref={footerRef} className="flex flex-col gap-3 px-4 pt-3 pb-4">
       {showEmptyState && (
         <ConversationEmptyState title="Send a message to start the conversation" description="" />
       )}
@@ -335,23 +370,17 @@ function TimelineFooter({ context }: { context?: TimelineFooterContext }) {
           }}
         />
       ))}
-      {thinkingText && (
-        <div className="flex w-full justify-start">
-          <div className="max-w-[85%]">
-            <Reasoning isStreaming={isThinking}>
-              <ReasoningTrigger />
-              <ReasoningContent>{thinkingText}</ReasoningContent>
-            </Reasoning>
-          </div>
-        </div>
-      )}
-      {showStreamingBubble && <StreamingBubble text={streaming} />}
+      <ReasoningBlock sessionId={activeSessionId} />
+      {showStreamingBubble && <StreamingBubble sessionId={activeSessionId} />}
       {queuePausedState && (
         <QueueRecoveryCard remainingCount={queuePausedState.remainingCount} onAction={handleQueueRecovery} />
       )}
     </div>
   );
 }
+
+const TIMELINE_COMPONENTS = { Footer: TimelineFooter };
+const computeTimelineItemKey = (_: number, item: TimelineItem) => item.data.id;
 
 interface TimelinePanelProps {
   /** Called by Phase 4 when the user submits a message. */
@@ -370,9 +399,6 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
   const session = useSessionStore((s) =>
     activeSessionId ? s.sessions[activeSessionId] : null
   );
-  const streaming = useSessionStore((s) =>
-    activeSessionId ? (s.streamingText[activeSessionId] ?? "") : ""
-  );
   const toolCalls = useSessionStore(
     (s) => (activeSessionId ? s.liveToolCalls[activeSessionId] : undefined) ?? EMPTY_TOOL_CALLS
   );
@@ -384,12 +410,6 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
   );
   const compactions = useSessionStore(
     (s) => (activeSessionId ? s.sessionCompactions[activeSessionId] : undefined) ?? EMPTY_COMPACTIONS
-  );
-  const thinkingText = useSessionStore((s) =>
-    activeSessionId ? (s.sessionThinking[activeSessionId] ?? "") : ""
-  );
-  const isThinking = useSessionStore((s) =>
-    activeSessionId ? (s.sessionIsThinking[activeSessionId] ?? false) : false
   );
   const queuedIds = useSessionStore(
     (s) => (activeSessionId ? s.queuedMessageIds[activeSessionId] : undefined) ?? EMPTY_QUEUED_IDS
@@ -442,18 +462,21 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
     });
   }, [messages, compactions]);
 
-  function handleApprovalDecision(approvalId: string, approved: boolean, scope: "once" | "session" | "project") {
-    if (!activeSessionId) return;
-    const approval = approvals.find((a) => a.approvalId === approvalId);
-    if (!approval) return;
-    // Unblock the agent immediately
-    approval.resolve(approved, { scope, projectId: activeProjectId ?? undefined });
-    // Remove the card after a brief feedback window
-    const sid = activeSessionId;
-    setTimeout(() => removeApproval(sid, approvalId), 1500);
-  }
+  const handleApprovalDecision = useCallback(
+    (approvalId: string, approved: boolean, scope: "once" | "session" | "project") => {
+      if (!activeSessionId) return;
+      const approval = approvals.find((a) => a.approvalId === approvalId);
+      if (!approval) return;
+      // Unblock the agent immediately
+      approval.resolve(approved, { scope, projectId: activeProjectId ?? undefined });
+      // Remove the card after a brief feedback window
+      const sid = activeSessionId;
+      setTimeout(() => removeApproval(sid, approvalId), 1500);
+    },
+    [activeSessionId, approvals, activeProjectId, removeApproval],
+  );
 
-  function handleQueueRecovery(action: "retry" | "skip" | "clear") {
+  const handleQueueRecovery = useCallback((action: "retry" | "skip" | "clear") => {
     if (!activeSessionId) return;
     const sid = activeSessionId;
     const failedMsgId = queuePausedState?.failedMessageId;
@@ -467,7 +490,7 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
         }
       })
       .catch(console.error);
-  }
+  }, [activeSessionId, queuePausedState, ipc, clearQueuePaused, clearQueuedMessages, dequeueMessage]);
 
   // ── Virtualized scroll management ──────────────────────────────────────────
   //
@@ -493,11 +516,16 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
     }
   }, []);
 
-  useEffect(() => {
-    if (isAtBottomRef.current) {
-      scrollToBottom("auto");
-    }
-  }, [streaming, thinkingText, toolCalls, approvals, questions, queuePausedState, scrollToBottom]);
+  // Footer growth (streaming text, reasoning, tool calls, approvals, …) is
+  // observed by a ResizeObserver inside TimelineFooter; pin only when the user
+  // is already at the bottom so we never fight a scrolled-up reader.
+  const handleFooterResize = useCallback(() => {
+    if (isAtBottomRef.current) scrollToBottom("auto");
+  }, [scrollToBottom]);
+
+  const setScrollerEl = useCallback((ref: HTMLElement | Window | null) => {
+    scrollerElRef.current = ref as HTMLElement | null;
+  }, []);
 
   useEffect(() => {
     isAtBottomRef.current = true;
@@ -521,21 +549,49 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
     });
   }, [activeSessionId, hasMoreMessages, messages, loadOlderMessages]);
 
-  const footerContext: TimelineFooterContext = {
-    showEmptyState: timelineItems.length === 0 && session?.status !== "running",
-    toolCalls,
-    approvals,
-    questions,
-    thinkingText,
-    isThinking,
-    showStreamingBubble: session?.status === "running",
-    streaming,
-    queuePausedState,
-    activeSessionId,
-    handleApprovalDecision,
-    removePendingQuestion,
-    handleQueueRecovery,
-  };
+  const showEmptyState = timelineItems.length === 0 && session?.status !== "running";
+  const showStreamingBubble = session?.status === "running";
+  const footerContext = useMemo<TimelineFooterContext>(
+    () => ({
+      showEmptyState,
+      toolCalls,
+      approvals,
+      questions,
+      showStreamingBubble,
+      queuePausedState,
+      activeSessionId,
+      handleApprovalDecision,
+      removePendingQuestion,
+      handleQueueRecovery,
+      onFooterResize: handleFooterResize,
+    }),
+    [
+      showEmptyState,
+      toolCalls,
+      approvals,
+      questions,
+      showStreamingBubble,
+      queuePausedState,
+      activeSessionId,
+      handleApprovalDecision,
+      removePendingQuestion,
+      handleQueueRecovery,
+      handleFooterResize,
+    ],
+  );
+
+  const itemContent = useCallback(
+    (index: number, item: TimelineItem) => (
+      <div className={cn("px-4", index === 0 ? "pt-4" : "pt-3")}>
+        {item.kind === "message" ? (
+          <MessageBubble message={item.data} isQueued={queuedIdsSet.has(item.data.id)} />
+        ) : (
+          <CompactionMarker event={item.data} />
+        )}
+      </div>
+    ),
+    [queuedIdsSet],
+  );
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (!session) {
@@ -567,7 +623,7 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
           style={{ height: "100%" }}
           data={timelineItems}
           context={footerContext}
-          computeItemKey={(_, item) => item.data.id}
+          computeItemKey={computeTimelineItemKey}
           firstItemIndex={firstItemIndex}
           initialTopMostItemIndex={
             timelineItems.length > 0 ? { index: timelineItems.length - 1, align: "end" } : undefined
@@ -575,20 +631,10 @@ export function TimelinePanel({ onSendMessage, onNewSession, createSessionError,
           startReached={handleStartReached}
           followOutput={(atBottom) => (atBottom ? "auto" : false)}
           atBottomStateChange={handleAtBottomStateChange}
-          scrollerRef={(ref) => {
-            scrollerElRef.current = ref as HTMLElement | null;
-          }}
+          scrollerRef={setScrollerEl}
           increaseViewportBy={{ top: 400, bottom: 400 }}
-          components={{ Footer: TimelineFooter }}
-          itemContent={(index, item) => (
-            <div className={cn("px-4", index === 0 ? "pt-4" : "pt-3")}>
-              {item.kind === "message" ? (
-                <MessageBubble message={item.data} isQueued={queuedIdsSet.has(item.data.id)} />
-              ) : (
-                <CompactionMarker event={item.data} />
-              )}
-            </div>
-          )}
+          components={TIMELINE_COMPONENTS}
+          itemContent={itemContent}
         />
         {!isAtBottom && (
           <Button
