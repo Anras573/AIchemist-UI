@@ -89,7 +89,7 @@ export async function createApprovalMcpServer(
           name: "execute_bash",
           args,
           category: "shell",
-          impl: () => implExecuteBash({ ...args, projectPath }),
+          impl: () => implExecuteBash({ ...args, projectPath, sessionId }),
         })
       )
   );

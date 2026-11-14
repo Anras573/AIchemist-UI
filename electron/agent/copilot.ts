@@ -440,7 +440,7 @@ export async function runCopilotAgentTurn(params: {
           args,
           category: "shell",
           onError: "throw",
-          impl: () => implExecuteBash({ ...args, projectPath }),
+          impl: () => implExecuteBash({ ...args, projectPath, sessionId: gateCtx.sessionId }),
         }),
     }
   );

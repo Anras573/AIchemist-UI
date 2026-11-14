@@ -739,6 +739,10 @@ The **Workflows** view (`src/components/workflows/`) is a full-screen surface to
 
 If you add a new IPC handler that starts an agent turn, always call `updateSessionStatus(db, sessionId, "running")` at the start and `"idle"` or `"error"` at the end so crash recovery works correctly.
 
+### No synchronous child processes on the main process (issue #290)
+
+Never use `spawnSync` / `execSync` / `execFileSync` in non-test `electron/` code — they block the whole main event loop (IPC, streaming, PTY output, scheduler). `implExecuteBash` (`tool-impls.ts`) uses async `spawn` with a 10 min timeout, a 1 MB per-stream output cap (truncated with a marker, real exit code kept), and kills the whole process tree on timeout/abort; `cancelSessionShells(sessionId)` aborts a session's running commands (called on session delete). Git helpers (`worktree.ts`, `GET_GIT_BRANCH`/`GET_GIT_DIFF`) use async `execFile`; `resolveClaudePath()` scans `PATH` in-process instead of shelling out to `which`.
+
 ### LIST_DIRECTORY — filtering and cap
 
 The `LIST_DIRECTORY` IPC handler in `electron/ipc/fs-handlers.ts` applies two safeguards before returning entries:

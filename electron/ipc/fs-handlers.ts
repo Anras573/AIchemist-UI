@@ -1,11 +1,15 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as childProcess from "child_process";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { shell } from "electron";
 import * as CH from "../ipc-channels";
 import { buildChildProcessPath } from "../config";
 import { openFolderDialog } from "../dialog";
 import { handle } from "./handle";
+
+const execFileAsync = promisify(execFile);
+const GIT_MAX_BUFFER = 64 * 1024 * 1024;
 
 const IGNORED_DIR_NAMES = new Set([
   "node_modules", ".git", ".hg", ".svn",
@@ -79,38 +83,50 @@ export function registerFsHandlers(): void {
     await shell.openExternal(url.toString());
   });
 
-  handle(CH.GET_GIT_BRANCH, (_event, projectPath: string) => {
+  handle(CH.GET_GIT_BRANCH, async (_event, projectPath: string) => {
     const env = { ...process.env, PATH: buildChildProcessPath(process.env.PATH) };
     try {
-      return childProcess
-        .execSync("git branch --show-current", { cwd: projectPath, encoding: "utf8", timeout: 5_000, env })
-        .trim() || null;
+      const { stdout } = await execFileAsync("git", ["branch", "--show-current"], {
+        cwd: projectPath,
+        encoding: "utf8",
+        timeout: 5_000,
+        env,
+      });
+      return stdout.trim() || null;
     } catch {
       return null;
     }
   });
 
-  handle(CH.GET_GIT_DIFF, (_event, projectPath: string) => {
+  handle(CH.GET_GIT_DIFF, async (_event, projectPath: string) => {
     const env = { ...process.env, PATH: buildChildProcessPath(process.env.PATH) };
 
-    const run = (cmd: string) =>
-      childProcess.execSync(cmd, { cwd: projectPath, encoding: "utf8", timeout: 10_000, env });
+    const run = async (gitArgs: string[]) =>
+      (
+        await execFileAsync("git", gitArgs, {
+          cwd: projectPath,
+          encoding: "utf8",
+          timeout: 10_000,
+          maxBuffer: GIT_MAX_BUFFER,
+          env,
+        })
+      ).stdout;
 
     try {
       let diff = "";
       try {
-        diff = run("git diff HEAD --no-color");
+        diff = await run(["diff", "HEAD", "--no-color"]);
       } catch (headErr) {
         const e = headErr as { stderr?: string };
         const isNoHead = e.stderr?.includes("ambiguous argument") || e.stderr?.includes("unknown revision");
         if (isNoHead) {
-          diff = run("git diff --no-color --cached");
+          diff = await run(["diff", "--no-color", "--cached"]);
         } else {
           throw headErr;
         }
       }
 
-      const untracked = run("git ls-files --others --exclude-standard").trim();
+      const untracked = (await run(["ls-files", "--others", "--exclude-standard"])).trim();
       if (untracked) {
         const header = "=== Untracked files ===\n";
         diff = diff ? `${diff}\n${header}${untracked}` : `${header}${untracked}`;

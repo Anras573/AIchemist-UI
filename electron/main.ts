@@ -23,6 +23,7 @@ import { registerBudgetHandlers } from "./ipc/budget-handlers";
 import { registerSpendingHandlers } from "./ipc/spending-handlers";
 import { registerUpdateHandlers } from "./ipc/update-handlers";
 import { WorkflowScheduler } from "./agent/workflow-scheduler";
+import { cancelAllShells } from "./agent/tool-impls";
 import { AgentBridge } from "./canvas/agent-bridge";
 import { CanvasHostManager } from "./canvas/host-manager";
 import { CanvasMcpEndpoint, setActiveCanvasMcpEndpoint } from "./canvas/mcp-endpoint";
@@ -338,6 +339,7 @@ app.on("before-quit", () => {
   clearInterval(updateCheckInterval);
   tray?.destroy();
   workflowScheduler?.stopAll();
+  cancelAllShells();
   setActiveCanvasMcpEndpoint(null);
   void canvasMcpEndpoint?.stop();
   void canvasHostManager?.stopAll();

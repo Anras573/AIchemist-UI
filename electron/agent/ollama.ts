@@ -616,6 +616,7 @@ async function executeTool(
         command: String(args.command ?? ""),
         cwd: typeof args.cwd === "string" ? args.cwd : undefined,
         projectPath: ctx.projectPath,
+        sessionId: ctx.sessionId,
       }));
     case "web_fetch":
       return runTool(ctx, name, args, "web", async () => implWebFetch({ url: String(args.url ?? "") }));

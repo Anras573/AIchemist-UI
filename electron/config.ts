@@ -1,7 +1,7 @@
 import * as dotenv from "dotenv";
 import * as os from "os";
 import * as path from "path";
-import { execSync } from "child_process";
+import { statSync } from "fs";
 
 /**
  * Load ~/.aichemist/.env into process.env.
@@ -43,20 +43,24 @@ export function resolveClaudePath(): string | null {
       ];
   for (const p of candidates) {
     try {
-      const { statSync } = require("fs") as typeof import("fs");
       statSync(p);
       return p;
     } catch { /* not found */ }
   }
 
-  // Last resort: ask the shell. `which` is POSIX-only; Windows uses `where`,
-  // which can return multiple lines — take the first.
-  try {
-    const lookup = isWindows ? "where claude" : "which claude";
-    return execSync(lookup, { encoding: "utf-8" }).split(/\r?\n/)[0]?.trim() || null;
-  } catch {
-    return null;
+  // Last resort: scan PATH ourselves (no child process — `which`/`where`
+  // would block the main process). Windows also tries the executable shims.
+  const exts = isWindows ? [".exe", ".cmd", ".bat", ""] : [""];
+  for (const dir of buildChildProcessPath(process.env.PATH).split(path.delimiter)) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const full = path.join(dir, `claude${ext}`);
+      try {
+        if (statSync(full).isFile()) return full;
+      } catch { /* not here */ }
+    }
   }
+  return null;
 }
 
 /**
