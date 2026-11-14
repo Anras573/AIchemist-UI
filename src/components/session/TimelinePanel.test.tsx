@@ -1,6 +1,7 @@
 import type React from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { memo } from "react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { TimelinePanel } from "./TimelinePanel";
 import { renderWithProviders } from "@/test/utils/renderWithProviders";
 import { useSessionStore } from "@/lib/store/useSessionStore";
@@ -21,9 +22,20 @@ type MockVirtuosoProps = {
   components?: { Footer?: React.ComponentType<{ context?: unknown }> };
   startReached?: (index: number) => void;
   firstItemIndex?: number;
+  scrollerRef?: (ref: HTMLElement | Window | null) => void;
+  atBottomStateChange?: (atBottom: boolean) => void;
 };
 
+// Fake scroll container handed to the panel via Virtuoso's `scrollerRef`, so the
+// auto-scroll path (ResizeObserver → scrollTo) can be asserted.
+const scrollerEl = document.createElement("div");
+const scrollToSpy = vi.fn();
+scrollerEl.scrollTo = scrollToSpy as unknown as typeof scrollerEl.scrollTo;
+let reportAtBottom: ((atBottom: boolean) => void) | undefined;
+
 const mockVirtuoso = vi.fn((props: MockVirtuosoProps) => {
+  props.scrollerRef?.(scrollerEl);
+  reportAtBottom = props.atBottomStateChange;
   const Footer = props.components?.Footer;
   return (
     <div>
@@ -39,15 +51,35 @@ vi.mock("react-virtuoso", () => ({
   Virtuoso: (props: MockVirtuosoProps) => mockVirtuoso(props),
 }));
 
-// Conversation (use-stick-to-bottom) requires ResizeObserver, absent in jsdom.
+// Replace InputBar with a memoised render counter so tests can assert it does
+// not re-render when streaming text changes (it keeps real `memo` semantics).
+const { inputBarRenders } = vi.hoisted(() => ({ inputBarRenders: vi.fn() }));
+vi.mock("./InputBar", () => ({
+  InputBar: memo(function InputBarMock() {
+    inputBarRenders();
+    return <div data-testid="input-bar" />;
+  }),
+}));
+
+// jsdom has no ResizeObserver; capture instances so tests can fire them.
 class ResizeObserverStub {
+  static instances: ResizeObserverStub[] = [];
+  disconnected = false;
+  constructor(public callback: () => void) {
+    ResizeObserverStub.instances.push(this);
+  }
   observe() {}
   unobserve() {}
-  disconnect() {}
+  disconnect() {
+    this.disconnected = true;
+  }
 }
 
 beforeEach(() => {
   mockVirtuoso.mockClear();
+  inputBarRenders.mockClear();
+  scrollToSpy.mockClear();
+  ResizeObserverStub.instances = [];
   vi.stubGlobal("ResizeObserver", ResizeObserverStub);
   useSessionStore.setState({
     sessions: {},
@@ -285,6 +317,79 @@ describe("TimelinePanel live turn state", () => {
     renderWithProviders(<TimelinePanel />);
     expect(screen.getByText("partial resp")).toBeInTheDocument();
     expect(screen.getByText(/agent is busy/i)).toBeInTheDocument();
+  });
+
+  it("does not re-render the timeline list when streaming text or reasoning updates (issue #291)", async () => {
+    useSessionStore.setState({
+      sessions: {
+        "sess-1": makeSession({
+          id: "sess-1",
+          status: "running",
+          messages: [makeMessage({ id: "m1", role: "user", content: "hello" })],
+        }),
+      },
+      activeSessionId: "sess-1",
+    });
+    renderWithProviders(<TimelinePanel onSendMessage={vi.fn()} />);
+    await screen.findByText("hello");
+    const rendersBefore = mockVirtuoso.mock.calls.length;
+    const inputBarBefore = inputBarRenders.mock.calls.length;
+
+    await act(async () => {
+      useSessionStore.setState({ streamingText: { "sess-1": "first chunk" } });
+    });
+    await act(async () => {
+      useSessionStore.setState({
+        streamingText: { "sess-1": "first chunk second chunk" },
+        sessionThinking: { "sess-1": "pondering" },
+      });
+    });
+
+    // The leaf components picked the text up...
+    expect(await screen.findByText(/second chunk/)).toBeInTheDocument();
+    // ...but TimelinePanel (and therefore Virtuoso / the historical items /
+    // the InputBar) did not commit again for the deltas.
+    expect(mockVirtuoso.mock.calls.length).toBe(rendersBefore);
+    expect(inputBarRenders.mock.calls.length).toBe(inputBarBefore);
+  });
+
+  describe("auto-scroll via footer ResizeObserver (issue #291)", () => {
+    function renderRunning() {
+      useSessionStore.setState({
+        sessions: { "sess-1": makeSession({ id: "sess-1", status: "running" }) },
+        activeSessionId: "sess-1",
+      });
+      renderWithProviders(<TimelinePanel onSendMessage={vi.fn()} />);
+      const ro = ResizeObserverStub.instances.at(-1);
+      expect(ro).toBeDefined();
+      return ro!;
+    }
+
+    it("pins to the bottom when the footer grows and the user is at the bottom", () => {
+      const ro = renderRunning();
+      scrollToSpy.mockClear();
+      act(() => ro.callback());
+      expect(scrollToSpy).toHaveBeenCalled();
+    });
+
+    it("does not scroll when the user has scrolled up", () => {
+      const ro = renderRunning();
+      act(() => reportAtBottom?.(false));
+      scrollToSpy.mockClear();
+      act(() => ro.callback());
+      expect(scrollToSpy).not.toHaveBeenCalled();
+    });
+
+    it("disconnects the observer on unmount", () => {
+      useSessionStore.setState({
+        sessions: { "sess-1": makeSession({ id: "sess-1", status: "running" }) },
+        activeSessionId: "sess-1",
+      });
+      const { unmount } = renderWithProviders(<TimelinePanel onSendMessage={vi.fn()} />);
+      const ro = ResizeObserverStub.instances.at(-1)!;
+      unmount();
+      expect(ro.disconnected).toBe(true);
+    });
   });
 
   it("renders live tool calls", () => {

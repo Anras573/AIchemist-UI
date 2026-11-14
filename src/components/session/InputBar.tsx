@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useSessionStore } from "@/lib/store/useSessionStore";
 import { useProjectStore } from "@/lib/store/useProjectStore";
 import { SkillInfo } from "@/types";
@@ -104,13 +104,13 @@ export interface InputBarProps {
 }
 
 /** Outer shell — provides the controlled text context for the inner bar. */
-export function InputBar(props: InputBarProps) {
+export const InputBar = memo(function InputBar(props: InputBarProps) {
   return (
     <PromptInputProvider>
       <InputBarInner {...props} />
     </PromptInputProvider>
   );
-}
+});
 
 /** Inner bar — has access to usePromptInputController for slash detection. */
 function InputBarInner({
