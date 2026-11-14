@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/Anras573/AIchemist-UI/compare/v1.3.0...v1.3.1) (2026-11-14)
+
+
+### Performance Improvements
+
+* remove synchronous child processes from the main process ([#293](https://github.com/Anras573/AIchemist-UI/issues/293)) ([d0d2fa7](https://github.com/Anras573/AIchemist-UI/commit/d0d2fa78e1329c045cbb7aa3d0a458b10b7ccc18))
+* stop streaming deltas re-rendering the whole TimelinePanel ([#295](https://github.com/Anras573/AIchemist-UI/issues/295)) ([1da2895](https://github.com/Anras573/AIchemist-UI/commit/1da2895748ce7b1619be0517a99a7ad186f1f09c))
+
 ## [1.3.0](https://github.com/Anras573/AIchemist-UI/compare/v1.2.0...v1.3.0) (2026-11-08)
 
 
