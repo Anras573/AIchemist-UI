@@ -156,6 +156,11 @@ const contextWindowCache = new Map<string, number>();
 /** Upper bound for the `num_ctx` we request — larger windows cost lots of VRAM. */
 const MAX_OLLAMA_NUM_CTX = 32_768;
 
+/** The `num_ctx` requested for a model (cached from its `show()` probe). */
+function numCtxForModel(model: string): number {
+  return Math.min(contextWindowCache.get(model) ?? DEFAULT_CONTEXT_WINDOW_TOKENS, MAX_OLLAMA_NUM_CTX);
+}
+
 function contextLengthFromModelInfo(info: OllamaShowResult["model_info"]): number | null {
   if (!info) return null;
   const entries = info instanceof Map ? [...info.entries()] : Object.entries(info);
@@ -573,12 +578,17 @@ async function runDelegatedTurn(
     { role: "user", content: subPrompt },
   ];
 
+  // Same num_ctx computation as a normal turn, so a same-model delegation
+  // doesn't force Ollama to reload the model at a different context size.
+  await getModelCapabilities(ctx.client, subModel);
+  const subNumCtx = numCtxForModel(subModel);
+
   let fullText = "";
   for (let round = 0; round < SUB_AGENT_MAX_ROUNDS; round++) {
     // Sub-agent reasoning is internal — pass think=false so delegated turns
     // never request or surface thinking deltas. (`subCtx.emitter` separately
     // suppresses SESSION_DELTA so the sub-agent's answer text doesn't interleave.)
-    const { text, toolCalls } = await runChatRound(ctx.client, subModel, messages, subTools, subCtx, false);
+    const { text, toolCalls } = await runChatRound(ctx.client, subModel, messages, subTools, subCtx, false, subNumCtx);
     fullText += text;
 
     if (toolCalls.length === 0) return fullText;
@@ -837,7 +847,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   // the SAME value the history budget is computed against. `context_length`
   // is the model's architectural maximum (often 128k+), far above what Ollama
   // serves by default, so it is capped. Cached from the `show()` probe above.
-  const numCtx = Math.min(contextWindowCache.get(model) ?? DEFAULT_CONTEXT_WINDOW_TOKENS, MAX_OLLAMA_NUM_CTX);
+  const numCtx = numCtxForModel(model);
   const historyBudget = computeHistoryBudget(
     numCtx,
     estimateTokens(systemPrompt) + estimateTokens(params.prompt),
