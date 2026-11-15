@@ -573,14 +573,7 @@ export function loadToolCallsForMessage(db: Database, messageId: string): ToolCa
     category: string;
   }[];
 
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    args: JSON.parse(row.args) as Record<string, unknown>,
-    result: row.result ? (JSON.parse(row.result) as unknown) : null,
-    status: row.status as ToolCallStatus,
-    category: row.category as ToolCategory,
-  }));
+  return rows.map((row) => toolCallFromRow({ ...row, message_id: messageId }));
 }
 
 type ToolCallRow = {

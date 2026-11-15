@@ -167,7 +167,8 @@ function isVisionEligible(a: MessageAttachment): boolean {
 
 // Attachment files are immutable once written, so base64 payloads are cached
 // by path + size + mtime (small LRU) instead of re-read on every turn.
-const IMAGE_CACHE_MAX = 8;
+// Matches MAX_VISION_IMAGES: at most that many payloads are ever inlined per turn.
+const IMAGE_CACHE_MAX = 4;
 const imageCache = new Map<string, string>();
 
 /** Test seam: drop cached image payloads. */

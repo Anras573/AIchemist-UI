@@ -463,6 +463,7 @@ async function loadHistory(
       units.push({
         messages: [{ role: "user", content: userContent(text, imagesByUserRow.get(row.id)) }],
         tokens: estimateTokens(text),
+        startsWithUser: true,
       });
       continue;
     }
@@ -882,10 +883,11 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   const withImages = !params.noTools;
   // Replay is bounded by the endpoint's context window (optional
   // `contextWindow` field on the endpoint entry, else a conservative default).
+  const systemPrompt = buildSystemPrompt(params);
   const configuredWindow = Number(entry.contextWindow);
   const historyBudget = computeHistoryBudget(
     Number.isFinite(configuredWindow) && configuredWindow > 0 ? configuredWindow : null,
-    estimateTokens(buildSystemPrompt(params)) + estimateTokens(params.prompt),
+    estimateTokens(systemPrompt) + estimateTokens(params.prompt),
   );
   const messages = withCurrentPrompt(
     await loadHistory(params.db, params.sessionId, params.messageId, withImages, historyBudget),
@@ -913,7 +915,7 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   const streamAttempt = async (msgs: ModelMessage[]): Promise<void> => {
     const result = streamText({
       model,
-      system: buildSystemPrompt(params),
+      system: systemPrompt,
       messages: msgs,
       ...(tools ? { tools, stopWhen: stepCountIs(maxToolRounds) } : {}),
     });

@@ -190,6 +190,22 @@ describe("ollama provider", () => {
     });
   });
 
+  it("requests an explicit, capped num_ctx derived from the model's context_length", async () => {
+    const db = makeDb([{ id: "m-user", role: "user", content: "hello" }]);
+    ollamaMocks.show.mockResolvedValue({ capabilities: [], model_info: new Map([["llama.context_length", 131072]]) });
+    ollamaMocks.chat.mockResolvedValue(streamChunks([{ message: { content: "ok" } }]));
+
+    await runOllamaAgentTurn({
+      db: db as never,
+      sessionId: "s-1",
+      messageId: "m-placeholder",
+      projectConfig: { model: "qwen2.5:latest" } as never,
+      webContents: { send: vi.fn() } as never,
+    } as never);
+
+    expect(ollamaMocks.chat.mock.calls[0][0].options).toEqual({ num_ctx: 32768 });
+  });
+
   it("appends the prompt when it is not already the last user message (skipPersistence turns)", async () => {
     // PR draft generation sends a prompt that is never saved to the DB —
     // the turn must still see it as the final user message.

@@ -10,6 +10,7 @@ import { loadToolCallsForSession } from "../sessions";
 import { stmt } from "../db-stmt-cache";
 import {
   computeHistoryBudget,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
   estimateTokens,
   trimUnitsToBudget,
   truncateToolResult,
@@ -97,6 +98,7 @@ interface OllamaClientLike {
     stream?: boolean;
     tools?: OllamaToolDefinition[];
     think?: boolean;
+    options?: { num_ctx?: number };
   }): Promise<AsyncIterable<OllamaChatChunk> | { message?: Partial<OllamaMessage> }>;
 }
 
@@ -151,6 +153,8 @@ function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
 const capabilityCache = new Map<string, string[]>();
 // Context window (tokens) per model, filled by the same `show()` probe.
 const contextWindowCache = new Map<string, number>();
+/** Upper bound for the `num_ctx` we request — larger windows cost lots of VRAM. */
+const MAX_OLLAMA_NUM_CTX = 32_768;
 
 function contextLengthFromModelInfo(info: OllamaShowResult["model_info"]): number | null {
   if (!info) return null;
@@ -259,6 +263,7 @@ async function loadHistory(
       units.push({
         messages: [{ role: "user", content, ...(images ? { images } : {}) }],
         tokens: estimateTokens(content),
+        startsWithUser: true,
       });
       continue;
     }
@@ -724,6 +729,7 @@ async function runChatRound(
   tools: OllamaToolDefinition[],
   ctx: ToolExecutionContext,
   think: boolean,
+  numCtx?: number,
 ): Promise<{ text: string; toolCalls: OllamaToolCall[] }> {
   const response = await client.chat({
     model,
@@ -731,6 +737,7 @@ async function runChatRound(
     stream: true,
     tools,
     ...(think ? { think: true } : {}),
+    ...(numCtx ? { options: { num_ctx: numCtx } } : {}),
   });
 
   let fullText = "";
@@ -825,11 +832,14 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   // Attached images are only sent as real image input to vision-capable models
   // (others would error); for the rest the path note in the prompt is all they get.
   const withImages = capabilities.includes("vision");
-  // Filled by the capability probe above (same cached `show()` call).
   const systemPrompt = buildSystemPrompt(params);
-  const contextWindow = params.noTools ? null : (contextWindowCache.get(model) ?? null);
+  // Explicit context the server is asked to run with (`options.num_ctx`), and
+  // the SAME value the history budget is computed against. `context_length`
+  // is the model's architectural maximum (often 128k+), far above what Ollama
+  // serves by default, so it is capped. Cached from the `show()` probe above.
+  const numCtx = Math.min(contextWindowCache.get(model) ?? DEFAULT_CONTEXT_WINDOW_TOKENS, MAX_OLLAMA_NUM_CTX);
   const historyBudget = computeHistoryBudget(
-    contextWindow,
+    numCtx,
     estimateTokens(systemPrompt) + estimateTokens(params.prompt),
   );
   const history = await loadHistory(params.db, params.sessionId, params.messageId, withImages, historyBudget);
@@ -889,7 +899,7 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   let turnStatus: "success" | "error" = "error";
   try {
     for (let round = 0; round < maxToolRounds; round++) {
-      const { text, toolCalls } = await runChatRound(client, model, messages, tools, ctx, think);
+      const { text, toolCalls } = await runChatRound(client, model, messages, tools, ctx, think, numCtx);
       fullText += text;
 
       if (toolCalls.length === 0) {

@@ -53,6 +53,15 @@ describe("trimUnitsToBudget", () => {
     expect(out).toEqual(["call", "result", "cur"]);
   });
 
+  it("advances the cut so the replay starts with a user unit", () => {
+    const u = (l: string, user: boolean): HistoryUnit<string> => ({ messages: [l], tokens: 10, startsWithUser: user });
+    const units = [u("u0", true), u("a0", false), u("u1", true), u("a1", false), u("u2", true)];
+    // Budget fits the last 2 units (a1,u2 → cut=3, an assistant) → advance to u2.
+    expect(trimUnitsToBudget(units, 20, 1)).toEqual(["u2"]);
+    // Budget fits 4 (cut=1, assistant) → advance to u1.
+    expect(trimUnitsToBudget(units, 40, 1)).toEqual(["u1", "a1", "u2"]);
+  });
+
   it("estimates tokens roughly by chars/4", () => {
     expect(estimateTokens("12345678")).toBe(2);
   });

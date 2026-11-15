@@ -44,6 +44,8 @@ export function computeHistoryBudget(
 export interface HistoryUnit<T> {
   messages: T[];
   tokens: number;
+  /** True when the unit's first message is a user message. */
+  startsWithUser?: boolean;
 }
 
 /**
@@ -66,6 +68,13 @@ export function trimUnitsToBudget<T>(
   }
   if (cut > 0) {
     cut = Math.min(units.length - 1, Math.ceil(cut / batch) * batch);
+  }
+  // Strict chat templates reject a conversation that doesn't open with a user
+  // message: advance to the next user unit, never dropping the newest unit.
+  if (cut > 0 && !units[cut].startsWithUser) {
+    let next = cut;
+    while (next < units.length && !units[next].startsWithUser) next++;
+    if (next < units.length) cut = next;
   }
   return units.slice(cut).flatMap((u) => u.messages);
 }
