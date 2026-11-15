@@ -25,7 +25,15 @@ import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
 import type { ManagedMcpBridge } from "../mcp";
 import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
-import { getDisabledMcpServers, loadToolCallsForMessage } from "../sessions";
+import { getDisabledMcpServers, loadToolCallsForSession } from "../sessions";
+import { stmt } from "../db-stmt-cache";
+import {
+  computeHistoryBudget,
+  estimateTokens,
+  trimUnitsToBudget,
+  truncateToolResult,
+  type HistoryUnit,
+} from "./history-budget";
 import { runGatedTool } from "./tool-gate";
 import { TurnEmitter, emitToolRoundLimitNotice } from "./turn-emitter";
 import { readMaxToolRounds } from "../settings";
@@ -421,75 +429,86 @@ function userContent(text: string, images: InlineImage[] | undefined): UserModel
   ];
 }
 
-function loadHistory(
+async function loadHistory(
   db: Database,
   sessionId: string,
   placeholderMessageId: string,
   withImages = true,
-): ModelMessage[] {
-  const rows = db
-    .prepare(
-      `SELECT id, role, content, attachments
-       FROM messages
-       WHERE session_id = ?
-       ORDER BY created_at ASC`,
-    )
-    .all(sessionId) as Array<{ id: string; role: string; content: string; attachments: string | null }>;
+  budgetTokens: number = Number.POSITIVE_INFINITY,
+): Promise<ModelMessage[]> {
+  const rows = stmt(
+    db,
+    `SELECT id, role, content, attachments
+     FROM messages
+     WHERE session_id = ?
+     ORDER BY rowid ASC`,
+  ).all(sessionId) as Array<{ id: string; role: string; content: string; attachments: string | null }>;
+  const toolCallsByMessage = loadToolCallsForSession(db, sessionId);
 
   // Bounded to the most recent few images across the whole replay.
   const userRows = rows.filter((r) => r.role === "user" && r.id !== placeholderMessageId);
   const imagesByUserRow = new Map<string, InlineImage[]>();
   if (withImages) {
-    const picked = selectInlineImages(userRows.map((r) => parseAttachments(r.attachments)));
+    const picked = await selectInlineImages(userRows.map((r) => parseAttachments(r.attachments)));
     userRows.forEach((r, i) => {
       if (picked[i].length > 0) imagesByUserRow.set(r.id, picked[i]);
     });
   }
 
-  const history: ModelMessage[] = [];
+  const units: HistoryUnit<ModelMessage>[] = [];
   for (const row of rows) {
     if (row.id === placeholderMessageId) continue;
     if (row.role === "user") {
-      history.push({
-        role: "user",
-        content: userContent(
-          appendAttachmentsToPrompt(row.content, parseAttachments(row.attachments)),
-          imagesByUserRow.get(row.id),
-        ),
+      const text = appendAttachmentsToPrompt(row.content, parseAttachments(row.attachments));
+      units.push({
+        messages: [{ role: "user", content: userContent(text, imagesByUserRow.get(row.id)) }],
+        tokens: estimateTokens(text),
       });
       continue;
     }
     if (row.role !== "assistant") continue;
 
-    const toolCalls = loadToolCallsForMessage(db, row.id);
+    const toolCalls = toolCallsByMessage.get(row.id) ?? [];
     if (toolCalls.length === 0) {
-      if (row.content) history.push({ role: "assistant", content: row.content });
+      if (row.content) {
+        units.push({ messages: [{ role: "assistant", content: row.content }], tokens: estimateTokens(row.content) });
+      }
       continue;
     }
 
-    history.push({
-      role: "assistant",
-      content: [
-        ...(row.content ? [{ type: "text" as const, text: row.content }] : []),
-        ...toolCalls.map((call) => ({
-          type: "tool-call" as const,
-          toolCallId: call.id,
-          toolName: call.name,
-          input: call.args ?? {},
-        })),
-      ],
-    });
-    history.push({
-      role: "tool",
-      content: toolCalls.map((call) => ({
+    // The assistant tool-call message and its tool-result message are one
+    // atomic unit, so a trim can never orphan either half.
+    let tokens = estimateTokens(row.content);
+    const results = toolCalls.map((call) => {
+      const value = truncateToolResult(stringifyToolResult(call.result));
+      tokens += estimateTokens(value) + estimateTokens(JSON.stringify(call.args ?? {}));
+      return {
         type: "tool-result" as const,
         toolCallId: call.id,
         toolName: call.name,
-        output: { type: "text" as const, value: stringifyToolResult(call.result) },
-      })),
+        output: { type: "text" as const, value },
+      };
+    });
+    units.push({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            ...(row.content ? [{ type: "text" as const, text: row.content }] : []),
+            ...toolCalls.map((call) => ({
+              type: "tool-call" as const,
+              toolCallId: call.id,
+              toolName: call.name,
+              input: call.args ?? {},
+            })),
+          ],
+        },
+        { role: "tool", content: results },
+      ],
+      tokens,
     });
   }
-  return history;
+  return trimUnitsToBudget(units, budgetTokens);
 }
 
 /**
@@ -861,8 +880,15 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
   // are always offered (text-only turns excluded) and `streamAttempt` below
   // falls back to text-only if the endpoint rejects them.
   const withImages = !params.noTools;
+  // Replay is bounded by the endpoint's context window (optional
+  // `contextWindow` field on the endpoint entry, else a conservative default).
+  const configuredWindow = Number(entry.contextWindow);
+  const historyBudget = computeHistoryBudget(
+    Number.isFinite(configuredWindow) && configuredWindow > 0 ? configuredWindow : null,
+    estimateTokens(buildSystemPrompt(params)) + estimateTokens(params.prompt),
+  );
   const messages = withCurrentPrompt(
-    loadHistory(params.db, params.sessionId, params.messageId, withImages),
+    await loadHistory(params.db, params.sessionId, params.messageId, withImages, historyBudget),
     params.prompt,
   );
 
@@ -948,7 +974,7 @@ export async function runOpenAiCompatTurn(params: AgentProviderParams): Promise<
       fullText += notice;
       emitter.delta(notice);
       await streamAttempt(
-        withCurrentPrompt(loadHistory(params.db, params.sessionId, params.messageId, false), params.prompt),
+        withCurrentPrompt(await loadHistory(params.db, params.sessionId, params.messageId, false, historyBudget), params.prompt),
       );
     }
     // The loop stopped on `tool-calls` rather than a natural `stop`: the step
@@ -974,3 +1000,7 @@ export const openaiCompatProvider: AgentProvider = {
   listModels: () => getOpenAiCompatModels(),
   probe: (opts?: { force?: boolean }) => probeOpenAiCompat(opts),
 };
+
+/** Test seam: exercise history replay (budget/truncation) against a real DB. */
+export const _loadHistoryForTests = loadHistory;
+export const _withCurrentPromptForTests = withCurrentPrompt;

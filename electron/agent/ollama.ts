@@ -6,7 +6,15 @@ import { readAgentFileSystemPrompt } from "./claude";
 import { requestQuestion } from "./question";
 import { loadManagedMcpServers, createManagedMcpBridge } from "../mcp";
 import { canvasMcpServersForSession, buildCanvasSystemPromptAddendum } from "../canvas/mcp-endpoint";
-import { loadToolCallsForMessage } from "../sessions";
+import { loadToolCallsForSession } from "../sessions";
+import { stmt } from "../db-stmt-cache";
+import {
+  computeHistoryBudget,
+  estimateTokens,
+  trimUnitsToBudget,
+  truncateToolResult,
+  type HistoryUnit,
+} from "./history-budget";
 import { runGatedTool } from "./tool-gate";
 import { TurnEmitter, emitToolRoundLimitNotice } from "./turn-emitter";
 import {
@@ -71,6 +79,8 @@ interface OllamaChatChunk {
 
 interface OllamaShowResult {
   capabilities?: string[];
+  // The real client returns a Map; plain objects are accepted too.
+  model_info?: Map<string, unknown> | Record<string, unknown>;
 }
 
 interface OllamaClientLike {
@@ -139,6 +149,17 @@ function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
 // stable for the lifetime of an installed model, so cache it to avoid a probe on
 // every turn. Cleared by `_resetOllamaClientForTests`.
 const capabilityCache = new Map<string, string[]>();
+// Context window (tokens) per model, filled by the same `show()` probe.
+const contextWindowCache = new Map<string, number>();
+
+function contextLengthFromModelInfo(info: OllamaShowResult["model_info"]): number | null {
+  if (!info) return null;
+  const entries = info instanceof Map ? [...info.entries()] : Object.entries(info);
+  for (const [key, value] of entries) {
+    if (key.endsWith(".context_length") && typeof value === "number" && value > 0) return value;
+  }
+  return null;
+}
 
 /**
  * The model's capability list from `ollama.show()` (e.g. "thinking", "vision").
@@ -162,6 +183,8 @@ async function getModelCapabilities(client: OllamaClientLike, model: string): Pr
     const info = await client.show({ model });
     const capabilities = Array.isArray(info?.capabilities) ? info.capabilities : [];
     capabilityCache.set(model, capabilities);
+    const ctxLen = contextLengthFromModelInfo(info?.model_info);
+    if (ctxLen) contextWindowCache.set(model, ctxLen);
     return capabilities;
   } catch {
     return [];
@@ -200,47 +223,48 @@ function buildSystemPrompt(params: AgentProviderParams): string {
   return parts.filter((part) => part.trim().length > 0).join("\n\n");
 }
 
-function loadHistory(
+async function loadHistory(
   db: Database,
   sessionId: string,
   placeholderMessageId: string,
   withImages = false,
-): OllamaMessage[] {
-  const rows = db
-    .prepare(
-      `SELECT id, role, content, attachments
-       FROM messages
-       WHERE session_id = ?
-       ORDER BY created_at ASC`
-    )
-    .all(sessionId) as Array<{ id: string; role: string; content: string; attachments: string | null }>;
+  budgetTokens: number = Number.POSITIVE_INFINITY,
+): Promise<OllamaMessage[]> {
+  const rows = stmt(
+    db,
+    `SELECT id, role, content, attachments
+     FROM messages
+     WHERE session_id = ?
+     ORDER BY rowid ASC`,
+  ).all(sessionId) as Array<{ id: string; role: string; content: string; attachments: string | null }>;
+  const toolCallsByMessage = loadToolCallsForSession(db, sessionId);
 
   // Image bytes are only read for vision-capable models, bounded to the most
   // recent few across the whole replay (see `selectInlineImages`).
   const userRows = rows.filter((r) => r.role === "user" && r.id !== placeholderMessageId);
   const imagesByUserRow = new Map<string, string[]>();
   if (withImages) {
-    const picked = selectInlineImages(userRows.map((r) => parseAttachments(r.attachments)));
+    const picked = await selectInlineImages(userRows.map((r) => parseAttachments(r.attachments)));
     userRows.forEach((r, i) => {
       if (picked[i].length > 0) imagesByUserRow.set(r.id, picked[i].map((img) => img.base64));
     });
   }
 
-  const history: OllamaMessage[] = [];
+  const units: HistoryUnit<OllamaMessage>[] = [];
   for (const row of rows) {
     if (row.id === placeholderMessageId) continue;
     if (row.role === "user") {
       const images = imagesByUserRow.get(row.id);
-      history.push({
-        role: "user",
-        content: appendAttachmentsToPrompt(row.content, parseAttachments(row.attachments)),
-        ...(images ? { images } : {}),
+      const content = appendAttachmentsToPrompt(row.content, parseAttachments(row.attachments));
+      units.push({
+        messages: [{ role: "user", content, ...(images ? { images } : {}) }],
+        tokens: estimateTokens(content),
       });
       continue;
     }
     if (row.role !== "assistant") continue;
 
-    const toolCalls = loadToolCallsForMessage(db, row.id);
+    const toolCalls = toolCallsByMessage.get(row.id) ?? [];
     const toolCallRefs = toolCalls.map((call) => ({
       function: {
         name: call.name,
@@ -248,21 +272,23 @@ function loadHistory(
       },
     }));
 
-    history.push({
-      role: "assistant",
-      content: row.content,
-      ...(toolCallRefs.length > 0 ? { tool_calls: toolCallRefs } : {}),
-    });
-
+    // An assistant message and its tool results form one atomic unit.
+    const messages: OllamaMessage[] = [
+      {
+        role: "assistant",
+        content: row.content,
+        ...(toolCallRefs.length > 0 ? { tool_calls: toolCallRefs } : {}),
+      },
+    ];
+    let tokens = estimateTokens(row.content);
     for (const call of toolCalls) {
-      history.push({
-        role: "tool",
-        content: stringifyToolResult(call.result),
-        tool_name: call.name,
-      });
+      const content = truncateToolResult(stringifyToolResult(call.result));
+      tokens += estimateTokens(content) + estimateTokens(safeJson(call.args ?? {}));
+      messages.push({ role: "tool", content, tool_name: call.name });
     }
+    units.push({ messages, tokens });
   }
-  return history;
+  return trimUnitsToBudget(units, budgetTokens);
 }
 
 function stringifyToolResult(result: unknown): string {
@@ -799,7 +825,14 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
   // Attached images are only sent as real image input to vision-capable models
   // (others would error); for the rest the path note in the prompt is all they get.
   const withImages = capabilities.includes("vision");
-  const history = loadHistory(params.db, params.sessionId, params.messageId, withImages);
+  // Filled by the capability probe above (same cached `show()` call).
+  const systemPrompt = buildSystemPrompt(params);
+  const contextWindow = params.noTools ? null : (contextWindowCache.get(model) ?? null);
+  const historyBudget = computeHistoryBudget(
+    contextWindow,
+    estimateTokens(systemPrompt) + estimateTokens(params.prompt),
+  );
+  const history = await loadHistory(params.db, params.sessionId, params.messageId, withImages, historyBudget);
 
   // When noTools is true (text-only generation turns), skip all tool definitions
   // and MCP bridge startup to prevent any filesystem/shell side-effects.
@@ -832,7 +865,6 @@ export async function runOllamaAgentTurn(params: AgentProviderParams): Promise<s
     canvasServerNames,
   };
 
-  const systemPrompt = buildSystemPrompt(params);
   const messages: OllamaMessage[] = [
     { role: "system", content: systemPrompt },
     ...(params.prompt?.trim() ? withCurrentPrompt(history, params.prompt) : history),
@@ -946,6 +978,7 @@ export async function getOllamaModels(): Promise<Array<{ id: string; name: strin
 export function _resetOllamaClientForTests(): void {
   clientPromise = null;
   capabilityCache.clear();
+  contextWindowCache.clear();
 }
 
 export const ollamaProvider: AgentProvider = {
@@ -954,3 +987,6 @@ export const ollamaProvider: AgentProvider = {
     return getOllamaModels();
   },
 };
+
+/** Test seam: exercise history replay (budget/truncation) against a real DB. */
+export const _loadHistoryForTests = loadHistory;
