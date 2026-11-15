@@ -165,13 +165,43 @@ function isVisionEligible(a: MessageAttachment): boolean {
   return VISION_IMAGE_TYPES.includes(a.media_type.toLowerCase()) && a.size <= MAX_VISION_IMAGE_BYTES;
 }
 
+// Attachment files are immutable once written, so base64 payloads are cached
+// by path + size + mtime (small LRU) instead of re-read on every turn.
+// Matches MAX_VISION_IMAGES: at most that many payloads are ever inlined per turn.
+const IMAGE_CACHE_MAX = 4;
+const imageCache = new Map<string, string>();
+
+/** Test seam: drop cached image payloads. */
+export function _resetInlineImageCache(): void {
+  imageCache.clear();
+}
+
+async function readImageBase64Cached(filePath: string): Promise<string> {
+  const st = await fs.promises.stat(filePath);
+  const key = `${filePath}|${st.size}|${st.mtimeMs}`;
+  const hit = imageCache.get(key);
+  if (hit !== undefined) {
+    imageCache.delete(key);
+    imageCache.set(key, hit); // refresh recency
+    return hit;
+  }
+  const base64 = (await fs.promises.readFile(filePath)).toString("base64");
+  imageCache.set(key, base64);
+  while (imageCache.size > IMAGE_CACHE_MAX) {
+    const oldest = imageCache.keys().next().value;
+    if (oldest === undefined) break;
+    imageCache.delete(oldest);
+  }
+  return base64;
+}
+
 /**
  * Given the attachments of each message in conversation order (oldest first),
  * return the images to inline per message — the newest `MAX_VISION_IMAGES`
  * eligible ones overall. Files that can no longer be read are skipped (and do
  * not consume budget). The result has the same length/order as the input.
  */
-export function selectInlineImages(perMessage: MessageAttachment[][]): InlineImage[][] {
+export async function selectInlineImages(perMessage: MessageAttachment[][]): Promise<InlineImage[][]> {
   const result: InlineImage[][] = perMessage.map(() => []);
   let budget = MAX_VISION_IMAGES;
   for (let i = perMessage.length - 1; i >= 0 && budget > 0; i--) {
@@ -183,7 +213,7 @@ export function selectInlineImages(perMessage: MessageAttachment[][]): InlineIma
         picked.push({
           name: a.name,
           mediaType: a.media_type.toLowerCase(),
-          base64: fs.readFileSync(a.path).toString("base64"),
+          base64: await readImageBase64Cached(a.path),
         });
         budget--;
       } catch {

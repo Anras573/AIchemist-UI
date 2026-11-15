@@ -32,6 +32,8 @@ export interface OpenAiEndpointEntry {
   headers?: Record<string, string>;
   /** Optional extra query parameters appended to every request URL. */
   queryParams?: Record<string, string>;
+  /** Optional context window (tokens) used to bound history replay; default 32768. */
+  contextWindow?: number;
   /** Unknown keys are preserved on round-trip so the JSON stays user-extensible. */
   [key: string]: unknown;
 }

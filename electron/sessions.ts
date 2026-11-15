@@ -573,12 +573,50 @@ export function loadToolCallsForMessage(db: Database, messageId: string): ToolCa
     category: string;
   }[];
 
-  return rows.map((row) => ({
+  return rows.map((row) => toolCallFromRow({ ...row, message_id: messageId }));
+}
+
+type ToolCallRow = {
+  message_id: string;
+  id: string;
+  name: string;
+  args: string;
+  result: string | null;
+  status: string;
+  category: string;
+};
+
+function toolCallFromRow(row: ToolCallRow): ToolCall {
+  return {
     id: row.id,
     name: row.name,
     args: JSON.parse(row.args) as Record<string, unknown>,
     result: row.result ? (JSON.parse(row.result) as unknown) : null,
     status: row.status as ToolCallStatus,
     category: row.category as ToolCategory,
-  }));
+  };
+}
+
+/**
+ * Loads every tool call of a session in ONE query (joined through messages),
+ * grouped by message id in insertion order. Constant statement count
+ * regardless of how many messages the session has.
+ */
+export function loadToolCallsForSession(db: Database, sessionId: string): Map<string, ToolCall[]> {
+  const rows = stmt(
+    db,
+    `SELECT tc.message_id, tc.id, tc.name, tc.args, tc.result, tc.status, tc.category
+     FROM tool_calls tc
+     JOIN messages m ON m.id = tc.message_id
+     WHERE m.session_id = ?
+     ORDER BY tc.rowid ASC`
+  ).all(sessionId) as ToolCallRow[];
+  const byMessage = new Map<string, ToolCall[]>();
+  for (const row of rows) {
+    const list = byMessage.get(row.message_id);
+    const call = toolCallFromRow(row);
+    if (list) list.push(call);
+    else byMessage.set(row.message_id, [call]);
+  }
+  return byMessage;
 }

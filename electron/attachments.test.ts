@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -15,6 +15,7 @@ import {
   readAttachmentDataUrl,
   MAX_VISION_IMAGES,
   selectInlineImages,
+  _resetInlineImageCache,
   sanitizeFileName,
   saveAttachments,
 } from "./attachments";
@@ -130,37 +131,47 @@ describe("selectInlineImages", () => {
     return a;
   };
 
-  it("inlines eligible images and skips non-images", () => {
+  it("inlines eligible images and skips non-images", async () => {
     const [txt] = saveAttachments("vis", [{ name: "a.txt", mediaType: "text/plain", dataUrl: dataUrl("a") }]);
     const img = png("one.png");
-    const out = selectInlineImages([[txt, img]]);
+    const out = await selectInlineImages([[txt, img]]);
     expect(out[0]).toEqual([
       { name: "one.png", mediaType: "image/png", base64: Buffer.from("one.png").toString("base64") },
     ]);
   });
 
-  it("keeps only the newest MAX_VISION_IMAGES across messages", () => {
+  it("keeps only the newest MAX_VISION_IMAGES across messages", async () => {
     const msgs = Array.from({ length: MAX_VISION_IMAGES + 2 }, (_, i) => [png(`img${i}.png`)]);
-    const out = selectInlineImages(msgs);
+    const out = await selectInlineImages(msgs);
     expect(out).toHaveLength(msgs.length);
     expect(out[0]).toEqual([]);
     expect(out[1]).toEqual([]);
     expect(out.slice(2).every((o) => o.length === 1)).toBe(true);
   });
 
-  it("skips unreadable files without spending budget", () => {
+  it("skips unreadable files without spending budget", async () => {
     const gone = png("gone.png");
     fs.rmSync(gone.path);
     const ok = png("ok.png");
-    const out = selectInlineImages([[ok], [gone]]);
+    const out = await selectInlineImages([[ok], [gone]]);
     expect(out[0]).toHaveLength(1);
     expect(out[1]).toEqual([]);
   });
 
-  it("ignores unsupported image types and oversized files", () => {
+  it("ignores unsupported image types and oversized files", async () => {
     const svg = { ...png("a.svg"), media_type: "image/svg+xml" };
     const big = { ...png("big.png"), size: 9 * 1024 * 1024 };
-    expect(selectInlineImages([[svg, big]])[0]).toEqual([]);
+    expect((await selectInlineImages([[svg, big]]))[0]).toEqual([]);
+  });
+
+  it("reads each file's bytes at most once across consecutive calls", async () => {
+    _resetInlineImageCache();
+    const img = png("cached.png");
+    const spy = vi.spyOn(fs.promises, "readFile");
+    await selectInlineImages([[img]]);
+    await selectInlineImages([[img]]);
+    expect(spy.mock.calls.filter((c) => c[0] === img.path)).toHaveLength(1);
+    spy.mockRestore();
   });
 });
 
